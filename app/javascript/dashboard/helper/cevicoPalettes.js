@@ -323,11 +323,168 @@ export const hexToRgb = hex => {
   if (m.length !== 6) return '21 44 97';
   return [0, 2, 4].map(i => parseInt(m.slice(i, i + 2), 16)).join(' ');
 };
+// ── 🧭 GUIA AREJADO (item 336): 3 cores por ambiente em 60-30-10 pela
+//    COMPLEMENTAR DIVIDIDA. 60% = a cor da paleta (--cv); 30% = apoio
+//    (uma vizinha da complementar, usada CLARA no fundo e escura no texto);
+//    10% = destaque (a outra vizinha, cheia: botão principal e número que
+//    manda). As 7 cores do dia têm os tons escolhidos à mão no guia
+//    (claude.ai/artifact/M7af1huY3VB8XEbt5gr7Jt); as frutas são calculadas.
+// (cada uma com os tons do modo CLARO e, em `escuro`, os do modo escuro)
+const HARMONY = {
+  bondi: {
+    apoio: '#c2410c',
+    apoioFundo: '#ffefe6',
+    destaque: '#c9a200',
+    destaqueInk: '#111827',
+    escuro: {
+      apoio: '#fb923c',
+      apoioFundo: '#3a1d10',
+      destaque: '#ffd60a',
+      destaqueInk: '#111827',
+    },
+  },
+  blueberry: {
+    apoio: '#8a5e0a',
+    apoioFundo: '#fff4d6',
+    destaque: '#f26a1b',
+    destaqueInk: '#111827',
+    escuro: {
+      apoio: '#fbbf24',
+      apoioFundo: '#3b2a08',
+      destaque: '#ff8a4c',
+      destaqueInk: '#111827',
+    },
+  },
+  strawberry: {
+    apoio: '#0b6b80',
+    apoioFundo: '#e3f6fa',
+    destaque: '#16a34a',
+    destaqueInk: '#ffffff',
+    escuro: {
+      apoio: '#5ad4ec',
+      apoioFundo: '#0e2f38',
+      destaque: '#4ade80',
+      destaqueInk: '#111827',
+    },
+  },
+  lime: {
+    apoio: '#4338ca',
+    apoioFundo: '#ecebff',
+    destaque: '#e0218a',
+    destaqueInk: '#ffffff',
+    escuro: {
+      apoio: '#a5b4fc',
+      apoioFundo: '#1f1b4a',
+      destaque: '#ff6fbd',
+      destaqueInk: '#111827',
+    },
+  },
+  tangerine: {
+    apoio: '#0f766e',
+    apoioFundo: '#dff7f3',
+    destaque: '#2f5bff',
+    destaqueInk: '#ffffff',
+    escuro: {
+      apoio: '#5eead4',
+      apoioFundo: '#0d3330',
+      destaque: '#7a9bff',
+      destaqueInk: '#111827',
+    },
+  },
+  grape: {
+    apoio: '#3f6212',
+    apoioFundo: '#eef9d6',
+    destaque: '#e0a800',
+    destaqueInk: '#111827',
+    escuro: {
+      apoio: '#bef264',
+      apoioFundo: '#233308',
+      destaque: '#ffcc33',
+      destaqueInk: '#111827',
+    },
+  },
+  // domingo: a única tela em que o navy e o ouro da marca entram
+  graphite: {
+    apoio: '#152c61',
+    apoioFundo: '#e8edf8',
+    destaque: '#d4af37',
+    destaqueInk: '#111827',
+    escuro: {
+      apoio: '#9db4ff',
+      apoioFundo: '#15213f',
+      destaque: '#e6c65a',
+      destaqueInk: '#111827',
+    },
+  },
+};
+const hexToHsl = hex => {
+  const m = String(hex).replace('#', '');
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(m.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return [h * 60, s, l];
+};
+const hslToHex = (h, s, l) => {
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n =>
+    l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return `#${[f(0), f(8), f(4)]
+    .map(v =>
+      Math.round(v * 255)
+        .toString(16)
+        .padStart(2, '0')
+    )
+    .join('')}`;
+};
+// complementar dividida calculada: apoio a +150°, destaque a +210°
+const harmonyOf = pal => {
+  if (HARMONY[pal.key]) return HARMONY[pal.key];
+  const [h, s] = hexToHsl(pal.dot);
+  const sat = Math.max(0.55, Math.min(s, 0.9));
+  const destaque = hslToHex((h + 210) % 360, sat, 0.5);
+  const destaqueEscuro = hslToHex((h + 210) % 360, sat, 0.62);
+  return {
+    apoio: hslToHex((h + 150) % 360, sat, 0.3),
+    apoioFundo: hslToHex((h + 150) % 360, 0.7, 0.93),
+    destaque,
+    destaqueInk: luminance(destaque) > 0.45 ? '#111827' : '#ffffff',
+    escuro: {
+      apoio: hslToHex((h + 150) % 360, sat, 0.75),
+      apoioFundo: hslToHex((h + 150) % 360, 0.5, 0.16),
+      destaque: destaqueEscuro,
+      destaqueInk: luminance(destaqueEscuro) > 0.45 ? '#111827' : '#ffffff',
+    },
+  };
+};
+export const paletteHarmony = harmonyOf;
+
 // as variáveis --cv* que o kit lê (na página inteira ou num bloco só)
 export const paletteVars = pal => {
   const accent = pal.dot;
   const deep = hexFromGrad(pal.family[0]) || accent;
+  const harmony = harmonyOf(pal);
   return {
+    // 🧭 guia arejado: os 30% e os 10% do ambiente
+    '--cv-apoio': harmony.apoio,
+    '--cv-apoio-rgb': hexToRgb(harmony.apoio),
+    '--cv-apoio-fundo': harmony.apoioFundo,
+    '--cv-destaque': harmony.destaque,
+    '--cv-destaque-rgb': hexToRgb(harmony.destaque),
+    '--cv-destaque-ink': harmony.destaqueInk,
+    // tons do modo escuro (o .scss troca para eles em `.dark .cv-page`)
+    '--cv-apoio-escuro': harmony.escuro.apoio,
+    '--cv-apoio-fundo-escuro': harmony.escuro.apoioFundo,
+    '--cv-destaque-escuro': harmony.escuro.destaque,
+    '--cv-destaque-ink-escuro': harmony.escuro.destaqueInk,
     '--cv': accent,
     '--cv-rgb': hexToRgb(accent),
     '--cv-deep': deep,

@@ -17,9 +17,10 @@ RSpec.describe 'CEVICO Appointments feed', type: :request do
                           contact: contact, phone: contact.phone_number, due_at: tz.now + 3.days,
                           description: "Conversa ##{conversation.display_id} — agendado pela IA")
     # remarcada HOJE (criada há 2 dias): no painel aparece só o acontecimento de hoje
-    account.tasks.create!(title: 'Consulta: Bruno Lima', task_type: 'consulta', unit: 'tatuape', creator: admin,
-                          due_at: tz.now + 5.days, rescheduled_count: 1, description: 'marcada pela recepção',
-                          created_at: 2.days.ago)
+    # (auditoria #2/#133: a remarcação vale pelo carimbo gravado quando o contador sobe)
+    bruno = account.tasks.create!(title: 'Consulta: Bruno Lima', task_type: 'consulta', unit: 'tatuape', creator: admin,
+                                  due_at: tz.now + 4.days, description: 'marcada pela recepção', created_at: 2.days.ago)
+    bruno.update!(due_at: tz.now + 5.days, rescheduled_count: 1)
     account.tasks.create!(title: 'Consulta: Carla Dias', task_type: 'consulta', unit: 'paulista', creator: admin,
                           due_at: tz.now + 6.days, canceled_at: Time.current)
     # 📅 item 217: lançada (já estava marcada fora do sistema) e confirmada (SIM ao lembrete)

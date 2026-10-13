@@ -4,6 +4,10 @@ require 'rails_helper'
 # sincronização (simulação) e leitura gancho/corpo/CTA × jornada do CRM.
 # rubocop:disable RSpec/MultipleExpectations
 RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
+  # Relógio fixo ao meio-dia de hoje em São Paulo: das 21h às 23h59 de SP o
+  # contêiner (UTC) já está no dia seguinte e os "dias" da conta não batiam.
+  around { |example| travel_to(ActiveSupport::TimeZone['America/Sao_Paulo'].now.change(hour: 12)) { example.run } }
+
   let(:account) { create(:account) }
   let!(:settings) do
     CrmSetting.create!(account: account, meta_ads_config: { 'access_token' => 'simulate', 'ad_account_id' => 'act_1' })
@@ -226,6 +230,7 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
       video = service.assets_for(nil)[:video]
       expect(video[:hooks].map { |h| h[:ad_id] }).to eq(['2304'])
       expect(video[:transcribed]).to eq(1)
+      expect(video[:transcribe_limit]).to eq(Crm::AdVideoTranscribeJob::LIMIT) # achado #410: a tela usa o limite do servidor
       image = Crm::AdCreative.find_by!(account: account, ad_id: '2305')
       expect(Crm::AdVideoTranscriptionService.new(image).perform).to be(false)
       expect(image.reload.transcript['status']).to eq('skipped')

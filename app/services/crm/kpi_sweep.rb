@@ -109,9 +109,11 @@ class Crm::KpiSweep
     result = plan
     return result if @setting.nil?
 
-    cfg = @setting.agenda_config.dup
-    cfg['custom_kpis'] = result[:kept]
-    @setting.update!(agenda_config: cfg)
+    # Rodada 4 (achado #383): sob a trava da linha, só 'custom_kpis' muda
+    Cevico::SettingMerge.merge!(@setting, :agenda_config) do |cfg|
+      cfg['custom_kpis'] = result[:kept]
+      cfg
+    end
     result
   end
 

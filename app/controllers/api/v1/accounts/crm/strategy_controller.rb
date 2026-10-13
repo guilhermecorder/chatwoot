@@ -17,10 +17,32 @@ class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseContro
   def save_business_board
     return render json: { error: 'Só administradores mexem no Painel do Empresário.' }, status: :forbidden unless Current.account_user.administrator?
 
-    cfg = crm_settings.agenda_config || {}
-    cfg['business_board'] = sanitize_business_board
-    crm_settings.update!(agenda_config: cfg)
-    render json: { business: cfg['business_board'] }
+    # Rodada 4 (#413/#414): grava só a chave business_board, sob trava. A tela
+    # manda `version` (o updated_at do quadro que ela carregou); se o quadro
+    # gravado for mais novo, recusa com 409 e devolve o quadro atual — quem
+    # salvou por último perde o que digitou naquele instante, mas NÃO apaga
+    # o que o outro escreveu (duas abas / dois administradores).
+    # A tela nova SEMPRE manda a chave `version` (mesmo vazia: quadro antigo,
+    # ainda sem updated_at). Por isso a conferência olha a PRESENÇA da chave:
+    # versão vazia × quadro já versionado também é conflito (duas abas abertas
+    # antes do 1º save novo). Só a tela de antes desta rodada (sem a chave)
+    # grava sem conferir.
+    check_version = params.key?(:version)
+    base_version = params[:version].to_s
+    conflict = nil
+    saved = Cevico::SettingMerge.merge_key!(crm_settings, :agenda_config, 'business_board') do |current|
+      if check_version && current['updated_at'].to_s != base_version
+        conflict = current
+        next current
+      end
+      sanitize_business_board.merge('updated_at' => Time.current.iso8601(6)) # microssegundos: dois saves no mesmo segundo ≠ mesma versão
+    end
+    if conflict
+      return render json: { error: 'Alguém salvou o quadro depois de você. Recarreguei o quadro atual — confira e refaça a sua mudança.',
+                            conflict: true, business: conflict }, status: :conflict
+    end
+
+    render json: { business: saved }
   end
 
   # ── 🏭 DESENHO DO PROCESSO (item 59): a máquina da clínica, etapa a
@@ -29,10 +51,10 @@ class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseContro
   def save_processes
     return render json: { error: 'Só administradores desenham processos.' }, status: :forbidden unless Current.account_user.administrator?
 
-    cfg = crm_settings.agenda_config || {}
-    cfg['process_designs'] = sanitize_processes
-    crm_settings.update!(agenda_config: cfg)
-    render json: { processes: cfg['process_designs'] }
+    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
+    list = sanitize_processes
+    Cevico::SettingMerge.merge!(crm_settings, :agenda_config) { |cfg| cfg.merge('process_designs' => list) }
+    render json: { processes: list }
   end
 
   def create_pillar
@@ -229,20 +251,27 @@ class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseContro
   # do valor), ainda agendadas, ticket médio
   MONTHS_PT = %w[janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro].freeze
 
-  def business_metrics # rubocop:disable Metrics/AbcSize
+  def business_metrics # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     return nil unless Current.account_user.administrator?
 
-    month = Time.zone.today.beginning_of_month
+    # Rodada 5 (#151/#173): mês e "hoje" no fuso de São Paulo; realizada =
+    # ativa com a data já passada (scope concluidas, régua do Financeiro) —
+    # antes contava só o rótulo "realizada", que o hub nunca usa (dava R$ 0)
+    today = ActiveSupport::TimeZone['America/Sao_Paulo'].today
+    month = today.beginning_of_month
     scope = Crm::OftalmofacilSurgery.where(account_id: account.id).in_period(month, month.end_of_month)
     own = Crm::PartnerGuard.own_provider_name(account)
-    scope = scope.where('LOWER(provider_name) LIKE ?', "%#{own}%") if own.present?
-    done = scope.realizadas
+    # da casa = o nome do fornecedor CONTÉM o nome configurado — a mesma régua
+    # do Crm::PartnerGuard.partner_surgery?, do Hub e do sync (em SQL)
+    scope = scope.where('LOWER(provider_name) LIKE ?', "%#{ActiveRecord::Base.sanitize_sql_like(own)}%") if own.present?
+    done = scope.concluidas(today)
     faturamento = done.sum(:amount).to_f.round(2)
     cirurgias = done.count
     {
       oftalmofacil: {
         month_label: "#{MONTHS_PT[month.month - 1]} de #{month.year}",
-        faturamento: faturamento, cirurgias: cirurgias, agendadas: scope.where(status_kind: 'agendada').count,
+        # ainda agendadas = de hoje em diante (a que já passou virou realizada)
+        faturamento: faturamento, cirurgias: cirurgias, agendadas: scope.agendadas_por_vir(today).count,
         ticket: cirurgias.positive? ? (faturamento / cirurgias).round(2) : 0,
         available: Crm::OftalmofacilSurgery.exists?(account_id: account.id)
       }

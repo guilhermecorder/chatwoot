@@ -87,4 +87,50 @@ RSpec.describe 'CEVICO segurança (rodada 171)', type: :request do
       expect(CrmSetting.find_by!(account: account).agenda_config['clinical_access']['doctor_user_ids']).to eq([admin.id])
     end
   end
+
+  # 🔐 Rodada 2 da auditoria (12/10): as portas do crm/settings
+  describe 'portas do crm/settings (Rodada 2)' do
+    let(:agent) { create(:user, account: account, role: :agent) }
+    let(:base) { "/api/v1/accounts/#{account.id}/crm/settings" }
+    # as ÚNICAS ações que a equipe toda pode chamar: a leitura (que vem enxuta,
+    # por papel) e fechar/reabrir dias da Agenda (item 267)
+    let(:open_to_team) { %w[show update_blocked_days] }
+
+    before do
+      # o atendente aqui só VÊ a ficha do paciente: quem edita o orçamento recebe a tabela de preços (decisão R2-G4)
+      CrmSetting.create!(account: account, agent_permissions: { 'tree' => { agent.id.to_s => { 'pacientes' => 'view' } } },
+                         ai_config: { 'script' => { 'persona' => 'Você é a Clara.' },
+                                      'agents' => { 'comments' => { 'prompt' => 'PROMPT PUBLICADO' } } },
+                         agenda_config: { 'price_table' => { 'items' => [{ 'group' => 'Cirurgias', 'name' => 'Catarata', 'price' => 9000 }] },
+                                          'column_presets' => [] })
+    end
+
+    it 'atendente sem concessão leva 403 em TODAS as rotas de settings (menos as duas abertas à equipe)', :aggregate_failures do
+      routes = Rails.application.routes.routes.select { |r| r.defaults[:controller] == 'api/v1/accounts/crm/settings' }
+      expect(routes.size).to be > 60 # se a lista encolher, alguém apagou rota — olhar
+      seen = []
+      routes.each do |route|
+        action = route.defaults[:action]
+        next if open_to_team.include?(action)
+
+        verb = route.verb.to_s.split('|').first.downcase
+        path = route.path.spec.to_s.sub('(.:format)', '').sub(':account_id', account.id.to_s)
+        send(verb, path, params: { full: true, user_id: agent.id }, headers: agent.create_new_auth_token, as: :json)
+        expect(response).to have_http_status(:forbidden), "#{verb.upcase} #{path} (#{action}) devolveu #{response.status}"
+        seen << action
+      end
+      expect(seen).to include('sync_oftalmofacil', 'test_oftalmofacil', 'ai_usage', 'update_ai', 'update', 'update_oftalmofacil')
+    end
+
+    it 'show sem concessão não traz Roteiro, prompts, concessões nem preços — e segue com o que a tela usa', :aggregate_failures do
+      get base, headers: agent.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:ok)
+      json = response.parsed_body
+      expect(json.keys).not_to include('agent_permissions', 'price_table', 'scheduler_log', 'appointment_reminders_state', 'nps_survey_state')
+      expect(json['ai'].keys).not_to include('script', 'script_v2', 'responder_events')
+      expect(json.dig('ai', 'agents', 'comments').keys).not_to include('prompt', 'draft', 'default_prompt')
+      expect(response.body).not_to include('Clara', 'PROMPT PUBLICADO', '9000')
+      expect(json).to include('column_presets', 'person_colors', 'list_clean_mode', 'calls', 'access', 'kpi_layout', 'agenda_windows')
+    end
+  end
 end

@@ -145,6 +145,10 @@ class Conversation < ApplicationRecord
   after_create_commit :load_attributes_created_by_db_triggers
   before_destroy :set_unread_count_deletion_data
   after_destroy_commit :notify_conversation_deletion
+  # CEVICO (auditoria 10/2026, #228): etiqueta da conversa sobe ao contato em
+  # TODO caminho que salva label_list (telas, add_labels da automação nativa,
+  # macro, ação em massa, remove_label) — não só em update_labels.
+  after_save :sync_saved_labels_to_contact, if: :saved_change_to_cached_label_list?
 
   delegate :auto_resolve_after, to: :account
 
@@ -213,11 +217,25 @@ class Conversation < ApplicationRecord
   # posta/removida em QUALQUER conversa (mesmo de caixas diferentes) reflete
   # no contato. Na remoção, só tira do contato se nenhuma conversa irmã ainda
   # tiver aquela etiqueta — assim o contato agrega o que veio de todos os canais.
-  def update_labels(labels = nil)
-    previous = label_list.to_a
-    result = super
-    sync_labels_to_contact(previous, Array(labels).map(&:to_s))
-    result
+  #
+  # Auditoria 10/2026 (#228): antes isso só rodava dentro de `update_labels`
+  # (telas do Chatwoot). `add_labels` (automação nativa, macro, ação em massa)
+  # e `update(label_list:)` (remover etiqueta) salvavam sem subir ao contato —
+  # e campanha/régua/opt-out, que leem a etiqueta do CONTATO, mandavam mensagem
+  # para quem tinha 'nao_perturbe'/'perda_*' só na conversa. Agora a cópia
+  # roda no after_save, comparando a lista guardada antes × depois.
+  def sync_saved_labels_to_contact
+    before, after = saved_change_to_cached_label_list
+    sync_labels_to_contact(split_cached_labels(before), split_cached_labels(after))
+  rescue ActiveRecord::RecordInvalid => e
+    # o after_save roda dentro da transação da conversa: se o cadastro do
+    # paciente não passa na validação (ex.: e-mail antigo fora do formato),
+    # a etiqueta da CONVERSA fica e só a cópia ao contato não sobe
+    Rails.logger.error "[Conversation#sync_labels_to_contact] etiqueta não subiu ao contato #{contact_id} (conversa #{id}): #{e.message}"
+  end
+
+  def split_cached_labels(text)
+    text.to_s.split(',').map(&:strip).compact_blank
   end
 
   def sync_labels_to_contact(previous_labels, current_labels)

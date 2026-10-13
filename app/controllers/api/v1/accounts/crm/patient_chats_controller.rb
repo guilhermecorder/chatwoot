@@ -5,6 +5,8 @@
 # sem ele, pelo telefone (agendamento antigo sem cadastro ligado). Só olha as
 # caixas que a pessoa logada pode ver.
 class Api::V1::Accounts::Crm::PatientChatsController < Api::V1::Accounts::BaseController
+  include Crm::ClinicalAccessGate # 💰 R2 da auditoria (#287): money_visible?
+
   # GET /crm/patient_chat?contact_id=12 | ?phone=+5511999990000
   def show
     contact = find_contact
@@ -36,7 +38,11 @@ class Api::V1::Accounts::Crm::PatientChatsController < Api::V1::Accounts::BaseCo
 
   def card_json(contact, card, conversation)
     { id: card&.id, contact_id: contact.id, name: contact.name, phone_number: contact.phone_number, email: contact.email,
-      avatar_url: contact.avatar_url, stage_id: card&.stage_id, pipeline_id: card&.pipeline_id, value: card&.value,
+      avatar_url: contact.avatar_url, stage_id: card&.stage_id, pipeline_id: card&.pipeline_id,
+      # 💰 R2 (#287): o valor em R$ do card só vai para quem vê o Financeiro
+      # (a mesma regra do quadro do CRM) — o popup da Agenda/Espaço do Paciente
+      # chega ao time todo
+      value: money_visible? ? card&.value : nil,
       labels: contact.label_list, last_activity_at: contact.last_activity_at,
       last_conversation_id: conversation&.id, last_conversation: conversation_json(conversation) }
   end

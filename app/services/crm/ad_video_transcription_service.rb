@@ -8,7 +8,7 @@
 # desenvolvimento; CTA = o pedido final. Simulação (token 'simulate') gera
 # um texto fictício sem chamar a Meta nem o Gemini. Nunca levanta erro:
 # falha vira status 'failed' com motivo curto em português.
-class Crm::AdVideoTranscriptionService
+class Crm::AdVideoTranscriptionService # rubocop:disable Metrics/ClassLength
   MODEL = 'gemini-2.5-flash'.freeze
   GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/#{MODEL}:generateContent".freeze
   MAX_BYTES = 18.megabytes
@@ -41,10 +41,10 @@ class Crm::AdVideoTranscriptionService
   end
 
   def perform
-    reason = precheck
-    return skip!(reason, retry_later: reason == NO_KEY) if reason
+    # achado #410: o mesmo vídeo enfileirado duas vezes não vai duas vezes ao
+    # Gemini — já transcrito ou em andamento há pouco = sai sem gravar nada
+    return false unless reserve!
 
-    mark!('processing')
     return save!(simulated_result) if graph.simulate? && !creative.manual_video?
 
     transcribe_with_gemini
@@ -53,6 +53,39 @@ class Crm::AdVideoTranscriptionService
   end
 
   private
+
+  # Reserva o "transcrevendo" numa transação só, com trava na linha: dois jobs
+  # do mesmo vídeo no mesmo instante — o segundo espera o primeiro gravar e
+  # já encontra 'processing' recente (ou 'done'), e sai sem chamar a IA.
+  # Devolve true só para quem conseguiu a reserva.
+  def reserve!
+    creative.with_lock do
+      next false if already_handled?
+
+      reason = precheck
+      next skip!(reason, retry_later: reason == NO_KEY) if reason
+
+      mark!('processing')
+      # guarda a hora da reserva: se chegar um pedido novo (link/arquivo novo)
+      # enquanto a IA trabalha, o resultado deste job não passa por cima dele
+      @reserved_at = creative.transcript['status_at']
+      true
+    end
+  end
+
+  # o vídeo ainda é "deste job"? (ninguém pediu de novo nem outro job reservou
+  # depois) — usado antes de gravar 'done' e de apagar o arquivo enviado
+  def still_reserved?
+    creative.reload
+    @reserved_at.nil? || (creative.transcript['status'] == 'processing' && creative.transcript['status_at'] == @reserved_at)
+  end
+
+  # transcrição pronta, ou outro job marcou 'processing' dentro da janela
+  # STUCK_AFTER (depois disso vale como travado e pode tentar de novo)
+  def already_handled?
+    creative.reload
+    creative.transcript_done? || creative.transcript_in_progress?(statuses: %w[processing])
+  end
 
   def precheck # rubocop:disable Metrics/CyclomaticComplexity
     return 'Só vídeos têm transcrição.' unless creative.transcribable? || creative.manual_video?
@@ -64,9 +97,10 @@ class Crm::AdVideoTranscriptionService
 
   def transcribe_with_gemini
     response = ask_gemini(input.part)
-    save!(parse_json(response.dig('candidates', 0, 'content', 'parts', 0, 'text')).merge('origem' => input.origin))
+    saved = save!(parse_json(response.dig('candidates', 0, 'content', 'parts', 0, 'text')).merge('origem' => input.origin))
     record_usage(response['usageMetadata'])
-    input.cleanup!
+    # se veio pedido novo no meio, o arquivo anexado agora é o DELE — não apaga
+    input.cleanup! if saved
     true
   end
 
@@ -121,8 +155,19 @@ class Crm::AdVideoTranscriptionService
     text = parsed['transcricao'].to_s.strip
     raise 'O Gemini não conseguiu transcrever o vídeo.' if text.blank?
 
-    write_transcript(transcript_fields(parsed, text))
-    true
+    creative.with_lock do
+      # pedido novo chegou enquanto a IA trabalhava (link/arquivo novo): deixa
+      # o vídeo "na fila" para o job novo, em vez de marcar pronto com o texto velho
+      next superseded! unless still_reserved?
+
+      write_transcript(transcript_fields(parsed, text))
+      true
+    end
+  end
+
+  def superseded!
+    Rails.logger.info("[CEVICO criativos] vídeo #{creative.ad_id} recebeu pedido novo no meio — resultado antigo descartado")
+    false
   end
 
   def transcript_fields(parsed, text) # rubocop:disable Metrics/AbcSize

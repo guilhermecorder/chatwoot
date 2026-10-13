@@ -1,9 +1,10 @@
-class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseController
+class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   include Crm::AccessControl
+  include Crm::ClinicalAccessGate # 💰 R2 da auditoria (#287): money_visible?
 
   # disparar/criar campanha em massa = área concedível (padrão: só admin).
   # Leitura (index/show/results) e prévias ficam livres p/ acompanhar.
-  before_action :campaign, only: [:show, :destroy, :send_now, :schedule, :results]
+  before_action :campaign, only: [:show, :destroy, :send_now, :schedule, :pause, :results]
 
   def index
     campaigns = Current.account.crm_campaigns.order(created_at: :desc)
@@ -28,75 +29,88 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
     head :no_content
   end
 
-  def send_now
-    # bloqueia só a campanha CONCLUÍDA (evita reblast acidental). Uma campanha
-    # travada em "processando" (job perdido num deploy) ou "falhou" pode ser
-    # reenviada: o job agora retoma sem reenviar quem já recebeu.
-    return render_could_not_create_error('Campanha já foi concluída') if @campaign.completed?
+  # 🕐 mesmo texto da campanha de ligação: a hora digitada é de São Paulo
+  SCHEDULE_ERROR = 'Data de envio inválida ou no passado (use uma data futura, no horário de São Paulo)'.freeze
 
-    @campaign.update!(status: :processing)
+  def send_now
+    # bloqueia a campanha CONCLUÍDA (evita reblast acidental). "Pausada" ou
+    # "falhou" pode ser reenviada: o job retoma sem reenviar quem já recebeu.
+    return render_could_not_create_error('Campanha já foi concluída') if @campaign.completed?
+    # 🚦 R3 da auditoria (#415): o 2º clique numa campanha em envio não
+    # re-enfileira o job; quem quiser recomeçar pausa primeiro e envia de novo.
+    return render_could_not_create_error('Campanha já está sendo enviada. Para reenviar, pause primeiro.') if @campaign.processing?
+    # 🚦 R3 da auditoria (#415): campanha AGENDADA só sai agora se a pessoa
+    # disser de propósito que quer ignorar o horário marcado.
+    if @campaign.scheduled? && !ignore_schedule?
+      return render_could_not_create_error("Campanha agendada para #{scheduled_label(@campaign)}. Confirme que quer ignorar o agendamento.")
+    end
+
+    # 🔒 revisão R3: a troca para "em envio" é atômica no banco — dois pedidos
+    # ao mesmo tempo (duplo clique, duas pessoas) só passam uma vez.
+    return render_could_not_create_error('Campanha já está sendo enviada. Para reenviar, pause primeiro.') unless claim_for_sending
+
     Crm::CampaignRunJob.perform_later(@campaign.id)
+    render json: campaign_json(@campaign.reload)
+  end
+
+  # POST schedule — agenda o disparo (scheduled_at obrigatório).
+  # 🕐 R3 da auditoria (CONTRATO-0/#411): "2026-10-08T08:00" (sem fuso) é
+  # 08:00 de SÃO PAULO — antes era gravado como UTC e a campanha saía 3 h antes.
+  def schedule
+    return render_could_not_create_error('Campanha já foi enviada') unless @campaign.draft? || @campaign.scheduled? || @campaign.paused?
+    return render_could_not_create_error('Informe a data de envio') if params[:scheduled_at].blank?
+
+    when_at = parse_schedule(params[:scheduled_at])
+    return render_could_not_create_error(SCHEDULE_ERROR) if when_at == :invalid
+
+    @campaign.update!(status: :scheduled, scheduled_at: when_at)
     render json: campaign_json(@campaign)
   end
 
-  # POST schedule — agenda o disparo (scheduled_at obrigatório)
-  def schedule
-    return render_could_not_create_error('Campanha já foi enviada') unless @campaign.draft? || @campaign.scheduled?
-    return render_could_not_create_error('Informe a data de envio') if params[:scheduled_at].blank?
+  # POST pause — ⏸ R3 da auditoria (#415): para uma campanha em envio (o job
+  # vê a mudança e interrompe no próximo contato) ou cancela o agendamento.
+  def pause
+    return render_could_not_create_error('Só campanhas em envio ou agendadas podem ser pausadas') unless @campaign.processing? || @campaign.scheduled?
 
-    @campaign.update!(status: :scheduled, scheduled_at: params[:scheduled_at])
+    @campaign.update!(status: :paused)
     render json: campaign_json(@campaign)
   end
 
   # GET results — painel de resultados: destinatários x conversões no CRM
+  # 💰 R2 da auditoria (#287): dinheiro (soma e valor de cada convertido) só
+  # para quem vê o Financeiro — "resultados" é leitura do time todo, então os
+  # campos de R$ vão como nil para os demais.
   def results
     recipients_count = @campaign.campaign_contacts.count
     converted = @campaign.converted_crm_contacts.to_a
-    replies = build_replies
-    label_conversions = build_label_conversions
-
-    total_value = converted.sum { |c| c.value.to_f }
-    by_procedure = converted.group_by { |c| c.procedure_of_interest.presence || 'Não informado' }
-                            .map do |procedure, cards|
-      {
-        procedure: procedure,
-        count: cards.size,
-        total_value: cards.sum { |c| c.value.to_f }
-      }
-    end.sort_by { |p| -p[:total_value] }
 
     render json: {
       recipients: recipients_count,
-      replies: replies,
-      label_conversions: label_conversions,
+      replies: build_replies,
+      label_conversions: build_label_conversions,
       conversions: {
         count: converted.size,
         rate: recipients_count.positive? ? (converted.size.to_f / recipients_count * 100).round(1) : 0,
-        total_value: total_value
+        total_value: money_sum(converted)
       },
-      by_procedure: by_procedure,
-      converted_contacts: converted.map do |c|
-        {
-          contact_id: c.contact_id,
-          name: c.contact.name,
-          phone_number: c.contact.phone_number,
-          procedure: c.procedure_of_interest,
-          value: c.value,
-          stage_name: c.stage&.name,
-          stage_color: c.stage&.color
-        }
-      end
+      by_procedure: build_by_procedure(converted),
+      converted_contacts: converted.map { |card| converted_json(card) }
     }
   end
 
   # POST preview_audience — recebe o audience e devolve contagem + amostra
+  # 💸 R3 da auditoria (#415): devolve também o custo estimado (tarifa da
+  # Meta na tabela de Crm::WhatsappPricing × contatos) para a confirmação
+  # "Enviar para N contatos (≈ R$ X)?". category = marketing (padrão) ou
+  # utility/authentication, conforme o modelo escolhido.
   def preview_audience
     preview = Crm::Campaign.new(account: Current.account, audience: audience_params)
     contacts = preview.resolve_audience
+    count = contacts.size
     render json: {
-      count: contacts.size,
+      count: count,
       sample: contacts.limit(10).map { |c| { id: c.id, name: c.name, phone_number: c.phone_number } }
-    }
+    }.merge(cost_estimate(count))
   end
 
   # GET templates?inbox_id= — templates aprovados do canal WhatsApp
@@ -112,6 +126,37 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   end
 
   private
+
+  # soma dos valores dos cards — nil para quem não vê o Financeiro
+  def money_sum(cards)
+    return nil unless finance_view?
+
+    cards.sum { |card| card.value.to_f }
+  end
+
+  def finance_view?
+    return @finance_view if defined?(@finance_view)
+
+    @finance_view = money_visible?
+  end
+
+  def build_by_procedure(converted)
+    converted.group_by { |card| card.procedure_of_interest.presence || 'Não informado' }
+             .map { |procedure, cards| { procedure: procedure, count: cards.size, total_value: money_sum(cards) } }
+             .sort_by { |row| [-row[:total_value].to_f, -row[:count]] }
+  end
+
+  def converted_json(card)
+    {
+      contact_id: card.contact_id,
+      name: card.contact.name,
+      phone_number: card.contact.phone_number,
+      procedure: card.procedure_of_interest,
+      value: finance_view? ? card.value : nil,
+      stage_name: card.stage&.name,
+      stage_color: card.stage&.color
+    }
+  end
 
   # Quem respondeu: mensagem recebida na conversa após o envio da campanha,
   # com a primeira resposta de cada um
@@ -162,6 +207,43 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
     @campaign ||= Current.account.crm_campaigns.find(params[:id])
   end
 
+  # tarifa da Meta (tabela do item 303) × contatos = custo estimado do disparo
+  def cost_estimate(count)
+    rates = Crm::WhatsappPricing.rates(Current.account)
+    category = Crm::WhatsappPricing::CATEGORIES.include?(params[:category].to_s) ? params[:category].to_s : 'marketing'
+    rate = rates[category].to_f
+    { estimated_cost: (rate * count).round(2), rate: rate, rate_category: category, currency: rates['currency'] }
+  end
+
+  # "2026-10-10T09:00" (sem fuso) = hora de São Paulo; com fuso/Z respeita o
+  # fuso. Inválida ou no passado → :invalid (mesmo padrão da campanha de ligação)
+  def parse_schedule(raw)
+    value = Crm::Campaign::TZ.parse(raw.to_s)
+    value.present? && value.future? ? value : :invalid
+  rescue ArgumentError
+    :invalid
+  end
+
+  # marca "em envio" só se a campanha AINDA estiver num estado que pode sair
+  # (rascunho, agendada, pausada, falhou); devolve false se outro pedido chegou antes
+  def claim_for_sending
+    sendable = Crm::Campaign.statuses.slice('draft', 'scheduled', 'paused', 'failed').values
+    Current.account.crm_campaigns.where(id: @campaign.id, status: sendable)
+           .update_all(status: Crm::Campaign.statuses[:processing], updated_at: Time.current).positive? # rubocop:disable Rails/SkipsModelValidations
+  end
+
+  # a tela manda ignore_schedule=1 só depois que a pessoa confirmou no modal
+  def ignore_schedule?
+    ActiveModel::Type::Boolean.new.cast(params[:ignore_schedule]) == true
+  end
+
+  # horário do agendamento como a equipe lê (fuso da clínica)
+  def scheduled_label(record)
+    return nil if record.scheduled_at.blank?
+
+    record.scheduled_at.in_time_zone(Crm::Campaign::TZ).strftime('%d/%m/%Y %H:%M')
+  end
+
   def campaign_params
     params.require(:campaign).permit(
       :name, :inbox_id, :apply_label, :message_preview, :scheduled_at,
@@ -189,7 +271,8 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
       apply_label: c.apply_label,
       conversion_stage_ids: c.conversion_stage_ids,
       conversion_label_ids: c.conversion_label_ids,
-      scheduled_at: c.scheduled_at,
+      # 🕐 R3 (#411): scheduled_at_label = hora pronta no fuso da clínica (a lista não depende do fuso do navegador)
+      scheduled_at: c.scheduled_at, scheduled_at_label: scheduled_label(c),
       status: c.status,
       stats: c.stats,
       sender_name: c.sender&.name,

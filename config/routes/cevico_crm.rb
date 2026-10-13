@@ -9,6 +9,7 @@ namespace :crm do
     member do
       post :send_now
       post :schedule
+      post :pause # ⏸ R3 da auditoria (#415): pausar envio / cancelar agendamento
       get :results
     end
     collection do
@@ -45,6 +46,10 @@ namespace :crm do
   end
   resources :followup_bots, only: [:index, :create, :update, :destroy] do
     post :ai_preview, on: :collection # item 315: exemplo da cutucada escrita pela IA
+    # 🧠 13/10: follow-up inteligente (config da conta) + resultado por coluna
+    get :smart, on: :collection
+    put :smart, on: :collection, action: :update_smart
+    get :results, on: :collection
     member { post :toggle } # chave de emergência — aberta às atendentes
   end
   resource :traffic_report, only: [:show]
@@ -319,6 +324,8 @@ namespace :crm do
     post :toggle_radar
     # cesto de indicadores c/ série + período anterior (item 141)
     get :kpis
+    # 🧭 item 337: VISÃO GERAL (as 14 perguntas) — dinheiro e médicos só p/ admin
+    get :overview
     # 🎂 item 331: aniversário da pessoa logada
     post :birthday
   end
@@ -394,6 +401,8 @@ namespace :crm do
   resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
     resources :stages, only: [:index, :create, :update, :destroy] do
       collection { post :reorder }
+      # 🧹 auditoria 12/10 (#288): apaga a coluna movendo TODOS os cards (transação)
+      member { delete :destroy_moving_to }
       resources :automations, only: [:index, :create, :update, :destroy] do
         member { post :trigger }
       end
@@ -417,4 +426,8 @@ namespace :crm do
     end
   end
 end
+# 🔔 Rodada 7 "Fôlego" (#301): o número dourado de Tarefas na barra lateral
+# — só a contagem, sem baixar a lista. Fica FORA do namespace :crm, então a
+# URL é /api/v1/accounts/:id/tasks/alert_count (controller de Tarefas)
+get 'tasks/alert_count', to: 'tasks#alert_count'
 # rubocop:enable Metrics/BlockLength

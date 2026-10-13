@@ -121,28 +121,80 @@ export const fmtDay = iso => {
 
 export function useBusinessBoard(initial) {
   const board = ref(hydrateBoard(initial));
-  const saveState = ref('idle'); // idle | saving | saved | error
+  const saveState = ref('idle'); // idle | saving | saved | error | conflict
   const savedAt = ref('');
+  // 🔒 Rodada 4 (#414): a VERSÃO do quadro que esta tela carregou (updated_at
+  // gravado pelo servidor). Vai junto em cada save; se alguém salvou depois,
+  // o servidor recusa (409) e a tela troca pelo quadro atual em vez de apagar
+  // o que o outro escreveu.
+  const version = ref(initial?.updated_at || null);
   let timer = null;
   let ready = false;
+  let dirty = false; // há mudança ainda não gravada?
+  // UM save de cada vez: o próximo só sai depois que o anterior voltar (já
+  // com a versão nova na mão). Sem isso, com rede lenta o 2º save saía com a
+  // versão velha e levava 409 do PRÓPRIO save — o admin perdia o que digitou.
+  let inFlight = null;
+  let pending = false; // pediram outro save enquanto um estava no ar
+  let ignoreNextChange = false; // a troca do quadro após 409 não é edição
 
-  const persist = async () => {
+  const sendBoard = async () => {
     saveState.value = 'saving';
+    dirty = false;
     try {
-      await CrmAPI.saveBusinessBoard(board.value);
+      const { data } = await CrmAPI.saveBusinessBoard(
+        board.value,
+        version.value
+      );
+      version.value = data?.business?.updated_at || version.value;
       saveState.value = 'saved';
       savedAt.value = new Date().toLocaleTimeString('pt-BR', {
         hour: '2-digit',
         minute: '2-digit',
       });
-    } catch {
-      saveState.value = 'error';
+    } catch (e) {
+      const fresh =
+        e?.response?.status === 409 ? e.response.data?.business : null;
+      if (fresh && typeof fresh === 'object') {
+        // quem salvou por último perde só o que digitou neste instante — e vê
+        // o quadro de verdade. A troca abaixo não pode disparar outro autosave
+        // (nem o save que estava na fila: ele era em cima do quadro velho).
+        clearTimeout(timer);
+        dirty = false;
+        pending = false;
+        ignoreNextChange = true;
+        board.value = hydrateBoard(fresh);
+        version.value = fresh.updated_at || null;
+        saveState.value = 'conflict';
+      } else {
+        dirty = true;
+        saveState.value = 'error';
+      }
     }
+  };
+  const persist = () => {
+    if (inFlight) {
+      pending = true;
+      return inFlight;
+    }
+    inFlight = sendBoard().finally(() => {
+      inFlight = null;
+      if (pending) {
+        pending = false;
+        if (dirty) persist();
+      }
+    });
+    return inFlight;
   };
   watch(
     board,
     () => {
+      if (ignoreNextChange) {
+        ignoreNextChange = false;
+        return;
+      }
       if (!ready) return;
+      dirty = true;
       clearTimeout(timer);
       timer = setTimeout(persist, 900);
     },
@@ -152,10 +204,11 @@ export function useBusinessBoard(initial) {
     ready = true;
   }, 300);
   onBeforeUnmount(() => {
-    if (timer) {
-      clearTimeout(timer);
-      persist();
-    }
+    clearTimeout(timer);
+    // só o que ainda não foi gravado — o servidor confere a versão, então
+    // nunca grava por cima de um quadro mais novo; estado já salvo não é
+    // reenviado (#414). Se houver save no ar, este entra na fila atrás dele.
+    if (dirty) persist();
   });
 
   // linha do tempo (mais nova primeiro)

@@ -84,8 +84,9 @@ class Crm::FormInsightService
   def build_corpus
     lines = ["Formulário: #{@form.name} — #{@responses.size} respostas\n"]
     @responses.each_with_index do |r, i|
-      lines << "--- Resposta #{i + 1} ---"
-      r.answers.each do |a|
+      # 🔐 achado #118: a IA fica sabendo quando a resposta não é confirmada
+      lines << "--- Resposta #{i + 1}#{' (não confirmada: quem respondeu se identificou só com nome e WhatsApp)' unless r.verified?} ---"
+      r.answer_items.each do |a|
         value = a['value'].is_a?(Array) ? a['value'].join(', ') : a['value'].to_s
         next if value.blank?
 

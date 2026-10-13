@@ -34,6 +34,7 @@
     "STAGE_AUTOMATIONS_SOON": "Configure gatilhos e ações automáticas para esta coluna. Disponível em breve.",
     "COMING_SOON": "Em breve",
     "DELETE_STAGE_HAS_CARDS": "Esta coluna possui {count} card(s). Selecione uma coluna de destino antes de excluir.",
+    "DELETE_STAGE_COUNT_UNKNOWN": "Com busca ou filtro ativo a contagem real não aparece. Escolha a coluna que recebe os cards desta.",
     "DELETE_MOVE_TO": "Mover cards para",
     "DELETE_MOVE_AND_DELETE": "Mover e excluir coluna",
     "SETTINGS_ALLOW_DRAG": "Permitir arrastar cards para esta coluna",
@@ -118,6 +119,7 @@
       "HISTORY_CURRENT": "Etapa atual",
       "HISTORY_IN_PROGRESS": "Em andamento",
       "REMOVE": "Remover do funil",
+      "REMOVE_WARNING": "O card some do funil e dos painéis por coluna; o histórico de colunas fica guardado no banco, mas sai desta ficha. Fica registrado quem removeu.",
       "SAVE": "Salvar",
       "SAVING": "Salvando...",
       "STATUS": {

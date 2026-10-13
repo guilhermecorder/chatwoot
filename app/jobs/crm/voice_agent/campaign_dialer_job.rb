@@ -31,12 +31,15 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
 
   def perform(now = nil)
     @now = now ? now.in_time_zone(TZ) : TZ.now
+    @health = { tried: 0, failed: 0 } # 🚨 #217
     sweep_stale_ai_calls
     Crm::CallCampaign.due.find_each { |campaign| safely(campaign) { campaign.start! } }
 
     Crm::CallCampaign.processing.includes(:account).group_by(&:account).each do |account, campaigns|
       run_account(account, campaigns)
     end
+    Crm::CronHealth.mark_round_error!('discador', **@health) # 🚨 #217: "com erro" só se metade ou mais das campanhas falharam
+    Crm::CronHealth.ran!('discador') # 🚨 #217: sinal de vida da rodada (o vigia confere)
   end
 
   private
@@ -69,9 +72,13 @@ class Crm::VoiceAgent::CampaignDialerJob < ApplicationJob
   end
 
   def safely(campaign)
+    @health ||= { tried: 0, failed: 0 } # 🚨 #217 (spec chama run_account direto)
+    @health[:tried] += 1
     yield
   rescue StandardError => e
     Rails.logger.error("[CEVICO voice] campanha #{campaign.id}: #{e.class}: #{e.message}")
+    @health[:failed] += 1
+    Crm::CronHealth.failed!('discador', e, account: campaign.account, item: "campanha #{campaign.id}", count: false) # 🚨 #217
   end
 
   def run_campaign(campaign, settings) # rubocop:disable Metrics/CyclomaticComplexity

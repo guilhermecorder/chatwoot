@@ -177,9 +177,9 @@ class Cevico::Company
   # ── gravação (admin) ───────────────────────────────────────────────────
   def self.save!(account, attrs) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     attrs = attrs.to_h.transform_keys(&:to_s)
-    settings = CrmSetting.find_or_create_by!(account: account)
-    cfg = (settings.agenda_config || {}).dup
-    current = (cfg[KEY] || {}).to_h.dup
+    # Rodada 4 (achado #383): `current` é só o que veio em attrs; no fim o
+    # merge_key! junta com o que já está gravado, sob a trava da linha
+    current = {}
 
     current['name'] = attrs['name'].to_s.strip[0, 80] if attrs.key?('name')
     current['segment'] = attrs['segment'].to_s if attrs.key?('segment') && SEGMENTS.include?(attrs['segment'].to_s)
@@ -223,8 +223,7 @@ class Cevico::Company
                               'ga4_measurement_id' => t['ga4_measurement_id'].to_s.strip[0, 30] }.compact_blank
     end
 
-    cfg[KEY] = current
-    settings.update!(agenda_config: cfg)
+    Cevico::SettingMerge.merge_key!(account, :agenda_config, KEY) { |saved| saved.to_h.merge(current) }
     new(account)
   end
 end

@@ -76,6 +76,10 @@ const STATUS = [
   { key: 'ausente', label: 'Não compareceu', tone: 'cv-pink', dot: '#EC4899' },
 ];
 const statusMeta = k => STATUS.find(s => s.key === k) || { key: k, label: k || 'Outro', tone: 'cv-slate', dot: '#94a3b8' };
+// Rodada 5 (#173): o hub nunca marca "realizada" — o servidor manda a situação
+// para a tela (status_view: ativa com a data já passada = realizada)
+const kindOf = r => r?.status_view || r?.status_kind;
+const kindLabel = r => r?.status_view_label || r?.status_kind_label;
 const UNIT_LABEL = { paulista: 'Av. Paulista', tatuape: 'Tatuapé', online: 'Online', iop: 'IOP', ocular_surgery: 'Ocular Surgery' };
 const unitLabel = key => UNIT_LABEL[key] || key || '';
 const pad = n => String(n).padStart(2, '0');
@@ -204,7 +208,7 @@ const shiftMonth = n => { monthStart.value = new Date(monthStart.value.getFullYe
 const monthLabel = computed(() => monthStart.value.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }));
 const monthTotals = computed(() => {
   const rows = (month.value?.rows || []).filter(r => new Date(`${r.surgery_date}T12:00:00`).getMonth() === monthStart.value.getMonth());
-  const by = k => rows.filter(r => r.status_kind === k).length;
+  const by = k => rows.filter(r => kindOf(r) === k).length;
   return { total: rows.length, realizada: by('realizada'), agendada: by('agendada') + by('aguardando_pagamento'), cancelada: by('cancelada') + by('ausente') };
 });
 // ── DIA e SEMANA no formato da nossa Agenda (coluna de horas + balões) ──
@@ -214,7 +218,7 @@ const WEEK_PX = 48;
 const DAY_PX = 80;
 const toTask = r => ({ id: r.id, due_at: `${r.surgery_date}T${r.surgery_hour || '08:00'}:00`, title: r.patient_name, _row: r, _nohour: !r.surgery_hour });
 const tasksOfDay = d => (weekByDay.value[dateKey(d)] || []).map(toTask);
-const accentOfTask = t => statusMeta(t._row.status_kind).dot;
+const accentOfTask = t => statusMeta(kindOf(t._row)).dot;
 const nameOfTask = t => `${t._row.own ? '⭐ ' : ''}${t._row.patient_name || '(sem nome)'}${t._nohour ? ' · sem hora' : ''}`;
 const durationOfTask = () => 30;
 const openTask = t => openDetail(t._row);
@@ -424,7 +428,8 @@ const reconcileDay = async () => {
     const { data } = await CrmAPI.oftalmofacilReconcileDay(dayCheckDate.value);
     dayCheck.value = data;
     const errs = (data.errors || []).length;
-    dayCheckMsg.value = `${data.fixed || 0} item(ns) reprocessado(s) · ${data.tasks_created || 0} agendamento(s) criado(s) · ${data.tasks_updated || 0} atualizado(s)${errs ? ` · ${errs} aviso(s)` : ''}`;
+    // o primeiro aviso vai junto, para o admin saber o porquê do 0
+    dayCheckMsg.value = `${data.fixed || 0} item(ns) reprocessado(s) · ${data.tasks_created || 0} agendamento(s) criado(s) · ${data.tasks_updated || 0} atualizado(s)${errs ? ` · ${errs} aviso(s): ${data.errors[0]}` : ''}`;
   } catch (e) {
     dayCheckMsg.value = e?.response?.data?.error || 'Não consegui trazer os agendamentos. Tente de novo.';
   } finally {
@@ -511,6 +516,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
         <template #chips>
           <span v-if="overview" class="cv-glass-chip"><span class="i-lucide-database text-xs" /> {{ overview.sync?.mirror_count || 0 }} itens espelhados</span>
           <span v-if="overview?.sync?.last_run_at" class="cv-glass-chip" :title="`cursor: ${overview.sync.last_sync_at || '—'}`"><span class="i-lucide-refresh-cw text-xs" /> sincronizado {{ fmtWhen(overview.sync.last_run_at) }}</span>
+          <!-- Rodada 4 (achado #382): sync falhou ou parou -->
+          <span v-if="overview?.sync?.sync_alert" class="cv-glass-chip" :title="overview.sync.sync_alert.message"><span class="i-lucide-octagon-alert text-xs" /> {{ overview.sync.sync_alert.kind === 'erro' ? 'sincronização falhou' : 'sincronização parada' }} {{ fmtWhen(overview.sync.sync_alert.at) }}</span>
           <span v-if="overview && !overview.sync?.partners_enabled" class="cv-glass-chip" title="Só o fornecedor da CEVICO está sendo lido"><span class="i-lucide-triangle-alert text-xs" /> parceiros desligados</span>
           <span v-if="overview && !overview.sync?.agenda_enabled" class="cv-glass-chip" title="Os itens ainda não viram agendamentos"><span class="i-lucide-calendar-off text-xs" /> Agenda desligada</span>
         </template>
@@ -538,6 +545,12 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
           <span class="cv-icon cv-icon-sm"><span class="i-lucide-triangle-alert text-xs" /></span>
           <p class="text-xs text-n-slate-11 flex-1 min-w-0">{{ loadError }}</p>
           <button class="cv-btn cv-btn-sm" @click="fetchOverview">Tentar de novo</button>
+        </div>
+        <!-- Rodada 4 (achado #382): a sincronização falhou ou parou → faixa vermelha (o aviso ativo vem na R6) -->
+        <div v-if="overview?.sync?.sync_alert" class="cv-block cv-strip cv-red px-4 py-3.5 mb-8 flex items-center gap-3 flex-wrap">
+          <span class="cv-icon cv-icon-sm"><span class="i-lucide-octagon-alert text-xs" /></span>
+          <p class="text-xs text-n-slate-11 flex-1 min-w-0"><b>{{ overview.sync.sync_alert.kind === 'erro' ? 'A sincronização falhou' : 'A sincronização parou' }}</b><template v-if="overview.sync.sync_alert.at"> ({{ fmtWhen(overview.sync.sync_alert.at) }})</template> · {{ overview.sync.sync_alert.message }}</p>
+          <router-link v-if="isAdmin" class="cv-btn cv-btn-sm" :to="integrationsUrl">Ver conexão</router-link>
         </div>
 
         <!-- ═══════════ VISÃO GERAL ═══════════ -->
@@ -666,7 +679,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
               <div v-if="!upcomingRows.length" class="cv-sub p-6 text-center text-sm text-n-slate-10">Nada marcado no hub nesta semana.</div>
               <div v-else class="space-y-1.5">
                 <button v-for="r in upcomingRows" :key="r.id" class="cv-row w-full text-left px-3 py-2 flex items-center gap-3" @click="openDetail(r)">
-                  <span class="w-1.5 h-8 rounded-full flex-shrink-0" :style="{ background: statusMeta(r.status_kind).dot }" />
+                  <span class="w-1.5 h-8 rounded-full flex-shrink-0" :style="{ background: statusMeta(kindOf(r)).dot }" />
                   <span class="w-20 text-xs font-bold text-n-slate-11 tabular-nums capitalize">{{ fmtDateLong(r.surgery_date) }}<br><span class="font-normal text-n-slate-10">{{ r.surgery_hour || '—' }}</span></span>
                   <span class="flex-1 min-w-0"><span class="text-sm font-semibold text-n-slate-12 block truncate">{{ r.patient_name }}</span><span class="text-[11px] text-n-slate-10 block truncate">{{ r.procedure_name || r.procedure_type }} · {{ r.own ? '⭐ CEVICO' : r.provider_name }}</span></span>
                   <span class="cv-chip" :class="agendaStateOf(r).tone"><span :class="agendaStateOf(r).icon" class="text-xs" /></span>
@@ -779,7 +792,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                   <p v-if="calSearching" class="text-[11px] text-n-slate-10 px-2 py-1.5">procurando…</p>
                   <p v-else-if="!calHits.length" class="text-[11px] text-n-slate-10 px-2 py-1.5">ninguém com "{{ calQuery }}" no hub</p>
                   <button v-for="h in calHits" :key="'hit' + h.id" class="w-full text-left rounded-lg px-2 py-1.5 hover:bg-n-alpha-2 flex items-center gap-2" @click="goToHit(h)">
-                    <span class="w-1.5 h-8 rounded-full shrink-0" :style="{ background: statusMeta(h.status_kind).dot }" />
+                    <span class="w-1.5 h-8 rounded-full shrink-0" :style="{ background: statusMeta(kindOf(h)).dot }" />
                     <span class="min-w-0 flex-1">
                       <span class="block text-xs font-semibold text-n-slate-12 truncate">{{ h.patient_name }}</span>
                       <span class="block text-[10px] text-n-slate-10 truncate capitalize">{{ fmtDateLong(h.surgery_date) }} · {{ h.surgery_hour || 'sem hora' }} · {{ h.procedure_name || h.procedure_type }}</span>
@@ -817,7 +830,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                   <span class="cv-of-mnum">{{ d.getDate() }}</span>
                   <span v-if="(monthByDay[dateKey(d)] || []).length" class="cv-of-mcount">{{ monthByDay[dateKey(d)].length }}</span>
                 </div>
-                <button v-for="r in (monthByDay[dateKey(d)] || []).slice(0, dayCellMax)" :key="r.id" class="cv-of-mchip" :class="`cv-of-ev-${r.status_kind}`" :title="`${r.surgery_hour || ''} ${r.patient_name} · ${r.procedure_name || ''} · ${r.provider_name}`" @click.stop="openDetail(r)">
+                <button v-for="r in (monthByDay[dateKey(d)] || []).slice(0, dayCellMax)" :key="r.id" class="cv-of-mchip" :class="`cv-of-ev-${kindOf(r)}`" :title="`${r.surgery_hour || ''} ${r.patient_name} · ${r.procedure_name || ''} · ${r.provider_name}`" @click.stop="openDetail(r)">
                   <span class="cv-of-mchip-time">{{ r.surgery_hour || '' }}</span> {{ r.patient_name }}
                 </button>
                 <span v-if="(monthByDay[dateKey(d)] || []).length > dayCellMax" class="text-[10px] font-bold text-n-slate-10 block px-1">+ {{ monthByDay[dateKey(d)].length - dayCellMax }} mais</span>
@@ -872,8 +885,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
               <div class="flex items-center gap-2"><span class="cv-icon cv-icon-sm"><span class="i-lucide-list text-xs" /></span><p class="text-sm font-bold text-n-slate-12">Itens do dia</p><span class="cv-chip cv-chip-on">{{ dayRows.length }}</span></div>
               <div v-if="!dayRows.length" class="cv-sub p-8 text-center text-sm text-n-slate-10">Nada marcado no hub neste dia.</div>
               <!-- item 243: cartão em GRADE — hora | quem e o quê | selos alinhados à direita -->
-              <div v-for="r in dayRows" :key="'dr' + r.id" class="cv-ag-card cv-ag-card-grid" :style="{ '--cv': statusMeta(r.status_kind).dot }" @click="openDetail(r)">
-                <span class="cv-ag-card-time" :style="{ color: statusMeta(r.status_kind).dot }">{{ r.surgery_hour || '—' }}</span>
+              <div v-for="r in dayRows" :key="'dr' + r.id" class="cv-ag-card cv-ag-card-grid" :style="{ '--cv': statusMeta(kindOf(r)).dot }" @click="openDetail(r)">
+                <span class="cv-ag-card-time" :style="{ color: statusMeta(kindOf(r)).dot }">{{ r.surgery_hour || '—' }}</span>
                 <div class="min-w-0">
                   <p class="text-sm font-semibold text-n-slate-12 truncate">{{ r.own ? '⭐ ' : '' }}{{ r.patient_name }}</p>
                   <p v-if="r.procedure_name" class="cv-ag-card-proc"><span class="i-lucide-eye text-[11px] opacity-60" /> {{ r.procedure_name }}<span v-if="r.eye" class="font-normal text-n-slate-10"> · {{ r.eye }}</span></p>
@@ -885,7 +898,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                   </div>
                 </div>
                 <div class="cv-ag-card-pills">
-                  <span class="cv-chip" :class="statusMeta(r.status_kind).tone">{{ r.status_kind_label }}</span>
+                  <span class="cv-chip" :class="statusMeta(kindOf(r)).tone">{{ kindLabel(r) }}</span>
                   <span class="cv-chip" :class="r.own ? 'cv-gold' : ''" :title="r.provider_name"><span :class="r.own ? 'i-lucide-star' : 'i-lucide-handshake'" class="text-xs shrink-0" /> <span class="truncate">{{ r.provider_name }}</span></span>
                   <span class="cv-chip" :class="agendaStateOf(r).tone"><span :class="agendaStateOf(r).icon" class="text-xs shrink-0" /> <span class="truncate">{{ agendaStateOf(r).label }}</span></span>
                 </div>
@@ -954,7 +967,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                     </td>
                     <td class="cv-of-sep">
                       <span class="flex items-center gap-1 flex-wrap">
-                        <span class="cv-chip" :class="statusMeta(row.status_kind).tone">{{ row.status_kind_label }}</span>
+                        <span class="cv-chip" :class="statusMeta(kindOf(row)).tone">{{ kindLabel(row) }}</span>
                         <span v-if="isAdmin && Number(row.amount) > 0" class="text-xs font-semibold text-n-slate-11 tabular-nums">{{ fmtBRL(row.amount) }}</span>
                       </span>
                       <span class="flex items-center gap-1 flex-wrap mt-1">
@@ -973,7 +986,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                           <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
                             <dt class="text-n-slate-10">E-mail</dt><dd class="text-n-slate-12 font-semibold truncate">{{ rowDetail(row).patient_email || '—' }}</dd>
                             <template v-if="isAdmin"><dt class="text-n-slate-10">CPF</dt><dd class="text-n-slate-12 font-semibold tabular-nums">{{ rowDetail(row).patient_cpf || '—' }}</dd></template>
-                            <dt class="text-n-slate-10">Casou por</dt><dd class="text-n-slate-12 font-semibold">{{ { phone: 'telefone', cpf: 'CPF', name: 'nome', created: 'criado pelo sync' }[rowDetail(row).match_via] || rowDetail(row).match_via || '—' }}</dd>
+                            <dt class="text-n-slate-10">Casou por</dt><dd class="text-n-slate-12 font-semibold">{{ { phone: 'telefone', cpf: 'CPF', name: 'nome (antigo)', name_email: 'nome + e-mail', created: 'criado pelo sync' }[rowDetail(row).match_via] || rowDetail(row).match_via || '—' }}</dd>
                             <dt class="text-n-slate-10">Aqui</dt><dd><router-link v-if="patientUrl(row)" class="font-semibold hover:underline" style="color: var(--cv)" :to="patientUrl(row)">{{ row.contact.name }} →</router-link><span v-else class="text-red-600 font-semibold">sem paciente casado</span></dd>
                           </dl>
                         </div>
@@ -1139,7 +1152,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
         <div class="cv-modal-head flex items-center gap-3">
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-hospital text-base" /></span>
           <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">{{ detail.procedure_type || 'Item' }} · {{ detail.status_kind_label }}</p>
+            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">{{ detail.procedure_type || 'Item' }} · {{ kindLabel(detail) }}</p>
             <h2 class="text-base font-bold leading-tight truncate">{{ detail.patient_name || '(sem nome)' }}</h2>
             <p class="text-[11px] opacity-90 truncate capitalize">{{ fmtDateLong(detail.surgery_date) }} · {{ detail.surgery_hour || 'sem hora' }} · {{ detail.own ? '⭐ CEVICO' : detail.provider_name }}</p>
           </div>
@@ -1152,7 +1165,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
               <dt class="text-n-slate-10">Telefone</dt><dd class="text-n-slate-12 font-semibold tabular-nums">{{ detail.patient_phone || '—' }}</dd>
               <dt class="text-n-slate-10">E-mail</dt><dd class="text-n-slate-12 font-semibold truncate">{{ detail.patient_email || '—' }}</dd>
               <template v-if="isAdmin"><dt class="text-n-slate-10">CPF</dt><dd class="text-n-slate-12 font-semibold tabular-nums">{{ detail.patient_cpf || '—' }}</dd></template>
-              <dt class="text-n-slate-10">Casou por</dt><dd class="text-n-slate-12 font-semibold">{{ { phone: 'telefone', cpf: 'CPF', name: 'nome', created: 'criado pelo sync' }[detail.match_via] || detail.match_via || '—' }}</dd>
+              <dt class="text-n-slate-10">Casou por</dt><dd class="text-n-slate-12 font-semibold">{{ { phone: 'telefone', cpf: 'CPF', name: 'nome (antigo)', name_email: 'nome + e-mail', created: 'criado pelo sync' }[detail.match_via] || detail.match_via || '—' }}</dd>
               <dt class="text-n-slate-10">No sistema</dt><dd><router-link v-if="patientUrl(detail)" class="font-semibold hover:underline" style="color: var(--cv)" :to="patientUrl(detail)">{{ detail.contact.name }} →</router-link><span v-else class="text-red-600 font-semibold">sem paciente casado</span></dd>
             </dl>
           </section>

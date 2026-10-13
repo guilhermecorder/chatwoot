@@ -63,6 +63,13 @@ RSpec.describe CrmListener do
     expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob).with(conversation.id, kind_of(Integer), 'atendente_agendamento')
   end
 
+  # 🚧 auditoria 10/2026 (#253): paciente de parceiro (etiqueta of_) — o listener não enfileira NADA
+  it 'cerca dos parceiros: paciente do Oftalmofácil não enfileira o job do agente' do
+    Crm::Contact.where(contact_id: contact.id).delete_all
+    contact.add_labels(%w[oftalmofacil of_clinica_parceira])
+    expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
+  end
+
   it 'card numa coluna do agente → agenda o job' do
     Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) { |c| c.stage_id = stage_new.id }
     expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob)
@@ -148,6 +155,26 @@ RSpec.describe CrmListener do
 
     it 'pausado, a mensagem do paciente NÃO vai para o agente' do
       conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true } })
+      expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
+    end
+
+    # 🚨 auditoria 10/2026 (#443): pausado por URGÊNCIA clínica, a mensagem ainda
+    # chega ao job — que só repete a orientação de pronto atendimento, sem IA
+    it 'pausado por URGÊNCIA, a mensagem do paciente ainda vai para o agente (orientação de pronto atendimento)' do
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true, 'reason' => 'chamou_humano', 'urgente' => true } })
+      expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob)
+    end
+
+    it 'pausado por URGÊNCIA, a resposta de uma pessoa tira a marca (a pausa continua) e a próxima mensagem do paciente não vai ao agente',
+       :aggregate_failures do
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true, 'reason' => 'chamou_humano', 'urgente' => true } })
+      outgoing = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing,
+                                  content: 'vem agora pra clínica', sender: human)
+      fire(outgoing)
+      state = conversation.reload.additional_attributes['cevico_atendente_wa']
+      expect(state).to include('paused' => true, 'reason' => 'humano_assumiu', 'by' => human.name)
+      expect(state).not_to include('urgente')
+      expect(conversation.messages.where(message_type: :activity).last.content).to include('assumiu esta conversa')
       expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
     end
 

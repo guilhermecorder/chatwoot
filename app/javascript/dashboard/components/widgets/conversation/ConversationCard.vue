@@ -113,6 +113,15 @@ const journeyStages = computed(() =>
 const chatStage = computed(
   () => journeyStages.value.find(s => s.id === props.chat.crm_stage_id) || null
 );
+// Rodada 5 (#196): o balão de mover lista só as colunas do funil do card —
+// mover para coluna de outro funil trocava o card de funil (paciente da
+// CEVICO virava "parceiro")
+const chatPipelineStages = computed(() => {
+  const pipeline = (crmPipelines.value || []).find(p =>
+    (p.stages || []).some(s => s.id === props.chat.crm_stage_id)
+  );
+  return pipeline?.stages || [];
+});
 const showStagePopover = ref(false);
 const isMovingStage = ref(false);
 // balão via Teleport (fora do card): a animação do card ativo cria stacking
@@ -428,7 +437,7 @@ const isCleanCard = computed(() => listMode.value === 'clean');
               </p>
               <div class="flex flex-wrap gap-1.5">
                 <button
-                  v-for="s in journeyStages"
+                  v-for="s in chatPipelineStages"
                   :key="s.id"
                   class="cv-tag cv-tag-btn cv-tag-md"
                   :class="s.id === chat.crm_stage_id ? 'cv-tag-solid' : ''"

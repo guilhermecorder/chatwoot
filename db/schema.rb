@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_05_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_10_13_010000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2446,10 +2446,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_05_010000) do
   add_foreign_key "cevico_journey_sends", "cevico_journey_messages", column: "journey_message_id", on_delete: :cascade
   add_foreign_key "cevico_journey_sends", "contacts", on_delete: :cascade
   add_foreign_key "cevico_oftalmofacil_surgeries", "accounts"
-  add_foreign_key "cevico_oftalmofacil_surgeries", "contacts"
+  add_foreign_key "cevico_oftalmofacil_surgeries", "contacts", on_delete: :nullify
   add_foreign_key "cevico_page_refs", "accounts"
   add_foreign_key "cevico_page_refs", "cevico_pages"
-  add_foreign_key "cevico_page_refs", "contacts"
+  add_foreign_key "cevico_page_refs", "contacts", on_delete: :cascade
   add_foreign_key "cevico_page_traffic", "accounts"
   add_foreign_key "cevico_page_traffic", "cevico_pages"
   add_foreign_key "cevico_pages", "accounts"
@@ -2469,17 +2469,17 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_05_010000) do
   add_foreign_key "crm_ai_usages", "accounts"
   add_foreign_key "crm_automation_logs", "crm_automations", column: "automation_id"
   add_foreign_key "crm_automations", "crm_stages", column: "stage_id"
-  add_foreign_key "crm_campaign_contacts", "contacts"
+  add_foreign_key "crm_campaign_contacts", "contacts", on_delete: :cascade
   add_foreign_key "crm_campaign_contacts", "conversations"
   add_foreign_key "crm_campaign_contacts", "crm_campaigns", column: "campaign_id"
   add_foreign_key "crm_campaigns", "accounts"
   add_foreign_key "crm_campaigns", "inboxes"
   add_foreign_key "crm_campaigns", "users", column: "sender_id"
   add_foreign_key "crm_clinical_notes", "accounts"
-  add_foreign_key "crm_clinical_notes", "contacts"
+  add_foreign_key "crm_clinical_notes", "contacts", on_delete: :cascade
   add_foreign_key "crm_clinical_notes", "tasks"
   add_foreign_key "crm_clinical_notes", "users", column: "author_id"
-  add_foreign_key "crm_contacts", "contacts"
+  add_foreign_key "crm_contacts", "contacts", on_delete: :cascade
   add_foreign_key "crm_contacts", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_contacts", "crm_stages", column: "stage_id"
   add_foreign_key "crm_contacts", "users", column: "assignee_id"
@@ -2489,7 +2489,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_05_010000) do
   add_foreign_key "crm_followup_bots", "inboxes"
   add_foreign_key "crm_followup_bots", "users", column: "sender_id"
   add_foreign_key "crm_form_responses", "accounts"
-  add_foreign_key "crm_form_responses", "contacts"
+  add_foreign_key "crm_form_responses", "contacts", on_delete: :cascade
   add_foreign_key "crm_form_responses", "crm_forms"
   add_foreign_key "crm_forms", "accounts"
   add_foreign_key "crm_message_automations", "accounts"
@@ -2505,7 +2505,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_05_010000) do
   add_foreign_key "crm_whatsapp_charges", "accounts"
   add_foreign_key "inboxes", "portals"
   add_foreign_key "tasks", "accounts"
-  add_foreign_key "tasks", "contacts"
+  add_foreign_key "tasks", "contacts", on_delete: :nullify
   add_foreign_key "tasks", "users", column: "assignee_id"
   add_foreign_key "tasks", "users", column: "canceled_by_id"
   add_foreign_key "tasks", "users", column: "creator_id"

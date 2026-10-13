@@ -32,8 +32,8 @@ class CevicoJourneyAPI extends ApiClient {
     });
   }
 
-  testSend(id, phone) {
-    return axios.post(`${this.url}/${id}/test_send`, { phone });
+  testSend(id, phone, extra = {}) {
+    return axios.post(`${this.url}/${id}/test_send`, { phone, ...extra });
   }
 
   planNow(id) {

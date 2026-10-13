@@ -48,17 +48,20 @@ RSpec.describe Crm::ResponderAgentService do
     expect(result[:mensagens]).to eq(['Achei a consulta da Maísa: hoje às 14:00, na Av. Paulista.'])
     expect(result[:acoes].size).to eq(1)
     expect(result[:acoes].first).to include('ferramenta' => 'buscar_consulta', 'ok' => true)
-    expect(result[:acoes].first['resumo']).to include('Maísa Teste')
+    expect(result[:acoes].first['resumo']).to include('1 de outra pessoa oculta')
 
     expect(calls.size).to eq(2)
-    expect(calls.first[:tools].pluck(:name)).to eq(Crm::ResponderTools::NAMES)
+    expect(calls.first[:tools].pluck(:name)).to eq(Crm::ResponderTools::ALL_NAMES) # #458: abrir_tarefa nos três atendentes
     expect(calls.first[:output_config][:format][:type]).to eq('json_schema')
     history = calls.last[:messages]
     expect(history.size).to eq(3)
     expect(history[1]).to eq(role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'buscar_consulta', input: { nome: 'Maísa' } }])
     expect(history[2][:content].first).to include(type: 'tool_result', tool_use_id: 'toolu_1')
-    expect(JSON.parse(history[2][:content].first[:content])['consultas'].first).to include('id' => mother.id, 'paciente' => 'Maísa Teste',
-                                                                                           'telefone_final' => '7777')
+    # 🔒 auditoria 10/10 (#99/#442): consulta de outra pessoa sem o telefone casar NÃO entra na lista: só a contagem
+    tool_json = history[2][:content].first[:content]
+    expect(JSON.parse(tool_json)).to include('consultas' => [], 'terceiros_ocultos' => 1)
+    expect(tool_json).not_to include('Maísa')
+    expect(tool_json).not_to include(mother.phone.last(4))
     expect(Crm::AiUsage.where(account: account, agent_key: 'atendente_pos').count).to eq(2)
   end
 

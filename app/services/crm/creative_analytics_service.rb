@@ -205,7 +205,12 @@ class Crm::CreativeAnalyticsService # rubocop:disable Metrics/ClassLength
       ctas: video_part_rows(rows, :video_cta, 'conv_rate'),
       transcribed: Crm::AdCreative.where(account_id: @account.id, format: 'video')
                                   .where("creative -> 'transcript' ->> 'status' = 'done'").count,
-      videos: Crm::AdCreative.where(account_id: @account.id, format: 'video').count
+      videos: Crm::AdCreative.where(account_id: @account.id, format: 'video').count,
+      # achado #410: quantos o botão "Transcrever vídeos" enfileira por clique (mesmo limite do job/cron)
+      transcribe_limit: Crm::AdVideoTranscribeJob::LIMIT,
+      # quantos o servidor enfileiraria agora (vídeos E dinâmicos com vídeo, sem os que já estão na fila) —
+      # a tela usa este número na confirmação, em vez de "vídeos − transcritos"
+      pending: Crm::AdVideoTranscribeJob.pending_for(@account, limit: nil).count
     }
   end
 

@@ -74,11 +74,20 @@ export default {
       showCreateAccountModal: false,
       showShortcutModal: false,
       isMobileSidebarOpen: false,
+      // título que veio do servidor (nome da instalação) — é o padrão da aba
+      baseTabTitle: (document.title || '').trim() || 'CEVICO S.Un',
     };
   },
   computed: {
     isSmallScreen() {
       return this.windowWidth < wootConstants.SMALL_SCREEN_BREAKPOINT;
+    },
+    // Título da aba segue a EMPRESA da conta aberta (Sua Ótica, etc.);
+    // sem empresa configurada, fica o nome da instalação.
+    cevicoTabTitle() {
+      const company = this.$store.getters['crm/getCompany'];
+      if (company?.configured && company.name) return company.name;
+      return this.baseTabTitle;
     },
     showUpgradePage() {
       return this.upgradePageRef?.shouldShowUpgradePage;
@@ -97,6 +106,12 @@ export default {
     },
   },
   watch: {
+    cevicoTabTitle: {
+      handler(title) {
+        if (title) document.title = title;
+      },
+      immediate: true,
+    },
     isSmallScreen: {
       handler() {
         const { LAYOUT_TYPES } = wootConstants;

@@ -238,3 +238,21 @@ crm_whatsapp_pricing_sync_job:
   cron: '40 7 * * *'
   class: 'Crm::WhatsappPricingSyncJob'
   queue: low
+
+# 🚨 Vigia dos robôs (auditoria 10/2026, achado #217): a cada 10 min confere o
+# sinal de vida dos robôs CEVICO (lembretes, NPS, jornada, resgate, OftalmoFácil,
+# Colheitadeira, follow-up, discador) e avisa o administrador (Radar + tarefa 🔴
+# + e-mail) quando um parou ou terminou em erro 2× seguidas. Fila HIGH: roda
+# mesmo com a fila dos lembretes empacada.
+crm_cron_watchdog_job:
+  cron: '*/10 * * * *'
+  class: 'Crm::CronWatchdogJob'
+  queue: high
+
+# 💓 Sinal de vida da fila dos robôs (achado #217): a cada 1 min renova uma
+# chave no Redis pela fila scheduled_jobs; o /health?sidekiq=1 do web e o vigia
+# acima leem essa chave para saber se a fila está andando
+crm_sidekiq_heartbeat_job:
+  cron: '*/1 * * * *'
+  class: 'Crm::SidekiqHeartbeatJob'
+  queue: scheduled_jobs

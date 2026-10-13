@@ -44,11 +44,21 @@
 class Crm::JourneySend < ApplicationRecord
   self.table_name = 'cevico_journey_sends'
 
-  STATUSES = %w[queued pending_review sent skipped failed expired].freeze
+  # 'sending' = alguém (tela ou cron) já pegou este envio e está mandando —
+  # auditoria R3 (#21/#412): a passagem para 'sending' é atômica no banco,
+  # então dois cliques (ou clique + cron) nunca mandam o mesmo balão duas vezes
+  STATUSES = %w[queued pending_review sending sent skipped failed expired].freeze
   STATUS_LABELS = {
-    'queued' => 'Na fila', 'pending_review' => 'Aguardando aprovação', 'sent' => 'Enviada',
+    'queued' => 'Na fila', 'pending_review' => 'Aguardando aprovação', 'sending' => 'Enviando', 'sent' => 'Enviada',
     'skipped' => 'Pulada', 'failed' => 'Falhou', 'expired' => 'Expirou'
   }.freeze
+  # de onde um envio pode ser pego para sair (fila ou aprovação) e de onde o
+  # "Reenviar" da tela pode pegar
+  CLAIMABLE = %w[pending_review queued].freeze
+  RETRYABLE = %w[failed skipped expired].freeze
+  # chave reservada dentro de `variables`: id da Message que saiu pela Meta
+  # (sem coluna nova; serve para reconferir se a Meta recusou depois)
+  MESSAGE_ID_KEY = '_mensagem_id'.freeze
   REPLY_LABELS = { 'confirmed' => 'Confirmou', 'declined' => 'Não vai / remarcar', 'other' => 'Respondeu' }.freeze
 
   belongs_to :account
@@ -65,6 +75,23 @@ class Crm::JourneySend < ApplicationRecord
 
   def final? = %w[sent skipped failed expired].include?(status)
 
+  # 🔒 pega o envio para mandar: só UM processo consegue passar o status para
+  # 'sending' (UPDATE ... WHERE status IN from); devolve true para quem pegou.
+  # Quem não pegou não pode mandar — outra aba, outra pessoa ou o cron já está
+  # mandando (ou já mandou).
+  def self.claim!(id, from: CLAIMABLE)
+    where(id: id, status: from).update_all(status: 'sending', updated_at: Time.current) == 1 # rubocop:disable Rails/SkipsModelValidations
+  end
+
+  def claim!(from: CLAIMABLE)
+    got = self.class.claim!(id, from: from)
+    self.status = 'sending' if got
+    got
+  end
+
+  # id da mensagem que saiu pela Meta (guardado dentro de `variables`)
+  def sent_message_id = (variables || {})[MESSAGE_ID_KEY]&.to_i
+
   # 🔁 item 288: o reforço é um envio próprio, com a chave do envio original +
   # ":f1" / ":f2" — o índice único (mensagem × chave) garante que o mesmo
   # reforço nunca nasce duas vezes
@@ -74,6 +101,10 @@ class Crm::JourneySend < ApplicationRecord
   def followup_number = event_key.to_s[FOLLOWUP_SUFFIX, 1]&.to_i
   def followup? = followup_number.present?
   def parent_key = event_key.to_s.sub(FOLLOWUP_SUFFIX, '')
+
+  # envio do botão "Testar no meu número": vai para o celular de quem testa,
+  # não para o paciente — por isso não passa pelas checagens da consulta/cirurgia
+  def test? = event_key.to_s.start_with?('teste:')
 
   # o envio original deste reforço
   def parent
@@ -89,8 +120,13 @@ class Crm::JourneySend < ApplicationRecord
       event_key: event_key, scheduled_for: scheduled_for&.iso8601, status: status,
       status_label: STATUS_LABELS[status], sent_at: sent_at&.iso8601, reply: reply,
       reply_label: reply && REPLY_LABELS[reply], replied_at: replied_at&.iso8601, reply_text: reply_text,
-      error: error, preview: preview, variables: variables, followup_number: followup_number
+      error: error, preview: preview, variables: public_variables, followup_number: followup_number
     }
+  end
+
+  # as variáveis que a tela mostra (sem as chaves internas, que começam com "_")
+  def public_variables
+    (variables || {}).reject { |k, _| k.to_s.start_with?('_') }
   end
 
   # "Confirmação de cirurgia · Reforço 1" nas filas e no histórico

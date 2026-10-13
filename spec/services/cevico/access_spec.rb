@@ -87,6 +87,32 @@ RSpec.describe Cevico::Access do
       expect(access.edit?('crm')).to be(false)
     end
 
+    # 🔐 revisão 12/10 (#19/#245/#299): nó `explicit` não herda do pai
+    it 'crm.funis não herda: CRM = editar (próprio, papel ou legado) não abre; só marcação própria', :aggregate_failures do
+      expect(catalog.explicit?('crm.funis')).to be(true)
+      expect(catalog.explicit?('crm.campanhas')).to be(false)
+
+      perms!('tree' => { agent.id.to_s => { 'crm' => 'edit' } })
+      expect(access_for(agent).level('crm')).to eq('edit')
+      expect(access_for(agent).level('crm.funis')).to eq('none')
+
+      perms!('roles' => [{ 'id' => 'r_v', 'name' => 'Vendedor', 'tree' => { 'crm' => 'edit' } }],
+             'role_by_user' => { agent.id.to_s => 'r_v' })
+      expect(access_for(agent).level('crm.funis')).to eq('none')
+
+      perms!('menu' => { agent.id.to_s => %w[crm] })
+      expect(access_for(agent).level('crm')).to eq('edit')
+      expect(access_for(agent).level('crm.funis')).to eq('none')
+      expect(access_for(agent).legacy_tree).not_to have_key('crm.funis')
+
+      perms!(agent.id.to_s => [])
+      expect(access_for(agent).level('crm.funis')).to eq('none')
+
+      perms!('tree' => { agent.id.to_s => { 'crm' => 'view', 'crm.funis' => 'edit' } })
+      expect(access_for(agent).level('crm.funis')).to eq('edit')
+      expect(access_for(admin).level('crm.funis')).to eq('edit')
+    end
+
     it 'papel dá a base e a marcação própria vence', :aggregate_failures do
       role = { 'id' => 'r_loja01', 'name' => 'Vendedor', 'tree' => { 'financeiro' => 'view', 'tarefas' => 'edit' }, 'units' => ['paulista'] }
       perms!('roles' => [role],

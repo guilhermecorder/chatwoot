@@ -36,6 +36,12 @@ const getters = {
   getRadarAlertCount: s => s.settings.ai?.opportunity_alerts_count || 0,
 };
 
+// nº da última carga do board pedida (ver fetchContacts)
+let contactsRequestSeq = 0;
+// nº da última carga COM spinner — só ela desliga o spinner (uma resposta
+// velha descartada não pode apagar o spinner de uma carga nova ainda no ar)
+let loudRequestSeq = 0;
+
 const actions = {
   async fetchPipelines({ commit }) {
     commit('setUIFlag', { isFetchingPipelines: true });
@@ -79,6 +85,22 @@ const actions = {
   async deleteStage({ commit }, { pipelineId, stageId }) {
     await CrmAPI.deleteStage(pipelineId, stageId);
     commit('removeStage', { pipelineId, stageId });
+  },
+
+  // 🧹 auditoria 12/10 (#288): o servidor move TODOS os cards e apaga a
+  // coluna de uma vez; aqui só refletimos o resultado nos cards carregados
+  async deleteStageMovingTo(
+    { commit },
+    { pipelineId, stageId, targetStageId }
+  ) {
+    const { data } = await CrmAPI.deleteStageMovingTo(
+      pipelineId,
+      stageId,
+      targetStageId
+    );
+    commit('moveStageContacts', { stageId, targetStageId });
+    commit('removeStage', { pipelineId, stageId });
+    return data;
   },
 
   async reorderStages({ commit }, { pipelineId, stageIds }) {
@@ -194,6 +216,10 @@ const actions = {
   },
 
   async fetchContacts({ commit }, payload) {
+    // 🫁 #323: busca no servidor dispara uma consulta por termo; se uma
+    // resposta antiga chegar depois da nova, ela é descartada (só vale a última)
+    contactsRequestSeq += 1;
+    const seq = contactsRequestSeq;
     const pipelineId =
       typeof payload === 'object' ? payload.pipelineId : payload;
     const scope = typeof payload === 'object' ? payload.scope : undefined;
@@ -202,9 +228,13 @@ const actions = {
     const dateTo = typeof payload === 'object' ? payload.dateTo : undefined;
     const dateMode = typeof payload === 'object' ? payload.dateMode : undefined;
     const perStage = typeof payload === 'object' ? payload.perStage : undefined;
+    const q = typeof payload === 'object' ? payload.q : undefined;
     // silent: completa em background sem spinner (board continua usável)
     const silent = typeof payload === 'object' ? payload.silent : false;
-    if (!silent) commit('setUIFlag', { isFetchingContacts: true });
+    if (!silent) {
+      loudRequestSeq = seq;
+      commit('setUIFlag', { isFetchingContacts: true });
+    }
     try {
       const params = {};
       if (scope) params.scope = scope;
@@ -213,25 +243,38 @@ const actions = {
       if (dateTo) params.date_to = dateTo;
       if (dateMode) params.date_mode = dateMode;
       if (perStage) params.per_stage = perStage;
+      if (q) params.q = q;
       const { data } = await CrmAPI.getContacts(pipelineId, params);
+      if (seq !== contactsRequestSeq) return;
       // formato novo { payload, meta }; aceita o antigo (array) por segurança
       commit('setContacts', data.payload ?? data);
       if (data.meta) commit('setContactsMeta', data.meta);
     } finally {
-      if (!silent) commit('setUIFlag', { isFetchingContacts: false });
+      if (!silent && seq === loudRequestSeq) {
+        commit('setUIFlag', { isFetchingContacts: false });
+      }
     }
   },
 
   // Próxima página de UMA coluna (scope=period) — anexa sem substituir o board
   async fetchMoreStage(
-    { commit },
-    { pipelineId, stageId, offset, limit, dateFrom, dateTo, dateMode }
+    { commit, state: storeState },
+    { pipelineId, stageId, offset, limit, dateFrom, dateTo, dateMode, range, q }
   ) {
     const params = { scope: 'stage_page', stage_id: stageId, offset, limit };
+    // range=all: próxima página do "Carregar todos" (base toda, sem datas)
+    if (range) params.range = range;
+    if (q) params.q = q;
     if (dateFrom) params.date_from = dateFrom;
     if (dateTo) params.date_to = dateTo;
     if (dateMode) params.date_mode = dateMode;
+    // 🫁 #323: se o board foi recarregado no meio (outra busca, outro
+    // período), esta página é de um board velho — descarta
+    const boardSeq = contactsRequestSeq;
     const { data } = await CrmAPI.getContacts(pipelineId, params);
+    const sameSearch =
+      !range || (storeState?.contactsMeta?.q || '') === (q || '');
+    if (boardSeq !== contactsRequestSeq || !sameSearch) return {};
     commit('appendContacts', data.payload ?? []);
     return data.meta ?? {};
   },
@@ -508,6 +551,37 @@ const mutations = {
   removeStage(s, { pipelineId, stageId }) {
     const p = s.pipelines.find(x => x.id === pipelineId);
     if (p) p.stages = p.stages.filter(x => x.id !== stageId);
+  },
+  // cards carregados da coluna apagada passam para a coluna de destino; a
+  // contagem real (stage_counts) acompanha
+  moveStageContacts(s, { stageId, targetStageId }) {
+    s.contacts = s.contacts.map(c =>
+      c.stage_id === stageId ? { ...c, stage_id: targetStageId } : c
+    );
+    const counts = s.contactsMeta?.stage_counts;
+    if (counts) {
+      const moved = counts[stageId] ?? counts[String(stageId)] ?? 0;
+      const current =
+        counts[targetStageId] ?? counts[String(targetStageId)] ?? 0;
+      const next = { ...counts, [targetStageId]: current + moved };
+      delete next[stageId];
+      delete next[String(stageId)];
+      s.contactsMeta = { ...s.contactsMeta, stage_counts: next };
+    }
+    // a soma de valor por coluna (stage_values) acompanha também
+    const values = s.contactsMeta?.stage_values;
+    if (values) {
+      const movedValue = values[stageId] ?? values[String(stageId)] ?? 0;
+      const currentValue =
+        values[targetStageId] ?? values[String(targetStageId)] ?? 0;
+      const nextValues = {
+        ...values,
+        [targetStageId]: Number(currentValue) + Number(movedValue),
+      };
+      delete nextValues[stageId];
+      delete nextValues[String(stageId)];
+      s.contactsMeta = { ...s.contactsMeta, stage_values: nextValues };
+    }
   },
   setStages(s, { pipelineId, stages }) {
     const p = s.pipelines.find(x => x.id === pipelineId);

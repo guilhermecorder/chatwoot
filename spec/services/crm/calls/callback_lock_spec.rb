@@ -28,9 +28,14 @@ RSpec.describe Crm::Calls::CallbackLock do
                         ended_at: 4.minutes.ago, simulated: true }.merge(attrs))
   end
 
-  def call_back!(status, at: 1.minute.ago)
-    call!(direction: :outbound, status: status, started_at: at, created_at: at,
-          answered_at: (status == :completed ? at : nil), ended_at: at + 30.seconds)
+  def call_back!(status, at: 1.minute.ago, **attrs)
+    call!({ direction: :outbound, status: status, started_at: at, created_at: at,
+            answered_at: (status == :completed ? at : nil), ended_at: at + 30.seconds }.merge(attrs))
+  end
+
+  # a pessoa está com o sistema aberto (mesma fonte da bolinha verde)
+  def online!(user)
+    OnlineStatusTracker.update_presence(account.id, 'User', user.id)
   end
 
   describe 'responsável' do
@@ -47,6 +52,8 @@ RSpec.describe Crm::Calls::CallbackLock do
   end
 
   describe 'tocando' do
+    before { online!(ana) }
+
     it 'o responsável toca primeiro e é quem trava; os outros continuam na lista (rede de segurança)' do
       targets = described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id])
       expect(targets).to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [ana.id], lock_user_ids: [ana.id], lock_after_seconds: 5)
@@ -59,6 +66,42 @@ RSpec.describe Crm::Calls::CallbackLock do
       settings.update!(agenda_config: { 'calls' => calls_cfg.deep_merge('lock' => { 'enabled' => false }) })
       expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id]))
         .to eq(ring_user_ids: [bia.id], ring_first_user_ids: [bia.id])
+    end
+
+    # Auditoria #85: responsável deslogado + "só o responsável" = ninguém ouvia tocar
+    describe 'responsável deslogado (férias, folga, aba fechada)' do
+      before { Redis::Alfred.delete(format(Redis::Alfred::ONLINE_PRESENCE_USERS, account_id: account.id)) }
+
+      it 'com "só o responsável", a ligação cai para a lista de sempre da caixa (ele continua nela), sem trava ao tocar' do
+        settings.update!(agenda_config: { 'calls' => calls_cfg.deep_merge('lock' => { 'exclusive' => true }) })
+        expect(described_class.ringing(account, call!(status: :ringing), [bia.id], []))
+          .to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [])
+      end
+
+      it 'sem "só o responsável", os outros tocam na hora, sem esperar a cascata por ele' do
+        expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id]))
+          .to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [bia.id])
+      end
+
+      it 'a ligação PERDIDA continua travando a tela dele, para retornar quando voltar' do
+        missed = call!
+        expect(described_class.arm!(missed)).to eq(ana.id)
+        expect(described_class.pending_for(account, ana)).to eq(missed)
+      end
+    end
+
+    it 'com o sistema aberto mas marcado "offline" (ausente), vale como deslogado; "ocupado" ainda toca', :aggregate_failures do
+      settings.update!(agenda_config: { 'calls' => calls_cfg.deep_merge('lock' => { 'exclusive' => true }) })
+      OnlineStatusTracker.set_status(account.id, ana.id, 'offline')
+      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [])[:ring_user_ids]).to eq([bia.id, ana.id])
+
+      OnlineStatusTracker.set_status(account.id, ana.id, 'busy')
+      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [])[:ring_user_ids]).to eq([ana.id])
+    end
+
+    it 'se a presença não puder ser lida, segue como antes (responsável toca)' do
+      allow(OnlineStatusTracker).to receive(:get_available_users).and_raise(Redis::CannotConnectError)
+      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id])[:lock_user_ids]).to eq([ana.id])
     end
   end
 
@@ -100,11 +143,33 @@ RSpec.describe Crm::Calls::CallbackLock do
       expect(described_class.pending_for(account, ana)).to be_nil
     end
 
-    it 'com a trava desligada não arma nada e o aviso segue geral, como era' do
+    # Auditoria #85: a ligação da assistente de voz não é retorno de gente
+    it 'ligação feita ou atendida pela assistente de voz NÃO conta como retorno; só a de gente conta', :aggregate_failures do
+      call_back!(:missed, at: 3.minutes.ago, handled_by: 'ai')
+      call_back!(:completed, at: 2.minutes.ago, handled_by: 'ai')
+      expect(described_class.attempts(missed)).to eq(0)
+      expect(described_class.answered_after?(missed)).to be(false)
+      expect(described_class.pending_for(account, ana)).to eq(missed)
+
+      call_back!(:completed, at: 1.minute.ago)
+      expect(described_class.done?(missed)).to be(true)
+    end
+
+    it 'com a trava desligada não arma nada e o aviso segue geral, como era', :aggregate_failures do
       settings.update!(agenda_config: { 'calls' => calls_cfg.deep_merge('lock' => { 'enabled' => false }) })
       livre = call!
       expect(described_class.arm!(livre)).to be_nil
-      expect(Crm::Calls::RadarAlert.push(livre)).not_to include('lock')
+      alert = Crm::Calls::RadarAlert.push(livre)
+      expect(alert).not_to include('lock')
+
+      # Auditoria #85: no aviso geral, a ligação da assistente de voz também não vale como retorno
+      call_back!(:completed, at: 2.minutes.ago, handled_by: 'ai')
+      expect(Crm::Calls::RadarAlert.returned?(livre)).to be(false)
+      expect(Crm::Calls::RadarAlert.still_open?(account, alert)).to be(true)
+
+      call_back!(:completed, at: 1.minute.ago)
+      expect(Crm::Calls::RadarAlert.returned?(livre)).to be(true)
+      expect(Crm::Calls::RadarAlert.still_open?(account, alert)).to be(false)
     end
   end
 

@@ -67,6 +67,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       bug_reports: bug_reports_json,
       # status dos números de WhatsApp (item 88 — só o gestor vê)
       whatsapp_status: whatsapp_status_json,
+      # 🚨 #217: robôs parados/com erro, lidos direto do Redis pelo WEB — aparece
+      # mesmo se o Sidekiq morreu inteiro (aí o vigia não roda) — só o admin vê
+      robot_problems: robot_problems_json,
       # 🎂 item 331: aniversariantes do dia e do mês + convite para quem ainda não informou
       birthdays: Crm::Birthdays.new(account).payload(Current.user, admin: Current.account_user.administrator?),
       # 📊 Gestor Autônomo (item 128): briefing do dia + desvios (gestão)
@@ -101,6 +104,19 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       findings: Array(state['findings']).first(3),
       tasks_opened: state['tasks_opened']
     }
+  end
+
+  def robot_problems_json
+    return [] unless Current.account_user.administrator?
+
+    Crm::CronHealth.problems.values.map do |p|
+      p.slice(:job, :label, :kind).merge(message: p[:message].to_s.gsub(/conta (\d+) · /) do
+        Regexp.last_match(1).to_i == account.id ? '' : 'outra conta · '
+      end)
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO saúde dos robôs] Meu Painel: #{e.message}"
+    []
   end
 
   # item 88: cada número de WhatsApp com o estado evidente — precisa
@@ -185,16 +201,19 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     return render json: { error: 'Só administradores pausam o Radar.' }, status: :forbidden unless Current.account_user.administrator?
 
     settings = CrmSetting.find_by(account: account) || CrmSetting.create!(account: account)
-    cfg = settings.ai_config || {}
-    cfg['agents'] ||= {}
-    cfg['agents']['opportunity'] ||= {}
-    enabled = cfg['agents']['opportunity']['enabled'] == true
-    cfg['agents']['opportunity']['enabled'] = !enabled
-    state = cfg['opportunity_state'] ||= {}
-    log = Array(state['manual_log'])
-    log << { 'action' => enabled ? 'desativado' : 'ativado', 'user' => Current.user.name, 'at' => Time.current.iso8601 }
-    state['manual_log'] = log.last(20)
-    settings.update!(ai_config: cfg)
+    # Rodada 4 (#413): vira o interruptor em cima da foto FRESCA, sob trava —
+    # o Radar grava alertas em ai_config o tempo todo e não pode ser apagado
+    cfg = Cevico::SettingMerge.merge!(settings, :ai_config) do |fresh|
+      fresh['agents'] ||= {}
+      fresh['agents']['opportunity'] ||= {}
+      enabled = fresh['agents']['opportunity']['enabled'] == true
+      fresh['agents']['opportunity']['enabled'] = !enabled
+      state = fresh['opportunity_state'] ||= {}
+      log = Array(state['manual_log'])
+      log << { 'action' => enabled ? 'desativado' : 'ativado', 'user' => Current.user.name, 'at' => Time.current.iso8601 }
+      state['manual_log'] = log.last(20)
+      fresh
+    end
     render json: { radar: radar_status(cfg) }
   end
 
@@ -214,6 +233,18 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
   # Cesto de indicadores (item 141): números-base do período com série e
   # período anterior — gráficos dos popups, cards do "+" e fórmulas
+  # 🧭 item 337: a VISÃO GERAL do Meu Painel (14 perguntas) — cache curto por
+  # conta/lente/período; dinheiro e médicos só entram para administradores
+  def overview
+    since, until_at = resolve_range
+    admin = Current.account_user.administrator?
+    key = ['cevico:overview', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i]
+    payload = Rails.cache.fetch(key, expires_in: heavy_ttl) do
+      Crm::OverviewService.new(account: account, since: since, until_at: until_at, lens: lens, admin: admin).call
+    end
+    render json: payload
+  end
+
   def kpis
     since, until_at = resolve_range
     # granularity opcional (item 144): a mini-régua do popup pode pedir o
@@ -221,10 +252,32 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     # item 328: o Meu Painel manda a fonte da chavinha (?source=); as outras
     # telas que usam o cesto não mandam e seguem na régua de sempre
     render json: Crm::KpiBagService.new(account: account, since: since, until_at: until_at, granularity: params[:granularity],
-                                        lens: params[:source].present? ? lens : nil).call
+                                        lens: params[:source].present? ? lens : nil).call(hide: hidden_money_keys)
   end
 
   private
+
+  # 🔒 auditoria R2 (#33/#350): o cesto entregava faturamento e gasto do
+  # WhatsApp a qualquer atendente. Faturamento = administrador ou quem tem a
+  # área Financeiro em EDITAR (a mesma régua da concessão antiga 'finance');
+  # gasto do WhatsApp = o nó "Gasto do WhatsApp" (só administrador hoje).
+  # Admin sempre passa pelo catálogo.
+  # DECISÃO PENDENTE (Guilherme, 12/10): quem só VÊ o Financeiro também deve
+  # ver o faturamento no Meu Painel? Ficou o lado mais fechado (editar) até
+  # ele decidir — para abrir, trocar :edit por :view em can_see_revenue? e
+  # em InicioPage.vue (canSeeRevenue).
+  def hidden_money_keys
+    hidden = []
+    hidden += Crm::KpiBagService::REVENUE_KEYS unless can_see_revenue?
+    hidden += Crm::KpiBagService::WA_COST_KEYS unless cevico_can?('relatorios.gasto_whatsapp', :view)
+    hidden
+  end
+
+  # quem pode ver dinheiro no Meu Painel (faturamento do cesto e o R$ das
+  # cirurgias fechadas do "Meu desempenho")
+  def can_see_revenue?
+    cevico_can?('financeiro', :edit)
+  end
 
   # ligação perdida / "não vou": aparece na hora e some quando alguém retornou
   def extra_alert(alert)
@@ -532,7 +585,11 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     digits = phone.to_s.gsub(/\D/, '')
     return false if digits.length < 8
 
-    cirurgias.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}").exists?
+    # auditoria 10/2026 (#239): o final de 8 dígitos só acha candidatos; a
+    # MESMA linha (DDD confere) é decidida pelo mesmo critério do recorder
+    cirurgias.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+             .pluck(:phone)
+             .any? { |task_phone| Crm::AppointmentRecorder.same_phone_line?(digits, task_phone) }
   end
 
   # notas de NPS dos pacientes dessas consultas: 1 query pelos contact_ids
@@ -655,7 +712,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     commercial = response_goal_rows(since, until_at, response_goal_minutes || 15, user_ids: ids)
                  .index_by { |r| r[:user_id] }
     off = off_hours_days(ids, since, until_at)
-    surgeries = surgeries_by_user(ids, since, until_at)
+    surgeries = my_surgeries(ids, since, until_at)
     metric_cfg = crm_settings&.agenda_config&.dig('performance_metrics') || {}
     build = lambda do |uid|
       row = rows[uid]
@@ -665,7 +722,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       row.merge(
         commercial: commercial[uid],
         off_hours: off[uid] || { count: 0, days: [] },
-        surgeries: surgeries[uid] || { count: 0, revenue: 0.0 },
+        surgeries: surgeries[uid],
         # métricas propostas pelo admin p/ esta pessoa (item 139)
         metrics: picked.presence || Crm::AgentPerformance::DEFAULT_METRICS
       )
@@ -728,6 +785,17 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       per_user[uid][t.to_date] ||= "#{Crm::AgentPerformance::WEEKDAYS_PT[t.wday]} #{t.strftime('%d/%m')}"
     end
     per_user.transform_values { |days| { count: days.size, days: days.values.first(6) } }
+  end
+
+  # cirurgias fechadas do "Meu desempenho" (eu + o robô), uma linha por id.
+  # 🔒 auditoria R2 (#33/#350): o R$ só vai para quem pode ver dinheiro; o
+  # resto recebe só a contagem (sem `revenue`, a tela não monta o "· R$").
+  # O miolo é guardado por PESSOA (heavy_cache_key), então o corte aqui não
+  # vaza para o cache de outra pessoa.
+  def my_surgeries(user_ids, since, until_at)
+    rows = surgeries_by_user(user_ids, since, until_at)
+    rows = user_ids.index_with { |uid| rows[uid] || { count: 0, revenue: 0.0 } }
+    can_see_revenue? ? rows : rows.transform_values { |h| h.except(:revenue) }
   end
 
   # cirurgias fechadas atribuídas à pessoa (card em "Cirurgia Realizada"
@@ -917,11 +985,23 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     state = settings&.ai_config&.dig('opportunity_state') || {}
     alerts = Array(state['alerts']).reverse
     alerts = alerts.select { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id } unless Current.account_user.administrator?
+    alerts = visible_robot_alerts(alerts)
     {
       last_run_at: state['last_run_at'],
       alerts: with_conversation_info(alerts.first(10)),
       efficacy: radar_efficacy_json(state)
     }
+  end
+
+  # 🚨 #217: aviso de robô só para o admin, e só enquanto o robô continua com
+  # problema (não espera o Radar de Oportunidades rodar para sumir)
+  def visible_robot_alerts(alerts)
+    admin = Current.account_user.administrator?
+    alerts.select do |a|
+      a['kind'] != Crm::AgentAlert::ROBOT_KIND || (admin && Crm::AgentAlert.robot_still_open?(a))
+    end
+  rescue StandardError
+    alerts.reject { |a| a['kind'] == Crm::AgentAlert::ROBOT_KIND }
   end
 
   # o balão de conversa do card do Radar (mesmo do CRM) precisa da caixa,
@@ -1047,7 +1127,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     # registro "sujo" e o with_lock logo abaixo estourava (500 no painel
     # na primeira vez que uma métrica batia recorde) — hotfix 20/07
     all = ((settings.agenda_config || {})['panel_records'] || {}).deep_dup
-    changed = false
+    new_slots = {} # Rodada 4: só os recordes batidos AGORA vão para o banco
     period = record_period_key
 
     result = keys.index_with do |key|
@@ -1059,17 +1139,19 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       if value.positive? && value > slot['best'].to_f
         slot = { 'best' => value, 'period' => period }
         all[slot_key] = slot
-        changed = true
+        new_slots[slot_key] = slot
       end
       { best: slot['best'].to_f, is_record: slot['period'] == period && slot['best'].to_f.positive? }
     end
     # esta é uma requisição GET (carga do painel): só grava quando bate um
     # recorde, e sob trava relendo o agenda_config fresco — assim não atropela
-    # uma config que o admin tenha salvo em paralelo (só a chave panel_records muda)
-    if changed
-      settings.with_lock do
-        fresh = settings.reload.agenda_config || {}
-        settings.update!(agenda_config: fresh.merge('panel_records' => all))
+    # uma config que o admin tenha salvo em paralelo (só a chave panel_records muda).
+    # Rodada 4 (#351): pelo gravador único, e só os recordes novos entram —
+    # o recorde que outro painel gravou neste meio-tempo fica como está; e se
+    # dois painéis batem o MESMO recorde juntos, fica o maior (nunca baixa)
+    if new_slots.any?
+      Cevico::SettingMerge.merge_key!(settings, :agenda_config, 'panel_records') do |records|
+        records.merge(new_slots) { |_slot, old, new| old.is_a?(Hash) && old['best'].to_f >= new['best'].to_f ? old : new }
       end
     end
     result

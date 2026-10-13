@@ -5,6 +5,7 @@ import { useStore } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import draggable from 'vuedraggable';
 import ContactCard from './ContactCard.vue';
 import StageEditModal from './StageEditModal.vue';
@@ -38,6 +39,14 @@ const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat', 'l
 const store = useStore();
 const { t } = useI18n();
 const { isAdmin } = useAdmin();
+// 🔐 revisão 12/10: a estrutura da coluna segue a MESMA concessão que o
+// CrmBoard usa para liberar o modo edição (crm.funis); os robôs de follow-up
+// seguem a concessão deles (automacoes.robos) — o admin tem as duas
+const { canView, canEdit } = useCevicoAccess();
+// 💰 R2 da auditoria (#287): soma da coluna = admin ou quem vê o Financeiro
+const canSeeValue = computed(() => isAdmin.value || canView('financeiro'));
+const canEditFunis = computed(() => canEdit('crm.funis'));
+const canEditBots = computed(() => canEdit('automacoes.robos'));
 
 // No celular o arrasto briga com o deslize entre colunas (pedido 24/07:
 // "no mobile não quero mover os cards arrastando, quero navegar") — abaixo
@@ -122,7 +131,7 @@ const editingBot        = ref(null);
 const deleteBotConfirmId = ref(null);
 
 const loadFollowupBots = async () => {
-  if (!isAdmin.value) return;
+  if (!canEditBots.value) return;
   try {
     followupBots.value = await store.dispatch('crm/fetchFollowupBots', { stage_id: props.stage.id });
   } catch {
@@ -250,8 +259,6 @@ const otherStages = computed(() =>
   props.allStages.filter(s => s.id !== props.stage.id)
 );
 
-const hasCards = computed(() => props.contacts.length > 0);
-
 const localContacts = computed({
   get: () => props.contacts,
   set: (val) => emit('stageDrop', { stageId: props.stage.id, contacts: val }),
@@ -271,6 +278,13 @@ const headerCount = computed(() =>
   props.totalCount !== null ? props.totalCount : props.contacts.length
 );
 
+// cards na coluna: a contagem REAL do servidor (totalCount) vence a fatia
+// carregada — auditoria 12/10 (#288). Sem contagem real (busca/filtro
+// ativo), a coluna é tratada como "pode ter cards": o admin sempre escolhe
+// o destino e o servidor move o que houver (zero também serve)
+const countUnknown = computed(() => props.totalCount === null);
+const hasCards = computed(() => countUnknown.value || headerCount.value > 0);
+
 // tem mais cards no servidor do que os carregados?
 const hasMoreCards = computed(() =>
   props.totalCount !== null && props.totalCount > props.contacts.length
@@ -286,25 +300,26 @@ const cancelDelete = () => {
   moveToStageId.value = '';
 };
 
+// 🧹 auditoria 12/10 (#288): com cards, o SERVIDOR move todos (não só os
+// carregados) e apaga a coluna numa transação — nada de mover card a card
 const deleteStage = async () => {
   isDeleting.value = true;
   try {
     if (hasCards.value && moveToStageId.value) {
-      for (const contact of props.contacts) {
-        await store.dispatch('crm/moveContact', {
-          pipelineId: props.pipelineId,
-          id: contact.id,
-          stageId: Number(moveToStageId.value),
-        });
-      }
+      await store.dispatch('crm/deleteStageMovingTo', {
+        pipelineId: props.pipelineId,
+        stageId: props.stage.id,
+        targetStageId: Number(moveToStageId.value),
+      });
+    } else {
+      await store.dispatch('crm/deleteStage', {
+        pipelineId: props.pipelineId,
+        stageId: props.stage.id,
+      });
     }
-    await store.dispatch('crm/deleteStage', {
-      pipelineId: props.pipelineId,
-      stageId: props.stage.id,
-    });
     useAlert(t('CRM.SUCCESS.STAGE_DELETED'));
-  } catch {
-    useAlert(t('CRM.ERROR.GENERIC'));
+  } catch (e) {
+    useAlert(e?.response?.data?.error || t('CRM.ERROR.GENERIC'));
   } finally {
     isDeleting.value = false;
     showDeleteConfirm.value = false;
@@ -404,9 +419,12 @@ const delayLabel = (minutes) => {
 
       <!-- Delete confirmation -->
       <div v-if="showDeleteConfirm" class="space-y-2">
-        <template v-if="hasCards">
-          <p class="text-xs text-n-slate-11">
-            {{ $t('CRM.DELETE_STAGE_HAS_CARDS', { count: contacts.length }) }}
+        <template v-if="hasCards && otherStages.length">
+          <p v-if="countUnknown" class="text-xs text-n-slate-11">
+            {{ $t('CRM.DELETE_STAGE_COUNT_UNKNOWN') }}
+          </p>
+          <p v-else class="text-xs text-n-slate-11">
+            {{ $t('CRM.DELETE_STAGE_HAS_CARDS', { count: headerCount }) }}
           </p>
           <select
             v-model="moveToStageId"
@@ -458,9 +476,9 @@ const delayLabel = (minutes) => {
           </div>
 
           <div class="flex items-center gap-1 flex-shrink-0 ml-1">
-            <!-- Arrastar coluna — só admin e SÓ no modo edição -->
+            <!-- Arrastar coluna — quem edita a estrutura (crm.funis) e SÓ no modo edição -->
             <span
-              v-if="isAdmin && editMode"
+              v-if="canEditFunis && editMode"
               class="column-drag-handle i-lucide-grip-vertical text-sm text-n-slate-9 hover:text-n-slate-12 cursor-grab active:cursor-grabbing"
               title="Arrastar para reordenar a coluna"
             />
@@ -482,8 +500,8 @@ const delayLabel = (minutes) => {
         <p v-if="programmingMode" class="text-[11px] font-semibold mt-1.5" style="color: #92600a">
           ⚡ Automações da coluna
         </p>
-        <!-- Valor total no modo normal (só admin vê valores) -->
-        <p v-else-if="isAdmin && totalValue > 0" class="cv-crm-col-value">
+        <!-- Valor total no modo normal (só quem vê o Financeiro) -->
+        <p v-else-if="canSeeValue && totalValue > 0" class="cv-crm-col-value">
           R$ {{ totalValue.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}
         </p>
       </div>
@@ -629,7 +647,7 @@ const delayLabel = (minutes) => {
       </template>
 
       <!-- Robôs de follow-up desta coluna (só admin) -->
-      <div v-if="isAdmin" class="mt-3 pt-3 border-t border-yellow-400/20">
+      <div v-if="canEditBots" class="mt-3 pt-3 border-t border-yellow-400/20">
         <p class="text-[11px] font-semibold text-yellow-600/90 mb-2 flex items-center gap-1">
           <span class="i-lucide-bot text-xs" /> Robôs de follow-up
         </p>

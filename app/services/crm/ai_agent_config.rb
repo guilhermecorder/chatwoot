@@ -34,11 +34,13 @@ module Crm::AiAgentConfig
     'manager'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # briefing diário curto (a matemática é do Ruby)
     'auditor'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # nota diária em volume — barato por desenho
     'creative'     => { 'model' => 'claude-sonnet-5', 'effort' => 'high' },   # copy que vai pro anúncio — qualidade importa
-    'followup_ia'  => { 'model' => 'claude-sonnet-5', 'effort' => 'low' }     # item 315: cutucada do follow-up escrita pela IA
+    'followup_ia'  => { 'model' => 'claude-sonnet-5', 'effort' => 'low' },    # item 315: cutucada do follow-up escrita pela IA
+    'followup_leitor' => { 'model' => 'claude-haiku-4-5', 'effort' => nil }   # 13/10: conversa aberta × encerrada (classificação curta)
   }.merge(
     # 🗣️ rodada 188: respondedores do WhatsApp (Roteiro CEVICO + bloco da etapa)
-    # 💸 item 214 (23/09): HAIKU no pós-agendamento (conversa simples, 3x mais
-    # barato). No agendamento ele NÃO quis esforço low — segue medium.
+    # 💸 item 214 (23/09): HAIKU no pós-agendamento (conversa simples, 2x mais
+    # barato — preço conferido 06/10/2026; a conta de 23/09 dizia 3x porque usava
+    # o preço errado do Sonnet, ver #444). No agendamento ele NÃO quis esforço low — segue medium.
     # O admin ainda pode escolher outro modelo/esforço por agente.
     'atendente_agendamento' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente até agendar
     'atendente_pos' => { 'model' => 'claude-haiku-4-5', 'effort' => nil }, # suporte a quem já agendou (dúvidas, remarcar)
@@ -54,10 +56,19 @@ module Crm::AiAgentConfig
   # Todos os demais seguem a trava operacional de leitura.
   RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos atendente_pos_op voice].freeze
 
-  # preço US$ por milhão de tokens (entrada / saída)
+  # preço US$ por milhão de tokens (entrada / saída) — preço de LISTA da API
+  # da Anthropic (não é a fatura: imposto/câmbio ficam de fora).
+  # 💸 #444 (13/10): conferido na tabela oficial de 06/10/2026 — o Sonnet 5
+  # custa US$ 2 / US$ 10 (estava 3 / 15 e o "Gasto da IA" saía ~50% maior
+  # nos agentes de mais volume). Opus 4.8 e Haiku 4.5 já estavam certos.
+  # Mudou o preço ou entrou modelo novo em MODELS? Atualize aqui E a data.
+  # O que já foi gravado antes do conserto continua com o preço velho: para
+  # corrigir o histórico existe `rake cevico:ai_usage_reprice` (Crm::AiUsageReprice,
+  # DRY=1 por padrão — só muda algo com DRY=0, decisão do Guilherme).
+  PRICING_TABLE_DATE = '2026-10-06'.freeze
   PRICING = {
     'claude-opus-4-8'  => [5.0, 25.0],
-    'claude-sonnet-5'  => [3.0, 15.0],
+    'claude-sonnet-5'  => [2.0, 10.0],
     'claude-haiku-4-5' => [1.0, 5.0]
   }.freeze
   # 💸 CACHE DO PROMPT (item 213, 23/09): o roteiro/prompt do agente (e as
@@ -66,6 +77,9 @@ module Crm::AiAgentConfig
   # mesmo roteiro de ~10 mil tokens centenas de vezes por dia. O que muda a
   # cada chamada (contexto, conversa) vai na mensagem do usuário, fora do cache.
   CACHE_TTL = '1h'.freeze
+  # Os dois fatores valem para os 3 modelos de MODELS (tabela de 06/10/2026).
+  # Atenção: modelos mais novos (ex.: Opus 5.5) cobram a leitura do cache a
+  # 5% — se um deles entrar em MODELS, o fator de leitura precisa ser por modelo.
   CACHE_WRITE_FACTOR = 2.0   # ttl 1h (5 min seria 1.25)
   CACHE_READ_FACTOR = 0.1
 

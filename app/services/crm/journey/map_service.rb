@@ -203,14 +203,23 @@ class Crm::Journey::MapService # rubocop:disable Metrics/ClassLength
   end
 
   def campaign_items
-    Crm::Campaign.where(account: @account, status: %w[draft scheduled processing]).order(:scheduled_at, :name).map do |camp|
+    # ⏸ R3 da auditoria (#415): a campanha PAUSADA também aparece no mapa (desligada)
+    Crm::Campaign.where(account: @account, status: %w[draft scheduled processing paused]).order(:scheduled_at, :name).map do |camp|
       stage_id = Array((camp.audience || {})['include_stage_ids']).first
       { id: "campaign:#{camp.id}", kind: 'campaign', name: camp.name, step: step_for_stage(stage_id) || 'lead',
-        enabled: camp.status != 'draft', stage_id: stage_id,
-        when_label: camp.scheduled_at ? "agendada #{camp.scheduled_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}" : camp.status,
+        enabled: %w[scheduled processing].include?(camp.status), stage_id: stage_id,
+        when_label: campaign_when_label(camp),
         detail: camp.message_preview.to_s.truncate(90).presence || 'campanha de WhatsApp',
         route: { name: 'crm_campaigns' } }
     end
+  end
+
+  # "agendada 08/10 08:00" | "pausada" | "agendamento cancelado" (pausada antes da hora) | status
+  def campaign_when_label(camp)
+    return camp.scheduled_at&.future? ? 'agendamento cancelado' : 'pausada' if camp.status == 'paused'
+    return camp.status if camp.scheduled_at.blank?
+
+    "agendada #{camp.scheduled_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}"
   end
 
   def agent_items

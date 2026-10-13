@@ -134,9 +134,15 @@ const transcribeVideo = async (source = {}) => {
     pollCount = 0;
     pollTranscript();
   } catch (e) {
-    sendError.value =
-      (e.response && e.response.data && e.response.data.error) ||
-      'Não consegui pedir a transcrição.';
+    const body = (e.response && e.response.data) || {};
+    sendError.value = body.error || 'Não consegui pedir a transcrição.';
+    // achado #410: o servidor recusou porque já está na fila/transcrevendo —
+    // a tela estava velha; mostra o estado de verdade e acompanha a fila
+    if (e.response && e.response.status === 409 && body.transcript) {
+      data.value = { ...data.value, transcript: body.transcript };
+      pollCount = 0;
+      pollTranscript();
+    }
   } finally {
     isTranscribing.value = false;
   }

@@ -35,6 +35,8 @@ RSpec.describe Crm::BookingSideEffects do
   it 'move o card existente e dispara as automações da coluna nova' do
     CrmSetting.create!(account: account, agenda_config: { 'booking' => { 'stage_id' => stage_booked.id } })
     card = Crm::Contact.create!(contact_id: contact.id, pipeline_id: pipeline.id, stage_id: stage_new.id)
+    # a etiqueta nova também dispara o gatilho "etiqueta adicionada" (Rodada 5, #17)
+    allow(CrmAutomationTriggerService).to receive(:new).and_call_original
     expect(CrmAutomationTriggerService).to receive(:new).with(hash_including(event_type: 'card_entered', new_stage: stage_booked)).and_call_original
     expect(CrmAutomationTriggerService).to receive(:new).with(hash_including(event_type: 'card_left')).and_call_original
     apply(:rescheduled)

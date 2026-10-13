@@ -66,15 +66,16 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
   end
 
   # item 181: todos os vídeos pendentes; :ad_id/transcribe = um só
+  # (achado #410: mesmo limite do job por vez — o botão não enfileira mais do que a carga/cron)
   def transcribe_videos
-    count = Crm::AdVideoTranscribeJob.enqueue_pending(Current.account, limit: 100)
-    render json: { enqueued: count }
+    count = Crm::AdVideoTranscribeJob.enqueue_pending(Current.account, limit: Crm::AdVideoTranscribeJob::LIMIT)
+    render json: { enqueued: count, limit: Crm::AdVideoTranscribeJob::LIMIT }
   end
 
   def transcribe
     creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
-    problem = manual_video_problem(creative)
-    return render json: { error: problem }, status: :unprocessable_entity if problem
+    refusal = transcribe_refusal(creative)
+    return render(**refusal) if refusal
 
     creative.video_upload.attach(params[:video]) if params[:video].present?
     creative.queue_transcript!(link: params[:video_link].to_s.strip)
@@ -111,6 +112,37 @@ class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseContr
   end
 
   private
+
+  # Motivo de recusar o pedido de transcrição de UM vídeo (nil = pode seguir):
+  # material inválido → 422; achado #410: sem arquivo nem link novo (tela
+  # desatualizada clicando por cima de um vídeo já na fila/transcrevendo há
+  # pouco) → 409 e não enfileira de novo, o primeiro job termina sozinho. Com
+  # material novo é retentativa de propósito e passa.
+  def transcribe_refusal(creative)
+    problem = manual_video_problem(creative)
+    return { json: { error: problem }, status: :unprocessable_entity } if problem
+    return unless transcript_busy?(creative)
+
+    { json: { error: "Este vídeo já está na fila/transcrevendo — volte em alguns minutos#{busy_until(creative)}.",
+              transcript: creative.transcript },
+      status: :conflict }
+  end
+
+  # se o trabalho parou no meio (deploy, falta de memória), a trava vence
+  # sozinha depois de STUCK_AFTER — a mensagem diz o horário em que libera
+  def busy_until(creative)
+    marked_at = Time.zone.parse(creative.transcript['status_at'].to_s)
+    return '' unless marked_at
+
+    frees_at = (marked_at + Crm::AdVideoTranscribeJob::STUCK_AFTER).in_time_zone(Crm::ResolvesPeriod::PERIOD_TZ)
+    " (se não terminar, libera às #{frees_at.strftime('%H:%M')})"
+  rescue ArgumentError
+    ''
+  end
+
+  def transcript_busy?(creative)
+    params[:video].blank? && params[:video_link].to_s.strip.blank? && creative.transcript_in_progress?
+  end
 
   # item 293: arquivo enviado ou link colado (sem eles, vale o vídeo da Meta)
   def manual_video_problem(creative) # rubocop:disable Metrics/CyclomaticComplexity

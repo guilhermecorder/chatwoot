@@ -18,14 +18,17 @@ class Crm::FlowMap::Flows::FollowupBots
     node :etapas, 'Robô tem etapas?', kind: :decision
     node :conversa, 'Uma conversa por contato (aberta, ≤ 3 dias)', kind: :loop
     node :travas, 'Pausado, etiqueta de parada ou paciente falou por último?', kind: :decision
-    node :prazo, 'Calcula o prazo da etapa (âncora + espaçamento)'
+    node :inteligente, 'Entrega falhou ou conversa encerrada/adiada/recusou?', kind: :decision
+    node :prazo, 'Prazo da etapa (espaçamento, fim de semana, lead frio)'
     node :bloqueada, 'Etapa bloqueada por etiquetas?', kind: :decision
     node :janela24, 'Texto fora da janela 24h do WhatsApp?', kind: :decision
     node :vencida, 'Vencida há mais de 3 h?', kind: :decision
     node :perdido, 'Momento perdido (anti-rajada)'
     node :fisicas, 'Cadência completa, < 30 min ou ≥ 4 hoje?', kind: :decision
     node :segura, 'Segura para a próxima rodada'
+    node :leitura, '1ª cutucada do silêncio: lê a conversa', kind: :ai
     node :envia, 'Envia 1 cutucada (marca o estado antes)', kind: :output
+    node :reativa, 'Quem adiou: 1 mensagem modelo após N dias', kind: :output
     node :registro, 'Registro de atividade do robô', kind: :output
     node :fim, 'Fim', kind: :end
 
@@ -40,7 +43,9 @@ class Crm::FlowMap::Flows::FollowupBots
     edge :etapas, :conversa, 'sim'
     edge :conversa, :travas
     edge :travas, :fim, 'sim'
-    edge :travas, :prazo, 'não'
+    edge :travas, :inteligente, 'não'
+    edge :inteligente, :fim, 'sim'
+    edge :inteligente, :prazo, 'não'
     edge :prazo, :bloqueada
     edge :bloqueada, :fim, 'sim'
     edge :bloqueada, :janela24, 'não'
@@ -51,9 +56,12 @@ class Crm::FlowMap::Flows::FollowupBots
     edge :vencida, :fisicas, 'não'
     edge :fisicas, :segura, 'sim'
     edge :segura, :fim
-    edge :fisicas, :envia, 'não'
+    edge :fisicas, :leitura, 'não'
+    edge :leitura, :fim, 'não está aberta'
+    edge :leitura, :envia, 'aberta'
     edge :envia, :registro
-    edge :registro, :fim
+    edge :registro, :reativa
+    edge :reativa, :fim
 
     live do |account|
       bots = Crm::FollowupBot.where(account_id: account.id)

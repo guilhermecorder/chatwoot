@@ -1804,6 +1804,10 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                     class="text-amber-700 dark:text-amber-400"
                     >· Oftalmofácil ({{ e.partner }})</span
                   >
+                  <!-- #45: reforço que a Meta recusou (não chegou; nenhum outro sai sozinho) -->
+                  <span v-if="e.refused" class="text-red-600 dark:text-red-400"
+                    >· {{ e.refused }}</span
+                  >
                   <span class="text-n-slate-9"
                     >{{ e.template ? `(${e.template})` : ''
                     }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span

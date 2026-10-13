@@ -28,19 +28,36 @@ class Crm::Calls::ConversationFinder
   end
 
   def conversation
-    @conversation ||= existing_conversation || ::Conversation.create!(
-      account_id: account.id, inbox_id: inbox.id, contact_id: contact.id, contact_inbox_id: contact_inbox.id
-    )
+    @conversation ||= existing_conversation || create_conversation
   end
 
   private
 
+  # 📱 auditoria 10/2026 (#62): a conversa reaproveitada tem que ser a do
+  # contact_inbox do número ATUAL (wa_id) — conversa presa a um contact_inbox
+  # de número antigo mandaria a mensagem modelo para o telefone velho. Em caixa
+  # que não amarra o source_id ao telefone, vale a mais recente, como sempre.
   def existing_conversation
-    existing = account.conversations.where(inbox_id: inbox.id, contact_id: contact.id).order(created_at: :desc).first
+    scope = account.conversations.where(inbox_id: inbox.id, contact_id: contact.id)
+    existing = scope.where(contact_inbox_id: contact_inbox.id).order(created_at: :desc).first
+    existing ||= scope.order(created_at: :desc).first unless Crm::SendTemplateService.phone_bound?(inbox)
     return nil unless existing
 
     existing.update!(status: :open) if existing.resolved?
     existing
+  end
+
+  # conversa nova no número atual; a presa ao número antigo (se houver) ganha a
+  # nota de "telefone atualizado" — mesma decisão do Crm::SendTemplateService (#62)
+  def create_conversation
+    previous = nil
+    if Crm::SendTemplateService.phone_bound?(inbox)
+      previous = account.conversations.where(inbox_id: inbox.id, contact_id: contact.id)
+                        .where.not(contact_inbox_id: contact_inbox.id).order(created_at: :desc).first
+    end
+    created = ::Conversation.create!(account_id: account.id, inbox_id: inbox.id, contact_id: contact.id, contact_inbox_id: contact_inbox.id)
+    Crm::SendTemplateService.note_number_changed!(previous, created) if previous
+    created
   end
 
   def create_contact

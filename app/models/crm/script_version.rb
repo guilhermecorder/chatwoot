@@ -67,23 +67,55 @@ class Crm::ScriptVersion < ApplicationRecord
 
   # ── escrita no lugar certo (usada pelas orientações e pelo "voltar") ──
 
-  # grava o Roteiro (só as seções personalizadas) + updated_at
+  # grava o Roteiro (só as seções personalizadas) + updated_at.
+  # 🔒 Rodada 4 da auditoria (#102): sob a trava da linha, relendo a config
+  # fresca (Cevico::SettingMerge) — "voltar para esta" nunca apaga o que outro
+  # escritor acabou de gravar no ai_config
   def self.write_script!(account, script)
-    settings = CrmSetting.find_or_create_by!(account: account)
-    cfg = settings.ai_config || {}
-    cfg['script'] = script.slice(*SCRIPT_KEYS).transform_values { |v| v.to_s.strip }.merge('updated_at' => Time.current.iso8601)
-    settings.update!(ai_config: cfg)
-    cfg['script']
+    saved = Cevico::SettingMerge.merge!(account, :ai_config) do |cfg|
+      cfg['script'] = script.slice(*SCRIPT_KEYS).transform_values { |v| v.to_s.strip }.merge('updated_at' => Time.current.iso8601)
+      cfg
+    end
+    saved['script']
   end
 
   # grava o prompt PUBLICADO da etapa do agente (o rascunho `draft` fica como está)
   def self.write_stage_prompt!(account, agent_key, prompt)
-    settings = CrmSetting.find_or_create_by!(account: account)
-    cfg = settings.ai_config || {}
-    cfg['agents'] ||= {}
-    cfg['agents'][agent_key] = (cfg['agents'][agent_key] || {}).merge('prompt' => prompt.to_s.strip)
-    settings.update!(ai_config: cfg)
-    cfg['agents'][agent_key]['prompt']
+    key = agent_key.to_s
+    saved = Cevico::SettingMerge.merge!(account, :ai_config) do |cfg|
+      cfg['agents'] ||= {}
+      cfg['agents'][key] = (cfg['agents'][key] || {}).merge('prompt' => prompt.to_s.strip)
+      cfg
+    end
+    saved.dig('agents', key, 'prompt')
+  end
+
+  # Orientação aplicada: acrescenta UMA linha no fim da seção do Roteiro, lendo
+  # o Roteiro FRESCO dentro da trava (Rodada 4). Assim, se outro admin salvou o
+  # Roteiro no hub nesse meio-tempo, a edição dele fica e a linha entra por cima.
+  # Seção vazia (= padrão) parte do texto padrão. Devolve a seção gravada.
+  def self.append_script_line!(account, section, line)
+    key = section.to_s
+    saved = Cevico::SettingMerge.merge!(account, :ai_config) do |cfg|
+      script = (cfg['script'] || {}).slice(*SCRIPT_KEYS).transform_values { |v| v.to_s.strip }
+      base = script[key].presence || Crm::CevicoScript.default_text(key, 'v1', account: account).to_s.strip
+      cfg['script'] = script.merge(key => "#{base}\n#{line}".strip, 'updated_at' => Time.current.iso8601)
+      cfg
+    end
+    saved.dig('script', key)
+  end
+
+  # mesma ideia para o prompt PUBLICADO da etapa do agente (o rascunho fica como está)
+  def self.append_stage_line!(account, agent_key, line)
+    key = agent_key.to_s
+    saved = Cevico::SettingMerge.merge!(account, :ai_config) do |cfg|
+      base = cfg.dig('agents', key, 'prompt').to_s.strip.presence ||
+             Crm::CevicoScript.default_stage_prompt(key, 'v1', account: account).to_s.strip
+      cfg['agents'] ||= {}
+      cfg['agents'][key] = (cfg['agents'][key] || {}).merge('prompt' => "#{base}\n#{line}".strip)
+      cfg
+    end
+    saved.dig('agents', key, 'prompt')
   end
 
   # "Voltar para esta": foto do estado atual e o conteúdo desta versão de volta

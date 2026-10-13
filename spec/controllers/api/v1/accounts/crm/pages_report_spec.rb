@@ -7,11 +7,17 @@ RSpec.describe 'CEVICO Resultados de tráfego', type: :request do
   let(:admin) { create(:user, account: account, role: :administrator) }
   let(:agent) { create(:user, account: account, role: :agent) }
   let(:base) { "/api/v1/accounts/#{account.id}/crm/pages_report" }
+  # 'hoje' no fuso de São Paulo: a régua fecha o período nesse fuso, e
+  # Date.current (UTC) já é o dia seguinte entre 21h e meia-noite
+  let(:today) { Time.current.in_time_zone('America/Sao_Paulo').to_date }
   let(:page) do
     CevicoPage.create!(account: account, title: 'Catarata', slug: 'catarata-teste', status: 'published', category: 'captacao',
-                       daily_stats: { Date.current.iso8601 => { 'scroll' => { '25' => 50, '50' => 30, '100' => 10 } } })
+                       daily_stats: { today.iso8601 => { 'scroll' => { '25' => 50, '50' => 30, '100' => 10 } } })
   end
 
+  # meio-dia de São Paulo: o dia é o mesmo em UTC e no fuso da casa (entre 21h
+  # e meia-noite Date.current já é 'amanhã' e os totais do período não batem)
+  around { |ex| travel_to(Time.current.in_time_zone('America/Sao_Paulo').change(hour: 12)) { ex.run } }
   before { Rails.cache.clear }
 
   def traffic(date, source, views, cta, campaign: '')
@@ -33,9 +39,9 @@ RSpec.describe 'CEVICO Resultados de tráfego', type: :request do
   end
 
   it 'entrega totais, período anterior, série por dia e a linha da página com leitura e SEO', :aggregate_failures do
-    traffic(Date.current, 'google_ads', 60, 9, campaign: 'catarata-sp')
-    traffic(Date.current - 1, 'google_organico', 40, 6)
-    traffic(Date.current - 8, 'google_ads', 20, 1) # período anterior
+    traffic(today, 'google_ads', 60, 9, campaign: 'catarata-sp')
+    traffic(today - 1, 'google_organico', 40, 6)
+    traffic(today - 8, 'google_ads', 20, 1) # período anterior
     lead('google_ads', booked: true)
     lead('google_organico')
 
@@ -59,13 +65,13 @@ RSpec.describe 'CEVICO Resultados de tráfego', type: :request do
   end
 
   it 'períodos longos viram série por semana' do
-    traffic(Date.current, 'direto', 5, 1)
+    traffic(today, 'direto', 5, 1)
     expect(report(preset: 'last90')['series']['granularity']).to eq('week')
   end
 
   it 'coleção de insights: guarda, aplica (com antes × depois), descarta e apaga', :aggregate_failures do
-    traffic(Date.current, 'direto', 40, 8)
-    traffic(Date.current - 1, 'direto', 50, 2)
+    traffic(today, 'direto', 40, 8)
+    traffic(today - 1, 'direto', 50, 2)
     headers = admin.create_new_auth_token
 
     post "#{base}/save_insight", params: { key: "p#{page.id}:cta_baixo", page_id: page.id, title: 'Subir o botão', text: 'no topo', origin: 'auto' },
@@ -93,7 +99,7 @@ RSpec.describe 'CEVICO Resultados de tráfego', type: :request do
   end
 
   it 'sugestões da IA: manda a página, os números e os diagnósticos; erro da IA volta como aviso', :aggregate_failures do
-    traffic(Date.current, 'google_ads', 60, 9)
+    traffic(today, 'google_ads', 60, 9)
     result = { diagnostico: 'ok', sugestoes: [{ 'titulo' => 'Subir o botão', 'por_que' => 'x', 'pedido' => 'y' }] }
     allow(Crm::PageOptimizerService).to receive(:new).and_return(instance_double(Crm::PageOptimizerService, call: result))
 

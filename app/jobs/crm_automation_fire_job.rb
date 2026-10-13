@@ -1,5 +1,15 @@
 class CrmAutomationFireJob < ApplicationJob
-  queue_as :default
+  # 🚦 Rodada 6 (RESIL-1): as ações que chamam a IA (pode levar minutos se a
+  # Anthropic ficar lenta) vão para a fila 'ai_fundo' — cápsula própria de 2
+  # linhas (config/sidekiq.yml). Assim um "mover 200 cards" com análise de IA não
+  # lota as 10 linhas normais (mensagem do WhatsApp entrando, lembretes) nem a
+  # fila 'ai' dos atendentes que respondem o paciente. O resto continua na default.
+  AI_ACTIONS = %w[ai_analyze closing_extract nps_score schedule_appointment].freeze
+
+  queue_as do
+    action = Crm::Automation.where(id: arguments.first).pick(:action_type)
+    AI_ACTIONS.include?(action) ? :ai_fundo : :default
+  end
 
   # 🚧 item 231 (cerca dos parceiros): para paciente de PARCEIRO do hub só
   # passam ações internas (etiqueta, mover, avisar a equipe…). Tudo que fala
@@ -22,6 +32,18 @@ class CrmAutomationFireJob < ApplicationJob
 
     if !PARTNER_SAFE_ACTIONS.include?(automation.action_type) && Crm::PartnerGuard.partner_contact?(contact)
       Crm::PartnerGuard.block!("automação #{automation.id} (#{automation.action_type})", contact: contact)
+      return
+    end
+
+    # 🔐 Rodada 4 da auditoria (#119): card que NASCEU do formulário público
+    # (origem 'formulario') e cujo paciente nunca escreveu para a clínica —
+    # ninguém provou que o número é dele. Vale para card parado, entrou/saiu,
+    # valor…: nada que fale com ele ou mande dado pra fora (mensagem modelo
+    # paga, formulário, n8n, webhook, anúncios); ações internas continuam.
+    # Vale também para cards 'formulario' ANTIGOS (antes da Rodada 4): o pulo
+    # fica no log de automações (status 'cancelled') para a equipe ver o motivo.
+    if PARTNER_SAFE_ACTIONS.exclude?(automation.action_type) && Crm::FormVerification.anonymous_card?(contact, pipeline)
+      log_anonymous_skip(automation, contact)
       return
     end
 
@@ -81,9 +103,45 @@ class CrmAutomationFireJob < ApplicationJob
       payload:       extra_payload,
       error_message: e.message
     )
+  ensure
+    release_queued_mark(automation_id, contact_id)
+  end
+
+  # 🔐 #119: registra o pulo do card de formulário sem conversa — no máximo um
+  # por automação + paciente por dia (o robô de card parado tenta a cada 6 h)
+  ANONYMOUS_SKIP_MESSAGE = 'pulado — card do formulário público e o paciente nunca escreveu para a clínica'.freeze
+  def log_anonymous_skip(automation, contact)
+    Rails.logger.info "[CrmAutomationFire] automação #{automation.id} (#{automation.action_type}) pulada: " \
+                      "card do formulário sem conversa do paciente (contato #{contact.id})"
+    return if Crm::AutomationLog.exists?(automation_id: automation.id, contact_id: contact.id, status: 'cancelled',
+                                         error_message: ANONYMOUS_SKIP_MESSAGE, created_at: 1.day.ago..)
+
+    Crm::AutomationLog.create!(automation: automation, contact_id: contact.id, status: 'cancelled',
+                               payload: {}, error_message: ANONYMOUS_SKIP_MESSAGE)
+  rescue StandardError => e
+    Rails.logger.warn "[CrmAutomationFire] log do pulo (automação #{automation.id}): #{e.message}"
+  end
+
+  # achado #194: nome da marca "já enfileirado" que o CrmListener grava no
+  # Redis ao enfileirar (gatilho "Mensagem criada" com freio). Fica aqui para
+  # listener e job usarem o MESMO nome.
+  def self.queued_key(automation_id, contact_id)
+    "CRM_AUTOMATION_QUEUED::#{automation_id}::#{contact_id}"
   end
 
   private
+
+  # Fim do job (disparou, falhou ou não disparou): apaga a marca "já
+  # enfileirado" do listener. Se disparou, o log com fired_at assume o freio
+  # (como sempre foi); se falhou ou não disparou (etiqueta exigida ausente,
+  # parceiro, modelo recusado pela Meta), a porta reabre e a próxima mensagem
+  # do paciente tenta de novo — sem duplicar, porque a trava + a marca "já
+  # enviei" do próprio envio seguram (send_once).
+  def release_queued_mark(automation_id, contact_id)
+    Redis::LockManager.new.unlock(self.class.queued_key(automation_id, contact_id))
+  rescue StandardError => e
+    Rails.logger.warn "[CrmAutomationFire] release_queued_mark: #{e.message}"
+  end
 
   # Condições que seguram o disparo:
   # (a) automação de "entrou na coluna" com ATRASO: se o paciente já saiu da
@@ -454,17 +512,48 @@ class CrmAutomationFireJob < ApplicationJob
     return unless form&.active
 
     # não reenvia para quem já respondeu este formulário
-    return if form.responses.where(contact_id: contact.id).where.not(completed_at: nil).exists?
-    # nem para quem JÁ RECEBEU o link há pouco (evita rajada de links quando o
-    # gatilho é "mensagem recebida": o paciente responde, dispara de novo...)
-    return if form_sent_recently?(contact, form)
+    return if form_answered?(form, contact)
 
     conversation = latest_conversation(contact)
     return unless conversation
 
-    # link LIMPO, sem token (decisão dele 01/09): o paciente se identifica
-    # com nome + WhatsApp no formulário e a resposta atrela pelo telefone
-    link = form.public_short_link
+    # nem para quem JÁ RECEBEU o link há pouco (evita rajada de links quando o
+    # gatilho é "mensagem recebida": o paciente responde, dispara de novo...).
+    # A marca é reservada ANTES de mandar — ver send_once.
+    send_once(automation, contact, 'cevico_forms_sent', form.id, FORM_RESEND_COOLDOWN) do
+      deliver_form_link(automation, contact, pipeline, form, conversation)
+    end
+  end
+
+  # 🔐 achado #118: resposta "não confirmada" (link limpo em cadastro que já
+  # existia) só conta como "já respondeu" se chegou DEPOIS de o sistema ter
+  # mandado o link para esse paciente — aí foi ele mesmo que respondeu. Uma
+  # resposta anônima que chegou sem link enviado não pode calar a automação
+  # (senão alguém de fora impede o paciente real de receber o formulário).
+  def form_answered?(form, contact)
+    responses = form.responses.where(contact_id: contact.id).where.not(completed_at: nil).to_a
+    return true if responses.any?(&:verified?)
+
+    sent_at = form_link_sent_at(form, contact)
+    sent_at.present? && responses.any? { |r| r.completed_at >= sent_at }
+  end
+
+  # quando o sistema mandou o link deste formulário para o contato (marca
+  # reservada em send_once); nil = nunca mandou ou marca ilegível
+  def form_link_sent_at(form, contact)
+    raw = contact.additional_attributes&.dig('cevico_forms_sent', form.id.to_s)
+    raw.is_a?(String) ? Time.zone.parse(raw) : raw.presence
+  rescue ArgumentError
+    nil
+  end
+
+  def deliver_form_link(automation, contact, pipeline, form, conversation)
+    # 🔐 Rodada 4 (#119): link ASSINADO com o paciente (90 dias) — a resposta
+    # já nasce confirmada no cadastro certo, sem código. Antes (decisão de
+    # 01/09) ia o link LIMPO e o paciente se identificava digitando nome +
+    # WhatsApp; com o código da Rodada 4 isso deixaria quase todo paciente
+    # legítimo "não confirmado". Para voltar: trocar por form.public_short_link.
+    link = form.public_link_for(contact)
     template = automation.action_config['message'].presence ||
                'Para agilizar seu atendimento, responda nosso formulário (leva 2 minutinhos): {{link}}'
     content = template.gsub('{{link}}', link)
@@ -476,9 +565,15 @@ class CrmAutomationFireJob < ApplicationJob
       message_type: :outgoing,
       content: content
     )
-    mark_form_sent(contact, form)
-    # contador de ENVIOS do hub dos Formulários (envio × respostas × %)
-    Crm::Form.where(id: form.id).update_all('sent_count = sent_count + 1') # rubocop:disable Rails/SkipsModelValidations
+    # contador de ENVIOS do hub dos Formulários (envio × respostas × %).
+    # A mensagem JÁ saiu: se o contador falhar, a marca "já enviei" fica
+    # (senão o paciente receberia o link de novo no próximo gatilho).
+    begin
+      Crm::Form.where(id: form.id).update_all('sent_count = sent_count + 1') # rubocop:disable Rails/SkipsModelValidations
+    rescue StandardError => e
+      Rails.logger.warn "[CrmAutomationFire] contador de envios do formulário #{form.id}: #{e.message}"
+    end
+    true
   end
 
   # ── enviar MENSAGEM MODELO do WhatsApp (aprovada na Meta) ───────────────
@@ -495,53 +590,94 @@ class CrmAutomationFireJob < ApplicationJob
     inbox = pipeline.account.inboxes.find_by(id: cfg['inbox_id'])
     return if inbox.nil? || cfg['template_params'].blank?
     return if contact.phone_number.blank?
-    return if template_sent_recently?(contact, automation)
 
-    source = TemplateSource.new(pipeline.account, inbox, nil,
-                                cfg['template_params'], cfg['message_preview'].presence,
-                                automation.name)
-    conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
-    mark_template_sent(contact, automation) if conversation
-  end
-
-  def template_sent_recently?(contact, automation)
-    sent_at = contact.additional_attributes&.dig('cevico_templates_sent', automation.id.to_s)
-    return false if sent_at.blank?
-
-    Time.zone.parse(sent_at.to_s) > TEMPLATE_RESEND_COOLDOWN.ago
-  rescue ArgumentError, TypeError
-    false
-  end
-
-  def mark_template_sent(contact, automation)
-    Cevico::AttributeMerge.merge!(contact) do |attrs|
-      sent = attrs['cevico_templates_sent'] || {}
-      sent[automation.id.to_s] = Time.current.iso8601
-      attrs.merge('cevico_templates_sent' => sent)
+    send_once(automation, contact, 'cevico_templates_sent', automation.id, TEMPLATE_RESEND_COOLDOWN) do
+      source = TemplateSource.new(pipeline.account, inbox, nil,
+                                  cfg['template_params'], cfg['message_preview'].presence,
+                                  automation.name)
+      Crm::SendTemplateService.new(source: source, contact: contact).perform
     end
-  rescue StandardError => e
-    Rails.logger.warn "[CrmAutomationFire] mark_template_sent: #{e.message}"
   end
 
   FORM_RESEND_COOLDOWN = 7.days
 
-  def form_sent_recently?(contact, form)
-    sent_at = contact.additional_attributes&.dig('cevico_forms_sent', form.id.to_s)
-    return false if sent_at.blank?
+  # ── trava de envio (achado #194 da auditoria de 07/10) ──────────────────
+  # Dois jobs da MESMA automação pro MESMO paciente podiam rodar juntos no
+  # Sidekiq (duas mensagens seguidas do paciente; entrar-sair-entrar na
+  # coluna dentro do atraso) e os dois passavam pelo "ainda não enviou",
+  # porque a marca só era gravada DEPOIS do envio → mensagem modelo /
+  # formulário saía 2x. Agora: (1) trava no Redis por (automação, paciente):
+  # o segundo job desiste; (2) a marca é reservada antes de enviar, dentro
+  # do merge atômico (que segura a linha do contato), e devolvida se o envio
+  # não sair. Mesmo desenho do claim_reminder! do lembrete de consulta.
+  SEND_LOCK_TTL = 2.minutes
 
-    Time.zone.parse(sent_at.to_s) > FORM_RESEND_COOLDOWN.ago
-  rescue ArgumentError, TypeError
-    false
+  def send_lock_key(automation, contact)
+    "CRM_AUTOMATION_SEND_LOCK::#{automation.id}::#{contact.id}"
   end
 
-  def mark_form_sent(contact, form)
+  # Envia UMA vez: trava no Redis + reserva a marca + roda o bloco (que
+  # devolve algo verdadeiro se saiu). Se o bloco devolver nil (sem telefone,
+  # modelo recusado…) ou estourar erro, a marca volta — senão o paciente
+  # ficaria 7 dias sem receber nada.
+  def send_once(automation, contact, key, id, cooldown)
+    with_send_lock(automation, contact) do
+      next unless claim_sent_mark!(contact, key, id, cooldown)
+
+      sent = begin
+        yield
+      rescue StandardError
+        release_sent_mark(contact, key, id)
+        raise
+      end
+      release_sent_mark(contact, key, id) unless sent
+    end
+  end
+
+  def with_send_lock(automation, contact)
+    lock_manager = Redis::LockManager.new
+    key = send_lock_key(automation, contact)
+    unless lock_manager.lock(key, SEND_LOCK_TTL.to_i)
+      Rails.logger.info "[CrmAutomationFire] automação #{automation.id} já está enviando para o contato #{contact.id}; pulando"
+      return
+    end
+
+    begin
+      yield
+    ensure
+      lock_manager.unlock(key)
+    end
+  end
+
+  # reserva a marca "já enviei" (chave => { id => quando }) ANTES do envio.
+  # Devolve false se já tinha marca dentro do intervalo → não manda de novo.
+  def claim_sent_mark!(contact, key, id, cooldown)
+    claimed = false
     Cevico::AttributeMerge.merge!(contact) do |attrs|
-      sent = attrs['cevico_forms_sent'] || {}
-      sent[form.id.to_s] = Time.current.iso8601
-      attrs.merge('cevico_forms_sent' => sent)
+      marks = attrs[key] || {}
+      next attrs if sent_recently?(marks[id.to_s], cooldown)
+
+      claimed = true
+      attrs.merge(key => marks.merge(id.to_s => Time.current.iso8601))
+    end
+    claimed
+  end
+
+  # envio não saiu → tira a marca de volta
+  def release_sent_mark(contact, key, id)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs.merge(key => (attrs[key] || {}).except(id.to_s))
     end
   rescue StandardError => e
-    Rails.logger.warn "[CrmAutomationFire] mark_form_sent: #{e.message}"
+    Rails.logger.warn "[CrmAutomationFire] release_sent_mark: #{e.message}"
+  end
+
+  def sent_recently?(sent_at, cooldown)
+    return false if sent_at.blank?
+
+    Time.zone.parse(sent_at.to_s) > cooldown.ago
+  rescue ArgumentError, TypeError
+    false
   end
 
   def fire_n8n(automation, payload)

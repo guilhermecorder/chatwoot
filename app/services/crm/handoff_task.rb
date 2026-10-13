@@ -6,8 +6,10 @@
 #
 # Quem recebe, nesta ordem: a pessoa escolhida no card do agente
 # (task_assignee_id) → quem cuida da coluna do paciente (Crm::TaskOwner) →
-# responsável pela conferência de cirurgia → ninguém (fica visível ao admin).
+# responsável pela conferência de cirurgia → o primeiro administrador da
+# conta (auditoria 10/2026, #443: tarefa urgente nunca fica sem dono).
 # Uma tarefa ABERTA por paciente: chamada nova só complementa a descrição.
+# 🙋 #458: vale para os três atendentes do WhatsApp (não só o pós-operatório).
 class Crm::HandoffTask
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   TASK_TYPE = 'pos_op'.freeze
@@ -46,8 +48,13 @@ class Crm::HandoffTask
     { task: existing, created: false }
   end
 
+  # aviso no Radar do Meu Painel: 'atendimento_atencao' para os Atendentes de
+  # Agendamento / Pós-agendamento (#458); pós-operatório e ligação (item 333)
+  # seguem com 'pos_op_atencao', como já estava
+  WHATSAPP_ATTENTION_KEYS = %w[atendente_agendamento atendente_pos].freeze
   def alert!(task)
-    Crm::AgentAlert.push(account: @account, kind: 'pos_op_atencao', task: task, conversation: @conversation, agent_key: @agent_key)
+    kind = WHATSAPP_ATTENTION_KEYS.include?(@agent_key) ? 'atendimento_atencao' : 'pos_op_atencao'
+    Crm::AgentAlert.push(account: @account, kind: kind, task: task, conversation: @conversation, agent_key: @agent_key)
   end
 
   def create!(motivo, detalhes, urgent)
@@ -62,9 +69,12 @@ class Crm::HandoffTask
     )
   end
 
-  # item 333: a tarefa aberta pelo Agente de Ligação diz que veio da ligação
-  def title_label = @agent_key == 'voice' ? 'Ligação' : 'Pós-op'
-  def title_icon = @agent_key == 'voice' ? '📞' : '🩺'
+  # item 333: a tarefa aberta pelo Agente de Ligação diz que veio da ligação;
+  # #458: a dos Atendentes de Agendamento/Pós-agendamento diz "Atendimento"
+  TITLE_LABELS = { 'voice' => 'Ligação', 'atendente_pos_op' => 'Pós-op' }.freeze
+  TITLE_ICONS = { 'voice' => '📞', 'atendente_pos_op' => '🩺' }.freeze
+  def title_label = TITLE_LABELS[@agent_key] || 'Atendimento'
+  def title_icon = TITLE_ICONS[@agent_key] || '🙋'
 
   def open_task
     return nil if @contact.blank?
@@ -82,7 +92,16 @@ class Crm::HandoffTask
   def assignee
     cfg = CrmSetting.find_by(account: @account)&.ai_config&.dig('agents', @agent_key) || {}
     chosen = @account.users.find_by(id: cfg['task_assignee_id'].to_i) if cfg['task_assignee_id'].to_i.positive?
-    chosen || Crm::TaskOwner.resolve(@account, contact: @contact, task_type: 'cirurgia')
+    chosen || Crm::TaskOwner.resolve(@account, contact: @contact, task_type: 'cirurgia') || fallback_admin
+  end
+
+  # #443: sem ninguém configurado, a tarefa vai para um administrador da conta
+  # — de preferência um que ATENDE esta caixa (é membro dela); senão o
+  # primeiro da conta. Nunca "a equipe (sem responsável definido)" num caso urgente.
+  def fallback_admin
+    admins = @account.administrators.order(:id)
+    inbox_id = @conversation.try(:inbox_id)
+    (inbox_id && admins.joins(:inbox_members).where(inbox_members: { inbox_id: inbox_id }).first) || admins.first
   end
 
   def patient_name

@@ -8,6 +8,7 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import { useAdmin } from 'dashboard/composables/useAdmin';
 import CrmAPI from 'dashboard/api/crm';
 
 const store = useStore();
@@ -189,6 +190,10 @@ const applyBatch = async () => {
 };
 
 // ── Preencher valores pelo orçamento (identificação com IA) ─────────
+// 🔒 R2 da auditoria (#0): só o administrador sobrescreve valor já preenchido;
+// quem tem "Tratamento de dados" sem ser admin só preenche os vazios (o
+// servidor força isso e devolve only_empty — a tela avisa em vez de fingir).
+const { isAdmin } = useAdmin();
 const showValuePanel = ref(false);
 const valueOnlyEmpty = ref(true);
 const isValueRunning = ref(false);
@@ -197,12 +202,19 @@ const runBulkValues = async () => {
   if (isValueRunning.value || !pipelines.value.length) return;
   isValueRunning.value = true;
   try {
-    await Promise.all(
+    const onlyEmpty = isAdmin.value ? valueOnlyEmpty.value : true;
+    const results = await Promise.all(
       pipelines.value.map(p =>
-        store.dispatch('crm/detectValuesBulk', { pipelineId: p.id, onlyEmpty: valueOnlyEmpty.value })
+        store.dispatch('crm/detectValuesBulk', { pipelineId: p.id, onlyEmpty })
       )
     );
-    useAlert('Processando em segundo plano — os valores aparecem em instantes.');
+    const forcedOnlyEmpty =
+      !onlyEmpty && results.some(r => r?.only_empty === true);
+    useAlert(
+      forcedOnlyEmpty
+        ? 'Só o administrador sobrescreve valores já preenchidos — preenchemos apenas os vazios.'
+        : 'Processando em segundo plano — os valores aparecem em instantes.'
+    );
     showValuePanel.value = false;
   } catch {
     useAlert('Erro ao iniciar o preenchimento de valores');
@@ -320,11 +332,19 @@ const previewUnify = async () => {
   }
 };
 
+// 🔒 Rodada 6 (#200): resultado da última unificação (quem não deu para
+// mesclar e por quê) — vem do servidor no "Calcular duplicados" (last_run)
+const unifyLastRun = computed(() => unifyPreview.value?.last_run || null);
+const unifyLastRunAt = computed(() => {
+  const at = unifyLastRun.value?.at;
+  return at ? new Date(at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+});
+
 const applyUnify = async () => {
   isUnifyApplying.value = true;
   try {
     await store.dispatch('crm/applyContactUnification');
-    useAlert('Unificação em andamento — os contatos serão mesclados em segundo plano.');
+    useAlert('Unificação em andamento — os contatos serão mesclados em segundo plano. Depois clique em "Calcular duplicados" para ver o resultado.');
     unifyPreview.value = null;
     showUnifyConfirm.value = false;
   } catch {
@@ -1042,7 +1062,7 @@ const undoImport = async () => {
         <div class="flex-1 min-w-0">
           <p class="text-sm font-semibold text-n-slate-12">Unificar contatos duplicados</p>
           <p class="text-xs text-n-slate-10">
-            Mescla contatos com o mesmo telefone ou e-mail (ex: chamou pelo Instagram e pelo WhatsApp).
+            Mescla contatos com o mesmo telefone, ou com o mesmo e-mail E o mesmo nome (ex: chamou pelo Instagram e pelo WhatsApp).
             Conversas, etiquetas e notas são preservadas no contato unificado.
           </p>
         </div>
@@ -1119,6 +1139,29 @@ const undoImport = async () => {
         <p v-if="unifyPreview && unifyPreview.contacts_to_merge === 0" class="text-xs text-green-600">
           ✓ Nenhum duplicado por telefone/e-mail encontrado.
         </p>
+
+        <!-- Resultado da última unificação (Rodada 6, #200) -->
+        <div v-if="unifyLastRun" class="bg-n-alpha-1 rounded-lg p-3 space-y-1">
+          <p class="text-xs text-n-slate-11">
+            Última unificação{{ unifyLastRunAt ? ` (${unifyLastRunAt})` : '' }}:
+            <b>{{ unifyLastRun.merged }}</b> mesclado(s) ·
+            <b :class="unifyLastRun.failed ? 'text-amber-600' : ''">{{ unifyLastRun.failed }}</b> não deu para mesclar
+          </p>
+          <div v-if="unifyLastRun.failures?.length" class="max-h-40 overflow-y-auto space-y-1">
+            <p class="text-[11px] text-n-slate-9">Estes ficaram separados (resolva pelo botão "Mesclar" no card):</p>
+            <div
+              v-for="(f, i) in unifyLastRun.failures"
+              :key="`${f.contact_id}-${i}`"
+              class="text-xs text-n-slate-11 flex items-start gap-2"
+            >
+              <span class="i-lucide-alert-triangle text-[11px] text-amber-600 flex-shrink-0 mt-0.5" />
+              <span class="min-w-0 break-words">
+                {{ f.name || `#${f.contact_id}` }} → {{ f.base_name || `#${f.base_contact_id}` }}
+                <span class="text-n-slate-9">· {{ f.reason }}</span>
+              </span>
+            </div>
+          </div>
+        </div>
         <p class="text-[11px] text-n-slate-9">
           Contatos sem telefone (ex: só Instagram) não são unificados automaticamente —
           use o botão "Mesclar" no card do CRM para esses casos.
@@ -1465,10 +1508,17 @@ const undoImport = async () => {
       </button>
 
       <div v-if="showValuePanel" class="px-4 pb-4 space-y-3 border-t border-n-weak pt-4">
-        <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer">
+        <label
+          v-if="isAdmin"
+          class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer"
+        >
           <input v-model="valueOnlyEmpty" type="checkbox" class="rounded accent-n-brand" />
           Só cards sem valor (recomendado)
         </label>
+        <p v-else class="text-xs text-n-slate-10">
+          Preenche só os cards sem valor — sobrescrever valor já preenchido é só
+          com o administrador.
+        </p>
         <button
           class="text-xs px-4 py-2 rounded-lg text-white hover:opacity-90 flex items-center gap-1.5 disabled:opacity-50"
           style="background: linear-gradient(135deg, #059669, #34D399)"

@@ -6,7 +6,8 @@
 # morreu no meio (deploy, fila reiniciada), erro fora da chamada da IA.
 # Seguro por construção: só reenfileira o MESMO job (que confere pausa, janela,
 # teto diário e se a mensagem ainda é a última) e cada mensagem é resgatada
-# UMA vez só (marca no Redis) — nunca vira rajada.
+# UMA vez só (marca no Redis) — nunca vira rajada. E respeita a cerca dos
+# parceiros (auditoria 10/2026): paciente do Oftalmofácil nunca volta à IA.
 class Crm::ResponderRescueJob < ApplicationJob
   queue_as :low
 
@@ -14,16 +15,20 @@ class Crm::ResponderRescueJob < ApplicationJob
   WAITED_MAX = 2.hours
   LIMIT = 40
   RESCUE_KEY = 'cevico:responder:rescue:%<id>s'.freeze
+  CERCA_KEY = 'cevico:responder:rescue:cerca:%<id>s'.freeze
   KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op].freeze
 
   def perform
-    return unless Crm::ResponderAgentJob::LIVE_ENABLED
+    # 🚨 #217: com os robôs desligados a rodada também conta (o cron está vivo)
+    return Crm::CronHealth.ran!('resgate') unless Crm::ResponderAgentJob::LIVE_ENABLED
 
     CrmSetting.where("ai_config -> 'agents' IS NOT NULL").find_each do |settings|
       rescue_account(settings)
     rescue StandardError => e
       Rails.logger.error "[Crm::ResponderRescueJob] conta #{settings.account_id}: #{e.message}"
+      Crm::CronHealth.failed!('resgate', e, account: settings.account) # 🚨 #217: avisa se repetir
     end
+    Crm::CronHealth.ran!('resgate') # 🚨 #217: sinal de vida da rodada (o vigia confere)
   end
 
   # conversas que o resgate devolveria agora (também usado pela tela/console)
@@ -38,18 +43,35 @@ class Crm::ResponderRescueJob < ApplicationJob
   end
 
   # [conversa, mensagem] quando a última fala é do paciente e ninguém respondeu
-  def self.candidate(conversation, now)
+  def self.candidate(conversation, now) # rubocop:disable Metrics/CyclomaticComplexity
     last = conversation.messages.where(private: false, message_type: %i[incoming outgoing]).order(:id).last
     return nil unless last&.incoming?
     return nil if last.created_at > now - WAITED_MIN || last.created_at < now - WAITED_MAX
     return nil if (conversation.additional_attributes || {}).dig(Crm::ResponderAgentJob::STATE_KEY, 'paused')
+    return nil if partner_blocked?(conversation, last)
 
     [conversation, last]
   end
 
+  # 🚧 cerca dos parceiros (auditoria #63/#98/#253/#459): o CrmListener deixou
+  # a mensagem do paciente de parceiro SEM resposta de propósito — o resgate
+  # não pode "devolver" essa conversa à IA. Fica UMA linha no log por mensagem
+  # (a tela e o cron de 5 min passam aqui várias vezes pela mesma conversa).
+  def self.partner_blocked?(conversation, message)
+    return false unless Crm::PartnerGuard.partner_conversation?(conversation)
+
+    Crm::PartnerGuard.block!('resgate do atendente', conversation: conversation) if first_time?(format(CERCA_KEY, id: message.id))
+    true
+  end
+
+  # marca SET NX (6 h): só a primeira passagem por esta chave devolve true
+  def self.first_time?(key)
+    Redis::Alfred.set(key, Time.current.to_i, nx: true, ex: 6.hours.to_i) ? true : false
+  end
+
   private
 
-  def rescue_account(settings)
+  def rescue_account(settings) # rubocop:disable Metrics/CyclomaticComplexity
     agents = live_agents(settings)
     return if agents.empty?
 
@@ -57,6 +79,10 @@ class Crm::ResponderRescueJob < ApplicationJob
       mine = agents.select { |_key, a| Array(a['inbox_ids']).map(&:to_i).include?(conversation.inbox_id) }
       key = CrmListener.instance.send(:responder_owner_for, conversation, mine)
       next if key.blank?
+      # (#100) conversa travada por outro job (o original ainda rodando, ou morto
+      # com a trava no Redis até ela expirar)? não gasta a única vez do resgate
+      # agora — a conversa continua candidata e a próxima rodada (5 min) resgata
+      next if Redis::LockManager.new.locked?(format(Crm::ResponderAgentJob::LOCK_KEY, id: conversation.id))
       next unless first_rescue?(message)
 
       Crm::ResponderAgentJob.perform_later(conversation.id, message.id, key)
@@ -72,7 +98,7 @@ class Crm::ResponderRescueJob < ApplicationJob
 
   # só a primeira vez passa (SET NX): a mesma mensagem nunca é resgatada de novo
   def first_rescue?(message)
-    Redis::Alfred.set(format(RESCUE_KEY, id: message.id), Time.current.to_i, nx: true, ex: 6.hours.to_i) ? true : false
+    self.class.first_time?(format(RESCUE_KEY, id: message.id))
   end
 
   def log(settings, key, conversation, message) # rubocop:disable Metrics/AbcSize

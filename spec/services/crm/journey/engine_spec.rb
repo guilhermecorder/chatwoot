@@ -69,7 +69,7 @@ RSpec.describe 'Crm::Journey (motor)' do
       captured = nil
       allow(Crm::SendTemplateService).to receive(:new) do |source:, contact: nil|
         captured = source
-        instance_double(Crm::SendTemplateService, perform: conversation)
+        instance_double(Crm::SendTemplateService, perform: conversation, message: nil)
       end
 
       result = described_class.new(account: account, now: now).perform
@@ -100,6 +100,10 @@ RSpec.describe 'Crm::Journey (motor)' do
   end
 
   describe Crm::Journey::ReplyService do
+    # O ReplyService só lê envios dos últimos 3 dias (REPLY_WINDOW). Com a data
+    # fixa de 18/09 a spec apodrecia sozinha: o relógio fica 1 h depois do envio.
+    around { |example| travel_to(now + 1.hour) { example.run } }
+
     let(:conversation) { create(:conversation, account: account, inbox: inbox, contact: contact) }
     let!(:send) do
       Crm::JourneySend.create!(account: account, journey_message: message, contact: contact, conversation: conversation,
@@ -128,6 +132,12 @@ RSpec.describe 'Crm::Journey (motor)' do
       alert = alerts.find { |a| a['kind'] == 'journey_reply' }
       expect(alert).to include('send_id' => send.id, 'contact_name' => 'Maria Teste')
       expect(Crm::RadarExtraAlerts.still_open?(account, alert)).to be(true)
+    end
+
+    it 'não lê resposta de envio com mais de 3 dias (fora da janela)' do
+      send.update!(sent_at: now - 4.days)
+      expect(described_class.handle(incoming('Confirmo sim!'), contact)).to be_nil
+      expect(send.reload.reply).to be_nil
     end
 
     it 'ignora resposta sem sim/não e quem não tem envio esperando resposta' do

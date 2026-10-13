@@ -9,7 +9,8 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
 
   def overview # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     scope = period_scope
-    by_status = scope.group(:provider_name, :status_kind).count
+    # Rodada 5 (#173): realizada = ativa com a data já passada (concluidas)
+    by_status = with_done(scope.group(:provider_name, :status_kind).count, scope.concluidas.group(:provider_name, :status_kind).count)
     partners = {}
     by_status.each do |(provider, kind), n|
       p = (partners[provider.to_s] ||= blank_partner(provider))
@@ -24,15 +25,15 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     end
     if admin?
       scope.faturaveis.group(:provider_name).sum(:amount).each { |prov, v| (partners[prov.to_s] ||= blank_partner(prov))[:amount] = v.to_f }
-      scope.realizadas.group(:provider_name).sum(:amount).each { |prov, v| (partners[prov.to_s] ||= blank_partner(prov))[:amount_done] = v.to_f }
+      scope.concluidas.group(:provider_name).sum(:amount).each { |prov, v| (partners[prov.to_s] ||= blank_partner(prov))[:amount_done] = v.to_f }
     end
     months = scope.group("to_char(surgery_date, 'YYYY-MM')").count
-    months_done = scope.realizadas.group("to_char(surgery_date, 'YYYY-MM')").count
+    months_done = scope.concluidas.group("to_char(surgery_date, 'YYYY-MM')").count
     # 24/09 (pedido dele): REPRESENTATIVIDADE — procedimentos e clínicas por volume,
     # e o recorte de procedimentos dentro de cada clínica e de cada parceiro
     partner_procs = top_by(scope.group(:provider_name, :procedure_name).count)
     partners.each_value { |p| p[:top_procedures] = partner_procs[p[:name]] || [] }
-    clinic_status = scope.group(:clinic_name, :status_kind).count
+    clinic_status = with_done(scope.group(:clinic_name, :status_kind).count, scope.concluidas.group(:clinic_name, :status_kind).count)
     clinic_procs = top_by(scope.group(:clinic_name, :procedure_name).count)
     clinics = scope.group(:clinic_name).count.map do |name, n|
       st = ->(k) { clinic_status[[name, k]] || 0 }
@@ -42,7 +43,7 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     end
     render json: {
       period: { from: period_from.iso8601, to: period_to.iso8601 },
-      totals: scope.group(:status_kind).count.merge('total' => scope.count),
+      totals: with_done(scope.group(:status_kind).count, scope.concluidas.group(:status_kind).count).merge('total' => scope.count),
       partners: partners.values.sort_by { |p| [p[:own] ? 0 : 1, -p[:total]] },
       months: months.keys.sort.map { |m| { month: m, total: months[m], realizada: months_done[m] || 0 } },
       clinics: clinics.sort_by { |c| -c[:total] },
@@ -128,9 +129,18 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
   # traz para a Agenda o que faltou no dia (só admin; nada muda no hub)
   def reconcile_day
     return render json: { error: 'Apenas administradores.' }, status: :forbidden unless admin?
+    # Rodada 2 (achado #193): integração desligada pelo admin = nem o "Trazer
+    # para a Agenda" grava (mesma chave do cron e do "Sincronizar agora")
+    return render json: { error: Crm::OftalmofacilSyncJob::OFF_MESSAGE }, status: :unprocessable_entity unless of_config['enabled'] == true
 
     date = safe_date(params[:date]) || Crm::OftalmofacilDayCheck.default_date
-    render json: Crm::OftalmofacilDayCheck.new(account: Current.account, date: date, config: of_config).reconcile!
+    out = Crm::OftalmofacilDayCheck.new(account: Current.account, date: date, config: of_config).reconcile!
+    # Rodada 4 (achado #172): outra sincronização no meio = aviso claro (409)
+    # na tela, em vez de "0 reprocessado(s) · 1 aviso(s)" sem dizer por quê
+    busy = Crm::OftalmofacilSyncJob::BUSY_MESSAGE
+    return render json: { error: busy }, status: :conflict if out[:errors] == [busy]
+
+    render json: out
   end
 
   private
@@ -186,7 +196,7 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     scope = scope.where(surgery_date: period_from..period_to) if params[:from].present? || params[:to].present?
     scope = scope.where(provider_name: params[:partner]) if params[:partner].present?
     scope = scope.where(clinic_name: params[:clinic]) if params[:clinic].present?
-    scope = scope.where(status_kind: params[:status]) if params[:status].present?
+    scope = status_filter(scope, params[:status]) if params[:status].present?
     scope = scope.where(procedure_type: params[:type]) if params[:type].present?
     scope = scope.where(contact_id: nil) if params[:unmatched] == 'true'
     if params[:side] == 'own'
@@ -210,6 +220,16 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     scope
   end
 
+  # Rodada 5 (#173): o chip "Realizada" usa a mesma régua do resumo
+  # (concluidas) e o "Agendada" mostra só o que ainda vai acontecer
+  def status_filter(scope, status)
+    case status.to_s
+    when 'realizada' then scope.concluidas
+    when 'agendada' then scope.agendadas_por_vir
+    else scope.where(status_kind: status)
+    end
+  end
+
   # a nossa Agenda está "assentada"? o que falta para o hub virar agenda de verdade
   def agenda_health # rubocop:disable Metrics/AbcSize
     upcoming = mirror.where(status_kind: %w[agendada aguardando_pagamento]).where('surgery_date >= ?', Date.current)
@@ -226,6 +246,21 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     }
   end
 
+  # Rodada 5 (#173): o hub nunca marca "realizada" — a cirurgia que está
+  # ativa e cuja data já passou SAI de "agendada" e ENTRA em "realizada"
+  # (o total não muda). counts/done: { 'agendada' => n } ou { [grupo, 'agendada'] => n }
+  def with_done(counts, done)
+    out = counts.dup
+    done.each do |key, n|
+      real = key.is_a?(Array) ? [*key[0...-1], 'realizada'] : 'realizada'
+      next if key == real
+
+      out[key] = out[key].to_i - n
+      out[real] = out[real].to_i + n
+    end
+    out
+  end
+
   # { chave => [{ name, total }, ...] } com os 5 maiores de cada chave
   def top_by(grouped, limit = 5)
     out = Hash.new { |h, k| h[k] = [] }
@@ -234,7 +269,7 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
   end
 
   def procedures_json(scope)
-    done = scope.realizadas.group(:procedure_name).count
+    done = scope.concluidas.group(:procedure_name).count
     scope.group(:procedure_name).count.map { |name, n| { name: name.presence || '(sem procedimento)', total: n, realizada: done[name] || 0 } }
          .sort_by { |x| -x[:total] }
   end
@@ -257,8 +292,18 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
       enabled: of_config['enabled'] == true, partners_enabled: of_config['partners_enabled'] == true,
       agenda_enabled: of_config['agenda_enabled'] == true, agenda_from: of_config['agenda_from'],
       partner_pipeline_id: of_config['partner_pipeline_id'], last_sync_at: of_config['last_sync_at'],
-      last_run_at: of_config['last_run_at'], mirror_count: mirror.count, own_provider: of_config['provider_name']
+      last_run_at: of_config['last_run_at'], mirror_count: mirror.count, own_provider: of_config['provider_name'],
+      # Rodada 4 (achado #382): faixa vermelha no Hub quando a sincronização falhou ou parou
+      last_error_at: of_config['last_error_at'], sync_alert: Crm::OftalmofacilSyncJob.alert_for(of_config, account_id: Current.account.id)
     }
+  end
+
+  # Rodada 5 (#173): situação para a TELA (mês, lista, ficha) — ativa com a
+  # data já passada = realizada, a mesma régua do resumo (concluidas)
+  def status_view(surgery)
+    return { status_view: surgery.status_kind, status_view_label: surgery.status_kind_label } unless surgery.concluida?
+
+    { status_view: 'realizada', status_view_label: 'Realizada' }
   end
 
   def item_json(s, task, contact, card) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Naming/MethodParameterName
@@ -270,7 +315,7 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
       clinic_name: s.clinic_name, unit: unit_for(s.clinic_name),
       doctor_crm: s.doctor_crm, doctor: doctor_name(s.doctor_crm),
       procedure_name: s.procedure_name, procedure_type: s.procedure_type, eye: s.eye,
-      status_kind: s.status_kind, status_label: s.status_label, status_kind_label: s.status_kind_label,
+      status_kind: s.status_kind, status_label: s.status_label, status_kind_label: s.status_kind_label, **status_view(s),
       surgery_date: s.surgery_date, surgery_hour: s.hour_hhmm,
       amount: admin? ? s.amount : nil, paid_amount: admin? ? s.paid_amount : nil,
       of_created_at: s.of_created_at, of_modified_at: s.of_modified_at,

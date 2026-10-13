@@ -14,17 +14,30 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                              report:criativos crm:chamadas crm:jornada crm:paginas crm:formularios crm:tarefas
                              crm:agendamentos crm:oftalmofacil].freeze
 
-  # integração/config sensível = admin (ou área concedida). Leitura (show) e os
-  # atalhos usados pela tela do atendente ficam livres.
+  # integração/config sensível = admin (ou área concedida). A leitura (show)
+  # continua aberta à equipe, mas desde a Rodada 2 da auditoria (12/10) o JSON
+  # é montado POR PAPEL: quem não tem a área "settings" recebe só o que as
+  # telas do dia a dia usam (ver team_settings_json).
   # 🧹 item 214: como as atendentes veem os cartões de Conversas
   LIST_CLEAN_MODES = %w[full no_stage clean].freeze
   # item 239: "quantos indicadores eu quiser" no Meu Painel (antes: 40 no total)
   KPI_LAYOUT_MAX = 200
+  # Rodada 2 (achado #338): chaves que o rascunho de um agente nunca guarda
+  DRAFT_SECRET_KEYS = %w[page_access_token api_key gemini_api_key access_token api_secret].freeze
+  # Rodada 2 (achados #295/#337): o que sai (ou fica) no GET settings da equipe sem a área "settings"
+  TEAM_HIDDEN_KEYS = %i[agent_permissions price_table scheduler_log team_roles
+                        appointment_reminders_state nps_survey_state
+                        n8n_base_url n8n_workflows n8n_workflows_fetched_at n8n_api_key_configured].freeze
+  TEAM_AI_KEYS = %i[configured gemini_key_set live_enabled opportunity_alerts_count opportunity_last_run_at].freeze
+  TEAM_AGENT_KEYS = %i[enabled stage_ids inbox_ids inbox_id mode live_days hours_start hours_end
+                       no_card after_booking_stage_id handoff_inbox_id].freeze
+  TEAM_OFTALMOFACIL_HIDDEN = %i[base_url key_set db_host db_port db_name db_user db_password_set last_error].freeze
+  TEAM_VOICE_KEYS = %i[enabled configured permission_template handoff_inbox_id whatsapp_number persona_name].freeze
 
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
     update_google_ads test_google_ads update_sheets test_sheets
-    update_oftalmofacil
+    update_oftalmofacil test_oftalmofacil sync_oftalmofacil
     update_calls enable_calls_at_meta calls_meta_status
     update_voice test_voice sync_voice voice_whatsapp_accounts voice_voices voice_state
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
@@ -33,16 +46,24 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     harvest_status harvest_preview harvest_approve harvest_pause harvest_resume
     harvest_skip_lead harvest_send_now run_manager run_auditor auditor_summary
     run_creative creative_state creative_review
+    ai_usage
   ].freeze
   before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
   # 🔐 rodada 334: nós mais finos da árvore para o que não é "integração"
   before_action -> { require_access('agenda.configuracao', :edit) }, only: %i[update_agenda agenda_backfill agenda_ai_preview]
   before_action -> { require_access('configuracoes.precos', :edit) }, only: [:update_price_table]
+  # Rodada 2: ler o domínio público = nó "Domínio público" da árvore (só admin)
+  before_action -> { require_access('configuracoes.dominio', :view) }, only: [:public_domain]
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
   before_action :require_administrator!, only: %i[update_agent_grants update_agent_access update_access_roles access_admin update_company]
 
+  # 🔐 Rodada 2 (achados #295/#337): a MESMA rota serve admin e equipe, mas
+  # quem não tem a área "settings" recebe o JSON enxuto — sem Roteiro, prompts,
+  # concessões dos colegas, preços, registros com nome de paciente nem dados
+  # da conexão do hub. A filtragem é no servidor; a tela não precisa mudar.
   def show
-    render json: settings_json(crm_settings)
+    full = settings_json(crm_settings)
+    render json: crm_can?(:settings) ? full : team_settings_json(full)
   end
 
   # POST update_agent_grants — admin configura os acessos de UM atendente.
@@ -184,22 +205,26 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # POST update_price_table — Tabela de preços oficial (Configurações →
   # Tabela de preços). Alimenta o Espaço do Paciente e os prompts da IA.
   def update_price_table
-    items = Array(params[:items]).first(60).filter_map do |raw|
-      name = raw[:name].to_s.strip[0, 80]
-      next if name.blank?
-
-      {
-        'group' => raw[:group].to_s.strip[0, 80].presence || 'Outros',
-        'name' => name,
-        'price' => raw[:price].to_f.round(2),
-        'promo_price' => raw[:promo_price].present? ? raw[:promo_price].to_f.round(2) : nil
-      }.compact
+    # 🔢 Rodada 5 (#401): procedimento sem preço (vazio/R$ 0) NÃO é gravado —
+    # virava "R$ 0" no prompt da IA e no Espaço do Paciente. Promoção R$ 0 ou
+    # maior que o preço vira "sem promoção"; a unidade é campo próprio.
+    rows = Array(params[:items]).first(60).select { |raw| raw.respond_to?(:permit) }.map do |raw|
+      Cevico::PriceList.sanitize_row(raw.permit(:group, :name, :price, :promo_price, :unit))
+    end
+    # linha com nome mas sem preço, sem unidade ou com grupo × unidade em
+    # contradição: recusa a tabela inteira e diz o que corrigir
+    problems = rows.filter_map(&:last)
+    if problems.any?
+      return render json: { error: "Corrija antes de salvar — #{problems.join('; ')}." },
+                    status: :unprocessable_entity
     end
 
-    cfg = crm_settings.agenda_config || {}
-    cfg['price_table'] = { 'items' => items, 'updated_at' => Time.current.iso8601 }
-    crm_settings.update!(agenda_config: cfg)
-    render json: { price_table: cfg['price_table'] }
+    items = rows.filter_map(&:first)
+
+    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
+    price_table = { 'items' => items, 'updated_at' => Time.current.iso8601 }
+    Cevico::SettingMerge.merge!(crm_settings, :agenda_config) { |cfg| cfg.merge('price_table' => price_table) }
+    render json: { price_table: price_table }
   end
 
   # POST update_inbox_investments — investimento em anúncios por caixa de
@@ -210,10 +235,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   #                        "15" => { mode: 'meta_auto' } } }
   def update_inbox_investments
     investments = sanitized_investments
-    cfg = crm_settings.agenda_config || {}
-    cfg['inbox_investments'] = investments
-    apply_capture_inboxes(cfg)
-    crm_settings.update!(agenda_config: cfg)
+    # Rodada 4 (#413): mexe só nas chaves recebidas, sob trava e em cima da foto fresca
+    cfg = Cevico::SettingMerge.merge!(crm_settings, :agenda_config) do |fresh|
+      fresh['inbox_investments'] = investments
+      apply_capture_inboxes(fresh)
+      fresh
+    end
     render json: { inbox_investments: investments, capture_inbox_ids: cfg['capture_inbox_ids'] }
   end
 
@@ -346,6 +373,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def harvest_preview
+    return render_harvest_busy if Crm::HarvestJob.busy?
+
     Crm::HarvestJob.perform_later(Current.account.id, 'preview')
     render json: { enqueued: true }
   end
@@ -367,8 +396,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def harvest_send_now
+    return render_harvest_busy if Crm::HarvestJob.busy?
+
     Crm::HarvestJob.perform_later(Current.account.id, 'batch')
     render json: { enqueued: true }
+  end
+
+  # achado #44: com uma rodada em andamento o pedido é recusado AQUI, com aviso
+  # na tela (409), em vez de a tela dizer "disparado" e nada sair
+  def render_harvest_busy
+    render json: { error: Crm::HarvestJob::BUSY_MESSAGE }, status: :conflict
   end
 
   # ── 📊 Gestor Autônomo (item 128): rodar agora ───────────────────────────────
@@ -440,12 +477,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def update_ai
     return render json: { error: 'Apenas administradores podem configurar a IA.' }, status: :forbidden unless Current.account_user.administrator?
 
+    # Rodada 4 (#413): `cfg` aqui é só a FOTO para VALIDAR o que chegou; a
+    # gravação acontece mais abaixo, sob trava, em cima da foto fresca do banco
+    # e só nas chaves recebidas (Cevico::SettingMerge).
     cfg = crm_settings.ai_config || {}
-    cfg['api_key'] = params[:api_key] if params[:api_key].present?
-    # Gemini (Google): reservada para geração de IMAGENS das Páginas
-    cfg['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
-    cfg['model']   = params[:model]   if params.key?(:model)
-    cfg['effort']  = params[:effort]  if params.key?(:effort)
+    permitted = nil
     # agentes internos: ligar/pausar, prompt, modelo e esforço por agente
     # (o Radar de Oportunidades ainda tem as vigias: coluna + painel do
     # atendente + janela de tempo, além dos minutos de espera).
@@ -523,42 +559,63 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         return render json: { error: "A coluna \"#{conflict}\" já pertence a outro atendente. Cada coluna tem um dono só." },
                       status: :unprocessable_entity
       end
-      existing = cfg['agents'] || {}
-      cfg['agents'] = existing.merge(permitted) do |_key, old_agent, new_agent|
-        merged = (old_agent || {}).merge(new_agent || {})
-        # draft vazio = limpar o rascunho (acontece no Publicar)
-        merged.delete('draft') if merged['draft'].blank?
-        merged
-      end
-      # 🤖📞 item 169: o interruptor do card "Agente de Ligação" (e a caixa do
-      # WhatsApp, 195) espelha em ai_config['voice'], que é o que a assistente lê
-      mirror_voice_agent!(cfg, permitted['voice']) if permitted.key?('voice')
+      # Rodada 2 (achado #338): token/chave NUNCA ficam no rascunho — só entram
+      # ao Publicar (campo de verdade, que a tela nunca recebe de volta). A
+      # limpeza é feita no que CHEGOU, antes do merge: o bloco do merge só roda
+      # para agente que já existia, e o primeiro rascunho de um agente nunca
+      # salvo entraria inteiro.
+      permitted.each_value { |agent| agent['draft'] = agent['draft'].except(*DRAFT_SECRET_KEYS) if agent['draft'].is_a?(Hash) }
     end
     # 📜 Roteiro CEVICO (fonte única dos respondedores): seção em branco = padrão
+    script_in = nil
     if params[:script].present?
       keys = Crm::CevicoScript::SECTIONS.pluck('key')
-      incoming = params.require(:script).permit(*keys).to_h
+      script_in = params.require(:script).permit(*keys).to_h.transform_values { |v| v.to_s.strip }
       # 🕘 rodada 191: foto do Roteiro atual antes de sobrescrever ("Histórico" no card)
       Crm::ScriptVersion.snapshot!(Current.account, kind: 'script', note: 'antes de editar na tela', by: Current.user)
-      script = (cfg['script'] || {}).merge(incoming.transform_values { |v| v.to_s.strip })
-      script['updated_at'] = Time.current.iso8601
-      cfg['script'] = script
     end
     # 🧪 (22/09) Roteiro v2 PARALELO: as seções do Roteiro + os Passos dos dois atendentes
     # (chaves stage_*), tudo num card só; em branco = padrão do v2. Só o 🧪 Testar
     # agente lê isto — nada de sombra ou ao vivo muda ao salvar aqui.
+    script_v2_in = nil
     if params[:script_v2].present?
       keys = Crm::CevicoScript::SECTIONS.pluck('key') + Crm::CevicoScript::STAGE_SECTIONS.pluck('key')
-      incoming = params.require(:script_v2).permit(*keys).to_h.transform_values { |v| v.to_s.strip }
-      Crm::CevicoScript::STAGE_SECTIONS.each do |sec|
-        next unless incoming.key?(sec['key'])
-
-        cfg['agents'] ||= {}
-        cfg['agents'][sec['agent']] = (cfg['agents'][sec['agent']] || {}).merge('prompt_v2' => incoming.delete(sec['key']))
-      end
-      cfg['script_v2'] = (cfg['script_v2'] || {}).merge(incoming).merge('updated_at' => Time.current.iso8601)
+      script_v2_in = params.require(:script_v2).permit(*keys).to_h.transform_values { |v| v.to_s.strip }
     end
-    crm_settings.update!(ai_config: cfg)
+    # Rodada 4 (#413): grava sob trava, relendo a foto FRESCA do banco e mexendo
+    # só nas chaves recebidas — o estado dos jobs (harvest_state da Colheitadeira,
+    # alertas do Radar, voice_state…) e o que outro admin salvou no meio-tempo
+    # ficam como estão (fecha o achado #44 sem o remendo do with_lock de antes)
+    Cevico::SettingMerge.merge!(crm_settings, :ai_config) do |fresh|
+      fresh['api_key'] = params[:api_key] if params[:api_key].present?
+      # Gemini (Google): reservada para geração de IMAGENS das Páginas
+      fresh['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
+      fresh['model']  = params[:model]  if params.key?(:model)
+      fresh['effort'] = params[:effort] if params.key?(:effort)
+      if permitted
+        fresh['agents'] = (fresh['agents'] || {}).merge(permitted) do |_key, old_agent, new_agent|
+          merged = (old_agent || {}).merge(new_agent || {})
+          # draft vazio = limpar o rascunho (acontece no Publicar)
+          merged.delete('draft') if merged['draft'].blank?
+          merged
+        end
+        # 🤖📞 item 169: o interruptor do card "Agente de Ligação" (e a caixa do
+        # WhatsApp, 195) espelha em ai_config['voice'], que é o que a assistente lê
+        mirror_voice_agent!(fresh, permitted['voice']) if permitted.key?('voice')
+      end
+      fresh['script'] = (fresh['script'] || {}).merge(script_in, 'updated_at' => Time.current.iso8601) if script_in
+      if script_v2_in
+        incoming = script_v2_in.dup
+        Crm::CevicoScript::STAGE_SECTIONS.each do |sec|
+          next unless incoming.key?(sec['key'])
+
+          fresh['agents'] ||= {}
+          fresh['agents'][sec['agent']] = (fresh['agents'][sec['agent']] || {}).merge('prompt_v2' => incoming.delete(sec['key']))
+        end
+        fresh['script_v2'] = (fresh['script_v2'] || {}).merge(incoming).merge('updated_at' => Time.current.iso8601)
+      end
+      fresh
+    end
     # 🎙️ (195) publicou o Agente de Ligação com a ElevenLabs configurada? o prompt
     # novo (Roteiro + regras de voz + etapa) sobe para lá; falha vira aviso, não erro
     sync = voice_sync_after_publish(params[:agents])
@@ -633,11 +690,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     note = Current.account.messages.where(message_type: :activity).find(params[:message_id])
     rating = %w[good bad].include?(params[:rating].to_s) ? params[:rating].to_s : nil
-    attrs = note.additional_attributes || {}
-    shadow = attrs['cevico_ia_shadow'] || {}
-    shadow['rating'] = rating
-    shadow['rating_note'] = params[:note].to_s.strip.first(300) if params.key?(:note)
-    note.update!(additional_attributes: attrs.merge('cevico_ia_shadow' => shadow))
+    # Rodada 4 da auditoria: gravado pelo Cevico::AttributeMerge (relê na trava)
+    Cevico::AttributeMerge.merge!(note) do |attrs|
+      shadow = (attrs['cevico_ia_shadow'] || {}).merge('rating' => rating)
+      shadow['rating_note'] = params[:note].to_s.strip.first(300) if params.key?(:note)
+      attrs.merge('cevico_ia_shadow' => shadow)
+    end
     # ✍️ rodada 191: 👎 vira orientação pendente (1 por nota) para o admin corrigir o Roteiro
     Crm::AgentGuidance.from_shadow_note!(note, by: Current.user) if rating == 'bad'
     render json: shadow_item(note.reload)
@@ -727,9 +785,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Item 157: a conexão de verdade é o BANCO do OftalmoFácil (usuário
   # só-leitura): host/porta/banco/usuário/senha + o nome do fornecedor
   # (CATARATA_SP = CEVICO) + o de-para de médicos (CRM → nome) + liga/desliga.
-  def update_oftalmofacil # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    cfg = crm_settings.agenda_config || {}
-    of = cfg['oftalmofacil'] || {}
+  def update_oftalmofacil
+    # Rodada 4 (#413): mexe só em agenda_config['oftalmofacil'], sob trava e em
+    # cima da foto fresca — o cursor/last_run que o sync grava não é apagado
+    Cevico::SettingMerge.merge_key!(crm_settings, :agenda_config, 'oftalmofacil') { |of| apply_oftalmofacil_params(of) }
+    Crm::PartnerGuard.forget!(Current.account) # item 322: funil/caixas dos parceiros mudaram → cerca e mapa das fontes releem
+    render json: { oftalmofacil: oftalmofacil_json(crm_settings) }
+  end
+
+  # aplica em `of` (a chave 'oftalmofacil' FRESCA, dentro da trava) só o que veio nos params
+  def apply_oftalmofacil_params(of) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     of['base_url'] = params[:base_url].to_s.strip if params.key?(:base_url)
     of['api_key'] = params[:api_key].to_s.strip if params[:api_key].to_s.strip.present?
     %w[db_host db_name db_user provider_name].each do |k|
@@ -768,10 +833,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                          .reject { |name, unit| name.blank? || unit.blank? }
     end
     of['updated_at'] = Time.current.iso8601
-    cfg['oftalmofacil'] = of
-    crm_settings.update!(agenda_config: cfg)
-    Crm::PartnerGuard.forget!(Current.account) # item 322: funil/caixas dos parceiros mudaram → cerca e mapa das fontes releem
-    render json: { oftalmofacil: oftalmofacil_json(crm_settings) }
+    of
   end
 
   # testa a conexão só-leitura e conta as cirurgias do fornecedor lá
@@ -787,6 +849,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def sync_oftalmofacil
     of = (crm_settings.agenda_config || {})['oftalmofacil'] || {}
     return render json: { ok: false, error: 'Conexão não configurada.' } unless Crm::OftalmofacilSyncService.configured?(of)
+    # Rodada 2 (achado #193): desligada pelo admin = o botão também não roda
+    # (antes só o cron respeitava a chave; o botão criava paciente/card/consulta
+    # e disparava automação mesmo com a integração desligada)
+    return render json: { ok: false, error: Crm::OftalmofacilSyncJob::OFF_MESSAGE } unless of['enabled'] == true
+    # Rodada 4 (achado #172): com uma rodada em andamento o pedido é recusado
+    # AQUI, com aviso na tela (409), em vez de "iniciada" e nada acontecer
+    # (o job só pularia a conta e escreveria no log)
+    if Crm::OftalmofacilSyncJob.busy?(Current.account.id)
+      return render json: { ok: false, error: Crm::OftalmofacilSyncJob::BUSY_MESSAGE }, status: :conflict
+    end
 
     Crm::OftalmofacilSyncJob.perform_later(Current.account.id, full: params[:full] == true)
     render json: { ok: true, queued: true }
@@ -797,16 +869,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # mensagem de permissão — tudo em agenda_config['calls'] (padrões em
   # Crm::Calls::Settings)
   def update_calls
-    cfg = crm_settings.agenda_config || {}
-    calls = cfg['calls'] || {}
-    apply_call_flags(calls)
-    apply_call_targets(calls)
-    apply_call_texts(calls)
-    # 🔒 item 325: trava da ligação + responsável por coluna do CRM
-    calls.merge!(Crm::Calls::CallbackLock.sanitize(Current.account, params)) if params.key?(:lock)
-    calls['updated_at'] = Time.current.iso8601
-    cfg['calls'] = calls
-    crm_settings.update!(agenda_config: cfg)
+    # Rodada 4 (#413): mexe só em agenda_config['calls'], sob trava e em cima da foto fresca
+    Cevico::SettingMerge.merge_key!(crm_settings, :agenda_config, 'calls') do |calls|
+      apply_call_flags(calls)
+      apply_call_targets(calls)
+      apply_call_texts(calls)
+      # 🔒 item 325: trava da ligação + responsável por coluna do CRM
+      calls.merge!(Crm::Calls::CallbackLock.sanitize(Current.account, params)) if params.key?(:lock)
+      calls['updated_at'] = Time.current.iso8601
+      calls
+    end
     render json: { calls: calls_json(crm_settings) }
   end
 
@@ -926,20 +998,25 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # guarda o último estado visto na Meta NA CAIXA (agenda_config.calls.inboxes[].meta;
   # erro não apaga o estado anterior). A primeira caixa também espelha em calls.meta.
   def store_calls_meta(inbox, calling, error: nil)
-    cfg = crm_settings.agenda_config || {}
-    calls = cfg['calls'] || {}
-    entries = calls_entries_with(inbox)
-    entry = entries.find { |c| c['inbox_id'] == inbox.id }
-    entry['meta'] = (entry['meta'] || {}).merge(calls_meta_seen(calling), 'checked_at' => Time.current.iso8601, 'error' => error)
-    calls['inboxes'] = entries
-    calls['meta'] = entries.first['meta']
-    crm_settings.update!(agenda_config: cfg.merge('calls' => calls))
-    entry['meta']
+    meta = nil
+    # Rodada 4 (#413): mexe só em agenda_config['calls'], sob trava e em cima da foto fresca
+    Cevico::SettingMerge.merge_key!(crm_settings, :agenda_config, 'calls') do |calls|
+      entries = calls_entries_with(inbox, calls)
+      entry = entries.find { |c| c['inbox_id'] == inbox.id }
+      entry['meta'] = (entry['meta'] || {}).merge(calls_meta_seen(calling), 'checked_at' => Time.current.iso8601, 'error' => error)
+      calls['inboxes'] = entries
+      calls['meta'] = entries.first['meta']
+      meta = entry['meta']
+      calls
+    end
+    meta
   end
 
-  # as caixas configuradas, garantindo uma entrada para esta caixa
-  def calls_entries_with(inbox)
-    entries = Crm::Calls::Settings.new(Current.account, crm_settings: crm_settings).inboxes
+  # as caixas configuradas (lidas do `calls` FRESCO de dentro da trava, não da
+  # foto da requisição), garantindo uma entrada para esta caixa
+  def calls_entries_with(inbox, calls)
+    carrier = CrmSetting.new(agenda_config: { 'calls' => calls }) # só para o Settings ler ESTE calls
+    entries = Crm::Calls::Settings.new(Current.account, crm_settings: carrier).inboxes
     entries << Crm::Calls::Settings.normalize_inbox('inbox_id' => inbox.id) if entries.none? { |c| c['inbox_id'] == inbox.id }
     entries
   end
@@ -983,16 +1060,27 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # fechar/reabrir um dia (inteiro, uma unidade ou um médico) é da EQUIPE,
   # não só do admin — por isso fica fora de ADMIN_SETTINGS_ACTIONS
   def update_blocked_days
-    s = CrmSetting.find_or_initialize_by(account: Current.account)
-    cfg = (s.agenda_config || {}).dup
-    cfg['blocked_days'] = sanitize_blocked_days(params[:blocked_days])
-    s.agenda_config = cfg
-    s.save!
-    render json: { agenda_blocked_days: cfg['blocked_days'] }
+    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
+    days = sanitize_blocked_days(params[:blocked_days])
+    Cevico::SettingMerge.merge!(Current.account, :agenda_config) { |cfg| cfg.merge('blocked_days' => days) }
+    render json: { agenda_blocked_days: days }
   end
 
   def update_agenda
-    cfg = crm_settings.agenda_config || {}
+    # cadeado (rodada 171): quem NÃO é admin não muda quem lê o prontuário —
+    # a área "settings" concedida não basta para se incluir entre os médicos
+    # (checado ANTES de qualquer gravação)
+    if params.key?(:clinical_access) && !Current.account_user.administrator?
+      return render json: { error: 'Só administradores mudam o acesso às anotações clínicas.' }, status: :forbidden
+    end
+
+    # Rodada 4 (#351): o corpo abaixo monta `cfg` a partir de uma FOTO só para
+    # saber o que esta requisição mexeu; no fim, save_agenda_keys! grava sob
+    # trava SÓ essas chaves, em cima da foto fresca do banco. Assim um arrasto
+    # no Modo edição não apaga o recorde, o aniversário ou o estado do lembrete
+    # que um job gravou no mesmo hash enquanto a tela pensava.
+    before = (crm_settings.agenda_config || {}).deep_dup
+    cfg = before.deep_dup
     if params.key?(:windows)
       # item 307: `only` = tipos que a faixa aceita (vazio = todos)
       cfg['windows'] = Array(params[:windows]).map do |w|
@@ -1081,9 +1169,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       assignments = (cfg['panel_assignments'] || {}).dup
       removed = before_keys - cfg['panel_variants'].map { |v| "variant:#{v['id']}" }
       assignments = assignments.reject { |_, k| removed.include?(k.to_s) }
-      cfg['kpi_layout'] = (cfg['kpi_layout'] || {}).except(*removed)
-      cfg['block_layout'] = (cfg['block_layout'] || {}).except(*removed)
-      cfg['panel_palettes'] = (cfg['panel_palettes'] || {}).except(*removed)
+      # Rodada 4: os layouts são mesclados painel a painel na gravação — a
+      # variante removida vira "null" (apaga só o layout dela, não os outros)
+      PANEL_LAYOUT_KEYS.each { |key| cfg[key] = removed.index_with { nil } } if removed.any?
       # a lista de pessoas da variante É a atribuição: entra quem está nela,
       # sai quem saiu dela (e apontava pra ela)
       cfg['panel_variants'].each do |v|
@@ -1110,9 +1198,13 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # LAYOUT da fileira de indicadores por painel (item 142): ordem dos cards
     # (arrasto magnético) + cards ocultos + COR escolhida por card (item 143)
     # — {painel => {order: [], hidden: [], colors: {id => grad}}}
+    # Rodada 4 (#351): a tela manda SÓ o painel que editou e o servidor mescla
+    # painel a painel (save_agenda_keys!); painel enviado como null = apagar
     if params.key?(:kpi_layout)
       raw = params.require(:kpi_layout).permit!.to_h
       cfg['kpi_layout'] = raw.slice(*layout_panel_keys(cfg)).transform_values do |v|
+        next nil if v.nil?
+
         h = v.to_h
         # item 239: sem teto prático de cards (200), card GRANDE (2×2, resumo) e
         # ESPAÇOS vazios ("gap:…") que entram na ordem como um card qualquer
@@ -1149,9 +1241,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # ORDEM DOS BLOCOS do Meu Painel (item 143): arrasto magnético em TODOS
     # os blocos — duas áreas (acima e abaixo do seletor de painel), pode
     # cruzar entre elas — {painel => {top: [ids], main: [ids]}}
+    # (Rodada 4: também só o painel editado; null = apagar — "restaurar o padrão")
     if params.key?(:block_layout)
       raw = params.require(:block_layout).permit!.to_h
       cfg['block_layout'] = raw.slice(*layout_panel_keys(cfg)).transform_values do |v|
+        next nil if v.nil?
+
         h = v.to_h
         {
           'top' => Array(h['top']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
@@ -1170,34 +1265,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # {painel => {mode, key, blocks: {bloco => paleta}}}; entrada vazia some
     if params.key?(:panel_palettes)
       raw = params.require(:panel_palettes).permit!.to_h
-      cfg['panel_palettes'] = raw.slice(*(layout_panel_keys(cfg) + REPORT_PALETTE_SCOPES)).each_with_object({}) do |(panel, v), acc|
-        pal = sanitize_panel_palette(v)
-        acc[panel] = pal if pal
+      # (Rodada 4: só o painel editado; entrada vazia ou null = apaga a daquele painel)
+      cfg['panel_palettes'] = raw.slice(*(layout_panel_keys(cfg) + REPORT_PALETTE_SCOPES)).transform_values do |v|
+        v.nil? ? nil : sanitize_panel_palette(v)
       end
     end
     # CARDS DE INDICADOR criados pelo admin no "+" do Meu Painel (item 141):
     # indicador pronto OU fórmula sobre o cesto de indicadores, com cor,
     # formato e painel de destino. Sanitizado campo a campo.
+    # Lista inteira = tela de antes da Rodada 4. A tela nova manda só o que
+    # mudou em `custom_kpis_patch` (mesclado pelo id na gravação — ver
+    # save_agenda_keys!).
     if params.key?(:custom_kpis)
-      cfg['custom_kpis'] = Array(params[:custom_kpis]).first(KPI_LAYOUT_MAX).filter_map do |raw|
-        k = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
-        expr = k['expr'].to_s.strip[0, 200]
-        next if expr.blank? || expr !~ %r{\A[a-z0-9_+\-*/().\s]+\z}i
-        next if k['label'].to_s.strip.blank?
-
-        {
-          'id' => k['id'].to_s[/\A[a-z0-9_-]{1,40}\z/i] || SecureRandom.hex(4),
-          'label' => k['label'].to_s.strip[0, 60],
-          'expr' => expr,
-          'format' => %w[number percent currency].include?(k['format'].to_s) ? k['format'].to_s : 'number',
-          'color' => k['color'].to_s[0, 120],
-          'icon' => k['icon'].to_s[/\Ai-lucide-[a-z0-9-]{1,40}\z/] || 'i-lucide-sparkles',
-          # item 241: ícone escolhido À MÃO no construtor (senão o nome decide)
-          'icon_manual' => ActiveModel::Type::Boolean.new.cast(k['icon_manual']) || false,
-          'panel' => %w[all agendamento conducao cirurgia medico gestor].include?(k['panel'].to_s) ? k['panel'].to_s : 'all',
-          'note' => k['note'].to_s.strip[0, 200]
-        }
-      end
+      cfg['custom_kpis'] = Array(params[:custom_kpis]).first(KPI_LAYOUT_MAX).filter_map { |kpi_raw| sanitize_custom_kpi(kpi_raw) }
     end
     # TEMA por painel do Meu Painel ({painel => tema}) — opção do admin
     # (item 140): cada ambiente com sua família de cores
@@ -1268,13 +1348,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # Central do Paciente: quem são os MÉDICOS no sistema (editam anotações
     # clínicas) e se a equipe pode visualizar as anotações (LGPD: fechado
     # por padrão)
-    if params.key?(:clinical_access)
-      # cadeado (rodada 171): quem NÃO é admin não muda quem lê o prontuário —
-      # a área "settings" concedida não basta para se incluir entre os médicos
-      unless Current.account_user.administrator?
-        return render json: { error: 'Só administradores mudam o acesso às anotações clínicas.' }, status: :forbidden
-      end
-
+    if params.key?(:clinical_access) # (cadeado de admin checado no topo do método)
       access = params.require(:clinical_access).permit(:team_view, doctor_user_ids: []).to_h
       cfg['clinical_access'] = {
         'doctor_user_ids' => Array(access['doctor_user_ids']).map(&:to_i),
@@ -1353,7 +1427,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       enabled = ActiveModel::Type::Boolean.new.cast(params.dig(:appointment_confirmation, :enabled)) == true
       cfg[Crm::AppointmentReminderSendJob::MASTER_KEY] = { 'enabled' => enabled, 'updated_at' => Time.current.iso8601 }
     end
-    crm_settings.update!(agenda_config: cfg)
+    cfg = save_agenda_keys!(before, cfg, custom_kpis_patch)
     render json: {
       agenda_windows: cfg['windows'] || [],
       agenda_blocked: cfg['blocked'] || [],
@@ -1394,6 +1468,91 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def layout_panel_keys(cfg)
     %w[agendamento conducao cirurgia medico gestor] +
       Array(cfg['panel_variants']).map { |v| "variant:#{v['id']}" }
+  end
+
+  # chaves do agenda_config guardadas POR PAINEL (fileira de indicadores,
+  # blocos e paletas do Meu Painel)
+  PANEL_LAYOUT_KEYS = %w[kpi_layout block_layout panel_palettes].freeze
+
+  # Rodada 4 (#351): grava sob trava (Cevico::SettingMerge) SÓ as chaves que o
+  # update_agenda mexeu nesta requisição, em cima da foto fresca do banco. As
+  # chaves por painel são mescladas PAINEL A PAINEL: a tela manda só o painel
+  # editado; painel enviado como null é apagado. Assim dois administradores em
+  # painéis diferentes (ou duas abas) não apagam o trabalho um do outro, e as
+  # chaves dos jobs (recorde, aniversários, estado dos lembretes…) nunca são
+  # tocadas por quem só arrastou um card. Devolve a coluna gravada.
+  def save_agenda_keys!(before, cfg, kpis_patch = nil)
+    changed = cfg.reject { |key, value| before.key?(key) && before[key] == value }
+    Cevico::SettingMerge.merge!(crm_settings, :agenda_config) do |fresh|
+      changed.each do |key, value|
+        fresh[key] = PANEL_LAYOUT_KEYS.include?(key) ? merge_panels(fresh[key], value) : value
+      end
+      fresh['custom_kpis'] = apply_custom_kpis_patch(fresh['custom_kpis'], kpis_patch) if kpis_patch
+      fresh
+    end
+  end
+
+  # um card de indicador do "+" do Meu Painel (item 141), sanitizado campo a
+  # campo; nil = descartado (sem nome ou fórmula com caractere estranho)
+  def sanitize_custom_kpi(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    k = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+    expr = k['expr'].to_s.strip[0, 200]
+    return if expr.blank? || expr !~ %r{\A[a-z0-9_+\-*/().\s]+\z}i
+    return if k['label'].to_s.strip.blank?
+
+    {
+      'id' => k['id'].to_s[/\A[a-z0-9_-]{1,40}\z/i] || SecureRandom.hex(4),
+      'label' => k['label'].to_s.strip[0, 60],
+      'expr' => expr,
+      'format' => %w[number percent currency].include?(k['format'].to_s) ? k['format'].to_s : 'number',
+      'color' => k['color'].to_s[0, 120],
+      'icon' => k['icon'].to_s[/\Ai-lucide-[a-z0-9-]{1,40}\z/] || 'i-lucide-sparkles',
+      # item 241: ícone escolhido À MÃO no construtor (senão o nome decide)
+      'icon_manual' => ActiveModel::Type::Boolean.new.cast(k['icon_manual']) || false,
+      'panel' => %w[all agendamento conducao cirurgia medico gestor].include?(k['panel'].to_s) ? k['panel'].to_s : 'all',
+      'note' => k['note'].to_s.strip[0, 200],
+      # 🔒 auditoria R2 (#350): marca "só Financeiro" dos modelos prontos —
+      # o Meu Painel esconde o card de quem não pode ver dinheiro
+      'finance' => ActiveModel::Type::Boolean.new.cast(k['finance']) || false
+    }
+  end
+
+  # 🔒 Rodada 4 (#351): o que a tela mudou nos cards de indicador —
+  # { upsert: [cards criados/editados], remove: [ids], remove_prefix: 'painel_p_' }
+  # (o "modelo pronto" troca todos os cards dele de uma vez). nil = não veio.
+  def custom_kpis_patch
+    raw = params[:custom_kpis_patch]
+    return unless raw.is_a?(ActionController::Parameters)
+
+    {
+      'upsert' => Array(raw[:upsert]).first(KPI_LAYOUT_MAX).filter_map { |k| sanitize_custom_kpi(k) },
+      'remove' => Array(raw[:remove]).filter_map { |id| id.to_s[/\A[a-z0-9_-]{1,40}\z/i] },
+      'remove_prefix' => raw[:remove_prefix].to_s[/\A[a-z0-9_:-]{1,40}\z/i]
+    }
+  end
+
+  # aplica o patch em cima da lista FRESCA do banco, pelo id: dois admins
+  # criando/apagando cards ao mesmo tempo não apagam o card um do outro
+  def apply_custom_kpis_patch(saved, patch)
+    list = Array(saved).select { |k| k.is_a?(Hash) }.reject { |k| patch['remove'].include?(k['id'].to_s) }
+    list = list.reject { |k| k['id'].to_s.start_with?(patch['remove_prefix']) } if patch['remove_prefix']
+    patch['upsert'].each do |kpi|
+      i = list.index { |k| k['id'] == kpi['id'] }
+      i ? list[i] = kpi : list << kpi
+    end
+    list.first(KPI_LAYOUT_MAX)
+  end
+
+  def merge_panels(saved, incoming)
+    base = saved.is_a?(Hash) ? saved.dup : {}
+    (incoming || {}).each do |panel, layout|
+      if layout.nil?
+        base.delete(panel)
+      else
+        base[panel] = layout
+      end
+    end
+    base
   end
 
   # cada régua (d1/d0) do lembrete: liga/desliga, hora cheia, caixa do
@@ -1999,6 +2158,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       doctors: of['doctors'] || {},
       configured: Crm::OftalmofacilSyncService.configured?(of),
       last_sync_at: of['last_sync_at'], last_run_at: of['last_run_at'], last_result: of['last_result'],
+      # Rodada 4 (achado #382): a última falha e o alerta da faixa vermelha (erro cru só para admin)
+      last_error: of['last_error'], last_error_at: of['last_error_at'], sync_alert: Crm::OftalmofacilSyncJob.alert_for(of, account_id: s.account_id),
       mirror_count: Crm::OftalmofacilSurgery.where(account_id: s.account_id).count,
       # 🏥 item 228: parceiros + Agenda
       partners_enabled: of['partners_enabled'] == true,
@@ -2400,11 +2561,62 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
               lookback_hours: w['lookback_hours'].presence&.to_i || 24
             }
           end,
-          draft: agents.dig(key, 'draft').presence,
+          draft: agent_draft_json(agents.dig(key, 'draft')),
+          # Rodada 2 (achado #338): rascunho antigo com token gravado só avisa que existe
+          draft_token_set: agents.dig(key, 'draft').is_a?(Hash) && agents.dig(key, 'draft', 'page_access_token').present?,
           default_prompt: default_prompt
         }]
       end
     }
+  end
+
+  # rascunho de um agente sem as chaves sensíveis (nil quando não sobra nada)
+  def agent_draft_json(draft)
+    return nil unless draft.is_a?(Hash)
+
+    draft.except(*DRAFT_SECRET_KEYS).presence
+  end
+
+  # ── 🔐 Rodada 2 (achados #295/#337): o que a EQUIPE recebe em GET settings ──
+  # Parte do JSON completo e tira o que é do admin: concessões dos colegas,
+  # tabela de preços (salvo quem pode VER "Tabela de preços" ou editar o
+  # orçamento do paciente), Roteiro/prompts,
+  # registros com nome de paciente (lembretes, NPS, Secretário, eventos dos
+  # atendentes de IA), insights comerciais, papéis da equipe, dados de conexão
+  # (hub, Meta, Google, planilha, N8N) e a lista de médicos do cadeado clínico
+  # (fica só o próprio usuário). Mantém o que CrmBoard, Conversas, Meu Painel,
+  # Agenda, Chamadas e Espaço do Paciente usam.
+  def team_settings_json(full) # rubocop:disable Metrics/AbcSize
+    json = full.except(*TEAM_HIDDEN_KEYS)
+    # a tabela de preços fica para quem pode VER "Tabela de preços" OU altera o
+    # orçamento no Espaço do Paciente (nó "pacientes" EDITAR): sem ela a tela
+    # cairia nos preços fixos do código e um valor errado iria ao paciente sem
+    # ninguém perceber (decisão R2-G4, registrada no BACKLOG)
+    json[:price_table] = full[:price_table] if cevico_can?('configuracoes.precos', :view) || cevico_can?('pacientes', :edit)
+    # quem cuida de lembretes/confirmação/NPS (nó "modelos") continua vendo o
+    # estado das rodadas no card — mesmo nó que appointment_reminders#run
+    if cevico_can?('configuracoes.modelos', :view)
+      json[:appointment_reminders_state] = full[:appointment_reminders_state]
+      json[:nps_survey_state] = full[:nps_survey_state]
+    end
+    ai = full[:ai].to_h
+    json[:ai] = ai.slice(*TEAM_AI_KEYS).merge(
+      agents: ai[:agents].to_h.transform_values { |agent| agent.slice(*TEAM_AGENT_KEYS) }
+    )
+    json[:oftalmofacil] = full[:oftalmofacil].to_h.except(*TEAM_OFTALMOFACIL_HIDDEN)
+    json[:voice] = full[:voice].to_h.slice(*TEAM_VOICE_KEYS)
+    json[:meta_ads] = full[:meta_ads].to_h.slice(:configured, :insights_configured)
+    json[:google_ads] = full[:google_ads].to_h.slice(:configured, :insights_configured, :cost_configured)
+    json[:sheets] = full[:sheets].to_h.slice(:configured)
+    json[:clinical_access] = own_clinical_access(full[:clinical_access].to_h)
+    json
+  end
+
+  # do cadeado clínico, a equipe só precisa saber de si: "sou médico?" e se a
+  # equipe vê o Espaço do Médico — a lista de colegas não viaja
+  def own_clinical_access(access)
+    ids = Array(access['doctor_user_ids']).map(&:to_i)
+    { 'team_view' => access['team_view'] == true, 'doctor_user_ids' => ids & [Current.user.id] }
   end
 
   def voice_settings_of(record)

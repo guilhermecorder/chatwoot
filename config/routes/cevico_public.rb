@@ -9,6 +9,9 @@
 # O 'track' literal precisa vir ANTES da rota com :token (senão o Rails
 # entenderia "track" como um token).
 post 'forms/:slug/track', to: 'cevico_forms#track'
+# 🔐 Rodada 4 (#119): o paciente digita o código que recebeu no WhatsApp
+# (literal, por isso também vem ANTES da rota com :token)
+post 'forms/:slug/verify', to: 'cevico_forms#verify'
 get 'forms/:slug', to: 'cevico_forms#show', as: :cevico_form_short
 post 'forms/:slug', to: 'cevico_forms#submit'
 # link assinado antigo (compatibilidade: mensagens já enviadas continuam valendo)

@@ -4,9 +4,18 @@
 #      formulário + contato; a resposta cai amarrada ao paciente.
 #   2. link LIMPO (/forms/pre-avaliacao): o paciente se identifica com nome
 #      + WhatsApp no começo; o sistema acha o paciente pelo telefone (mesmo
-#      critério do resto do CEVICO) e atrela a resposta ao card. Telefone
-#      desconhecido → cria o paciente + card em "Agendamento de Consulta"
-#      (decisão 01/09: o link só vai pra quem decidiu agendar).
+#      critério do resto do CEVICO). 🔐 Rodada 4 da auditoria (#119):
+#      · telefone de cadastro EXISTENTE → a resposta nasce "não confirmada" e
+#        um CÓDIGO sai pela conversa em que o paciente já fala com a clínica;
+#        acertou o código (POST /verify) → confirmada (+ card em "Agendamento
+#        de Consulta" se ainda não tinha). O cadastro nunca muda.
+#      · telefone DESCONHECIDO → cria o paciente SEM card (fora dos
+#        indicadores) e com marca pendente + tarefa "ligar e confirmar" para
+#        a equipe; teto diário por formulário.
+#      · LGPD: a página responde IGUAL para qualquer telefone (sempre o card
+#        "se este número já conversa com a gente, enviamos um código") —
+#        ninguém descobre pelo formulário quem é paciente da clínica.
+#      Tudo em Crm::FormVerification.
 class CevicoFormsController < ActionController::Base # rubocop:disable Rails/ApplicationController
   protect_from_forgery with: :null_session
   layout false
@@ -15,6 +24,12 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
   include Cevico::PublicSecurity
 
   before_action :load_form
+
+  # 🔐 achado #118: limite do JSON de respostas (jsonb fica fora da trava de
+  # 20k do ApplicationRecord) e tamanho de cada valor
+  MAX_ANSWERS_BYTES = 32.kilobytes
+  MAX_VALUE_CHARS = 2000
+  MAX_MULTI_ITEMS = 50
 
   def show
     # domínio oficial configurado → link antigo (host da VPS) redireciona
@@ -29,16 +44,21 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
   end
 
   def submit
+    # 🔐 achado #118: id/label/type vêm das perguntas do banco — do cliente
+    # só o `value`; resposta grande demais é recusada (422 too_large) ANTES
+    # de identificar o paciente, para não criar cadastro/card sem resposta
+    answers = sanitized_answers
+    return render json: { ok: false, error: 'too_large' }, status: :unprocessable_entity if answers.to_json.bytesize > MAX_ANSWERS_BYTES
+
     # link limpo: sem paciente colado no token → a identificação do
     # formulário (nome + WhatsApp) diz quem é. Telefone inválido = 422
     # com mensagem que a tela mostra no próprio card.
     if @contact.nil? && @ask_identity
       @contact = resolve_identity_contact
       return if performed? # resolve_identity_contact já respondeu o erro
-    end
 
-    answers = Array(params[:answers]).map do |a|
-      a.permit(:id, :label, :type, :value, value: []).to_h
+      @identity_asked = true
+      answers += identity_meta # a marca "não confirmada" só existe depois de saber quem é
     end
 
     response = @form.responses.create!(
@@ -49,10 +69,28 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
     )
 
     @form.bump_funnel!('done')
-    render json: { ok: true, id: response.id }
+    # 🔐 #119: cadastro existente → código pela conversa do paciente; paciente
+    # novo → marca pendente + tarefa. A página recebe SEMPRE o mesmo
+    # `verify: {status:'check'}` (sem final do número): nada no JSON diz se o
+    # telefone é de paciente. O código em si NUNCA vai no JSON.
+    render json: { ok: true, id: response.id, verify: after_identity(response) }.compact
   rescue StandardError => e
     Rails.logger.error "[CevicoForms] submit: #{e.message}"
     render json: { ok: false }, status: :unprocessable_entity
+  end
+
+  # 🔐 Rodada 4 (#119): o paciente digita o código recebido no WhatsApp.
+  # 5 tentativas em 10 min (Redis); errou tudo ou venceu → a resposta fica
+  # "não confirmada" para a equipe conferir (nada muda no cadastro). Sem
+  # código guardado responde igual a código errado (LGPD — ver verify!).
+  def verify
+    record = @form.responses.find_by(id: params[:response_id])
+    return render json: { ok: false, error: 'expired' }, status: :unprocessable_entity if record.nil?
+
+    result = Crm::FormVerification.verify!(record, params[:code])
+    return render json: { ok: true } if result[:ok]
+
+    render json: { ok: false, error: result[:error], remaining: result[:remaining] }.compact, status: :unprocessable_entity
   end
 
   # beacon de retenção: o paciente CHEGOU no card X (1 por card por visita)
@@ -98,8 +136,8 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
 
   # ── identificação pelo telefone (link limpo) ────────────────────────────
   # Acha o paciente pelos últimos 8 dígitos + confirmação de linha (mesmo
-  # critério do AppointmentRecorder). Não achou → cria paciente + card na
-  # coluna "Agendamento de Consulta" com origem 'formulario'.
+  # critério do AppointmentRecorder). Não achou → cria o paciente SEM card
+  # (#119: só ganha card quando prova o telefone ou escreve no WhatsApp).
   def resolve_identity_contact
     name = params.dig(:identity, :name).to_s.strip[0, 120]
     digits = params.dig(:identity, :phone).to_s.gsub(/\D/, '')
@@ -108,12 +146,72 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
 
     contact = find_contact_by_phone(digits)
     if contact
-      # nome só COMPLETA cadastro sem nome — nunca sobrescreve o existente
-      contact.update(name: name) if contact.name.blank?
+      # 🔐 achado #118: cadastro existente NÃO muda (nem o nome) — quem digitou
+      # pode não ser o dono do telefone. O nome digitado vai na marca da resposta.
+      @unverified_identity = true
       return contact
     end
 
-    Crm::Stamp.with(via: 'paciente') { create_contact_with_card(name, digits) } # 🏷️ item 322
+    # 🔐 #119: teto diário global de cadastros novos por formulário. Passou do
+    # teto: NÃO cria paciente, mas guarda a resposta solta (sem paciente, com
+    # o telefone digitado na marca) e responde igual aos outros casos — um
+    # erro só para telefone desconhecido contaria quem é paciente (LGPD).
+    unless Crm::FormVerification.new_contact_allowed?(@form)
+      @capped_phone = digits
+      @unverified_identity = true
+      return nil
+    end
+
+    Crm::Stamp.with(via: 'paciente') { create_pending_contact(name, digits) } # 🏷️ item 322
+  end
+
+  # depois de gravar a resposta do link limpo: paciente novo ganha a marca
+  # pendente + tarefa para a equipe; cadastro existente recebe o código pela
+  # conversa dele. A página recebe SEMPRE { status: 'check' } (LGPD).
+  def after_identity(response)
+    return nil unless @identity_asked
+
+    if @new_contact
+      Crm::FormVerification.mark_pending!(@contact, form: @form, response: response, informed_name: params.dig(:identity, :name))
+      Crm::FormVerification.open_pending_task!(@contact, form: @form)
+    elsif @unverified_identity && @contact
+      Crm::FormVerification.start!(response)
+    end
+    { status: 'check' }
+  end
+
+  # Reconstrói cada resposta a partir da PERGUNTA do banco (id/label/type) e
+  # aceita do cliente só o `value` (texto curto ou lista de textos curtos).
+  def sanitized_answers
+    questions = @form.questions.reject { |q| q['type'] == 'message' }.index_by { |q| q['id'].to_s }
+    Array(params[:answers]).filter_map do |a|
+      next unless a.respond_to?(:permit)
+
+      raw = a.permit(:id, :value, value: []).to_h
+      question = questions[raw['id'].to_s]
+      next if question.nil?
+
+      { 'id' => question['id'], 'label' => question['label'], 'type' => question['type'],
+        'value' => sanitized_value(raw['value']) }
+    end
+  end
+
+  # link limpo que caiu num cadastro que JÁ EXISTIA: ninguém provou que é o
+  # dono do telefone → a resposta nasce "não confirmada" (selo para a equipe
+  # e o médico). Link assinado (token com o paciente) continua confirmado.
+  def identity_meta
+    return [] unless @unverified_identity
+
+    via = @new_contact || @capped_phone ? Crm::FormResponse::VIA_NEW_CONTACT : Crm::FormResponse::VIA_CLEAN_LINK
+    [Crm::FormResponse.unverified_meta(informed_name: params.dig(:identity, :name), via: via, informed_phone: @capped_phone)]
+  end
+
+  def sanitized_value(value)
+    if value.is_a?(Array)
+      value.first(MAX_MULTI_ITEMS).map { |v| v.to_s[0, MAX_VALUE_CHARS] }
+    else
+      value.to_s[0, MAX_VALUE_CHARS]
+    end
   end
 
   def find_contact_by_phone(digits)
@@ -124,32 +222,33 @@ class CevicoFormsController < ActionController::Base # rubocop:disable Rails/App
          .find { |c| Crm::AppointmentRecorder.same_phone_line?(digits, c.phone_number) }
   end
 
-  def create_contact_with_card(name, digits)
+  # 🔐 #119: telefone desconhecido vira paciente SEM card — não entra na
+  # coluna de agendamento nem nos indicadores de etapa; o card nasce quando
+  # ele escreve no WhatsApp (CrmListener) ou confirma o código. A resposta
+  # dele também nasce "não confirmada" (via 'cadastro_novo').
+  def create_pending_contact(name, digits)
     e164 = digits.start_with?('55') && digits.length >= 12 ? "+#{digits}" : "+55#{digits}"
     contact = @form.account.contacts.create!(name: name, phone_number: e164)
-
-    stage = booking_stage
-    if stage
-      Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: stage.pipeline_id) do |card|
-        card.stage_id = stage.id
-        card.origin = 'formulario'
-      end
-    end
+    @new_contact = true
+    @unverified_identity = true
     contact
   rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
     # corrida (dois envios) ou telefone já cadastrado com outra máscara:
-    # tenta achar de novo antes de desistir
-    find_contact_by_phone(digits) || (render_identity_error && nil)
+    # tenta achar de novo antes de desistir. Se achou, é um cadastro que já
+    # existia → a resposta também nasce "não confirmada" (achado #118).
+    # Nos dois casos ninguém novo foi criado: a vaga do teto do dia volta.
+    Crm::FormVerification.release_new_contact_slot!(@form)
+    existing = find_contact_by_phone(digits)
+    if existing
+      @unverified_identity = true
+      return existing
+    end
+
+    render_identity_error
+    nil
   end
 
   def render_identity_error
     render json: { ok: false, error: 'identity' }, status: :unprocessable_entity
-  end
-
-  def booking_stage
-    scope = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: @form.account_id })
-    scope.where('crm_stages.name ILIKE ?', '%agendamento%consulta%').order(:position).first ||
-      scope.where('crm_stages.name ILIKE ?', '%agendamento%').order(:position).first ||
-      scope.order(:position).first
   end
 end

@@ -49,11 +49,12 @@ def voice_simulated_payload(conversation_id:, name:, phone:, direction:, outcome
   }
 end
 
-# PHONE= > telefone do contato da campanha > 1º contato com telefone > número fictício
-def voice_pick_phone(account, campaign_contact = nil)
-  raw = ENV['PHONE'].presence || campaign_contact&.contact&.phone_number ||
-        account.contacts.where.not(phone_number: [nil, '']).order(:id).pick(:phone_number) || '5511999990000'
-  raw.to_s.gsub(/\D/, '')
+# PHONE= > telefone do contato da campanha > número fictício (inválido).
+# 🔒 auditoria #211: NUNCA cai no 1º contato da conta (era um paciente real);
+# fora do desenvolvimento PHONE= é obrigatório e não pode ser de ninguém.
+def voice_pick_phone(account, campaign_contact = nil, task_name = 'cevico:voice_simulate')
+  raw = ENV['PHONE'].presence || campaign_contact&.contact&.phone_number || Cevico::SimulationGuard::FAKE_PHONE
+  Cevico::SimulationGuard.phone!(account, raw, task_name)
 end
 
 # contato da campanha a fechar (calling, senão queued), já marcado como calling
@@ -71,6 +72,8 @@ end
 
 desc 'Simula o pós-chamada de uma ligação da assistente virtual — ACCOUNT_ID= [PHONE=] [OUTCOME=agendou] [DIRECTION=inbound|outbound] [CAMPAIGN_ID=]'
 task 'cevico:voice_simulate' => :environment do
+  # 🔒 auditoria #211: comando de teste — fora do desenvolvimento só com CEVICO_SIMULATION_OK=1
+  Cevico::SimulationGuard.check!('cevico:voice_simulate')
   account = Account.find(ENV.fetch('ACCOUNT_ID'))
   campaign_contact = voice_pick_campaign_contact(account)
   phone = voice_pick_phone(account, campaign_contact)
@@ -92,8 +95,11 @@ end
 
 desc 'Roda as 6 ferramentas da assistente localmente e imprime — ACCOUNT_ID= [PHONE=]'
 task 'cevico:voice_tools' => :environment do
+  # 🔒 auditoria #211: as ferramentas marcam consulta e mandam WhatsApp de verdade —
+  # fora do desenvolvimento só com CEVICO_SIMULATION_OK=1 e PHONE= que não é de paciente
+  Cevico::SimulationGuard.check!('cevico:voice_tools')
   account = Account.find(ENV.fetch('ACCOUNT_ID'))
-  phone = voice_pick_phone(account)
+  phone = voice_pick_phone(account, nil, 'cevico:voice_tools')
   conversation_id = "sim_tools_#{SecureRandom.hex(3)}"
   run = lambda do |tool, params|
     result = Crm::VoiceAgent::ToolsService.new(account: account, tool: tool, params: params.merge('telefone' => phone),

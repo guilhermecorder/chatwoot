@@ -42,6 +42,15 @@ class CrmAPI extends ApiClient {
     );
   }
 
+  // 🧹 auditoria 12/10 (#288): apaga a coluna movendo TODOS os cards para a
+  // coluna de destino numa só operação no servidor (transação)
+  deleteStageMovingTo(pipelineId, stageId, targetStageId) {
+    return axios.delete(
+      `${this.url}/pipelines/${pipelineId}/stages/${stageId}/destroy_moving_to`,
+      { params: { target_stage_id: targetStageId } }
+    );
+  }
+
   reorderStages(pipelineId, stageIds) {
     return axios.post(`${this.url}/pipelines/${pipelineId}/stages/reorder`, {
       stage_ids: stageIds,
@@ -65,14 +74,25 @@ class CrmAPI extends ApiClient {
     return axios.delete(`${this.url}/campaigns/${id}`);
   }
 
-  sendCampaign(id) {
-    return axios.post(`${this.url}/campaigns/${id}/send_now`);
+  // 🚦 R3 da auditoria (#415): ignoreSchedule=true só depois que a pessoa
+  // confirmou no modal que quer ignorar o horário agendado
+  sendCampaign(id, { ignoreSchedule = false } = {}) {
+    return axios.post(`${this.url}/campaigns/${id}/send_now`, {
+      ignore_schedule: ignoreSchedule ? 1 : 0,
+    });
+  }
+
+  // ⏸ R3 da auditoria (#415): pausa o envio / cancela o agendamento
+  pauseCampaign(id) {
+    return axios.post(`${this.url}/campaigns/${id}/pause`);
   }
 
   getCampaignResults(id) {
     return axios.get(`${this.url}/campaigns/${id}/results`);
   }
 
+  // 🕐 R3 da auditoria (CONTRATO-0/#411): manda o valor do datetime-local
+  // ("2026-10-08T08:00", sem fuso) e o SERVIDOR lê como hora de São Paulo
   scheduleCampaign(id, scheduledAt) {
     return axios.post(`${this.url}/campaigns/${id}/schedule`, {
       scheduled_at: scheduledAt,
@@ -122,6 +142,22 @@ class CrmAPI extends ApiClient {
 
   deleteFollowupBot(id) {
     return axios.delete(`${this.url}/followup_bots/${id}`);
+  }
+
+  // 🧠 follow-up inteligente (13/10): leitura da conversa, lead frio, fim de
+  // semana e reativação de quem adiou + resultado por coluna do CRM
+  getFollowupSmart() {
+    return axios.get(`${this.url}/followup_bots/smart`);
+  }
+
+  updateFollowupSmart(data) {
+    return axios.put(`${this.url}/followup_bots/smart`, {
+      followup_smart: data,
+    });
+  }
+
+  getFollowupResults(params = {}) {
+    return axios.get(`${this.url}/followup_bots/results`, { params });
   }
 
   getTrafficReport(params) {
@@ -797,8 +833,12 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/contact_unification/apply`);
   }
 
-  previewAudience(audience) {
-    return axios.post(`${this.url}/campaigns/preview_audience`, { audience });
+  // category (marketing | utility | authentication) = tarifa usada no custo estimado
+  previewAudience(audience, category = 'marketing') {
+    return axios.post(`${this.url}/campaigns/preview_audience`, {
+      audience,
+      category,
+    });
   }
 
   getWhatsappTemplates(inboxId, all = false) {
@@ -1001,8 +1041,22 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🔒 Rodada 4 (#351): só o que mudou nos cards ({ upsert, remove,
+  // remove_prefix }) — o servidor mescla pelo id em cima da lista do banco,
+  // então dois admins criando/apagando cards ao mesmo tempo não se apagam
+  patchCustomKpis(patch) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      custom_kpis_patch: patch,
+    });
+  }
+
   getHome(params = {}) {
     return axios.get(`${this.url}/home`, { params });
+  }
+
+  // 🧭 item 337: visão geral do Meu Painel (14 perguntas)
+  getOverview(params = {}) {
+    return axios.get(`${this.url}/home/overview`, { params });
   }
 
   // 🎂 item 331: informar o aniversário (dia, mês, ano opcional); clear = apagar
@@ -1566,8 +1620,12 @@ class CrmAPI extends ApiClient {
   }
 
   // 🧭 Painel do Empresário (quadro de gestão do dono — só admin)
-  saveBusinessBoard(business) {
-    return axios.post(`${this.url}/strategy/save_business_board`, { business });
+  // (Rodada 4, #414) `version` = updated_at do quadro carregado; 409 se já mudou
+  saveBusinessBoard(business, version = null) {
+    return axios.post(`${this.url}/strategy/save_business_board`, {
+      business,
+      version,
+    });
   }
 
   // ── Automations ───────────────────────────────────────────────────

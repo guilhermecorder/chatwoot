@@ -50,6 +50,9 @@ RSpec.describe 'CEVICO Meu Painel por fonte', type: :request do
   end
 
   it 'o cesto de indicadores segue a fonte pedida' do
+    # relógio fixo ao meio-dia de São Paulo: "daqui a 1 hora" precisa cair HOJE
+    # (rodado de noite, caía em amanhã e o exemplo falhava)
+    travel_to Time.current.in_time_zone('America/Sao_Paulo').change(hour: 12)
     book(due_at: 1.hour.from_now)
     book(due_at: 1.hour.from_now, origin: 'oftalmofacil')
 

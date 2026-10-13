@@ -13,25 +13,28 @@ class Crm::LabelReplaceService
     }
   end
 
+  # 🏷️ Rodada 5 (#17): troca em massa NÃO dispara as automações "Etiqueta
+  # adicionada/removida" (senão cada paciente atingido viraria uma mensagem
+  # paga, webhook ou conversão). A etiqueta da conversa que sobe ao contato
+  # também fica muda, porque roda dentro do mesmo bloco.
   def apply!
     return { contacts: 0, conversations: 0 } if from.blank? || to.blank? || from == to
 
-    contacts = 0
-    tagged_contacts.find_each do |contact|
-      swap_labels(contact)
-      contacts += 1
+    Contact.without_label_triggers do
+      { contacts: swap_all(tagged_contacts), conversations: swap_all(tagged_conversations) }
     end
-
-    conversations = 0
-    tagged_conversations.find_each do |conversation|
-      swap_labels(conversation)
-      conversations += 1
-    end
-
-    { contacts: contacts, conversations: conversations }
   end
 
   private
+
+  def swap_all(scope)
+    count = 0
+    scope.find_each do |record|
+      swap_labels(record)
+      count += 1
+    end
+    count
+  end
 
   def from
     @from ||= from_label.to_s.strip

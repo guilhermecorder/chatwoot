@@ -86,8 +86,15 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
     Current.account.cevico_pages.order(:title).map do |page|
       { id: page.id, title: page.title, slug: page.slug, emoji: page.emoji, status: page.status,
         public_url: Cevico::PublicSite.page_url(page.slug),
-        builder_url: "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}?edit=#{page.edit_token}" }
+        # token de RETOQUE só para quem EDITA páginas (quem só vê resultados fica sem)
+        builder_url: builder_url_for(page) }
     end
+  end
+
+  def builder_url_for(page)
+    return nil unless cevico_can?('marketing.paginas', :edit)
+
+    "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}?edit=#{page.edit_token}"
   end
 
   # régua padrão CEVICO (06/08) via concern; since/until soltos = legado

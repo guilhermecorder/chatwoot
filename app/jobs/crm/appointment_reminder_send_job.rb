@@ -55,27 +55,47 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   TemplateSource = Crm::TemplateSource
 
   # now: só os testes passam (congelar o relógio sem gem de viagem no tempo)
-  def perform(now = nil) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def perform(now = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     now_sp = now ? now.in_time_zone(TZ) : TZ.now
     CrmSetting.find_each do |settings|
       next if settings.agenda_config&.dig(MASTER_KEY, 'enabled') == false
 
       cfg = settings.agenda_config&.dig('appointment_reminders') || {}
+      # 🚫 #45/RESIL-7: antes de qualquer envio, confere se a Meta recusou algum lembrete já enviado
+      reconcile_refused(settings.account, REGUAS & cfg.keys, now_sp)
       # da régua mais distante (d7) para o dia (d0): na sexta com ponte, a
       # confirmação completa sai antes da véspera (varredura 03/10)
       (REGUAS & cfg.keys).sort_by { |r| -self.class.days_of(r) }.each do |regua|
         run_regua(settings.account, regua, cfg[regua] || {}, now_sp)
       rescue StandardError => e
         Rails.logger.error "[CEVICO lembretes] conta #{settings.account_id} #{regua}: #{e.message}"
+        Crm::CronHealth.failed!('lembretes', e, account: settings.account) # 🚨 #217: avisa se repetir
       end
       # 🔁 item 288: reforço para quem não respondeu ao lembrete (desligado por padrão)
       run_followups(settings.account, cfg, now_sp)
     end
+    Crm::CronHealth.ran!('lembretes') # 🚨 #217: sinal de vida da rodada (o vigia confere)
   end
 
   def self.days_of(regua)
     regua.to_s.delete_prefix('d').to_i
   end
+
+  # marca "a Meta recusou" desta régua na consulta (#45/RESIL-7)
+  def self.refused_key(regua)
+    "#{regua}_refused"
+  end
+
+  # id da mensagem do lembrete desta régua, guardado NA MARCA da consulta: a
+  # conferência da recusa lê daqui (a lista da tela é cortada em 80 e trocada
+  # quando o dia vira — revisão da Rodada 3)
+  def self.message_key(regua)
+    "#{regua}_message_id"
+  end
+
+  # a partir de tantas recusas na mesma rodada, UMA tarefa resumo (modelo
+  # pausado na Meta derruba dezenas de uma vez) em vez de uma por paciente
+  SUMMARY_AT = 5
 
   def self.default_hour(regua)
     days_of(regua).zero? ? 7 : 10
@@ -174,6 +194,11 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     marks = (contact.additional_attributes || {}).dig('cevico_appt_reminders', task.id.to_s) || {}
     return if reminder_spent?(marks, regua, task) && !force
 
+    # 🚫 #45/RESIL-7: a Meta recusou o lembrete desta consulta → fica nas "puladas"
+    # com o erro; não reenvia sozinho (a equipe corrige a causa e reenvia pelo card)
+    refused = refused_reason(marks, regua, task)
+    return skip(run, task, refused) if refused && !force
+
     # paciente de parceiro (já liberado no skip_reason) sai pela caixa e modelo do bloco Oftalmofácil
     partner = partner_patient?(task, contact)
     if partner
@@ -202,7 +227,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
                                 personalized_params(template['template_params'], task, rcfg, template['message_preview']),
                                 template['message_preview'].presence,
                                 "Lembrete de consulta (#{regua.upcase})")
-    conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
+    sender = Crm::SendTemplateService.new(source: source, contact: contact)
+    conversation = sender.perform
     if conversation.nil?
       release_reminder!(contact, task, regua)
       return skip(run, task, 'envio não saiu (contato/caixa)')
@@ -210,8 +236,10 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
     # item 300: paciente do Oftalmofácil ganha o card no funil DELE (nunca no da CEVICO)
     Crm::PartnerFunnel.place!(account, contact, :booked) if partner
+    # message_id: a rodada seguinte confere se a Meta recusou (#45/RESIL-7) — na marca e na lista
+    remember_reminder_message!(contact, task, self.class.message_key(regua), sender.message&.id)
     run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox,
-                                            general: template['general'], model: template['model'])
+                                            general: template['general'], model: template['model'], message_id: sender.message&.id)
   rescue StandardError => e
     Rails.logger.error "[CEVICO lembretes] task #{task.id}: #{e.message}"
     skip(run, task, "erro: #{e.message.truncate(60)}")
@@ -433,13 +461,180 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   # ── registro da rodada: quem recebeu / receberia e quem foi pulado ──
   # general: saiu o modelo "geral" (não o da unidade) — a lista avisa
   # model: saiu um modelo PERSONALIZADO (item 327) — "Retorno · Dra. Roberta Negri"
-  def entry_for(task, contact, template: nil, partner: false, inbox: nil, general: nil, model: nil) # rubocop:disable Metrics/ParameterLists
+  def entry_for(task, contact, template: nil, partner: false, inbox: nil, general: nil, model: nil, message_id: nil) # rubocop:disable Metrics/ParameterLists
     at = task.due_at&.in_time_zone(TZ)
     { 'task_id' => task.id, 'name' => patient_name(task), 'phone_tail' => contact.phone_number.to_s.last(4),
       'when' => at&.strftime('%d/%m %H:%M'), 'unit' => unit_label(task), 'template' => template, 'contact_id' => contact.id,
       'general' => (general ? true : nil), 'model' => model.presence,
       'inbox' => inbox&.name, # item 310: por qual caixa saiu / sairia
+      'message_id' => message_id, # #45: a mensagem gravada, para conferir depois se a Meta recusou
       'partner' => (partner ? partner_name(task).presence || 'Oftalmofácil' : nil) }.compact
+  end
+
+  # ── a Meta recusou (#45/RESIL-7, auditoria 10/2026) ────────────────────
+  # O lembrete é dado como "enviado" quando a mensagem é gravada, mas a Meta
+  # responde DEPOIS (modelo pausado, variável vazia, número inválido…) e a
+  # mensagem fica `status: failed`. A cada rodada do cron, as consultas de
+  # hoje em diante são conferidas pela MARCA do paciente (dN_message_id — não
+  # pela lista da tela, que é cortada em 80 e trocada quando o dia vira): a
+  # recusada sai das enviadas, entra nas puladas com o erro, a marca da
+  # consulta é devolvida (o reforço não conta horas de uma mensagem que nunca
+  # chegou), fica a nota "recusada" na consulta para NÃO reenviar sozinho (a
+  # causa costuma ser a mesma) e a responsável ganha uma tarefa — ela corrige
+  # e reenvia pelo card. Muitas recusas de uma vez = uma tarefa resumo.
+  def reconcile_refused(account, reguas, now_sp)
+    hits = refused_hits(account, reguas, now_sp)
+    return if hits.empty?
+
+    hits.each { |hit| mark_refused!(hit[:contact], hit[:task], hit[:regua], hit[:error]) }
+    record_refused_hits(CrmSetting.find_by(account: account), hits)
+    notify_refused_all(account, hits)
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO lembretes] conferência das recusas: #{e.message}"
+  end
+
+  # régua por régua: sai das "enviadas" e entra nas "puladas" com o erro
+  def record_refused_hits(settings, hits)
+    return if settings.blank?
+
+    hits.group_by { |hit| hit[:regua] }.each do |regua, list|
+      record_refused(settings, regua, list.map { |h| entry_for(h[:task], h[:contact], message_id: h[:message_id]).merge('error' => h[:error]) })
+    end
+  end
+
+  # { task:, contact:, regua:, error:, message_id: } de cada lembrete que a Meta recusou
+  def refused_hits(account, reguas, now_sp)
+    return [] if reguas.empty?
+
+    found = upcoming_marks(account, now_sp).flat_map do |task, contact, entry|
+      reguas.filter_map do |regua|
+        id = entry[self.class.message_key(regua)]
+        { task: task, contact: contact, regua: regua, message_id: id } if id.present?
+      end
+    end
+    with_meta_errors(found)
+  end
+
+  # só os que a Meta recusou, com o erro dela em :error
+  def with_meta_errors(found)
+    refused = Crm::SendTemplateService.refused(found.pluck(:message_id))
+    found.filter_map { |f| f.merge(error: refused[f[:message_id]]) if refused.key?(f[:message_id]) }
+  end
+
+  # [consulta, paciente, marcas da consulta] das consultas de hoje em diante
+  # (até o alcance do reforço) — lembrete e reforço conferem a partir daqui.
+  # Uma leitura por conta por rodada (memória da instância).
+  def upcoming_marks(account, now_sp)
+    @upcoming_marks ||= {}
+    @upcoming_marks[account.id] ||= begin
+      tasks = upcoming_tasks(account, now_sp)
+      contacts = account.contacts.where(id: tasks.map(&:contact_id).uniq)
+                        .where("additional_attributes -> 'cevico_appt_reminders' IS NOT NULL").index_by(&:id)
+      tasks.filter_map { |task| marks_of(task, contacts[task.contact_id]) }
+    end
+  end
+
+  def marks_of(task, contact)
+    entry = contact && (contact.additional_attributes['cevico_appt_reminders'] || {})[task.id.to_s]
+    [task, contact, entry] if entry.present?
+  end
+
+  def upcoming_tasks(account, now_sp)
+    account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
+           .where(due_at: now_sp.beginning_of_day..(now_sp + Crm::AppointmentReminderFollowup::LOOKAHEAD))
+           .where.not(contact_id: nil).to_a
+  end
+
+  # poucas recusas = uma tarefa por paciente (com a conversa); muitas = resumo
+  def notify_refused_all(account, hits)
+    return notify_refused_summary(account, hits) if hits.size >= SUMMARY_AT
+
+    hits.each { |hit| notify_refused(account, hit) }
+  end
+
+  def refused_label(hit)
+    hit[:number] ? "Reforço #{hit[:number]} do lembrete #{hit[:regua].upcase}" : "Lembrete #{hit[:regua].upcase}"
+  end
+
+  # modelo pausado na Meta derruba dezenas de lembretes numa manhã: UMA tarefa
+  # (aberta hoje, complementada enquanto chegam mais) com o erro mais comum e
+  # os pacientes — em vez de 30–60 tarefas e notas para a responsável
+  SUMMARY_TITLE = '🚫 Lembretes recusados pela Meta — confira o modelo e os telefones'.freeze
+
+  def notify_refused_summary(account, hits) # rubocop:disable Metrics/AbcSize
+    entry = summary_entry(hits)
+    existing = account.tasks.where(task_type: Crm::HandoffTask::TASK_TYPE, status: %i[todo doing], title: SUMMARY_TITLE)
+                      .where(created_at: TZ.now.beginning_of_day..).order(:created_at).first
+    return existing.update!(description: [existing.description.presence, entry].compact.join("\n\n")) if existing
+
+    account.tasks.create!(title: SUMMARY_TITLE, description: entry, task_type: Crm::HandoffTask::TASK_TYPE, priority: :high, status: :todo,
+                          due_at: TZ.now.end_of_day, creator: account.administrators.first || account.users.first,
+                          assignee: Crm::TaskOwner.resolve(account, task_type: 'cirurgia') || account.administrators.order(:id).first)
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO lembretes] tarefa resumo das recusas: #{e.message}"
+  end
+
+  # o texto da tarefa resumo: quantos, de que tipo, o erro mais comum e os pacientes
+  def summary_entry(hits) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    common = hits.map { |h| h[:error].to_s }.tally.max_by(&:last)&.first.to_s
+    kinds = hits.group_by { |h| refused_label(h) }.map { |label, list| "#{list.size} × #{label}" }.join(', ')
+    names = hits.first(20).map { |h| "#{patient_name(h[:task])} (#{h[:task].due_at&.in_time_zone(TZ)&.strftime('%d/%m %H:%M')})" }
+    "#{TZ.now.strftime('%d/%m %H:%M')} · #{hits.size} não chegaram (#{kinds}). Erro mais comum: #{common.truncate(120)}. " \
+      "Pacientes: #{names.join('; ')}#{hits.size > names.size ? ' e outros' : ''}. " \
+      'Confira o modelo do lembrete na Meta e os telefones das fichas; depois reenvie pelo card.'
+  end
+
+  def refused_text(error)
+    "a Meta recusou: #{error.to_s.truncate(80)} — corrija e reenvie pelo card"
+  end
+
+  def refused_reason(marks, regua, task)
+    note = marks[self.class.refused_key(regua)]
+    return nil unless note.is_a?(Hash)
+    return nil if note['due'].present? && Time.zone.parse(note['due'].to_s).to_i != task.due_at.to_i # remarcou: ciclo novo
+
+    refused_text(note['error'])
+  rescue ArgumentError
+    nil
+  end
+
+  # devolve a marca da régua (e a mensagem guardada) e deixa a nota da recusa na consulta
+  def mark_refused!(contact, task, regua, error)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      marks = attrs['cevico_appt_reminders'] || {}
+      entry = (marks[task.id.to_s] || {}).except(regua, Crm::AppointmentReminderFollowup.due_key(regua),
+                                                 Crm::AppointmentReminderFollowup.inbox_key(regua), self.class.message_key(regua))
+      entry = entry.merge(self.class.refused_key(regua) => { 'at' => Time.current.iso8601, 'error' => error.to_s.truncate(160),
+                                                             'due' => task.due_at&.iso8601 })
+      attrs.merge('cevico_appt_reminders' => marks.merge(task.id.to_s => entry))
+    end
+  end
+
+  # hit = { task:, contact:, regua:, error:, message_id:, number: (só reforço) }
+  def notify_refused(account, hit)
+    task = hit[:task]
+    conversation = Message.find_by(id: hit[:message_id])&.conversation
+    # agent_key vira o nome na nota/tarefa (não há atendente de IA por trás)
+    Crm::HandoffTask.open!(account: account, contact: hit[:contact], conversation: conversation, agent_key: 'Confirmação de consulta',
+                           motivo: "#{refused_label(hit)} não chegou: a Meta recusou",
+                           detalhes: "Consulta #{task.due_at&.in_time_zone(TZ)&.strftime('%d/%m %H:%M')} · erro: #{hit[:error]}. " \
+                                     'Confira o telefone na ficha e o modelo do lembrete; depois reenvie pelo card.')
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO lembretes] aviso da recusa (consulta #{task.id}): #{e.message}"
+  end
+
+  # sai das "enviadas" e entra nas "puladas" com o erro da Meta
+  def record_refused(settings, regua, entries)
+    task_ids = entries.pluck('task_id')
+    skipped = entries.map { |e| e.slice('task_id', 'name', 'when', 'unit').merge('why' => refused_text(e['error'])) }
+    settings.with_lock do
+      agenda = settings.agenda_config || {}
+      state = agenda[STATE_KEY] || {}
+      current = state[regua] || {}
+      kept = Array(current['sent']).reject { |e| task_ids.include?(e['task_id']) }
+      state[regua] = current.merge('sent' => kept, 'skipped' => (skipped + Array(current['skipped'])).first(LIST_CAP))
+      settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
+    end
   end
 
   def skip(run, task, why)
@@ -529,7 +724,9 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   end
 
   def stamped(entry, regua, task, inbox)
-    entry.merge(regua => Time.current.iso8601,
+    # reenvio (pelo card ou consulta remarcada): a nota "a Meta recusou" e a mensagem antiga saem junto
+    entry.except(self.class.refused_key(regua), self.class.message_key(regua))
+         .merge(regua => Time.current.iso8601,
                 Crm::AppointmentReminderFollowup.inbox_key(regua) => inbox&.id, # item 310: o reforço sai pela MESMA caixa
                 Crm::AppointmentReminderFollowup.due_key(regua) => task.due_at&.iso8601).compact # item 288: remarcou = não é a mesma
   end
@@ -546,8 +743,18 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       marks = attrs['cevico_appt_reminders'] || {}
       entry = (marks[task.id.to_s] || {}).except(regua, Crm::AppointmentReminderFollowup.due_key(regua),
-                                                 Crm::AppointmentReminderFollowup.inbox_key(regua))
+                                                 Crm::AppointmentReminderFollowup.inbox_key(regua), self.class.message_key(regua))
       attrs.merge('cevico_appt_reminders' => marks.merge(task.id.to_s => entry))
+    end
+  end
+
+  # guarda o id da mensagem gravada na marca da consulta (lembrete ou reforço)
+  def remember_reminder_message!(contact, task, key, message_id)
+    return if message_id.blank?
+
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      marks = attrs['cevico_appt_reminders'] || {}
+      attrs.merge('cevico_appt_reminders' => marks.merge(task.id.to_s => (marks[task.id.to_s] || {}).merge(key => message_id)))
     end
   end
 end

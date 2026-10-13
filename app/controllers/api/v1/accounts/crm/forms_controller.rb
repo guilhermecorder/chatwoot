@@ -35,6 +35,9 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
     responses = scoped_responses
     render json: {
       total: responses.size,
+      # 🔐 achado #118: respostas do link limpo em cadastro que já existia
+      # (ninguém provou que é o dono do telefone) — o hub avisa
+      unverified_count: responses.count { |r| !r.verified? },
       first_response_at: responses.map(&:created_at).min,
       last_response_at: responses.map(&:created_at).max,
       questions: aggregate_questions(responses),

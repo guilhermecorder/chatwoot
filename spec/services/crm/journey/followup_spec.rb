@@ -47,7 +47,7 @@ RSpec.describe Crm::Journey::Followup do # rubocop:disable RSpec/MultipleMemoize
     CrmSetting.create!(account: account, agenda_config: {})
     allow(Crm::SendTemplateService).to receive(:new) do |source:, contact: nil| # rubocop:disable Lint/UnusedBlockArgument
       templates << source.template_params['name']
-      instance_double(Crm::SendTemplateService, perform: conversation)
+      instance_double(Crm::SendTemplateService, perform: conversation, message: nil)
     end
     run_at(sent_at) # a confirmação sai às 10h05
   end

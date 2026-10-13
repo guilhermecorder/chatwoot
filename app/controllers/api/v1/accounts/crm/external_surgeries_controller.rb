@@ -310,21 +310,10 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
 
   # Valor em formato brasileiro ou simples: "3900", "3900,00", "3.900,00",
   # "3.900" (milhar), "R$ 3.900". Inválido ou zero = sem valor.
+  # Rodada 5 (#192): mesma regra única do Cevico::Money.
   def parse_value(raw)
-    text = raw.to_s.gsub(/r\$/i, '').gsub(/\s/, '')
-    return nil if text.blank?
-
-    text = if text.include?(',')
-             text.delete('.').tr(',', '.')
-           elsif text.match?(/\A\d{1,3}(\.\d{3})+\z/) # "3.900" sem vírgula = milhar BR
-             text.delete('.')
-           else
-             text
-           end
-    value = Float(text)
-    value.positive? ? value.round(2) : nil
-  rescue ArgumentError, TypeError
-    nil
+    value = Cevico::Money.parse(raw)
+    value&.positive? ? value : nil
   end
 
   # Casa por SUFIXO de 9 e 8 dígitos — cobre telefone BR com/sem o 55 do país

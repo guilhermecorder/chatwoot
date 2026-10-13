@@ -27,6 +27,12 @@ class Crm::StageLog < ApplicationRecord
 
   include CevicoSourceStamped # 🏷️ item 322: fonte do card + como ESTA entrada aconteceu
 
+  # 🔒 R2 da auditoria (#300): desde que "Remover do funil" preserva os logs,
+  # existem logs ÓRFÃOS (card removido; contato apagado por LGPD; funil apagado).
+  # Como o belongs_to é obrigatório, um `update!`/`save!` num log órfão falha
+  # com "Crm contact must exist" — hoje nada faz isso depois da criação (só
+  # update_all/update_columns/delete_all). Decidir na Rodada 6 (exclusão LGPD
+  # em cascata): coluna nula + nullify, ou chave estrangeira ON DELETE SET NULL.
   belongs_to :crm_contact, class_name: 'Crm::Contact', foreign_key: :crm_contact_id
 
   scope :for_contact, ->(id) { where(crm_contact_id: id).order(entered_at: :asc) }

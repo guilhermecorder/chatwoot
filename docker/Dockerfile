@@ -157,3 +157,9 @@ COPY --from=pre-builder /app/.git_sha /app/.git_sha
 WORKDIR /app
 
 EXPOSE 3000
+
+# 🩺 CEVICO Rodada 6: teste de saúde. Web → /health responde; Sidekiq → batimento
+# recente no Redis; migration rodando → sempre saudável (ver docker/entrypoints/healthcheck.sh).
+# Folgado de propósito: só marca "doente" depois de ~2,5 min seguidos falhando.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=5 \
+  CMD sh /app/docker/entrypoints/healthcheck.sh

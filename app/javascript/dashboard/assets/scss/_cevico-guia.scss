@@ -1,0 +1,574 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   🧭 GUIA CEVICO AREJADO (item 336, 12/10) — a régua visual nova.
+   Fonte da verdade: https://claude.ai/artifact/M7af1huY3VB8XEbt5gr7Jt
+   Regras em uma linha:
+     • 3 cores por ambiente em 60-30-10 (complementar dividida):
+         60% = --cv (cor do dia)  · 30% = --cv-apoio sobre --cv-apoio-fundo
+         10% = --cv-destaque (botão principal + número que manda)
+       (as três vêm de paletteVars() em helper/cevicoPalettes.js)
+     • nada abaixo de 12px · um número grande por bloco · respiro = 24px
+     • blocos opacos com sombra; cartões dentro do bloco sem sombra/borda
+   Tudo prefixado .cvg-* e dentro do .cv-page para não brigar com o kit
+   antigo (.cv-*), que continua valendo nas telas ainda não migradas.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.cv-page {
+  --g-fundo: #f4f6fb;
+  --g-superficie: #ffffff;
+  --g-superficie-2: #eef1f7;
+  --g-texto: #111827;
+  --g-texto-2: #4b5563;
+  --g-texto-3: #6b7280;
+  --g-borda: #e3e7ef;
+  --g-foco: #1d4ed8;
+  --g-bom: #15803d;
+  --g-bom-fundo: #dcfce7;
+  --g-atencao: #b45309;
+  --g-atencao-fundo: #fef3c7;
+  --g-problema: #b91c1c;
+  --g-problema-fundo: #fee2e2;
+  --g-raio-sm: 10px;
+  --g-raio-md: 14px;
+  --g-raio-lg: 20px;
+  --g-sombra-bloco: 0 1px 2px rgba(17, 24, 39, 0.04), 0 8px 24px rgba(17, 24, 39, 0.06);
+  --g-sombra-painel: -8px 0 32px rgba(17, 24, 39, 0.12);
+  --g-veu: rgba(17, 24, 39, 0.3);
+  /* os 30% e os 10% do ambiente (paletteVars): no escuro trocam pelos tons
+     "-escuro", porque o inline style da página não pode ser sobrescrito */
+  --ga: var(--cv-apoio);
+  --ga-fundo: var(--cv-apoio-fundo);
+  --gd: var(--cv-destaque);
+  --gd-ink: var(--cv-destaque-ink, #fff);
+  --g-dia-texto: var(--cv-deep, var(--cv));
+}
+.dark .cv-page {
+  --g-fundo: #0f1420;
+  --g-superficie: #171d2b;
+  --g-superficie-2: #1f2636;
+  --g-texto: #f3f4f6;
+  --g-texto-2: #b6bcc9;
+  --g-texto-3: #8d94a3;
+  --g-borda: #2a3242;
+  --g-foco: #8ab4ff;
+  --g-bom: #4ade80;
+  --g-bom-fundo: #14532d;
+  --g-atencao: #fbbf24;
+  --g-atencao-fundo: #4a2e05;
+  --g-problema: #f87171;
+  --g-problema-fundo: #5b1515;
+  --g-sombra-bloco: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --g-sombra-painel: -8px 0 32px rgba(0, 0, 0, 0.6);
+  --g-veu: rgba(0, 0, 0, 0.5);
+  --ga: var(--cv-apoio-escuro, var(--cv-apoio));
+  --ga-fundo: var(--cv-apoio-fundo-escuro, var(--cv-apoio-fundo));
+  --gd: var(--cv-destaque-escuro, var(--cv-destaque));
+  --gd-ink: var(--cv-destaque-ink-escuro, var(--cv-destaque-ink, #fff));
+  --g-dia-texto: var(--cv);
+}
+
+/* a página no formato novo: fundo levemente azulado, sem a luz do iMac */
+.cv-page.cvg-page {
+  background: var(--g-fundo);
+  background-image: none;
+  color: var(--g-texto);
+  padding: 24px 32px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 720px) {
+  .cv-page.cvg-page { padding: 16px 16px 48px; gap: 16px; }
+}
+
+/* ── escala de texto (as 9 vozes do guia) ── */
+.cv-page .cvg-titulo-ambiente { font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+.cv-page .cvg-titulo-bloco { font-size: 20px; line-height: 26px; font-weight: 600; margin: 0; color: var(--g-texto); }
+.cv-page .cvg-subtitulo { font-size: 15px; line-height: 22px; font-weight: 400; margin: 0; color: var(--g-texto-2); }
+.cv-page .cvg-numero-heroi { font-size: 44px; line-height: 48px; font-weight: 600; letter-spacing: -0.02em; }
+.cv-page .cvg-numero { font-size: 28px; line-height: 32px; font-weight: 600; letter-spacing: -0.01em; }
+.cv-page .cvg-comparacao { font-size: 13px; line-height: 18px; font-weight: 500; }
+.cv-page .cvg-corpo { font-size: 15px; line-height: 22px; font-weight: 400; margin: 0; }
+.cv-page .cvg-rotulo { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: 0.02em; color: var(--g-texto-2); }
+.cv-page .cvg-legenda { font-size: 12px; line-height: 16px; font-weight: 400; color: var(--g-texto-3); }
+.cv-page .cvg-texto-2 { color: var(--g-texto-2); }
+.cv-page .cvg-texto-3 { color: var(--g-texto-3); }
+.cv-page .cvg-bom { color: var(--g-bom); }
+.cv-page .cvg-atencao { color: var(--g-atencao); }
+.cv-page .cvg-problema { color: var(--g-problema); }
+
+/* ── CABEÇALHO DO AMBIENTE (os 60%) ── */
+.cv-page .cvg-cab {
+  position: relative;
+  overflow: clip;
+  background: var(--cv);
+  color: #fff;
+  border-radius: var(--g-raio-lg);
+  padding: 24px 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+}
+.cv-page .cvg-cab::after {
+  /* um brilho só, bem suave: lembra o vidro sem virar degradê de IA */
+  content: '';
+  position: absolute;
+  inset: -40% -10% auto auto;
+  width: 60%;
+  height: 160%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.cv-page .cvg-cab > * { position: relative; z-index: 1; }
+.cv-page .cvg-cab-h1 { color: #fff; }
+.cv-page .cvg-cab-icone { width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 20px; background: rgba(255, 255, 255, 0.16); }
+.cv-page .cvg-cab .cvg-subtitulo { color: rgba(255, 255, 255, 0.86); max-width: 640px; }
+.cv-page .cvg-cab-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.cv-page .cvg-cab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cv-page button.cvg-cab-chip { cursor: pointer; }
+.cv-page button.cvg-cab-chip:hover { background: rgba(255, 255, 255, 0.26); }
+.cv-page .cvg-cab-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+@media (max-width: 720px) {
+  .cv-page .cvg-cab { padding: 20px; }
+}
+
+/* ── BLOCO ── */
+.cv-page .cvg-bloco {
+  background: var(--g-superficie);
+  border-radius: var(--g-raio-lg);
+  box-shadow: var(--g-sombra-bloco);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.cv-page .cvg-bloco-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+.cv-page .cvg-bloco-head .cvg-subtitulo { margin-top: 4px; }
+.cv-page .cvg-bloco-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* o 1º bloco da tela leva a cor do dia no título; o 2º, o apoio */
+.cv-page .cvg-bloco--dia .cvg-titulo-bloco { color: var(--g-dia-texto); }
+.cv-page .cvg-bloco--apoio .cvg-titulo-bloco { color: var(--ga); }
+.cv-page .cvg-bloco-icone {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--g-raio-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+  background: rgb(var(--cv-rgb) / 0.12);
+  color: var(--g-dia-texto);
+}
+.cv-page .cvg-bloco--apoio .cvg-bloco-icone { background: var(--ga-fundo); color: var(--ga); }
+.cv-page .cvg-bloco-titulo { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cv-page .cvg-grupo { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+
+/* ── FILEIRA DE INDICADORES + INDICADOR ── */
+.cv-page .cvg-fila {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 16px;
+}
+.cv-page .cvg-fila--heroi { grid-template-columns: 1.6fr repeat(auto-fit, minmax(150px, 1fr)); }
+@media (max-width: 720px) {
+  .cv-page .cvg-fila, .cv-page .cvg-fila--heroi { grid-template-columns: 1fr; }
+}
+.cv-page .cvg-ind {
+  background: var(--g-superficie-2);
+  border-radius: var(--g-raio-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+.cv-page .cvg-ind--apoio { background: var(--ga-fundo); }
+.cv-page .cvg-ind--apoio .cvg-rotulo { color: var(--ga); }
+.cv-page .cvg-ind--clicavel { cursor: pointer; transition: transform 160ms ease, box-shadow 160ms ease; }
+.cv-page .cvg-ind--clicavel:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgb(var(--cv-rgb) / 0.12); }
+.cv-page .cvg-ind:focus-visible { outline: 2px solid var(--g-foco); outline-offset: 2px; }
+.cv-page .cvg-ind-valor { color: var(--g-texto); }
+.cv-page .cvg-ind--heroi .cvg-ind-valor { color: var(--gd); }
+.cv-page .cvg-ind-cmp { display: flex; align-items: center; gap: 4px; }
+.cv-page .cvg-ind-ctx { margin-top: 4px; color: var(--g-texto-2); }
+.cv-page .cvg-ind-graf { margin-top: auto; width: 100%; height: 64px; display: block; }
+.cv-page .cvg-ind-graf .area { fill: var(--cv); opacity: 0.15; }
+.cv-page .cvg-ind-graf .linha { fill: none; stroke: var(--cv); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cv-page .cvg-ind-graf .ponto { fill: var(--gd); stroke: var(--g-superficie-2); stroke-width: 2; }
+.cv-page .cvg-ind--apoio .cvg-ind-graf .ponto { stroke: var(--ga-fundo); }
+.cv-page .cvg-ind-pe { display: flex; justify-content: space-between; gap: 8px; }
+
+/* ── CHAVINHA (Lista | Cards, períodos) ── */
+.cv-page .cvg-chave {
+  display: inline-flex;
+  background: var(--g-superficie-2);
+  border-radius: 999px;
+  padding: 2px;
+  gap: 2px;
+}
+.cv-page .cvg-chave button {
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--g-texto-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.cv-page .cvg-chave button[aria-pressed='true'],
+.cv-page .cvg-chave button.cvg-on { background: var(--g-superficie); color: var(--g-texto); box-shadow: 0 1px 2px rgba(17, 24, 39, 0.08); }
+.cv-page .cvg-chave button:focus-visible { outline: 2px solid var(--g-foco); outline-offset: 1px; }
+
+/* ── LISTA (linhas de 52px) ── */
+.cv-page .cvg-lista { display: flex; flex-direction: column; }
+.cv-page .cvg-linha {
+  display: grid;
+  align-items: center;
+  gap: 8px 16px;
+  min-height: 52px;
+  padding: 8px 0;
+  border-top: 1px solid var(--g-borda);
+  font-size: 15px;
+  line-height: 22px;
+}
+.cv-page .cvg-linha:first-child { border-top: 0; }
+.cv-page .cvg-linha-quem { min-width: 0; display: flex; flex-direction: column; }
+.cv-page .cvg-linha-quem b { font-weight: 600; color: var(--g-texto); }
+.cv-page .cvg-vazio { padding: 24px 0; text-align: center; color: var(--g-texto-3); font-size: 15px; }
+
+/* cartões de uma lista em modo Cards */
+.cv-page .cvg-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.cv-page .cvg-card {
+  background: var(--g-superficie-2);
+  border-radius: var(--g-raio-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.cv-page .cvg-bloco--apoio .cvg-card { background: var(--ga-fundo); }
+.cv-page .cvg-card-titulo { font-size: 17px; line-height: 24px; font-weight: 600; color: var(--g-texto); margin: 0; }
+.cv-page .cvg-card-pe { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
+
+/* ── CHIPS DE ESTADO (sempre com palavra) ── */
+.cv-page .cvg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--g-superficie-2);
+  color: var(--g-texto-2);
+}
+.cv-page .cvg-chip--dia { background: rgb(var(--cv-rgb) / 0.12); color: var(--g-dia-texto); }
+.cv-page .cvg-chip--apoio { background: var(--ga-fundo); color: var(--ga); }
+.cv-page .cvg-chip--bom { background: var(--g-bom-fundo); color: var(--g-bom); }
+.cv-page .cvg-chip--atencao { background: var(--g-atencao-fundo); color: var(--g-atencao); }
+.cv-page .cvg-chip--problema { background: var(--g-problema-fundo); color: var(--g-problema); }
+.cv-page .cvg-chip--marcavel { cursor: pointer; }
+.cv-page .cvg-chip--marcavel input { accent-color: var(--cv); }
+
+/* ── BOTÕES ── */
+.cv-page .cvg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 20px;
+  border-radius: var(--g-raio-sm);
+  border: 0;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  background: var(--g-superficie-2);
+  color: var(--g-texto);
+  transition: background 120ms ease, transform 120ms ease;
+}
+.cv-page .cvg-btn:hover { filter: brightness(0.96); }
+.cv-page .cvg-btn:active { transform: scale(0.98); }
+.cv-page .cvg-btn:disabled { opacity: 0.55; cursor: default; }
+.cv-page .cvg-btn:focus-visible { outline: 2px solid var(--g-foco); outline-offset: 2px; }
+.cv-page .cvg-btn--principal { background: var(--gd); color: var(--gd-ink); }
+.cv-page .cvg-btn--dia { background: var(--cv); color: #fff; }
+.cv-page .cvg-btn--ghost { background: transparent; color: var(--g-texto-2); }
+.cv-page .cvg-btn--ghost:hover { background: var(--g-superficie-2); filter: none; }
+.cv-page .cvg-btn--problema { color: var(--g-problema); }
+.cv-page .cvg-btn--sm { height: 36px; padding: 0 14px; font-size: 14px; }
+.cv-page .cvg-btn--icone { width: 44px; padding: 0; }
+.cv-page .cvg-btn--icone.cvg-btn--sm { width: 36px; }
+.cv-page .cvg-cab .cvg-btn--ghost { color: #fff; }
+.cv-page .cvg-cab .cvg-btn--ghost:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* ── CAMPOS ── */
+.cv-page .cvg-campo {
+  height: 44px;
+  width: 100%;
+  padding: 0 14px;
+  border-radius: var(--g-raio-sm);
+  border: 1px solid var(--g-borda);
+  background: var(--g-superficie);
+  color: var(--g-texto);
+  font-size: 15px;
+  line-height: 22px;
+  margin: 0;
+}
+.cv-page .cvg-campo:focus { outline: 2px solid var(--g-foco); outline-offset: 0; border-color: transparent; }
+.cv-page .cvg-campo--sm { height: 36px; font-size: 14px; }
+.cv-page select.cvg-campo { padding-right: 32px; }
+.cv-page .cvg-busca { position: relative; display: flex; align-items: center; max-width: 360px; width: 100%; }
+.cv-page .cvg-busca > span { position: absolute; left: 14px; color: var(--g-texto-3); pointer-events: none; }
+.cv-page .cvg-busca .cvg-campo { padding-left: 40px; }
+.cv-page .cvg-campo-rotulo { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── VITRINE GIRATÓRIA ── */
+.cv-page .cvg-vitrine {
+  position: relative;
+  height: 180px;
+  border-radius: var(--g-raio-lg);
+  overflow: hidden;
+  color: #fff;
+}
+.cv-page .cvg-vitrine-painel {
+  position: absolute;
+  inset: 0;
+  padding: 24px 32px 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 400ms ease;
+  background: var(--cv);
+}
+.cv-page .cvg-vitrine-painel[aria-hidden='false'] { opacity: 1; }
+.cv-page .cvg-vitrine-painel--apoio { background: var(--ga); }
+.cv-page .cvg-vitrine-painel--escuro { background: #152c61; }
+.cv-page .cvg-vitrine-etq { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: 0.02em; opacity: 0.85; }
+.cv-page .cvg-vitrine-titulo { font-size: 24px; line-height: 30px; font-weight: 600; letter-spacing: -0.01em; max-width: 680px; text-wrap: balance; margin: 0; }
+.cv-page .cvg-vitrine-texto { font-size: 15px; line-height: 22px; opacity: 0.9; margin: 0; max-width: 600px; }
+.cv-page .cvg-vitrine-pontos { position: absolute; left: 32px; bottom: 16px; display: flex; gap: 8px; z-index: 2; }
+.cv-page .cvg-vitrine-pontos button {
+  width: 24px;
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+  padding: 0;
+  cursor: pointer;
+}
+.cv-page .cvg-vitrine-pontos button[aria-current='true'] { background: #fff; }
+.cv-page .cvg-vitrine-pontos button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .cv-page .cvg-vitrine { height: 200px; }
+  .cv-page .cvg-vitrine-painel { padding: 20px 20px 36px; }
+  .cv-page .cvg-vitrine-titulo { font-size: 20px; line-height: 26px; }
+  .cv-page .cvg-vitrine-pontos { left: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-page .cvg-vitrine-painel { transition: none; }
+}
+
+/* ── PAINEL LATERAL (a história do número) ── */
+.cvg-veu {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: var(--g-veu, rgba(17, 24, 39, 0.3));
+  animation: cvg-veu-in 240ms ease;
+}
+.cvg-painel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 61;
+  width: 420px;
+  max-width: 100%;
+  background: var(--g-superficie, #fff);
+  color: var(--g-texto, #111827);
+  border-radius: var(--g-raio-lg, 20px) 0 0 var(--g-raio-lg, 20px);
+  box-shadow: var(--g-sombra-painel);
+  display: flex;
+  flex-direction: column;
+  animation: cvg-painel-in 240ms ease;
+}
+.cvg-painel-head {
+  padding: 24px;
+  border-bottom: 1px solid var(--g-borda, #e3e7ef);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.cvg-painel-head .cvg-numero-heroi { color: var(--gd); margin-top: 8px; }
+.cvg-painel-corpo { padding: 24px; overflow: auto; display: flex; flex-direction: column; gap: 24px; }
+.cvg-painel-pe { padding: 16px 24px; border-top: 1px solid var(--g-borda, #e3e7ef); display: flex; flex-wrap: wrap; gap: 8px; }
+.cvg-painel-sec h3 { margin: 0 0 8px; font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: 0.02em; color: var(--g-texto-2); }
+@keyframes cvg-painel-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes cvg-veu-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .cvg-painel, .cvg-veu { animation: none; }
+}
+
+/* ── MEU PAINEL em transição para o guia (item 336, etapa A) ──
+   fundo arejado + cabeçalho chapado na cor do dia; os blocos .cv-* antigos
+   continuam até a etapa B (indicadores no formato novo). */
+.cv-page.cvg-arejado {
+  /* a luz do dia continua (kit): o fundo não é cinza chapado */
+  background-color: var(--g-fundo);
+  background-image: radial-gradient(1100px 420px at 50% -180px, rgb(var(--cv-rgb) / 0.18), rgb(var(--cv-rgb) / 0) 70%);
+}
+.dark .cv-page.cvg-arejado {
+  background-image: radial-gradient(1100px 420px at 50% -180px, rgb(var(--cv-rgb) / 0.26), rgb(var(--cv-rgb) / 0) 70%);
+}
+/* ── v2 "mais cor e mais vida" (pedido 12/10 noite): blocos em VIDRO na cor
+   do dia (como o kit) e cartões na FAMÍLIA do dia — uma harmonia só ── */
+.cv-page.cvg-arejado .cvg-bloco {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.58) 60%, rgba(255, 255, 255, 0.66) 100%),
+    rgb(var(--cv-rgb) / 0.06);
+  border: 1px solid rgb(var(--cv-rgb) / 0.22);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 12px 32px -14px rgb(var(--cv-deep-rgb) / 0.3);
+}
+.dark .cv-page.cvg-arejado .cvg-bloco {
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 60%, rgba(255, 255, 255, 0.05) 100%),
+    rgb(var(--cv-rgb) / 0.14);
+  border: 1px solid rgb(var(--cv-rgb) / 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 12px 32px -14px rgba(0, 0, 0, 0.6);
+}
+/* cartão comum: tinta leve da cor do dia; herói: degradê cheio da família com número branco */
+.cv-page.cvg-arejado .cvg-ind {
+  background: rgb(var(--cv-rgb) / 0.1);
+  border: 1px solid rgb(var(--cv-rgb) / 0.14);
+}
+.dark .cv-page.cvg-arejado .cvg-ind { background: rgb(var(--cv-rgb) / 0.18); border-color: rgb(var(--cv-rgb) / 0.3); }
+.cv-page.cvg-arejado .cvg-ind--apoio { background: var(--ga-fundo); border-color: transparent; }
+.cv-page.cvg-arejado .cvg-ind--heroi {
+  background: var(--cv-grad, var(--cv));
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 14px 30px -14px rgba(0, 0, 0, 0.4);
+}
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-rotulo,
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-ctx,
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-pe { color: rgba(255, 255, 255, 0.88); }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-valor { color: #fff; }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-cmp.cvg-bom { color: #d9ffe6; }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-cmp.cvg-atencao { color: #ffe9b3; }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-cmp.cvg-problema { color: #ffd1d1; }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-cmp.cvg-texto-3 { color: rgba(255, 255, 255, 0.8); }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-graf .area { fill: #fff; opacity: 0.22; }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-graf .linha { stroke: #fff; }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-graf .ponto { fill: var(--gd); stroke: #fff; }
+.cv-page.cvg-arejado .cvg-ind--heroi:focus-visible { outline-color: #fff; }
+/* no escuro a regra do cartão comum (.dark …) ganharia do herói: repete o degradê */
+.dark .cv-page.cvg-arejado .cvg-ind--heroi { background: var(--cv-grad, var(--cv)); border-color: rgba(255, 255, 255, 0.28); }
+/* miolo do bloco em duas colunas: números à esquerda, gráfico à direita */
+.cv-page .cvg-bloco-duas { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 1100px) { .cv-page .cvg-bloco-duas { grid-template-columns: 1fr; } }
+.cv-page .cvg-grafico { background: rgb(var(--cv-rgb) / 0.06); border-radius: var(--g-raio-md); padding: 16px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.dark .cv-page .cvg-grafico { background: rgba(255, 255, 255, 0.04); }
+.cv-page .cvg-grafico-titulo { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: 0.02em; color: var(--g-texto-2); display: flex; justify-content: space-between; gap: 8px; }
+/* anel de ocupação */
+.cv-page .cvg-anel { display: flex; align-items: center; gap: 16px; }
+.cv-page .cvg-anel svg { width: 96px; height: 96px; flex-shrink: 0; }
+.cv-page .cvg-anel .trilho { fill: none; stroke: rgb(var(--cv-rgb) / 0.15); stroke-width: 10; }
+.cv-page .cvg-anel .valor { fill: none; stroke: var(--cv); stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 600ms ease; }
+.cv-page .cvg-anel text { font-size: 22px; font-weight: 600; fill: var(--g-texto); }
+.cv-page .cvg-cab-inicio {
+  background: var(--cv);
+  border-radius: var(--g-raio-lg);
+  box-shadow: var(--g-sombra-bloco);
+}
+.cv-page .cvg-cab-inicio::after {
+  content: '';
+  position: absolute;
+  inset: -40% -10% auto auto;
+  width: 60%;
+  height: 160%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0));
+  pointer-events: none;
+  z-index: 0;
+}
+.cv-page .cvg-arejado-vitrine {
+  margin-bottom: 24px;
+}
+
+/* ── v3 ENQUADRAMENTO (12/10 noite): números em cima, FILEIRA DE GRÁFICOS
+   embaixo, todos da mesma altura — nada de lado curto × lado comprido ── */
+.cv-page .cvg-bloco-pilha { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.cv-page .cvg-graficos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.cv-page .cvg-graficos--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .cv-page .cvg-graficos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .cv-page .cvg-graficos, .cv-page .cvg-graficos--2 { grid-template-columns: 1fr; } }
+.cv-page .cvg-grafico { min-height: 220px; justify-content: flex-start; }
+.cv-page .cvg-grafico > .cvg-grafico-corpo { flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.cv-page .cvg-grafico-nota { font-size: 12px; line-height: 16px; color: var(--g-texto-3); margin-top: auto; }
+/* fileira de 4 cartões no desktop (o herói ocupa 1 coluna e meia) */
+.cv-page .cvg-fila--4 { grid-template-columns: 1.5fr repeat(3, minmax(0, 1fr)); }
+.cv-page .cvg-fila--3 { grid-template-columns: 1.5fr repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .cv-page .cvg-fila--4, .cv-page .cvg-fila--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .cv-page .cvg-fila--4, .cv-page .cvg-fila--3 { grid-template-columns: 1fr; } }
+/* anel pequeno dentro do painel de gráfico */
+.cv-page .cvg-anel svg { width: 88px; height: 88px; }
+
+/* ── item 338: chavinha CLÁSSICO × NOVO no cabeçalho do Meu Painel ── */
+.cevico-hero-chip.cevico-hero-chip-seg { padding: 2px; gap: 2px; }
+.cevico-hero-seg-btn {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  font: inherit;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.cevico-hero-seg-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.cevico-hero-seg-btn.cevico-hero-seg-on { background: #fff; color: var(--cv-deep, #152c61); }
+.cevico-hero-seg-btn:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }

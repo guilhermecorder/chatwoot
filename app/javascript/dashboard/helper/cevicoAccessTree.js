@@ -39,6 +39,8 @@ export function flattenCatalog(catalog) {
             : ['view'],
         default: raw.default || (raw.admin ? 'none' : INHERIT),
         admin: raw.admin === true,
+        // nó "sem herança" (auditoria 12/10): só vale com marcação própria
+        explicit: raw.explicit === true,
         children: children.map(c => String(c.key)),
       };
       walk(children, key);
@@ -109,6 +111,8 @@ export function mergedMarks(index, explicit, roleTree) {
 // a marcação que vale para o nó: nele mesmo ou no pai mais perto
 export function explicitLevel(index, marks, key) {
   if (key in marks) return { level: marks[key], from: key };
+  // nó "sem herança": a marcação do pai não desce até aqui
+  if (index[key]?.explicit) return null;
   const anc = ancestorsOf(index, key).find(a => a in marks);
   return anc ? { level: marks[anc], from: anc } : null;
 }

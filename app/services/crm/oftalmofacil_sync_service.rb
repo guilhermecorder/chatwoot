@@ -3,8 +3,8 @@
 # Lê o banco MySQL do OftalmoFácil com um usuário SÓ-LEITURA (nenhuma
 # alteração no sistema dele) e espelha as cirurgias da CEVICO (fornecedor
 # CATARATA_SP) em cevico_oftalmofacil_surgeries. Depois TRATA cada uma:
-#   1. casa o paciente: telefone → CPF → nome exato (o que sobrar pode ir
-#      pro casador por IA da planilha, opcional) → senão CRIA o paciente
+#   1. casa o paciente: telefone → CPF → nome + e-mail iguais → senão CRIA o
+#      paciente (nome sozinho NUNCA casa — auditoria 07/10, #170: homônimo)
 #   2. enriquece o cadastro (CPF em custom_attributes, e-mail, nome vazio)
 #   3. card do CRM: agendada/aguardando pagamento → "Cirurgia Agendada";
 #      realizada até 30 dias → "Cirurgia Realizada" (roda a jornada de
@@ -38,13 +38,27 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
 
   Result = Struct.new(:pulled, :created_contacts, :moved, :ahead, :labeled, :errors, :cursor, :cursor_id,
                       :tasks_created, :tasks_updated, :partners, :skipped_partners, :healed, :unread_found,
-                      keyword_init: true)
+                      :tasks_adopted, :fatal, keyword_init: true)
+  # Rodada 4 (revisão do achado #382): a rodada inteira falhou (hub fora do ar,
+  # senha errada, IP bloqueado, tempo esgotado). O call continua devolvendo o
+  # Result (quem chama decide), mas com result.fatal preenchido; o
+  # Crm::OftalmofacilSyncJob transforma isso neste erro para gravar a falha e
+  # mostrar a faixa vermelha, sem fingir que a rodada foi boa.
+  class Unreachable < StandardError; end
+  # 🔁 auditoria 10/2026 (#462/#472): a consulta lançada pela recepção e a
+  # mesma consulta vinda do hub só são "a mesma" quando a hora bate com esta folga
+  TWIN_WINDOW = 30.minutes
   # item 254: a Agenda se conserta sozinha nos próximos dias (ver heal_agenda!)
   HEAL_DAYS = 14
   UPCOMING_DAYS = 7
 
-  def initialize(account:, config: nil, silent: nil, since: :cursor)
+  attr_reader :result
+
+  # heartbeat: chamado a cada lote lido do hub (o job usa para renovar a trava
+  # da conta numa recarga longa, ver Crm::OftalmofacilSyncJob.renew_lock)
+  def initialize(account:, config: nil, silent: nil, since: :cursor, heartbeat: nil)
     @account = account
+    @heartbeat = heartbeat
     @config = config || (CrmSetting.find_by(account: account)&.agenda_config || {})['oftalmofacil'] || {}
     # item 249 (26/09): cursor em DUAS partes (momento + id do último item lido).
     # Antes, dois itens gravados no MESMO segundo na virada de um lote de 500
@@ -54,7 +68,60 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     @silent = silent.nil? ? @since.blank? : silent
     @result = Result.new(pulled: 0, created_contacts: 0, moved: 0, ahead: 0, labeled: 0, errors: [], cursor: @since,
                          cursor_id: @since_id, tasks_created: 0, tasks_updated: 0, partners: 0, skipped_partners: 0,
-                         healed: 0, unread_found: 0)
+                         healed: 0, unread_found: 0, tasks_adopted: 0)
+  end
+
+  # 🔁 auditoria 10/2026 (#462/#472): "gêmea" = agendamento ATIVO do mesmo
+  # paciente (mesmo contato, ou mesmo telefone com DDD), do mesmo tipo, que a
+  # equipe/robô já lançou na Agenda SEM vínculo com o hub (external_ref vazio),
+  # na mesma hora (±30 min; sem hora no hub, o mesmo dia). É a consulta que o
+  # sync deve ADOTAR em vez de criar outra — duas tasks = dois lembretes pagos
+  # e o "sim" do paciente confirmando só uma. O rake cevico:oftalmofacil_dedupe_tasks
+  # usa a mesma regra para unir as que já nasceram duplicadas.
+  #
+  # 👪 Revisão: a família usa o MESMO número ("marca para a minha mãe", #101).
+  # Por isso: (a) consulta que já é de OUTRO contato nunca é gêmea ("o dono
+  # não muda", regra do AppointmentRecorder); (b) casou só pelo telefone → o
+  # nome do hub tem que bater com o nome na consulta; (c) casou pelo contato →
+  # o título não pode nomear outra pessoa. Sem prova, não adota (duplicar é
+  # bem menos grave do que engolir a consulta de um terceiro).
+  def self.twin_task(account, contact_id:, phone:, task_type:, at:, name: nil, exact_hour: true) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/ParameterLists, Metrics/PerceivedComplexity
+    digits = phone.to_s.gsub(/\D/, '')
+    return nil if at.blank? || task_type.blank? || (contact_id.blank? && digits.length < 8)
+
+    sp = at.in_time_zone('America/Sao_Paulo')
+    window = exact_hour ? ((sp - TWIN_WINDOW)..(sp + TWIN_WINDOW)) : sp.all_day
+    conds = []
+    conds << 'tasks.contact_id = :cid' if contact_id.present?
+    conds << "regexp_replace(COALESCE(tasks.phone, ''), '\\D', '', 'g') LIKE :tail" if digits.length >= 8
+    account.tasks
+           .where(task_type: task_type, external_ref: nil, canceled_at: nil, archived_at: nil, due_at: window)
+           .where(conds.join(' OR '), cid: contact_id, tail: "%#{digits.last(8)}")
+           .order(:due_at, :id)
+           .find do |t|
+      next false if t.contact_id.present? && contact_id.present? && t.contact_id != contact_id # é de outra pessoa
+
+      same_contact = contact_id.present? && t.contact_id == contact_id
+      # o LIKE pelos 8 últimos dígitos é só o filtro grosso: o DDD é conferido aqui
+      same_line = digits.length >= 8 && Crm::AppointmentRecorder.same_phone_line?(digits, t.phone)
+      (same_contact || same_line) && twin_name_ok?(name, t, same_contact: same_contact)
+    end
+  end
+
+  # palavras de título que não são nome de gente ("Consulta", "Retorno Maria")
+  GENERIC_TITLE_WORDS = %w[consulta consultas exame exames retorno avaliacao cirurgia teleconsulta paciente recepcao
+                           agendamento pos operatorio posop].freeze
+
+  # o nome do hub bate com quem está na consulta da equipe?
+  #   · casou pelo CONTATO: título sem nome ("Consulta") vale; com um nome só,
+  #     ele tem que aparecer no nome do hub; nome completo = mesma régua da IA.
+  #   · casou só pelo TELEFONE: o título precisa trazer o nome (régua da IA).
+  def self.twin_name_ok?(name, task, same_contact:)
+    words = Crm::AppointmentRecorder.name_words(Crm::AppointmentRecorder.patient_title(task)) - GENERIC_TITLE_WORDS
+    return same_contact if words.empty? || name.blank?
+    return Crm::AppointmentRecorder.name_words(name).intersect?(words) if same_contact && words.size == 1
+
+    Crm::AppointmentRecorder.same_patient_name?(name, words.join(' '))
   end
 
   # ── parceiros × nosso ──────────────────────────────────────────────────
@@ -180,6 +247,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
         @result.errors << "item #{row['SCH_ITE_TOKEN']}: #{e.message}"
         Rails.logger.error "[OftalmoFácil sync] #{row['SCH_ITE_TOKEN']}: #{e.class} #{e.message}"
       end
+      @heartbeat&.call
       break if rows.size < BATCH
     end
     @result.cursor = max_seen
@@ -188,6 +256,9 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     @result
   rescue StandardError => e
     @result.errors << friendly_error(e)
+    # falha da rodada inteira (não de um item): o cursor fica onde estava
+    @result.fatal = friendly_error(e)
+    Rails.logger.error "[OftalmoFácil sync] rodada falhou: #{e.class} #{e.message}"
     @result
   ensure
     @connection&.close
@@ -301,6 +372,42 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     @result
   end
 
+  # 🔁 Revisão (#462/#472, ordem inversa): o hub trouxe o item PRIMEIRO (task
+  # com vínculo) e a recepção lançou a mesma consulta na Agenda DEPOIS. Roda a
+  # cada sincronização (depois de heal_agenda!) e pelo rake
+  # cevico:oftalmofacil_dedupe_tasks: a consulta da equipe fica (quem criou,
+  # observações, hora) e ganha o vínculo; a cópia do hub vai para a Lixeira com
+  # o motivo "duplicada_hub". Resposta do paciente (sim/não) e as marcas de
+  # lembrete já enviadas passam para a que fica, para nada sair de novo.
+  # Devolve os pares [consulta da equipe, cópia do hub] unidos (ou que seriam,
+  # em `dry`). `days: nil` = sem limite para a frente; `past: true` olha também
+  # consultas já passadas.
+  def dedupe_tasks!(days: HEAL_DAYS, past: false, dry: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    return [] unless agenda_enabled?
+
+    today = ActiveSupport::TimeZone['America/Sao_Paulo'].now.beginning_of_day
+    scope = @account.tasks.where(source: 'oftalmofacil', canceled_at: nil, archived_at: nil)
+                    .where.not(external_ref: nil).where.not(due_at: nil)
+    scope = scope.where(due_at: today..) unless past
+    scope = scope.where(due_at: ..(today + days.days).end_of_day) if days
+    seen = Set.new # cirurgia OD+OE = dois itens do hub para UMA consulta da equipe: conta uma vez
+    pairs = []
+    scope.order(:due_at, :id).each do |hub|
+      surgery = Crm::OftalmofacilSurgery.find_by(account_id: @account.id, item_token: hub.external_ref)
+      twin = self.class.twin_task(@account, contact_id: hub.contact_id, phone: hub.phone, task_type: hub.task_type,
+                                            at: hub.due_at, exact_hour: surgery.nil? || surgery.hour_hhmm.present?,
+                                            name: surgery&.patient_name.presence || Crm::AppointmentRecorder.patient_title(hub))
+      next if twin.nil? || seen.include?(twin.id)
+
+      seen << twin.id
+      merge_twin!(twin, hub) unless dry
+      pairs << [twin, hub]
+    rescue StandardError => e
+      @result.errors << "duplicada #{hub.external_ref}: #{e.message}"
+    end
+    pairs
+  end
+
   private
 
   def heal_candidates(days) # rubocop:disable Metrics/AbcSize
@@ -319,7 +426,8 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   end
 
   def heal_one!(surgery)
-    contact = surgery.contact_id && @account.contacts.find_by(id: surgery.contact_id)
+    # casado só pelo nome (antes do #170) não é de confiança: passa pelo casamento de novo
+    contact = surgery.contact_id && surgery.match_via != 'name' ? @account.contacts.find_by(id: surgery.contact_id) : nil
     before = @result.tasks_created + @result.tasks_updated
     if contact
       Crm::Stamp.with(via: 'sync') { sync_task!(contact, surgery, !own_provider?(surgery.provider_name)) }
@@ -473,18 +581,29 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     "of_#{slug.first(40)}"
   end
 
-  def resolve_contact(surgery)
+  # 🛡️ auditoria 07/10 (#170): NUNCA casar só pelo nome. Homônimo (duas "Maria
+  # Silva" no mundo, uma só na base) virava a mesma pessoa — e o CPF, a etiqueta
+  # do parceiro, o card e o lembrete de confirmação iam parar no WhatsApp do
+  # paciente errado. Sem telefone ou CPF casando, só nome + e-mail iguais ainda
+  # casa; senão nasce um paciente novo (duplicado a equipe junta depois; mensagem
+  # mandada para a pessoa errada não volta).
+  def resolve_contact(surgery) # rubocop:disable Metrics/CyclomaticComplexity
     @match_via = nil
     if (c = find_by_phone(surgery.patient_phone))
       @match_via = 'phone'
       return c
     end
-    if surgery.patient_cpf.present? && (c = find_by_cpf(surgery.patient_cpf))
+    # cirurgia que ANTES do #170 casou só pelo nome: o CPF e o e-mail que estão
+    # nesse contato foram gravados pelo próprio sync, então não servem de prova.
+    # Só o telefone confirma que é a mesma pessoa; senão nasce um paciente novo
+    # (ação pós-deploy limpa o rastro no contato antigo).
+    suspect_id = surgery.match_via == 'name' ? surgery.contact_id : nil
+    if surgery.patient_cpf.present? && (c = find_by_cpf(surgery.patient_cpf)) && c.id != suspect_id
       @match_via = 'cpf'
       return c
     end
-    if (c = find_by_name(surgery.patient_name))
-      @match_via = 'name'
+    if (c = find_by_name_and_email(surgery.patient_name, surgery.patient_email)) && c.id != suspect_id
+      @match_via = 'name_email'
       return c
     end
     @match_via = 'created'
@@ -505,13 +624,14 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     @account.contacts.where("custom_attributes->>'cpf' = ?", cpf).order(:id).first
   end
 
-  # nome EXATO normalizado e único — homônimo não casa (fica pro CPF/telefone)
-  def find_by_name(name)
+  # nome EXATO normalizado + e-mail igual (o e-mail é chave forte; o nome
+  # sozinho nunca casa — ver #170)
+  def find_by_name_and_email(name, email)
     key = normalize_name(name)
-    return nil if key.blank?
+    return nil if key.blank? || email.blank?
 
-    matches = @account.contacts.where('LOWER(name) LIKE ?', "%#{key.split.last}%").select { |c| normalize_name(c.name) == key }
-    matches.size == 1 ? matches.first : nil
+    c = @account.contacts.where('LOWER(email) = ?', email.to_s.strip.downcase).order(:id).first
+    c if c && normalize_name(c.name) == key
   end
 
   def create_contact(surgery)
@@ -521,8 +641,17 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     @account.contacts.create!(attrs)
   rescue ActiveRecord::RecordInvalid
     # telefone/e-mail já existem com outra máscara — acha de novo antes de desistir
-    find_by_phone(surgery.patient_phone) || @account.contacts.create!(name: surgery.patient_name.presence || 'Paciente',
-                                                                      additional_attributes: origin_attributes(surgery))
+    find_by_phone(surgery.patient_phone) || create_contact_without_email(attrs)
+  end
+
+  # e-mail da família (o mesmo e-mail já é de OUTRO paciente da conta) não pode
+  # derrubar o telefone junto: tenta de novo só sem o e-mail, e só então nasce
+  # o cadastro só com nome e origem. Sem telefone o paciente não recebe lembrete
+  # e a próxima sincronização da mesma cirurgia criava mais um duplicado.
+  def create_contact_without_email(attrs)
+    @account.contacts.create!(attrs.except(:email))
+  rescue ActiveRecord::RecordInvalid
+    @account.contacts.create!(attrs.slice(:name, :additional_attributes))
   end
 
   def origin_attributes(surgery)
@@ -537,15 +666,31 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     if surgery.patient_cpf.present? && contact.custom_attributes&.dig('cpf').blank?
       changes[:custom_attributes] = (contact.custom_attributes || {}).merge('cpf' => surgery.patient_cpf)
     end
-    changes[:email] = surgery.patient_email if contact.email.blank? && surgery.patient_email.present?
+    changes[:email] = surgery.patient_email if contact.email.blank? && email_free?(surgery.patient_email, contact)
     changes[:name] = surgery.patient_name if contact.name.blank? && surgery.patient_name.present?
-    # parceiro: o contato lembra de onde veio (mesmo quando já existia)
-    if partner && contact.additional_attributes&.dig('parceiro').blank?
-      current = contact.additional_attributes || {}
-      changes[:additional_attributes] = current.merge('origem' => current['origem'].presence || 'oftalmofacil',
-                                                      'parceiro' => surgery.provider_name.to_s.first(80))
-    end
     contact.update_columns(changes) if changes.any? # rubocop:disable Rails/SkipsModelValidations
+    remember_partner!(contact, surgery) if partner && contact.additional_attributes&.dig('parceiro').blank?
+  end
+
+  # parceiro: o contato lembra de onde veio (mesmo quando já existia).
+  # Rodada 4 da auditoria: gravado pelo Cevico::AttributeMerge e o 'parceiro' é
+  # conferido de novo DENTRO da trava — o lê→altera→grava antigo apagava, no
+  # contato, marcas que outro escritor guardou no meio (lembrete, NPS, pausa da IA).
+  def remember_partner!(contact, surgery)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      next attrs if attrs['parceiro'].present?
+
+      attrs.merge('origem' => attrs['origem'].presence || 'oftalmofacil',
+                  'parceiro' => surgery.provider_name.to_s.first(80))
+    end
+  end
+
+  # e-mail só completa o cadastro se NINGUÉM mais da conta já o tem (o e-mail é
+  # único por conta; gravar por cima derrubava o item inteiro com erro do banco)
+  def email_free?(email, contact)
+    return false if email.blank?
+
+    !@account.contacts.where('LOWER(email) = ?', email.to_s.strip.downcase).where.not(id: contact.id).exists?
   end
 
   # nosso → funil da CEVICO; parceiro → funil dos parceiros (sem funil
@@ -663,25 +808,29 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     return if task.nil? && surgery.status_kind == 'cancelada' # cancelada lá e nunca esteve aqui: nada a criar
 
     kind = task_kind(surgery)
-    attrs = {
-      title: "#{kind[:prefix]}: #{surgery.patient_name.presence || contact.name}",
-      task_type: kind[:task_type], modality: kind[:modality],
-      due_at: surgery.local_time, # item 242: hora certa (segundos → HH:MM) no fuso de São Paulo
-      phone: surgery.patient_phone.presence && e164(surgery.patient_phone),
-      procedure: [surgery.procedure_name, surgery.eye].compact_blank.join(' · ').presence,
-      doctor: doctor_name_for(surgery.doctor_crm),
-      unit: unit_for(surgery.clinic_name),
-      contact_id: contact.id,
-      booking_kind: 'registro',
-      source: 'oftalmofacil',
-      source_detail: partner ? surgery.provider_name.to_s.first(80) : nil,
-      external_ref: surgery.item_token
-    }
-    attrs[:unit] ||= task&.unit
-    attrs[:doctor] ||= task&.doctor
+    # 🔁 auditoria 10/2026 (#462/#472): a recepção (ou o Atendente) já lançou
+    # esta consulta na Agenda? Então ela é ADOTADA: ganha o vínculo com o hub e
+    # fica como está (quem criou, observações, hora da equipe). Antes nascia uma
+    # segunda task → dois lembretes no mesmo dia e o "sim" confirmava só um.
+    # Adotada, segue direto para o bloco de STATUS (item já realizado/ausente
+    # na primeira vez que aparece também conclui/marca falta).
+    if task.nil?
+      twin = twin_for(contact, surgery, kind)
+      task = adopt_twin!(twin, contact, surgery, partner) if twin
+    end
+
+    # 🔒 Revisão: consulta que NÃO nasceu do sync (adotada) só acompanha o
+    # STATUS do hub. Título, hora, unidade, médico, telefone, paciente e tipo são
+    # da equipe — senão a hora do hub (ou o 08:00 de item sem hora) trocava a
+    # hora certa, 'registro' tirava a consulta de "Consultas agendadas" e a
+    # remarcação apagava o "sim" do paciente (lembrete de novo, na hora errada).
+    # (born_via vazio = task de antes do carimbo: o sync a criou, segue como sempre)
+    adopted = task.present? && task.cevico_born_via.present? && task.cevico_born_via != 'sync'
+    attrs = adopted ? {} : hub_task_attrs(contact, surgery, kind, partner, task)
     case surgery.status_kind
     when 'realizada'
-      attrs.merge!(status: :done, attendance: 'attended', canceled_at: nil, completed_at: task&.completed_at || attrs[:due_at])
+      attrs.merge!(status: :done, attendance: 'attended', canceled_at: nil,
+                   completed_at: task&.completed_at || attrs[:due_at] || task&.due_at)
     when 'cancelada'
       attrs[:canceled_at] = task&.canceled_at || Time.current
     when 'ausente'
@@ -708,6 +857,95 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     end
   rescue ActiveRecord::RecordInvalid => e
     @result.errors << "agenda #{surgery.item_token}: #{e.message}"
+  end
+
+  # tudo o que o hub manda para a task que ELE criou (ou vai criar)
+  def hub_task_attrs(contact, surgery, kind, partner, task) # rubocop:disable Metrics/AbcSize
+    attrs = {
+      title: "#{kind[:prefix]}: #{surgery.patient_name.presence || contact.name}",
+      task_type: kind[:task_type], modality: kind[:modality],
+      due_at: surgery.local_time, # item 242: hora certa (segundos → HH:MM) no fuso de São Paulo
+      phone: surgery.patient_phone.presence && e164(surgery.patient_phone),
+      procedure: [surgery.procedure_name, surgery.eye].compact_blank.join(' · ').presence,
+      doctor: doctor_name_for(surgery.doctor_crm),
+      unit: unit_for(surgery.clinic_name),
+      contact_id: contact.id,
+      booking_kind: 'registro',
+      source: 'oftalmofacil',
+      source_detail: partner ? surgery.provider_name.to_s.first(80) : nil,
+      external_ref: surgery.item_token
+    }
+    attrs[:unit] ||= task&.unit
+    attrs[:doctor] ||= task&.doctor
+    attrs
+  end
+
+  def twin_for(contact, surgery, kind)
+    self.class.twin_task(@account, contact_id: contact.id, phone: surgery.patient_phone, task_type: kind[:task_type],
+                                   at: surgery.local_time, name: surgery.patient_name.presence || contact.name,
+                                   exact_hour: surgery.hour_hhmm.present?)
+  end
+
+  # só o CARIMBO do hub entra na task da equipe (vínculo + de onde veio); o resto
+  # — título, hora, médico, observação, quem criou — continua sendo dela.
+  # Daqui em diante o item do hub acompanha só o STATUS desta task (ver sync_task!).
+  # Devolve a task adotada.
+  def adopt_twin!(twin, contact, surgery, partner)
+    twin.update!(external_ref: surgery.item_token, source: 'oftalmofacil',
+                 source_detail: adopted_source_detail(twin, contact, partner ? surgery.provider_name : nil),
+                 # casou só pelo telefone (com o nome conferido no twin_task): ganha o paciente
+                 contact_id: twin.contact_id || contact.id,
+                 # "como nasceu" nunca fica vazio na adotada — é o que diz ao sync
+                 # que ela é da equipe (o carimbo escreveria 'sync' por causa da fonte)
+                 cevico_born_via: twin.cevico_born_via.presence || 'equipe')
+    @result.tasks_adopted += 1
+    twin
+  end
+
+  # 🏷️ Revisão: item de PARCEIRO adotando consulta que a recepção marcou como
+  # "CEVICO" (origem do formulário, item 300) ou de paciente "CEVICO primeiro"
+  # (regra B) NÃO carimba a consulta como do parceiro — senão o lembrete
+  # passaria a sair pela caixa/modelo do Oftalmofácil e os números por fonte
+  # mudariam. O vínculo (external_ref) sozinho já evita a duplicata. Decisão
+  # final de quem manda o lembrete nesse caso fica com o Guilherme; até lá, o
+  # lado mais seguro: a consulta continua sendo da CEVICO.
+  def adopted_source_detail(twin, contact, provider_name)
+    return nil if provider_name.blank?
+    return nil if twin.origin == 'cevico' || Crm::PartnerGuard.cevico_first?(contact)
+
+    provider_name.to_s.first(80)
+  end
+
+  def merge_twin!(twin, hub)
+    contact = twin.contact || hub.contact
+    ref = hub.external_ref
+    provider = hub.source_detail
+    Task.transaction do
+      # a cópia do hub solta o vínculo ANTES (o vínculo é único por conta) e vai para a Lixeira
+      hub.update_columns(external_ref: nil, source: nil, canceled_at: Time.current, cancel_reason: 'duplicada_hub') # rubocop:disable Rails/SkipsModelValidations
+      twin.update!(external_ref: ref, source: 'oftalmofacil',
+                   source_detail: adopted_source_detail(twin, contact, provider),
+                   contact_id: twin.contact_id || hub.contact_id,
+                   confirmed_at: twin.confirmed_at || hub.confirmed_at, declined_at: twin.declined_at || hub.declined_at,
+                   cevico_born_via: twin.cevico_born_via.presence || 'equipe')
+    end
+    carry_reminder_marks!(contact, from: hub, to: twin)
+    @result.tasks_adopted += 1
+  end
+
+  # as marcas de lembrete (D-n, reforço, resposta) da cópia passam para a que
+  # fica; marca que a que fica já tinha vence
+  def carry_reminder_marks!(contact, from:, to:)
+    return if contact.nil?
+
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      all = attrs['cevico_appt_reminders'] || {}
+      src = all[from.id.to_s]
+      next attrs if src.blank?
+
+      all[to.id.to_s] = src.merge(all[to.id.to_s] || {})
+      attrs.merge('cevico_appt_reminders' => all)
+    end
   end
 
   # tipo do agendamento pelo tipo do procedimento lá: exame → trilho Exames,

@@ -20,6 +20,9 @@ module Crm::BookingRate
   end
 
   # entradas na coluna de agendamento no período (uma linha por passagem)
+  # Só conta event_type 'entered': a passagem por REMARCAÇÃO ('rescheduled',
+  # Crm::BookingSideEffects::RESCHEDULED_EVENT — auditoria #197) e a carga em
+  # massa ('bulk', item 309) ficam fora — remarcar não é agendamento novo.
   # lens (item 328): com a lente, vale a coluna de agendamento de CADA fonte
   # que ela enxerga (a da casa + "Consulta Agendada" do funil do Oftalmofácil)
   def entries(account, since, until_at, lens: nil)

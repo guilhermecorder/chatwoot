@@ -242,6 +242,14 @@ class Rack::Attack
     req.ip if req.post? && %r{\A/forms/[^/]+(/[^/]+)?\z}.match?(req.path) && !req.path.end_with?('/track')
   end
 
+  ## 🔐 Rodada 4 da auditoria (#119): o link LIMPO (/forms/:slug, sem token)
+  ## pode criar paciente novo — além dos 10/min, um teto por DIA por IP.
+  ## O teto global por formulário (200 cadastros novos/dia) fica no servidor
+  ## (Crm::FormVerification.new_contact_allowed?), com tarefa 🔴 para o admin.
+  throttle('cevico/form_submit_daily', limit: ENV.fetch('RATE_LIMIT_CEVICO_FORM_DAILY', '100').to_i, period: 1.day) do |req|
+    req.ip if req.post? && %r{\A/forms/[^/]+\z}.match?(req.path)
+  end
+
   ## Beacons de retenção/protocolo (só contadores — limite mais alto)
   throttle('cevico/public_beacons', limit: 90, period: 1.minute) do |req|
     req.ip if req.post? &&

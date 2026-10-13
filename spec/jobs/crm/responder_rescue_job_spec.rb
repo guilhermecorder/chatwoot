@@ -55,6 +55,20 @@ RSpec.describe Crm::ResponderRescueJob do
     expect { described_class.perform_now }.not_to rescued
   end
 
+  # (#100) o job original ainda roda (ou morreu com a trava no Redis): a única
+  # vez do resgate não pode ser gasta num job que ia encontrar a conversa travada
+  it 'conversa travada por outro job: o resgate não gasta a vez e tenta de novo na próxima rodada', :aggregate_failures do
+    talk(last: :incoming, minutes_ago: 10)
+    lock = instance_double(Redis::LockManager)
+    allow(Redis::LockManager).to receive(:new).and_return(lock)
+    allow(lock).to receive(:locked?).and_return(true, false)
+
+    expect { described_class.perform_now }.not_to rescued
+    # só a marca do resgate (a criação da conversa no preparo também usa o .set)
+    expect(Redis::Alfred).not_to have_received(:set).with(/cevico:responder:rescue/, any_args)
+    expect { described_class.perform_now }.to rescued
+  end
+
   it 'respeita a pausa da conversa (humano assumiu)' do
     conversation, = talk(last: :incoming, minutes_ago: 10)
     conversation.update!(additional_attributes: { Crm::ResponderAgentJob::STATE_KEY => { 'paused' => true } })
@@ -69,6 +83,23 @@ RSpec.describe Crm::ResponderRescueJob do
 
     settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
     stub_const('Crm::ResponderAgentJob::LIVE_ENABLED', false)
+    expect { described_class.perform_now }.not_to rescued
+  end
+
+  # 🚧 auditoria 10/2026 (#63/#98/#253/#459): o listener deixa o paciente de
+  # parceiro sem IA de propósito; o resgate não pode devolver a conversa à IA
+  it 'cerca dos parceiros: paciente do Oftalmofácil (etiqueta of_) nunca volta para a IA', :aggregate_failures do
+    conversation, = talk(last: :incoming, minutes_ago: 10)
+    conversation.contact.add_labels(%w[oftalmofacil of_clinica_parceira])
+
+    expect(described_class.waiting(account, settings.ai_config['agents'])).to eq([])
+    expect { described_class.perform_now }.not_to rescued
+  end
+
+  it 'cerca dos parceiros: paciente com atributo parceiro também fica de fora' do
+    conversation, = talk(last: :incoming, minutes_ago: 10)
+    conversation.contact.update!(additional_attributes: { 'parceiro' => 'CLINICA VISAO NORTE' })
+
     expect { described_class.perform_now }.not_to rescued
   end
 

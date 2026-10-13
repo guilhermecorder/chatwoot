@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import { useAlert } from 'dashboard/composables';
 import { relativeTime } from '../helpers';
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
@@ -23,6 +24,15 @@ const { t } = useI18n();
 const router = useRouter();
 const { accountId } = useAccount();
 const { isAdmin } = useAdmin();
+// 🔒 R2 da auditoria (#287/#300): valor em R$ é do Financeiro (ver = enxerga,
+// editar = grava) e "Remover do funil" é de quem trata dados — o servidor
+// aplica a mesma regra; aqui só se esconde o que a pessoa não pode.
+const { canView, canEdit } = useCevicoAccess();
+const canSeeValue = computed(() => isAdmin.value || canView('financeiro'));
+const canEditValue = computed(() => isAdmin.value || canEdit('financeiro'));
+const canRemove = computed(
+  () => isAdmin.value || canEdit('automacoes.tratamento')
+);
 
 const agents = useMapGetter('agents/getAgents');
 const accountLabels = useMapGetter('labels/getLabels');
@@ -178,8 +188,11 @@ const save = async () => {
   if (!props.contact) return;
   isSaving.value = true;
   try {
-    const { labels, ...crmFields } = form.value;
+    const { labels, value, ...crmFields } = form.value;
     const previousLabels = props.contact.labels ?? [];
+    // valor só vai no pedido de quem pode gravar (o servidor ignora de qualquer
+    // jeito; assim não mandamos um '' que apagaria o valor que a pessoa nem vê)
+    if (canEditValue.value) crmFields.value = value;
 
     // Salva campos CRM e etiquetas em paralelo
     await Promise.all([
@@ -468,11 +481,12 @@ const doMerge = async () => {
               </select>
             </div>
 
-            <!-- Value (só admin) -->
-            <div v-if="isAdmin">
+            <!-- Value (só admin ou quem vê o Financeiro; grava quem edita) -->
+            <div v-if="canSeeValue">
               <div class="flex items-center justify-between mb-1">
                 <label class="text-xs font-medium text-n-slate-11">{{ $t('CRM.MODAL.VALUE') }}</label>
                 <button
+                  v-if="canEditValue"
                   class="text-[11px] text-n-brand hover:underline flex items-center gap-1 disabled:opacity-50"
                   :disabled="isDetectingValue"
                   :title="$t('CRM.VALUE_DETECT.HINT')"
@@ -486,7 +500,8 @@ const doMerge = async () => {
                 v-model="form.value"
                 type="number"
                 step="0.01"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                :disabled="!canEditValue"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 disabled:opacity-60"
                 placeholder="0,00"
               />
             </div>
@@ -580,8 +595,8 @@ const doMerge = async () => {
             </button>
           </div>
 
-          <!-- Remove section -->
-          <div class="border-t border-n-weak pt-3">
+          <!-- Remove section (só admin ou quem trata dados — R2 #300) -->
+          <div v-if="canRemove" class="border-t border-n-weak pt-3">
             <div v-if="!showRemoveConfirm">
               <button
                 class="w-full py-2 text-sm text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
@@ -591,7 +606,12 @@ const doMerge = async () => {
               </button>
             </div>
             <div v-else class="flex items-center gap-2">
-              <span class="text-xs text-n-slate-11 flex-1">{{ $t('CRM.MODAL.REMOVE') }}?</span>
+              <span class="text-xs text-n-slate-11 flex-1">
+                {{ $t('CRM.MODAL.REMOVE') }}?
+                <span class="block text-[11px] text-n-slate-10">
+                  {{ $t('CRM.MODAL.REMOVE_WARNING') }}
+                </span>
+              </span>
               <button
                 class="bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs disabled:opacity-50"
                 :disabled="isRemoving"
@@ -678,7 +698,10 @@ const doMerge = async () => {
 
           <!-- CRM snapshot (read-only) -->
           <div class="border-t border-n-weak pt-4 space-y-2">
-            <div v-if="isAdmin && contact.value" class="flex items-center justify-between">
+            <div
+              v-if="canSeeValue && contact.value"
+              class="flex items-center justify-between"
+            >
               <span class="text-xs text-n-slate-10">{{ $t('CRM.MODAL.VALUE') }}</span>
               <span class="text-sm font-medium text-green-600">
                 R$ {{ Number(contact.value).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}

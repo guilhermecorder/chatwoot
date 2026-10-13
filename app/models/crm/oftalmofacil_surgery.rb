@@ -53,7 +53,7 @@
 # Foreign Keys
 #
 #  fk_rails_...  (account_id => accounts.id)
-#  fk_rails_...  (contact_id => contacts.id)
+#  fk_rails_...  (contact_id => contacts.id) ON DELETE => nullify
 #
 class Crm::OftalmofacilSurgery < ApplicationRecord
   self.table_name = 'cevico_oftalmofacil_surgeries'
@@ -68,11 +68,34 @@ class Crm::OftalmofacilSurgery < ApplicationRecord
   KINDS = %w[agendada realizada cancelada ausente aguardando_pagamento outro].freeze
 
   scope :in_period, ->(from, to) { where(surgery_date: from..to) }
-  scope :realizadas, -> { where(status_kind: 'realizada') }
+  # Rodada 5 (#151/#173): o Oftalmofácil NUNCA marca "realizada" — realizada
+  # = ativa (agendada) ou realizada com a data já PASSADA, no fuso de São
+  # Paulo. Mesma ideia do Financeiro (item 318) e do funil por anúncio (esses
+  # dois ainda usam o "hoje" do servidor, em UTC — ver BACKLOG).
+  # ⚠️ Para contar cirurgia realizada use SEMPRE esta scope (ou `concluida?`);
+  # o status_kind 'realizada' sozinho dá quase sempre zero. A antiga
+  # `realizadas` foi apagada de propósito.
+  scope :concluidas, lambda { |today = Crm::OftalmofacilSurgery.today_sp|
+    where(status_kind: Crm::AdFunnelSteps::OF_DONE).where('surgery_date < ?', today)
+  }
+  # ainda por fazer: só agendada de hoje em diante (ou sem data) — a que já
+  # passou é `concluidas`
+  scope :agendadas_por_vir, lambda { |today = Crm::OftalmofacilSurgery.today_sp|
+    where(status_kind: 'agendada').where('surgery_date IS NULL OR surgery_date >= ?', today)
+  }
   scope :faturaveis, -> { where(status_kind: %w[agendada realizada aguardando_pagamento]) }
+
+  def self.today_sp
+    ActiveSupport::TimeZone['America/Sao_Paulo'].today
+  end
 
   def resultado
     amount.to_f - clinic_price.to_f - profit.to_f
+  end
+
+  # a mesma régua da scope `concluidas`, item a item (Hub: mês, lista, ficha)
+  def concluida?(today = self.class.today_sp)
+    Crm::AdFunnelSteps::OF_DONE.include?(status_kind) && surgery_date.present? && surgery_date < today
   end
 
   # rótulo humano da classificação

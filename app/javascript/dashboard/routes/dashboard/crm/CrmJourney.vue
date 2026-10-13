@@ -69,6 +69,7 @@ const SEND_STATUS = {
     label: 'Aguardando aprovação',
     cls: 'bg-amber-500/15 text-amber-700',
   },
+  sending: { label: 'Enviando', cls: 'bg-amber-500/15 text-amber-700' },
   sent: { label: 'Enviada', cls: 'bg-green-500/15 text-green-700' },
   skipped: { label: 'Pulada', cls: 'bg-n-alpha-2 text-n-slate-10' },
   failed: { label: 'Falhou', cls: 'bg-red-500/15 text-red-600' },
@@ -185,12 +186,25 @@ const act = async (send, action) => {
     load(true);
   } catch (error) {
     useAlert(error?.response?.data?.error || 'Não consegui fazer isso agora.');
+    // 409 "já está sendo tratado / já foi tratado": o servidor devolve o envio
+    // como está agora — a linha da fila não pode ficar "Aguardando aprovação"
+    const s = error?.response?.data?.send;
+    if (s) {
+      const i = queue.value.findIndex(x => x.id === s.id);
+      if (i >= 0) queue.value.splice(i, 1, s);
+    }
+    loadQueue();
   } finally {
     busySend.value = null;
   }
 };
 const approveAll = async () => {
   if (!pendingReview.value.length) return;
+  // auditoria R3 (#412): confirma antes de mandar N mensagens de verdade
+  const n = pendingReview.value.length;
+  const msg = `Aprovar todos (${n})? Vai mandar ${n} mensagem(ns) para os pacientes agora, de verdade.`;
+  // eslint-disable-next-line no-alert
+  if (!window.confirm(msg)) return;
   busySend.value = 'all';
   try {
     const { data } = await CevicoJourneyAPI.approveAll();
@@ -296,11 +310,14 @@ const planNow = async m => {
 // teste para o meu número
 const testTarget = ref(null);
 const testPhone = ref(localStorage.getItem('cevico_journey_test_phone') || '');
+// auditoria R3 (#416): o teste só vai para o celular da própria pessoa
+const testOwnPhone = ref(false);
 const isTesting = ref(false);
 const testResult = ref(null);
 const openTest = m => {
   testTarget.value = m;
   testResult.value = null;
+  testOwnPhone.value = false;
 };
 const runTest = async () => {
   if (!testTarget.value) return;
@@ -310,7 +327,8 @@ const runTest = async () => {
     localStorage.setItem('cevico_journey_test_phone', testPhone.value);
     const { data } = await CevicoJourneyAPI.testSend(
       testTarget.value.id,
-      testPhone.value
+      testPhone.value,
+      { own_phone: testOwnPhone.value }
     );
     testResult.value = data;
   } catch (error) {
@@ -1471,14 +1489,19 @@ const inputClass =
               Enviar teste · {{ testTarget.name }}
             </h2>
             <p class="text-xs text-n-slate-10">
-              Manda a mensagem para o telefone abaixo com os dados de um
-              paciente real de exemplo. Sai pela caixa configurada, de verdade.
+              Manda a mensagem para o SEU celular com dados fictícios de exemplo
+              (nenhum paciente real). Sai pela caixa configurada, de verdade.
+              Número de paciente é recusado.
             </p>
             <input
               v-model="testPhone"
               :class="inputClass"
               placeholder="55 11 99999-9999"
             />
+            <label class="flex items-center gap-2 text-xs text-n-slate-11">
+              <input v-model="testOwnPhone" type="checkbox" />
+              Este celular é meu (não é de paciente)
+            </label>
             <div
               v-if="testResult"
               class="text-xs rounded-lg px-3 py-2"

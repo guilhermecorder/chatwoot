@@ -6,6 +6,7 @@ class Crm::PageGenerateJob < ApplicationJob
   queue_as :default
 
   RESULT_TTL = 15.minutes
+  PUBLISHED_MEANWHILE = 'A página foi publicada enquanto a IA trabalhava — nada foi alterado.'.freeze
 
   def self.result_key(job_id)
     "cevico:pagegen:#{job_id}"
@@ -34,6 +35,7 @@ class Crm::PageGenerateJob < ApplicationJob
     if payload[:status] == 'done' && CevicoPage.normalize_ai_sections(result[:sections] || result['sections']).empty?
       payload = { status: 'error', error: 'A IA terminou sem conteúdo de seções — tente de novo (se repetir, me avise).' }
     end
+    payload = guard_published(page, payload, options)
     apply_result_to_page(page, result) if page && payload[:status] == 'done'
     write_status(job_id, page, payload)
   rescue StandardError => e
@@ -44,6 +46,16 @@ class Crm::PageGenerateJob < ApplicationJob
   end
 
   private
+
+  # corrida: o admin publicou o rascunho enquanto a IA trabalhava — o site
+  # está no ar e não pode ser reescrito por um pedido feito antes.
+  # (allow_published = admin pediu a IA numa página que JÁ estava no ar)
+  def guard_published(page, payload, options)
+    return payload unless page && payload[:status] == 'done'
+    return payload if options['allow_published'] || !page.reload.published?
+
+    { status: 'error', error: PUBLISHED_MEANWHILE }
+  end
 
   # resultado da IA vai DIRETO pra página (rascunho): a aba de montagem
   # recarrega e mostra pronta; slug/status/categoria ficam como estão.

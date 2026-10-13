@@ -89,8 +89,30 @@ module Crm::Calls::CallbackLock # rubocop:disable Metrics/ModuleLength
     owner = cfg['enabled'] ? owner_id(account, call.contact_id, calls) : nil
     return { ring_user_ids: ring_user_ids, ring_first_user_ids: ring_first_user_ids } if owner.nil?
 
+    # Auditoria #85: responsável deslogado (férias, folga, aba fechada) não
+    # ouve tocar — e com "só o responsável" NINGUÉM ouviria. Então a ligação
+    # cai para a lista de sempre da caixa, sem trava ao tocar. O responsável
+    # FICA na lista: a presença pisca (ping a cada 20 s; aba em segundo plano
+    # atrasa) e quem realmente saiu já não toca no navegador. A trava da
+    # ligação PERDIDA (arm!) continua com ele, para retornar quando voltar.
+    unless owner_online?(account, owner)
+      Rails.logger.info("[CEVICO calls] responsável #{owner} offline: ligação #{call.id} toca para a caixa inteira")
+      return { ring_user_ids: ring_user_ids | [owner], ring_first_user_ids: ring_first_user_ids }
+    end
+
     { ring_user_ids: cfg['exclusive'] ? [owner] : (ring_user_ids | [owner]),
       ring_first_user_ids: [owner], lock_user_ids: [owner], lock_after_seconds: cfg['after_seconds'] }
+  end
+
+  # a pessoa está com o sistema aberto e não se marcou "offline"? (mesma fonte
+  # da bolinha verde: OnlineStatusTracker). Se o Redis falhar, vale como presente
+  # para não mudar o comportamento de antes.
+  def owner_online?(account, user_id)
+    status = OnlineStatusTracker.get_available_users(account.id)[user_id.to_s]
+    status.present? && status != 'offline'
+  rescue StandardError => e
+    Rails.logger.warn("[CEVICO calls] presença do responsável não lida: #{e.message}")
+    true
   end
 
   # ligação perdida: guarda o responsável na ligação (nil = trava desligada ou coluna sem dono)
@@ -114,12 +136,13 @@ module Crm::Calls::CallbackLock # rubocop:disable Metrics/ModuleLength
     entry&.dig('raw', 'user_id')
   end
 
-  # ligações de volta feitas para o paciente depois da perdida
+  # ligações de volta feitas para o paciente depois da perdida — só de GENTE:
+  # ligação da assistente de voz (handled_by 'ai') não conta como retorno (#85)
   def attempts(call)
     return 0 if call.contact_id.blank?
 
     since = call.ended_at || call.started_at || call.created_at
-    Crm::Call.where(account_id: call.account_id, contact_id: call.contact_id, direction: :outbound)
+    Crm::Call.by_human.where(account_id: call.account_id, contact_id: call.contact_id, direction: :outbound)
              .where.not(id: call.id).where('created_at > ?', since).count
   end
 
@@ -127,7 +150,7 @@ module Crm::Calls::CallbackLock # rubocop:disable Metrics/ModuleLength
     return false if call.contact_id.blank?
 
     since = call.ended_at || call.started_at || call.created_at
-    Crm::Call.where(account_id: call.account_id, contact_id: call.contact_id).answered
+    Crm::Call.by_human.where(account_id: call.account_id, contact_id: call.contact_id).answered
              .where.not(id: call.id).exists?(['started_at > ?', since])
   end
 

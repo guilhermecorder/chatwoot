@@ -962,8 +962,9 @@ const visibleMenuItems = computed(() => {
 onMounted(() => {
   // carrega agent_permissions (e presets do CRM) para filtrar o menu
   store.dispatch('crm/fetchSettings').catch(() => {});
-  // carrega tarefas para o aviso de prazo na sidebar (badge em Tarefas)
-  store.dispatch('tasks/fetch').catch(() => {});
+  // badge em Tarefas: só a CONTAGEM (Rodada 7 — antes baixava a lista
+  // inteira de tarefas e agendamentos a cada abertura do sistema)
+  store.dispatch('tasks/fetchAlertCount').catch(() => {});
   // badge do Radar de Oportunidades no "Meu Painel" — atualiza a cada 5 min
   radarBadgeTimer = setInterval(
     () => {

@@ -6,11 +6,26 @@ class AutomationRules::ActionService < ActionService
     Current.executed_by = rule
   end
 
+  # 🚧 Auditoria 10/2026 (#237): cerca dos parceiros também nas automações
+  # NATIVAS do Chatwoot. Paciente de parceiro/Oftalmofácil nunca recebe
+  # mensagem automática — nem por regra "ao criar conversa → enviar mensagem".
+  # As ações que falam com o paciente (ou mandam a conversa dele por e-mail
+  # para um endereço que pode ser o dele, {{contact.email}}) são puladas;
+  # etiqueta, time, status, webhook e o e-mail de aviso para a EQUIPE
+  # (send_email_to_team) continuam valendo — avisar a equipe é justamente o
+  # que a cerca quer.
+  PARTNER_BLOCKED_ACTIONS = %w[send_message send_attachment send_email_transcript].freeze
+
   def perform
     @rule.actions.each do |action|
       @conversation.reload
       action = action.with_indifferent_access
+
       begin
+        # a conferência da cerca fica dentro do rescue: se ela falhar, só esta
+        # ação cai (e é registrada), não a regra inteira
+        next if partner_blocked?(action[:action_name])
+
         send(action[:action_name], action[:action_params])
       rescue StandardError => e
         ChatwootExceptionTracker.new(e, account: @account).capture_exception
@@ -21,6 +36,16 @@ class AutomationRules::ActionService < ActionService
   end
 
   private
+
+  # conversa de parceiro + ação que fala com o paciente = pula e registra no log
+  def partner_blocked?(action_name)
+    return false unless PARTNER_BLOCKED_ACTIONS.include?(action_name.to_s)
+
+    @partner_conversation = Crm::PartnerGuard.partner_conversation?(@conversation) if @partner_conversation.nil?
+    return false unless @partner_conversation
+
+    Crm::PartnerGuard.block!("automação nativa '#{@rule.name}' · #{action_name}", conversation: @conversation)
+  end
 
   def send_attachment(blob_ids)
     return if conversation_a_tweet?

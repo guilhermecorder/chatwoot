@@ -26,6 +26,7 @@ import AgentTestModal from './AgentTestModal.vue';
 import GuidancesPanel from './GuidancesPanel.vue';
 import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
 import NpsSurveyCard from './NpsSurveyCard.vue';
+import FollowupSmartCard from './FollowupSmartCard.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import {
   PERIOD_PRESETS,
@@ -1874,13 +1875,21 @@ const toggleInstagramInbox = id => {
 const saveAgentDraft = async key => {
   savingAgent.value = key;
   try {
+    // 🔐 auditoria 12/10 (achado #338): o token da Página NUNCA vai no rascunho
+    // (o rascunho volta para o navegador no GET settings); ele só entra ao Publicar
+    const draft = packAgentFields(key);
+    const tokenTyped = Boolean(draft.page_access_token);
+    delete draft.page_access_token;
     await CrmAPI.updateAi({
-      agents: { [key]: { draft: packAgentFields(key) } },
+      agents: { [key]: { draft } },
     });
     aiAgents.value[key].has_draft = true;
     editingAgent.value = { ...editingAgent.value, [key]: false };
+    const title = AGENT_META[key].title;
     useAlert(
-      `💾 Rascunho de ${AGENT_META[key].title} salvo — ainda NÃO está valendo. Publique quando quiser aplicar.`
+      tokenTyped
+        ? `💾 Rascunho de ${title} salvo — o token da Página NÃO fica no rascunho: cole de novo e Publique para aplicar.`
+        : `💾 Rascunho de ${title} salvo — ainda NÃO está valendo. Publique quando quiser aplicar.`
     );
   } catch {
     useAlert('Erro ao salvar o rascunho.');
@@ -3574,6 +3583,10 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+
+          <!-- 🧠 13/10: follow-up inteligente (leitura da conversa, lead frio,
+               fim de semana, reativação de quem adiou) + resultado por coluna -->
+          <FollowupSmartCard :can-edit="canEditRobos" />
 
           <!-- 📅 item 253: lembretes e confirmação de consulta agora ficam em
                Agentes de IA → "Confirmação de consulta"; aqui só o atalho -->

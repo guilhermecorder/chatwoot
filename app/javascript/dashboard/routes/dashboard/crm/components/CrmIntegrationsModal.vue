@@ -267,8 +267,9 @@ const syncOftalmo = async full => {
     await CrmAPI.syncOftalmofacil(full);
     useAlert(full ? 'Recarga completa iniciada em segundo plano (histórico em silêncio)' : 'Sincronização iniciada em segundo plano');
     setTimeout(() => store.dispatch('crm/fetchSettings').catch(() => {}), 4000);
-  } catch {
-    useAlert('Erro ao iniciar a sincronização.');
+  } catch (e) {
+    // 409 = outra sincronização ainda rodando (o servidor manda o aviso)
+    useAlert(e?.response?.data?.error || 'Erro ao iniciar a sincronização.');
   } finally {
     isOftalmoSyncing.value = false;
   }
@@ -1339,6 +1340,13 @@ const fetchWorkflows = async () => {
             <template v-if="oftalmoTest.ok">✅ Conectou! <b>{{ oftalmoTest.total }}</b> cirurgia(s) do fornecedor lá<template v-if="oftalmoTest.first_date"> desde {{ oftalmoTest.first_date }}</template>.</template>
             <template v-else>❌ {{ oftalmoTest.error }}</template>
           </p>
+          <!-- Rodada 4 (achado #382): a sincronização falhou ou parou → faixa vermelha, em vez de a tela seguir mostrando a última rodada boa -->
+          <div v-if="oftalmoStatus.sync_alert" class="mt-2 text-[11px] rounded-lg px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-600">
+            <b>{{ oftalmoStatus.sync_alert.kind === 'erro' ? '❌ A sincronização falhou' : '⏸️ A sincronização parou' }}</b>
+            <template v-if="oftalmoStatus.sync_alert.at"> ({{ new Date(oftalmoStatus.sync_alert.at).toLocaleString('pt-BR') }})</template>
+            · {{ oftalmoStatus.sync_alert.message }}
+            <span v-if="oftalmoStatus.last_error && oftalmoStatus.sync_alert.kind === 'erro'" class="block mt-1 font-mono opacity-80">{{ oftalmoStatus.last_error }}</span>
+          </div>
           <div v-if="oftalmoStatus.last_run_at" class="mt-2 text-[11px] text-n-slate-10 rounded-lg bg-n-alpha-1 px-3 py-2">
             Última sincronização: {{ new Date(oftalmoStatus.last_run_at).toLocaleString('pt-BR') }} ·
             <b>{{ oftalmoStatus.last_result?.pulled || 0 }}</b> lidas · <b>{{ oftalmoStatus.last_result?.moved || 0 }}</b> cards movidos ·

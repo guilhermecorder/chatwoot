@@ -22,6 +22,9 @@ class Crm::PageEditJob < ApplicationJob
       return write_status(page, { status: 'error', error: 'A correção voltou sem seções — nada foi alterado. Tente reformular o pedido.' })
     end
 
+    # corrida: publicada enquanto a IA trabalhava = não reescreve o site no ar
+    return write_status(page, { status: 'error', error: Crm::PageGenerateJob::PUBLISHED_MEANWHILE }) if page.reload.published?
+
     page.update!(
       title: result['title'].presence || page.title,
       subtitle: result['subtitle'].to_s,

@@ -162,9 +162,9 @@ export function useCevicoPalette({
     palettePicker.value = null;
   };
   const savePanelPalettes = async next => {
-    const all = { ...(crmSettings.value?.panel_palettes || {}) };
-    if (next) all[scopeKey.value] = next;
-    else delete all[scopeKey.value];
+    // Rodada 4 (#351): manda só ESTE painel; null = apaga a paleta dele
+    // (o servidor mescla painel a painel — os outros painéis ficam como estão)
+    const all = { [scopeKey.value]: next || null };
     isSavingPalette.value = true;
     try {
       await CrmAPI.updatePanelPalettes(all);

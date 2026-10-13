@@ -19,6 +19,7 @@ import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsC
 import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
 import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 import { hexToRgbSpaced } from 'dashboard/helper/cevicoAgenda';
+import { PRICE_UNITS } from 'dashboard/routes/dashboard/settings/precos/priceRows';
 
 const route = useRoute();
 const router = useRouter();
@@ -463,24 +464,43 @@ const PROCEDURE_GROUPS = [
     ],
   },
 ];
-// preço vigente por nome (promocional vence) vindo da tabela oficial
+// 🔢 Rodada 5 (#401): o preço sempre aparece com a unidade (por olho × dois
+// olhos). Plano B (sem tabela carregada): refrativa é dos dois olhos; catarata
+// e lente fácica são por olho.
+const DEFAULT_UNIT_BY_GROUP = {
+  refrativa: 'dois_olhos',
+  catarata: 'por_olho',
+  faco_refrativa: 'por_olho',
+  artisan: 'por_olho',
+};
+const priceUnitLabel = unit =>
+  PRICE_UNITS.find(u => u.value === unit)?.label || '';
+// preço vigente por nome (promocional vence) + unidade, da tabela oficial
 const officialPriceByName = computed(() => {
   const items = crmSettings.value?.price_table?.items || [];
   const map = {};
   items.forEach(item => {
-    map[item.name.toLowerCase().trim()] =
-      Number(item.promo_price || item.price) || undefined;
+    map[item.name.toLowerCase().trim()] = {
+      price: Number(item.promo_price || item.price) || undefined,
+      unit: item.unit,
+    };
   });
   return map;
 });
-const withOfficialPrice = option => {
+const withOfficialPrice = (option, groupKey) => {
   const official = officialPriceByName.value[option.name?.toLowerCase().trim()];
-  return official ? { ...option, price: official } : option;
+  const fallbackUnit = option.price ? DEFAULT_UNIT_BY_GROUP[groupKey] : null;
+  if (!official?.price) return { ...option, unit: fallbackUnit };
+  return {
+    ...option,
+    price: official.price,
+    unit: official.unit || fallbackUnit,
+  };
 };
 const PROCEDURES = computed(() =>
   PROCEDURE_GROUPS.map(group => ({
-    ...withOfficialPrice(group),
-    options: group.options.map(withOfficialPrice),
+    ...withOfficialPrice(group, group.key),
+    options: group.options.map(option => withOfficialPrice(option, group.key)),
   }))
 );
 const selectedProcedure = computed(() =>
@@ -1039,7 +1059,10 @@ watch(contactId, () => {
                   {{ card.stage || '—' }}
                 </p>
                 <p class="text-[11px] text-white/70">
-                  {{ fmtMoney(card.value) || 'sem valor'
+                  <!-- 🔐 achado #307: sem o Financeiro o valor vem em branco de propósito -->
+                  {{
+                    fmtMoney(card.value) ||
+                    (identity.money_restricted ? '🔒 valor' : 'sem valor')
                   }}<span v-if="card.assignee"> · {{ card.assignee }}</span>
                 </p>
               </div>
@@ -1603,12 +1626,27 @@ watch(contactId, () => {
                         >
                           “{{ event.comment }}”
                         </p>
+                        <!-- 🔐 achado #307: comentário livre só com acesso clínico -->
+                        <p
+                          v-else-if="event.comment_restricted"
+                          class="text-[10px] text-n-slate-9 mt-0.5"
+                        >
+                          🔒 comentário só com acesso clínico
+                        </p>
                       </template>
 
                       <template v-else-if="event.type === 'formulario'">
                         <p class="text-[13px] text-n-slate-12">
                           📋 Respondeu
                           <strong>{{ event.form || 'formulário' }}</strong>
+                          <!-- 🔐 achado #118: link limpo em cadastro existente = não confirmada -->
+                          <span
+                            v-if="event.verified === false"
+                            class="ml-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800"
+                            :title="`Quem respondeu se identificou só com nome e WhatsApp${event.informed_name ? ` (digitou: ${event.informed_name})` : ''} — ninguém provou que é o dono do telefone`"
+                          >
+                            ⚠️ não confirmada
+                          </span>
                           <button
                             v-if="(event.answers || []).length"
                             class="ml-1.5 text-[11px] text-n-blue-text hover:underline"
@@ -1620,6 +1658,14 @@ watch(contactId, () => {
                                 : 'ver respostas'
                             }}
                           </button>
+                          <!-- 🔐 achado #307: respostas só com acesso clínico (LGPD) -->
+                          <span
+                            v-else-if="event.restricted && event.completed"
+                            class="ml-1.5 text-[10px] text-n-slate-9"
+                            title="As respostas do paciente são dado de saúde — só médicos, administradores ou a equipe com o acesso clínico liberado"
+                          >
+                            🔒 respostas só com acesso clínico
+                          </span>
                         </p>
                         <div
                           v-if="expandedForms.has(eventKey(event, idx))"
@@ -2144,7 +2190,9 @@ watch(contactId, () => {
               {{ proc.label }}
               <span v-if="proc.price"
 class="opacity-70"
-                >· {{ fmtMoney(proc.price) }}</span>
+                >· {{ fmtMoney(proc.price) }}
+                {{ priceUnitLabel(proc.unit) }}
+              </span>
             </button>
           </div>
           <div
@@ -2171,7 +2219,9 @@ class="opacity-70"
               {{ option.name }}
               <span v-if="option.price"
 class="opacity-70"
-                >· {{ fmtMoney(option.price) }}</span>
+                >· {{ fmtMoney(option.price) }}
+                {{ priceUnitLabel(option.unit) }}
+              </span>
             </button>
           </div>
           <div class="flex items-center gap-2 flex-wrap mt-2">

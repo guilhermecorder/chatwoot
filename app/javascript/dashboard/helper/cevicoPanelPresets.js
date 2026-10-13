@@ -8,6 +8,15 @@
 // hora de aplicar — funciona em qualquer conta. Card que não resolve é pulado.
 //
 // color: [paleta, degrau] → family[degrau] da paleta (cevicoPalettes.js)
+//
+// 🔒 auditoria R2 (#350, 12/10): `finance: true` marca os cards de DINHEIRO
+// (faturamento, ticket médio). A marca é GRAVADA junto com o card (sanitizador
+// de custom_kpis em settings_controller.rb) e o Meu Painel não mostra esses
+// cards para quem não tem a área Financeiro (editar) — e o servidor já tira
+// `revenue` do cesto deles. Mesmo sem a marca, a fórmula que cita `revenue`
+// (ou outro card de dinheiro, `kpi_<id>`) também some. Modelo aplicado no
+// painel da recepção: o card de dinheiro some só para quem não pode; o admin
+// continua vendo.
 import { PALETTE_BY_KEY } from 'dashboard/helper/cevicoPalettes';
 
 const gradOf = ([key, step = 1]) => PALETTE_BY_KEY[key]?.family?.[step] || null;
@@ -179,6 +188,7 @@ export const PANEL_PRESETS = [
           expr: 'revenue',
           format: 'currency',
           icon: 'i-lucide-banknote',
+          finance: true,
         },
         size: 'lg',
         color: ['laranja', 1],
@@ -191,6 +201,7 @@ export const PANEL_PRESETS = [
           format: 'currency',
           icon: 'i-lucide-coins',
           note: 'Faturamento fechado ÷ cirurgias realizadas.',
+          finance: true,
         },
         color: ['laranja', 3],
       },
@@ -255,6 +266,7 @@ export const PANEL_PRESETS = [
           expr: 'revenue',
           format: 'currency',
           icon: 'i-lucide-banknote',
+          finance: true,
         },
         size: 'lg',
         color: ['laranja', 1],
@@ -359,6 +371,7 @@ export const PANEL_PRESETS = [
           expr: 'revenue',
           format: 'currency',
           icon: 'i-lucide-banknote',
+          finance: true,
         },
         size: 'lg',
         color: ['laranja', 1],

@@ -31,7 +31,9 @@ RSpec.describe Crm::FlowMap::Registry do
       'Crm::StageLogBulkSweepJob' => 'data_hygiene', # 🧹 item 309 (faltava no mapa)
       'Crm::SourceStampSweepJob' => 'data_hygiene', # 🏷️ item 322
       'Crm::VoiceAgent::CampaignDialerJob' => 'voice',
-      'Crm::VoiceAgent::UnresponsiveLeadsJob' => 'voice' # 📞 rodada 195
+      'Crm::VoiceAgent::UnresponsiveLeadsJob' => 'voice', # 📞 rodada 195
+      'Crm::CronWatchdogJob' => 'cron_watchdog', # 🚨 Rodada 6 (achado #217)
+      'Crm::SidekiqHeartbeatJob' => 'cron_watchdog'
     }
   end
 

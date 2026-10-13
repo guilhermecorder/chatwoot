@@ -34,17 +34,18 @@ RSpec.describe Crm::AiAgentConfig do
     expect(service.cached_system('outro')[0][:text]).to eq('outro')
   end
 
-  it 'registra o custo com cache: leitura a 10%, gravação a 2x (sonnet US$3/M entrada)' do
+  # #444 (13/10): Sonnet 5 = US$ 2 entrada / US$ 10 saída (tabela oficial 06/10/2026)
+  it 'registra o custo com cache: leitura a 10%, gravação a 2x (sonnet US$2/M entrada)' do
     usage = usage_struct.new(1_000, 10_000, 0, 100)
     service.record_usage(reply_struct.new(usage))
     row = Crm::AiUsage.last
     expect(row.input_tokens).to eq(11_000)
-    # 1000*3 + 10000*3*2 + 100*15 = 3000 + 60000 + 1500 = 64500 / 1e6
-    expect(row.cost_usd.to_f).to be_within(0.000001).of(0.0645)
+    # 1000*2 + 10000*2*2 + 100*10 = 2000 + 40000 + 1000 = 43000 / 1e6
+    expect(row.cost_usd.to_f).to be_within(0.000001).of(0.043)
 
     usage2 = usage_struct.new(1_000, 0, 10_000, 100)
     service.record_usage(reply_struct.new(usage2))
-    # 1000*3 + 10000*0.3 + 100*15 = 3000 + 3000 + 1500 = 7500 / 1e6
-    expect(Crm::AiUsage.last.cost_usd.to_f).to be_within(0.000001).of(0.0075)
+    # 1000*2 + 10000*0.2 + 100*10 = 2000 + 2000 + 1000 = 5000 / 1e6
+    expect(Crm::AiUsage.last.cost_usd.to_f).to be_within(0.000001).of(0.005)
   end
 end

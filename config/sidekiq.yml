@@ -32,6 +32,34 @@
   - active_storage_purge
   - action_mailbox_incineration
 
+# 🚦 CEVICO Rodada 6 (RESIL-1): a IA roda em "cápsulas" próprias DENTRO deste
+# mesmo processo (um Sidekiq só no EasyPanel continua atendendo tudo):
+# - cápsula 'ia' (fila 'ai'): os 3 atendentes de IA que falam com o paciente
+#   (Atendente do WhatsApp, Atendente do Instagram, leitura de áudio/imagem).
+#   SIDEKIQ_AI_CONCURRENCY, padrão 5 (antes da Rodada 6 a IA podia usar até as
+#   10 linhas; 5 é o meio-termo até medir o pico — ver docs/BACKUP.md seção 4);
+# - cápsula 'ia_fundo' (fila 'ai_fundo'): IA de bastidor das automações do CRM
+#   (analisar conversa, fechamento, NPS, agendar pela conversa). Fica separada
+#   para um "mover 200 cards" não fazer o paciente esperar na fila 'ai'.
+#   SIDEKIQ_AI_BG_CONCURRENCY, padrão 2.
+# Por quê: uma resposta da IA pode demorar minutos quando a Anthropic fica lenta.
+# Antes ela ocupava as 10 linhas da fila default e travava o resto (mensagens do
+# WhatsApp entrando, lembretes, NPS, jornada). As filas 'ai'/'ai_fundo' NÃO entram
+# na lista de cima de propósito: se entrassem, as 10 linhas voltariam a pegar IA.
+# Ainda sobra IA nas 10 linhas: o robô de follow-up (fila high, uma rodada por vez,
+# limite de 30 s por chamada) e montar/editar página (default, clique raro do admin).
+# Não precisa de 2º processo no EasyPanel (docs/BACKUP.md, "Filas do Sidekiq").
+# Conexões do banco: config/database.yml soma as três.
+:capsules:
+  :ia:
+    :concurrency: <%= ENV.fetch("SIDEKIQ_AI_CONCURRENCY", 5) %>
+    :queues:
+      - ai
+  :ia_fundo:
+    :concurrency: <%= ENV.fetch("SIDEKIQ_AI_BG_CONCURRENCY", 2) %>
+    :queues:
+      - ai_fundo
+
 # you can override concurrency based on environment
 production:
   :concurrency: <%= ENV.fetch("SIDEKIQ_CONCURRENCY", 10) %>

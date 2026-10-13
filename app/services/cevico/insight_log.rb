@@ -58,9 +58,9 @@ class Cevico::InsightLog
   end
 
   def write
-    settings.with_lock do
-      config = settings.reload.agenda_config || {}
-      settings.update!(agenda_config: config.merge(KEY => yield(Array(config[KEY]).map(&:dup))))
+    # Rodada 4 (achado #383): sob a trava da linha, só a lista de insights muda
+    Cevico::SettingMerge.merge!(settings, :agenda_config) do |config|
+      config.merge(KEY => yield(Array(config[KEY]).map(&:dup)))
     end
     list
   end

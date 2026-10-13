@@ -156,14 +156,16 @@ const formatDate = iso =>
               <p class="text-3xl font-bold" style="color: var(--cv)">{{ totals.agendamentos_rate || 0 }}%</p>
               <p class="text-[11px] text-n-slate-9 mt-1">dos destinatários</p>
             </div>
+            <!-- Rodada 5 (#385): agendada × realizada, cada uma com o seu % -->
             <div class="cv-sub p-5">
-              <p class="text-xs font-medium text-n-slate-10 mb-1">Cirurgias realizadas</p>
-              <p class="text-3xl font-bold" style="color: #65A30D">{{ totals.cirurgias || 0 }}</p>
+              <p class="text-xs font-medium text-n-slate-10 mb-1">Cirurgias agendadas</p>
+              <p class="text-3xl font-bold" style="color: var(--cv)">{{ totals.cirurgias_agendadas || 0 }}</p>
+              <p class="text-[11px] text-n-slate-9 mt-1">{{ totals.cirurgias_agendadas_rate || 0 }}% dos destinatários</p>
             </div>
             <div class="cv-sub p-5">
-              <p class="text-xs font-medium text-n-slate-10 mb-1">% cirurgias agendadas</p>
-              <p class="text-3xl font-bold" style="color: #65A30D">{{ totals.cirurgias_rate || 0 }}%</p>
-              <p class="text-[11px] text-n-slate-9 mt-1">dos destinatários</p>
+              <p class="text-xs font-medium text-n-slate-10 mb-1">Cirurgias realizadas</p>
+              <p class="text-3xl font-bold" style="color: #65A30D">{{ totals.cirurgias_realizadas || 0 }}</p>
+              <p class="text-[11px] text-n-slate-9 mt-1">{{ totals.cirurgias_realizadas_rate || 0 }}% dos destinatários</p>
             </div>
           </div>
         </div>
@@ -211,7 +213,8 @@ const formatDate = iso =>
                   <th class="py-2 pr-3 cv-label text-right">Enviadas</th>
                   <th class="py-2 pr-3 cv-label text-right">Respostas</th>
                   <th class="py-2 pr-3 cv-label text-right">Agendamentos</th>
-                  <th class="py-2 pr-3 cv-label text-right">Cirurgias</th>
+                  <th class="py-2 pr-3 cv-label text-right">Cir. agendadas</th>
+                  <th class="py-2 pr-3 cv-label text-right">Cir. realizadas</th>
                   <th class="py-2 pr-3 cv-label text-right">Valor possível</th>
                   <th class="py-2 cv-label text-right">Investimento</th>
                 </tr>
@@ -237,9 +240,13 @@ const formatDate = iso =>
                     {{ c.agendamentos }}
                     <span class="text-[10px] text-n-slate-9">({{ c.agendamentos_rate }}%)</span>
                   </td>
+                  <td class="py-2.5 pr-3 text-right" style="color: var(--cv)">
+                    {{ c.cirurgias_agendadas || 0 }}
+                    <span class="text-[10px] text-n-slate-9">({{ c.cirurgias_agendadas_rate || 0 }}%)</span>
+                  </td>
                   <td class="py-2.5 pr-3 text-right" style="color: #65A30D">
-                    {{ c.cirurgias }}
-                    <span class="text-[10px] text-n-slate-9">({{ c.cirurgias_rate }}%)</span>
+                    {{ c.cirurgias_realizadas || 0 }}
+                    <span class="text-[10px] text-n-slate-9">({{ c.cirurgias_realizadas_rate || 0 }}%)</span>
                   </td>
                   <td class="py-2.5 pr-3 text-right whitespace-nowrap">{{ formatCurrency(c.potential_value) }}</td>
                   <td class="py-2.5 text-right whitespace-nowrap">{{ formatCurrency(c.investment) }}</td>
@@ -248,8 +255,11 @@ const formatDate = iso =>
             </table>
           </div>
           <p class="text-[11px] text-n-slate-9 mt-4">
-            Agendamentos e cirurgias contam destinatários cujo card ENTROU nas etapas de
-            Agendamento/Cirurgia depois do disparo da campanha (via histórico de etapas).
+            Agendamentos e cirurgias contam destinatários cujo card ENTROU nas
+            etapas de Agendamento / Cirurgia Agendada / Cirurgia Realizada
+            depois do disparo da campanha (via histórico de etapas, sem cargas
+            em massa). Quem já chegou em Cirurgia Realizada também conta como
+            cirurgia agendada.
           </p>
         </div>
       </template>

@@ -4,6 +4,7 @@
 // (lentes, insumos, medicamentos) com alerta de estoque mínimo e os
 // PEDIDOS — encomendas que nascem da indicação de cirurgia sem estoque,
 // vinculadas ao card do paciente. Receber um pedido soma no estoque.
+import { parseMoneyBR } from 'dashboard/helper/cevicoMoney';
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
@@ -61,13 +62,9 @@ const fmtMoney = (v, cents = false) =>
   })}`;
 const fmtDate = iso => new Date(iso).toLocaleDateString('pt-BR');
 
-// aceita "1.234,56" e "1234.56"
-const parseAmount = raw => {
-  let s = String(raw || '').replace(/[R$\s]/g, '');
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
-};
+// aceita "1.234,56", "1234,56", "5.000" e "1234.56" — Rodada 6: mesma
+// regra do servidor (cevicoMoney); antes "5.000" virava 5 e saía R$ 5,00
+const parseAmount = raw => parseMoneyBR(raw) ?? 0;
 
 const summary = computed(() => data.value?.summary || {});
 const kpiCards = computed(() => [

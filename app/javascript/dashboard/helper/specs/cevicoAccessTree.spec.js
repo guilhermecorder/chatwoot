@@ -182,6 +182,59 @@ describe('cevicoAccessTree (rodada 334)', () => {
     expect(effectiveLevel({ ...own, key: 'relatorios.crm' })).toBe('none');
   });
 
+  // 🔐 revisão 12/10: nó `explicit` não herda do pai (ex.: crm.funis)
+  it('nó sem herança (explicit) só vale com marcação própria', () => {
+    const catalog = [
+      {
+        key: 'crm',
+        levels: ['view', 'edit'],
+        default: 'edit',
+        children: [
+          {
+            key: 'crm.funis',
+            levels: ['edit'],
+            default: 'none',
+            explicit: true,
+          },
+          { key: 'crm.campanhas', levels: ['view', 'edit'], default: 'view' },
+        ],
+      },
+    ];
+    const base = { catalog, roleTree: {}, admin: false };
+    expect(flattenCatalog(catalog)['crm.funis'].explicit).toBe(true);
+    // pai marcado: o irmão herda, o nó explicit não
+    expect(
+      effectiveLevel({
+        ...base,
+        explicit: { crm: 'edit' },
+        key: 'crm.campanhas',
+      })
+    ).toBe('edit');
+    expect(
+      effectiveLevel({ ...base, explicit: { crm: 'edit' }, key: 'crm.funis' })
+    ).toBe('none');
+    // nem pelo papel
+    expect(
+      effectiveLevel({
+        ...base,
+        explicit: {},
+        roleTree: { crm: 'edit' },
+        key: 'crm.funis',
+      })
+    ).toBe('none');
+    // só marcação própria
+    expect(
+      effectiveLevel({
+        ...base,
+        explicit: { crm: 'view', 'crm.funis': 'edit' },
+        key: 'crm.funis',
+      })
+    ).toBe('edit');
+    expect(
+      effectiveMap({ ...base, explicit: { crm: 'edit' } })['crm.funis']
+    ).toBe('none');
+  });
+
   it('marcação própria vence a do papel; o papel vence o padrão', () => {
     const base = { catalog: CATALOG, admin: false };
     expect(

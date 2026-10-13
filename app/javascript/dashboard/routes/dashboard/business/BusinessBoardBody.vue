@@ -117,6 +117,8 @@ const saveLabel = computed(() => {
   if (saveState.value === 'saved') return `Salvo às ${savedAt.value}`;
   if (saveState.value === 'error')
     return 'Não salvou — tento de novo na próxima mudança';
+  if (saveState.value === 'conflict')
+    return 'Alguém salvou depois de você — mostrando o quadro atual';
   return 'Salva sozinho';
 });
 const wins = computed(() =>
@@ -137,7 +139,7 @@ const lastEvent = computed(() => board.value.events[0] || null);
           :class="
             saveState === 'saving'
               ? 'i-lucide-loader-2 animate-spin'
-              : saveState === 'error'
+              : saveState === 'error' || saveState === 'conflict'
                 ? 'i-lucide-alert-triangle'
                 : 'i-lucide-cloud-check'
           "

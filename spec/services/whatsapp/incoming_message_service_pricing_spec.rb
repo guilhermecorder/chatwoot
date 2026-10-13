@@ -42,6 +42,25 @@ RSpec.describe Whatsapp::IncomingMessageService do
                                                                                  'category' => 'utility')
   end
 
+  # Rodada 4 da auditoria (#229): outro escritor grava na mensagem DEPOIS que o
+  # status carregou a foto dela — as duas chaves têm de sobreviver
+  it 'não apaga a chave que outro escritor gravou enquanto o status era processado' do
+    service = described_class.new(inbox: inbox, params: status_params(
+      { 'billable' => true, 'pricing_model' => 'PMP', 'type' => 'regular', 'category' => 'marketing' }
+    ))
+    allow(service).to receive(:store_billing).and_wrap_original do |original, msg, pricing|
+      Message.find(msg.id).update_column(:additional_attributes, # rubocop:disable Rails/SkipsModelValidations
+                                         msg.additional_attributes.merge('cevico_outro' => 'gravado no meio'))
+      original.call(msg, pricing)
+    end
+    service.perform
+
+    message.reload
+    expect(message.status).to eq('delivered')
+    expect(message.additional_attributes).to include('cevico_ia_agent' => 'atendente_agendamento', 'cevico_outro' => 'gravado no meio')
+    expect(message.additional_attributes['cevico_wa_billing']).to include('category' => 'marketing')
+  end
+
   it 'sem pricing no status, não mexe nos atributos' do
     described_class.new(inbox: inbox, params: status_params(nil, status: 'read')).perform
 

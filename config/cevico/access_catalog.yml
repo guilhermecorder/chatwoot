@@ -11,11 +11,14 @@
 #   default   o que um atendente SEM configuração tem: none | view | edit |
 #             inherit (segue o pai)
 #   admin     true = só administrador (não dá para conceder)
+#   explicit  true = NÃO herda do pai: só vale com marcação própria no nó
+#             (portas perigosas, que "CRM = editar" não deve abrir por tabela)
 #   segment   clinica = só aparece em empresa do ramo clínica
 #   children  os filhos
 #
 # Regra de herança: o que o admin marca num nó vale para os filhos, a não
-# ser que o filho tenha marcação própria. Editar sempre inclui ver.
+# ser que o filho tenha marcação própria — ou seja um nó `explicit`.
+# Editar sempre inclui ver.
 - key: inicio
   label: Meu Painel
   hint: a tela de abertura, com os indicadores e avisos de cada pessoa
@@ -42,9 +45,13 @@
   children:
     - key: funis
       label: Funis e colunas (estrutura)
-      hint: criar, renomear, reordenar e apagar funis e colunas
+      hint: "criar, renomear, reordenar e apagar funis e colunas (não herda de CRM: marque aqui de propósito)"
       levels: [edit]
       default: none
+      # auditoria 12/10 (#19/#245/#299): apagar um funil leva colunas, cards e
+      # histórico junto — "CRM = editar" (próprio, do papel ou do modelo antigo)
+      # NÃO abre esta porta; só marcação própria neste nó
+      explicit: true
     - key: campanhas
       label: Campanha WhatsApp
       hint: "ver = painel e histórico (o time todo, por padrão); editar = cria e dispara campanhas e ligações em massa"

@@ -11,6 +11,14 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   MESES_PT = %w[jan fev mar abr mai jun jul ago set out nov dez].freeze
 
+  # 🔒 auditoria R2 (#33/#350, 12/10): as chaves de DINHEIRO do cesto. Quem
+  # não tem a área Financeiro não recebe o faturamento; o gasto do WhatsApp
+  # segue o nó "Gasto do WhatsApp" (hoje só administrador, item 303). O
+  # cesto é guardado por CONTA, então o corte entra DEPOIS do cache (call).
+  REVENUE_KEYS = %w[revenue].freeze
+  WA_COST_KEYS = %w[wa_cost wa_cost_meta].freeze
+  MONEY_KEYS = (REVENUE_KEYS + WA_COST_KEYS).freeze
+
   # granularity: opcional (item 144) — a mini-régua do popup pode forçar o
   # balde; sem ela vale o automático pelo tamanho do período
   # lens: opcional (item 328) — a lente da fonte escolhida no Meu Painel
@@ -24,7 +32,9 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     @granularity = %i[day week month].include?(forced) ? forced : pick_granularity
   end
 
-  def call
+  # hide: chaves que esta pessoa NÃO pode ver (ex.: MONEY_KEYS) — tiradas do
+  # cesto já pronto, para o cache continuar valendo para a conta inteira
+  def call(hide: [])
     prev_until = @since - 1.second
     prev_since = prev_until - (@until_at - @since)
     keys = bucket_keys(@since, @until_at)
@@ -34,9 +44,22 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     # ⚡ item 237: cesto guardado por conta+período (2 min com o período aberto,
     # 10 min fechado) — a tela atualiza a cada 2 min e refazia ~120 queries
     ttl = @until_at >= Time.current ? 2.minutes : 10.minutes
-    Rails.cache.fetch("cevico:kpibag:#{@account.id}:#{@lens&.key || 'padrao'}:#{@since.to_i}:#{@until_at.to_i}:#{@granularity}", expires_in: ttl) do
+    cache_key = "cevico:kpibag:#{@account.id}:#{@lens&.key || 'padrao'}:#{@since.to_i}:#{@until_at.to_i}:#{@granularity}"
+    bag = Rails.cache.fetch(cache_key, expires_in: ttl) do
       build_bag(prev_since, prev_until, keys, prev_keys)
     end
+    self.class.without_keys(bag, hide)
+  end
+
+  # devolve o cesto SEM as métricas pedidas (aceita chaves string ou símbolo,
+  # porque o cache pode devolver qualquer uma das duas)
+  def self.without_keys(bag, keys)
+    keys = Array(keys).map(&:to_s)
+    return bag if keys.empty? || !bag.is_a?(Hash)
+
+    metrics_key = bag.key?('metrics') ? 'metrics' : :metrics
+    metrics = (bag[metrics_key] || {}).reject { |k, _| keys.include?(k.to_s) }
+    bag.merge(metrics_key => metrics)
   end
 
   def build_bag(prev_since, prev_until, keys, prev_keys)
@@ -256,10 +279,11 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     @lens ? @lens.stage_logs(scope) : scope
   end
 
+  # Rodada 5 (#198): sem carga em massa e 1 valor por card (1ª entrada no
+  # período) — o ticket médio do KpiSweep (revenue ÷ surgeries_done) herda
   def revenue_logs(pipelines, since, until_at)
-    scope = Crm::StageLog.joins(:crm_contact)
-                         .where(crm_contacts: { pipeline_id: pipelines.map(&:id) }, entered_at: since..until_at)
-                         .where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
+    scope = Crm::StageLog.joins(:crm_contact).where(crm_contacts: { pipeline_id: pipelines.map(&:id) })
+    scope = Crm::RevenueEntries.first_entries(scope, since, until_at)
     @lens ? @lens.stage_logs(scope) : scope
   end
 

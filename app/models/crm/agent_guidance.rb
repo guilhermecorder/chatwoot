@@ -133,11 +133,9 @@ class Crm::AgentGuidance < ApplicationRecord
   # seção vazia (= padrão) parte do DEFAULT: a partir daqui ela vira personalizada
   def apply_to_script!(by)
     Crm::ScriptVersion.snapshot!(account, kind: 'script', note: "antes de aplicar a orientação ##{id}", by: by, guidance: self)
-    script = Crm::ScriptVersion.current_content(account, 'script', nil)
-    base = script[target_section].to_s.strip.presence || Crm::CevicoScript.default_text(target_section, 'v1', account: account).to_s
-    script[target_section] = "#{base}\n#{formatted_line}"
-    Crm::ScriptVersion.write_script!(account, script)
-    script[target_section]
+    # Rodada 4: a linha entra no Roteiro relido DENTRO da trava (não some edição
+    # que outro admin salvou entre a foto e a gravação)
+    Crm::ScriptVersion.append_script_line!(account, target_section, formatted_line)
   end
 
   # passos do agente: parte do prompt vigente (personalizado ou padrão) e
@@ -145,9 +143,6 @@ class Crm::AgentGuidance < ApplicationRecord
   def apply_to_stage!(by)
     Crm::ScriptVersion.snapshot!(account, kind: 'stage', agent_key: agent_key, note: "antes de aplicar a orientação ##{id}",
                                           by: by, guidance: self)
-    base = Crm::CevicoScript.stage_prompt(account, agent_key).to_s.strip
-    new_prompt = "#{base}\n#{formatted_line}"
-    Crm::ScriptVersion.write_stage_prompt!(account, agent_key, new_prompt)
-    new_prompt
+    Crm::ScriptVersion.append_stage_line!(account, agent_key, formatted_line)
   end
 end

@@ -35,11 +35,12 @@ class Crm::AgentSimulator
   end
 
   # troca o motivo numa conversa já aberta (a tela pode ajustar entre as falas)
+  # (Rodada 4 da auditoria: grava pelo Cevico::AttributeMerge, como todo mundo)
   def objective!(conversation)
     attrs = conversation.additional_attributes || {}
     return if @objective.blank? || attrs['cevico_simulado_objective'] == @objective
 
-    conversation.update!(additional_attributes: attrs.merge('cevico_simulado_objective' => @objective))
+    Cevico::AttributeMerge.merge!(conversation) { |fresh| fresh.merge('cevico_simulado_objective' => @objective) }
   end
 
   # uma fala do "paciente" → resposta do agente (IA de verdade) como nota de sombra

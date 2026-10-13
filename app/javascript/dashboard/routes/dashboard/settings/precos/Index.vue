@@ -3,13 +3,20 @@
 // UM lugar para os preços oficiais da clínica: preço atual e preço
 // promocional por procedimento. Vale no Espaço do Paciente (orçamento de
 // indicação) e nos prompts dos agentes de IA ({{TABELA_DE_PRECOS}}).
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import {
+  PRICE_UNITS,
+  isPerEyeLocked,
+  rowProblem,
+  tableProblems,
+  rowsToSave,
+} from './priceRows';
 
 const store = useStore();
 // 🔐 rodada 334: quem só VÊ a tabela lê os preços; editar = linhas e salvar
@@ -25,7 +32,10 @@ const customized = ref(false);
 
 const hydrate = () => {
   const table = crmSettings.value?.price_table;
-  rows.value = (table?.items || []).map(item => ({ ...item }));
+  rows.value = (table?.items || []).map(item => ({
+    ...item,
+    unit: item.unit || '',
+  }));
   updatedAt.value = table?.updated_at || null;
   customized.value = table?.customized === true;
 };
@@ -46,27 +56,47 @@ const groups = computed(() => [
 ]);
 
 const addRow = () => {
+  const group = groups.value[groups.value.length - 1] || 'Outros';
+  // 🔢 Rodada 5 (#401): a linha nova herda a unidade das outras do mesmo grupo
+  const sameGroup = rows.value.filter(r => r.group === group);
   rows.value.push({
-    group: groups.value[groups.value.length - 1] || 'Outros',
+    group,
     name: '',
     price: null,
     promo_price: null,
+    unit: sameGroup[sameGroup.length - 1]?.unit || '',
   });
 };
+
+// lente fácica (Artisan) é sempre por olho — o seletor fica travado
+watch(
+  rows,
+  list =>
+    list.forEach(row => {
+      if (isPerEyeLocked(row) && row.unit !== 'por_olho') row.unit = 'por_olho';
+    }),
+  { deep: true }
+);
 
 const removeRow = index => rows.value.splice(index, 1);
 
 const save = async () => {
+  // 🔢 Rodada 5 (#401): nada de R$ 0, promoção estranha ou linha sem unidade
+  const problems = tableProblems(rows.value);
+  if (problems.length) {
+    useAlert(
+      `Antes de salvar: ${problems.map(p => `${p.name} (${p.problem})`).join('; ')}.`
+    );
+    return;
+  }
   isSaving.value = true;
   try {
-    await CrmAPI.updatePriceTable(
-      rows.value.filter(r => r.name?.trim())
-    );
+    await CrmAPI.updatePriceTable(rowsToSave(rows.value));
     await store.dispatch('crm/fetchSettings');
     hydrate();
     useAlert('Tabela de preços salva! Telas e agentes de IA já usam os novos valores.');
-  } catch {
-    useAlert('Não consegui salvar a tabela.');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui salvar a tabela.');
   } finally {
     isSaving.value = false;
   }
@@ -96,8 +126,10 @@ const fmtDate = iso =>
     <p class="text-sm text-n-slate-10 mt-1 mb-5">
       Os preços oficiais da clínica, num lugar só. Valem no
       <b>Espaço do Paciente</b> (orçamento de indicação) e nos
-      <b>agentes de IA</b> que falam de valores. Preencher o preço
-      promocional faz ele valer no lugar do preço normal.
+      <b>agentes de IA</b> que falam de valores. Preencher o preço promocional
+      (menor que o normal) faz ele valer no lugar do preço normal. Toda linha
+      precisa de preço e da <b>unidade</b> (por olho, dois olhos, por sessão ou
+      único) — é assim que a IA passa o valor ao paciente.
     </p>
 
     <div v-if="isLoading" class="flex justify-center py-16"><Spinner /></div>
@@ -112,11 +144,12 @@ const fmtDate = iso =>
       </p>
 
       <!-- cabeçalho -->
-      <div class="hidden sm:grid grid-cols-[1.2fr_1.4fr_6.5rem_6.5rem_2rem] gap-2 px-1 mb-1">
+      <div class="hidden sm:grid grid-cols-[1.2fr_1.4fr_6.5rem_6.5rem_7rem_2rem] gap-2 px-1 mb-1">
         <span class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-9">Grupo</span>
         <span class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-9">Procedimento</span>
         <span class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-9">Preço (R$)</span>
         <span class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-9">Promo (R$)</span>
+        <span class="text-[10px] font-semibold uppercase tracking-wide text-n-slate-9">Unidade</span>
         <span />
       </div>
 
@@ -124,7 +157,7 @@ const fmtDate = iso =>
         <div
           v-for="(row, i) in rows"
           :key="i"
-          class="grid grid-cols-2 sm:grid-cols-[1.2fr_1.4fr_6.5rem_6.5rem_2rem] gap-2 items-center rounded-xl border border-n-weak bg-n-solid-2 p-2"
+          class="grid grid-cols-2 sm:grid-cols-[1.2fr_1.4fr_6.5rem_6.5rem_7rem_2rem] gap-2 items-center rounded-xl border border-n-weak bg-n-solid-2 p-2"
         >
           <input
             v-model="row.group"
@@ -140,24 +173,49 @@ const fmtDate = iso =>
             style="margin-bottom: 0"
           />
           <input
-            v-model.number="row.price"
-            type="number"
-            min="0"
-            step="10"
-            placeholder="0"
-            class="h-8 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-xs font-bold text-n-slate-12"
+            v-model="row.price"
+            type="text"
+            inputmode="decimal"
+            placeholder="preço"
+            class="h-8 rounded-lg border bg-n-solid-1 px-2 text-xs font-bold text-n-slate-12"
+            :class="
+              rowProblem(row) === 'falta o preço'
+                ? 'border-red-500'
+                : 'border-n-weak'
+            "
             style="margin-bottom: 0"
           />
           <input
-            v-model.number="row.promo_price"
-            type="number"
-            min="0"
-            step="10"
+            v-model="row.promo_price"
+            type="text"
+            inputmode="decimal"
             placeholder="—"
             class="h-8 rounded-lg border px-2 text-xs font-bold"
             :class="row.promo_price ? 'border-green-600/50 bg-green-600/10 text-green-700' : 'border-n-weak bg-n-solid-1 text-n-slate-12'"
             style="margin-bottom: 0"
           />
+          <!-- 🔢 Rodada 5 (#401): unidade do valor é campo da linha -->
+          <select
+            v-model="row.unit"
+            :disabled="!canEditPrices || isPerEyeLocked(row)"
+            :title="
+              isPerEyeLocked(row)
+                ? 'Lente fácica é sempre por olho'
+                : 'Unidade do valor'
+            "
+            class="h-8 rounded-lg border bg-n-solid-1 px-2 text-xs text-n-slate-12"
+            :class="
+              rowProblem(row) === 'escolha a unidade'
+                ? 'border-red-500'
+                : 'border-n-weak'
+            "
+            style="margin-bottom: 0"
+          >
+            <option value="" disabled>unidade…</option>
+            <option v-for="u in PRICE_UNITS" :key="u.value" :value="u.value">
+              {{ u.label }}
+            </option>
+          </select>
           <button
             v-if="canEditPrices"
             class="i-lucide-trash-2 text-n-slate-9 hover:text-red-500 text-sm justify-self-center"

@@ -106,6 +106,12 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
     message.save!
   end
 
+  # Rodada 4 da auditoria (#229): gravado pelo Cevico::AttributeMerge (trava da
+  # linha). Os status sent/delivered/read chegam em paralelo e a atribuição +
+  # save! gravava a coluna inteira a partir de uma foto velha, apagando o que
+  # outro escritor (carimbo do robô, por exemplo) tinha acabado de guardar.
+  # O merge! cuida da mensagem "suja" (status já trocado em memória): trava uma
+  # cópia limpa e devolve a coluna gravada para o save! logo abaixo não a reescrever.
   def store_billing(message, pricing)
     billing = {
       'billable' => pricing[:billable].to_s == 'true',
@@ -113,7 +119,7 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
       'type' => pricing[:type].to_s.downcase,
       'model' => pricing[:pricing_model].to_s
     }
-    message.additional_attributes = (message.additional_attributes || {}).merge('cevico_wa_billing' => billing)
+    Cevico::AttributeMerge.merge!(message) { |attrs| attrs.merge('cevico_wa_billing' => billing) }
   end
 
   def create_messages

@@ -39,7 +39,8 @@ class Crm::Calls::RadarAlert
   end
 
   # alguém já retornou? mensagem da clínica na conversa depois da perdida,
-  # ou uma ligação atendida com o paciente depois dela
+  # ou uma ligação atendida com o paciente depois dela — só de GENTE: a
+  # ligação da assistente de voz (handled_by 'ai') não apaga o aviso (#85)
   def self.returned?(call)
     since = call.ended_at || call.started_at || call.created_at
     if call.conversation
@@ -50,7 +51,7 @@ class Crm::Calls::RadarAlert
     end
     return false if call.contact_id.blank?
 
-    Crm::Call.where(account_id: call.account_id, contact_id: call.contact_id).answered
+    Crm::Call.by_human.where(account_id: call.account_id, contact_id: call.contact_id).answered
              .where.not(id: call.id).exists?(['started_at > ?', since])
   end
 
@@ -58,16 +59,18 @@ class Crm::Calls::RadarAlert
     @call = call
   end
 
+  # 🔒 Rodada 4 da auditoria (#81): grava sob a trava da linha relendo a lista
+  # fresca (Cevico::SettingMerge) — nunca por cima do que outro escritor
+  # (Radar, agente, jornada) acabou de gravar
   def push
-    settings = CrmSetting.find_or_create_by!(account: @call.account)
-    cfg = settings.ai_config || {}
-    state = cfg['opportunity_state'] || {}
-    alerts = Array(state['alerts']).reject { |a| a['kind'] == KIND && a['call_id'] == @call.id }
-    alerts << build
-    state['alerts'] = alerts.last(MAX_ALERTS)
-    cfg['opportunity_state'] = state
-    settings.update!(ai_config: cfg)
-    alerts.last
+    alert = build
+    Cevico::SettingMerge.merge_key!(@call.account, :ai_config, 'opportunity_state') do |state|
+      alerts = Array(state['alerts']).reject { |a| a['kind'] == KIND && a['call_id'] == @call.id }
+      alerts << alert
+      state['alerts'] = alerts.last(MAX_ALERTS)
+      state
+    end
+    alert
   end
 
   private

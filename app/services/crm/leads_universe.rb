@@ -14,7 +14,7 @@ module Crm::LeadsUniverse
   def scope(account, since, until_at, lens: nil)
     return lens_scope(account, since, until_at, lens) if lens
 
-    base = account.contacts.where(created_at: since..until_at)
+    base = new_contacts(account, since, until_at)
     # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub e caixa
     # dos parceiros nunca contam como lead da CEVICO
     partner_ids = Crm::PartnerGuard.excluded_contact_ids(account)
@@ -31,7 +31,7 @@ module Crm::LeadsUniverse
   #                  caixa dela — não há "caixa de captação" para exigir)
   #   tudo         = a soma das duas coisas
   def lens_scope(account, since, until_at, lens)
-    base = account.contacts.where(created_at: since..until_at)
+    base = new_contacts(account, since, until_at)
     return own_lens_scope(account, base, lens) if lens.own?
     return lens.contacts(base) unless lens.all?
 
@@ -46,6 +46,13 @@ module Crm::LeadsUniverse
     return base if inbox_ids.empty?
 
     base.where(id: Conversation.where(account_id: account.id, inbox_id: inbox_ids).select(:contact_id))
+  end
+
+  # contatos novos do período — sem o celular de teste da jornada (R3 #416),
+  # que é da equipe, não um lead
+  def new_contacts(account, since, until_at)
+    account.contacts.where(created_at: since..until_at)
+           .where.not('jsonb_exists(contacts.additional_attributes, :key)', key: Crm::Journey::TestContact::KEY)
   end
 
   # ids das portas de entrada: configuração do admin > heurística por nome

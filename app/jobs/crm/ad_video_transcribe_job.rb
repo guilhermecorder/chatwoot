@@ -34,11 +34,27 @@ class Crm::AdVideoTranscribeJob < ApplicationJob
     Rails.logger.warn("[CEVICO criativos] limpeza dos vídeos enviados falhou: #{e.message}")
   end
 
+  # Achado #410 (auditoria): marca "na fila" ANTES de enfileirar. Assim a janela
+  # STUCK_AFTER passa a valer e um segundo pedido (botão de novo, "Atualizar
+  # agora", cron das 04:20) não acha mais o mesmo vídeo — cada vídeo vai ao
+  # Gemini uma vez só. Devolve quantos entraram na fila de verdade.
   def self.enqueue_pending(account, limit: LIMIT)
     purge_stale_uploads
     ids = pending_for(account, limit: limit).pluck(:id)
-    ids.each { |id| perform_later(id) }
-    ids.size
+    ids.count { |id| claim!(account, id) && perform_later(id) }
+  end
+
+  # Reserva o vídeo com trava na linha: dois pedidos ao mesmo tempo esperam um
+  # pelo outro e o segundo já não o encontra pendente. Mantém o link colado pela
+  # pessoa (queue_transcript! sem link apagaria). Só enfileira depois de gravar.
+  def self.claim!(account, id)
+    Crm::AdCreative.transaction do
+      creative = pending_for(account, limit: 1).where(id: id).lock.first
+      next false unless creative
+
+      creative.queue_transcript!(link: creative.transcript['link'])
+      true
+    end
   end
 
   def perform(creative_id)

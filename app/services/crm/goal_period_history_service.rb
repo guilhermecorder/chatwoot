@@ -51,7 +51,9 @@ class Crm::GoalPeriodHistoryService
   # terminando na janela que contém HOJE
   def history(scoped_plans)
     starts = window_starts
-    rows = indicator_rows(starts.first.in_time_zone(TZ), period_end(starts.last).in_time_zone(TZ).end_of_day)
+    from = starts.first.in_time_zone(TZ)
+    to = period_end(starts.last).in_time_zone(TZ).end_of_day
+    rows = indicator_rows(from, to).merge('revenue_closed' => revenue_entries(from, to))
     plans = scoped_plans.where(month: starts.first..).index_by { |p| p.month.iso8601 }
 
     starts.map do |p_start|
@@ -95,20 +97,36 @@ class Crm::GoalPeriodHistoryService
       'surgeries_booked' => @account.tasks.where(task_type: 'cirurgia', created_at: from..to)
                                     .group(trunc.call('tasks.created_at')).count,
       'surgeries_done' => @account.tasks.where(task_type: 'cirurgia', attendance: 'attended', due_at: from..to)
-                                  .group(trunc.call('tasks.due_at')).count,
-      'revenue_closed' => Crm::StageLog.joins(crm_contact: :pipeline)
-                                       .where(crm_pipelines: { account_id: @account.id }, event_type: 'entered')
-                                       .where('stage_name ILIKE ?', '%cirurgia realizada%')
-                                       .where(entered_at: from..to)
-                                       .group(trunc.call('crm_contact_stage_logs.entered_at'))
-                                       .sum('crm_contacts.value')
+                                  .group(trunc.call('tasks.due_at')).count
     }
   end
 
+  # 💰 Rodada 5 (#198): "Faturamento fechado" com a MESMA régua do Meu Painel
+  # e do PRO MAX (Crm::RevenueEntries) — só entrada de verdade (`entered`,
+  # sem carga em massa) e UM valor por card em cada janela: se o card sai e
+  # volta para "Cirurgia Realizada" na mesma janela, conta 1x. Devolve as
+  # entradas em ordem ([dia local, card, valor]); a janela escolhe a 1ª.
+  def revenue_entries(from, to)
+    Crm::StageLog.joins(crm_contact: :pipeline)
+                 .where(crm_pipelines: { account_id: @account.id }, event_type: Crm::StageLogBulk::ENTERED)
+                 .where(Crm::RevenueEntries::STAGE_SQL)
+                 .where(entered_at: from..to)
+                 .order('crm_contact_stage_logs.entered_at', 'crm_contact_stage_logs.id')
+                 .pluck('crm_contact_stage_logs.entered_at', 'crm_contact_stage_logs.crm_contact_id', 'crm_contacts.value')
+                 .map { |at, card_id, value| [at.in_time_zone(TZ).to_date, card_id, value.to_f] }
+  end
+
+  def revenue_in(entries, p_start, p_end)
+    entries.select { |day, _card, _value| day.between?(p_start, p_end) }
+           .uniq { |_day, card_id, _value| card_id }
+           .sum { |_day, _card, value| value }
+           .round
+  end
+
   def values_between(rows, p_start, p_end)
-    values = rows.transform_values { |counts| sum_in(counts, p_start, p_end) }
-    values['revenue_closed'] = values['revenue_closed'].to_f.round
-    values
+    rows.to_h do |key, counts|
+      [key, key == 'revenue_closed' ? revenue_in(counts, p_start, p_end) : sum_in(counts, p_start, p_end)]
+    end
   end
 
   def sum_in(counts, p_start, p_end)

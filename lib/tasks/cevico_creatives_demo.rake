@@ -22,6 +22,10 @@ task 'cevico:creatives_demo_funnel' => :environment do # rubocop:disable Metrics
     next
   end
   abort 'já existe demonstração — rode com UNDO=1 antes' if demo.exists?
+  # 🔒 auditoria #211: criar leads/consultas/cirurgias fictícios é coisa de
+  # desenvolvimento — fora dele só com CEVICO_SIMULATION_OK=1. O UNDO=1 (acima)
+  # continua livre: só apaga o que tem a marca "[demo criativos]".
+  Cevico::SimulationGuard.check!('cevico:creatives_demo_funnel')
 
   ads = Crm::AdCreative.where(account_id: account.id).pluck(:ad_id)
   abort 'nenhum anúncio na conta (sincronize a Central antes)' if ads.empty?

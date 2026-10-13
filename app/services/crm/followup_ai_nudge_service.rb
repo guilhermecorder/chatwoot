@@ -33,6 +33,8 @@ class Crm::FollowupAiNudgeService
     - Português do Brasil, tom humano e acolhedor, como a equipe da clínica fala (sem jargão, sem "prezado").
     - No máximo 2 frases curtas + UMA pergunta simples no fim. Sem listas, sem títulos, sem emoji em excesso (no máximo 1).
     - Use o primeiro nome do paciente se ele aparecer na conversa; se não aparecer, não invente nome.
+    - A mensagem precisa fazer sentido SOZINHA: cite o que o paciente procurou (ex.: cirurgia refrativa, catarata,
+      consulta) quando isso aparecer na conversa ou nas etiquetas, e feche com uma pergunta simples.
     - NÃO repita a última mensagem da clínica; NÃO envie uma segunda cobrança igual às cutucadas anteriores.
     - NÃO ofereça horário, NÃO fale de preço que não esteja na conversa, NÃO prometa resultado, NÃO dê orientação médica.
     - Não cite nomes de médicos. Autoridade = equipe cirúrgica especializada e estrutura de alta tecnologia.
@@ -110,6 +112,7 @@ class Crm::FollowupAiNudgeService
         CONTEXTO:
         - Agora: #{Crm::AgendaSlots::TZ.now.strftime('%d/%m/%Y %H:%M')} (São Paulo).
         - Coluna do paciente no CRM: #{stage || 'sem card'}.
+        - Etiquetas do paciente: #{patient_labels.presence || 'nenhuma'}.
         - Esta é a cutucada "#{step_label}" do robô "#{@bot&.name || 'follow-up'}" — o paciente está em silêncio desde a última mensagem da clínica.
         #{"- ORIENTAÇÃO DO ADMIN PARA ESTA ETAPA: #{guidance}\n" if guidance.present?}
         Escreva a mensagem agora.
@@ -121,6 +124,11 @@ class Crm::FollowupAiNudgeService
     value = @step['delay_value'].presence || @step['delay_hours']
     unit = { 'minutes' => 'min', 'days' => 'dias' }.fetch(@step['delay_unit'], 'h')
     "#{value}#{unit} sem resposta"
+  end
+
+  # etiquetas do contato + da conversa (ex.: refrativa, catarata) — dizem o que o paciente procurou
+  def patient_labels
+    (Array(@conversation.contact&.label_list) + Array(@conversation.label_list)).uniq.first(12).join(', ')
   end
 
   def card_stage_name

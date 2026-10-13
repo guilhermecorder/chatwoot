@@ -13,6 +13,10 @@ class Api::V1::Accounts::Crm::RadarController < Api::V1::Accounts::BaseControlle
     return render json: { error: 'Radar não configurado.' }, status: :unprocessable_entity if settings.blank?
 
     conversation_id = params[:conversation_id].to_i
+    # aviso sem conversa (ex.: robô parado, #217): nada a atender — sem isto o
+    # 0 apagava TODOS os avisos sem conversa e entrava na eficácia do Radar
+    return render json: { removed: false, remaining: remaining_count(settings) } unless conversation_id.positive?
+
     removed = nil
 
     with_ai_config_lock(settings) do |ai|

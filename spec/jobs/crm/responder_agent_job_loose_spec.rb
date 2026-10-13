@@ -4,13 +4,43 @@ require 'rails_helper'
 RSpec.describe Crm::ResponderAgentJob do
   let(:job) { described_class.new }
 
-  it 'não pausa depois de agendar nem quando o paciente encerra' do
-    expect(job.send(:pause_reason_for, { agendar: true, pausar: true, chamar_humano: false }, true)).to be_nil
-    expect(job.send(:pause_reason_for, { pausar: true, chamar_humano: false }, false)).to be_nil
-  end
+  # auditoria 10/2026 (#443/#458): pause_reason_for virou hand_over! — a pausa
+  # agora é testada pelo caminho de verdade (ao vivo, IA simulada)
+  describe 'pausa ao vivo' do
+    let(:account) { create(:account) }
+    let(:inbox) { create(:inbox, account: account) }
+    let(:contact) { create(:contact, account: account, name: 'Maria Silva', phone_number: '+5511999990000') }
+    let(:conversation) { create(:conversation, account: account, inbox: inbox, contact: contact) }
+    let(:ai_reply) do
+      { mensagens: ['Combinado, obrigado!'], etapa: 'confirmacao', agendar: false, agendamento: {}, pausar: false, chamar_humano: false,
+        leitura: 'Paciente encerrou a conversa.' }
+    end
 
-  it 'pausa só quando pede humano' do
-    expect(job.send(:pause_reason_for, { chamar_humano: true }, false)).to eq('chamou_humano')
+    before do
+      stub_const('Crm::ResponderAgentJob::LIVE_ENABLED', true)
+      create(:user, account: account, role: :administrator)
+      CrmSetting.create!(account: account, ai_config: { 'api_key' => 'sk-teste',
+                                                        'agents' => { 'atendente_agendamento' => { 'enabled' => true, 'mode' => 'live',
+                                                                                                   'inbox_ids' => [inbox.id], 'no_card' => true } } })
+    end
+
+    # cada rodada é uma mensagem NOVA do paciente (a anterior já foi respondida)
+    def run_with(result)
+      incoming = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: 'oi')
+      allow(Crm::ResponderAgentService).to receive(:new).and_return(instance_double(Crm::ResponderAgentService, call: result))
+      described_class.perform_now(conversation.id, incoming.id, 'atendente_agendamento')
+      conversation.reload.additional_attributes&.dig(described_class::STATE_KEY)
+    end
+
+    it 'não pausa depois de agendar nem quando o paciente encerra', :aggregate_failures do
+      allow_any_instance_of(described_class).to receive(:book!).and_return(true) # rubocop:disable RSpec/AnyInstance
+      expect(run_with(ai_reply.merge(agendar: true, pausar: true))).to be_nil
+      expect(run_with(ai_reply.merge(pausar: true))).to be_nil
+    end
+
+    it 'pausa só quando pede humano' do
+      expect(run_with(ai_reply.merge(chamar_humano: true))).to include('paused' => true, 'reason' => 'chamou_humano')
+    end
   end
 
   it 'espaça os balões em 3 s e tira a carinha que pausava' do

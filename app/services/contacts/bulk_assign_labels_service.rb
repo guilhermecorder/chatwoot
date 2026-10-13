@@ -10,8 +10,11 @@ class Contacts::BulkAssignLabelsService
 
     contacts = @account.contacts.where(id: @contact_ids)
 
-    contacts.find_each do |contact|
-      contact.add_labels(@labels)
+    # CEVICO Rodada 5 (#17): etiqueta em lote não dispara automações de etiqueta
+    Contact.without_label_triggers do
+      contacts.find_each do |contact|
+        contact.add_labels(@labels)
+      end
     end
 
     { success: true, updated_contact_ids: contacts.pluck(:id) }

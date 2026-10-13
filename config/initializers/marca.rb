@@ -21,8 +21,27 @@ end
 MARCA = YAML.safe_load(File.read(arquivo)).freeze
 
 Rails.application.config.after_initialize do
-  # A marca padrão não mexe em nada: o banco continua mandando sozinho.
-  next if MARCA['id'] == 'cevico'
+  # A marca padrão só corrige o NOME da instalação quando ele ainda é um dos
+  # antigos (o "Chatwoot" de fábrica ou os nomes que já usamos) — assim o título
+  # da aba vira o nome oficial do pacote sem ninguém mexer em painel. O resto
+  # (logos, cores) continua vindo do banco.
+  if MARCA['id'] == 'cevico'
+    begin
+      if ActiveRecord::Base.connection.data_source_exists?('installation_configs')
+        config = InstallationConfig.find_or_initialize_by(name: 'INSTALLATION_NAME')
+        antigos = ['', 'Chatwoot', 'Sistema CEVICO', 'CEVICO S.I']
+        if antigos.include?(config.value.to_s.strip) && config.value != MARCA['nome']
+          config.value = MARCA['nome']
+          config.save!
+          GlobalConfig.clear_cache
+          Rails.logger&.info("[marca] nome da instalação atualizado para '#{MARCA['nome']}'")
+        end
+      end
+    rescue ActiveRecord::NoDatabaseError, PG::ConnectionBad => e
+      Rails.logger&.warn("[marca] nome adiado (banco indisponível): #{e.class}")
+    end
+    next
+  end
 
   begin
     next unless ActiveRecord::Base.connection.data_source_exists?('installation_configs')

@@ -47,16 +47,20 @@ class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::Bas
                    variables: values, text: preview_text(m, values) }
   end
 
-  # manda a mensagem para o MEU número (ou o telefone informado) com as
-  # variáveis do exemplo — o jeito de ver a mensagem chegando no celular
+  # manda a mensagem para o MEU celular com dados FICTÍCIOS — o jeito de ver a
+  # mensagem chegando no celular. 🛡️ auditoria R3 (#416): nunca usa a
+  # cirurgia/consulta de um paciente real (o Dispatcher troca pelas variáveis
+  # de exemplo), nunca sai para número de paciente (erro de digitação) e não
+  # cria contato por qualquer número: só o celular de teste da própria pessoa.
   def test_send
     phone = params[:phone].to_s.delete('^0-9')
     return render json: { ok: false, error: 'Informe o telefone com DDD.' }, status: :unprocessable_entity if phone.length < 10
 
-    contact = Task.match_contact(Current.account, phone) || create_test_contact(phone)
-    event = sample_event(@message)
+    contact, why = test_contact_for(phone)
+    return render json: { ok: false, error: why }, status: :unprocessable_entity if why
+
     send = Crm::JourneySend.new(account: Current.account, journey_message: @message, contact: contact,
-                                source: event&.dig(:source), event_key: "teste:#{SecureRandom.hex(4)}",
+                                source: nil, event_key: "teste:#{SecureRandom.hex(4)}",
                                 scheduled_for: Time.current, status: 'queued')
     send.save!
     outcome = Crm::Journey::Dispatcher.new(account: Current.account).dispatch(send)
@@ -80,9 +84,10 @@ class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::Bas
 
   def update_settings
     crm = CrmSetting.find_or_create_by!(account: Current.account)
-    cfg = crm.agenda_config || {}
-    cfg['journey'] = apply_settings_params(cfg['journey'] || {})
-    crm.update!(agenda_config: cfg)
+    # Rodada 4 (#413): mexe só em agenda_config['journey'], sob trava e em cima
+    # da foto fresca — o mapa salva a cada clique e não pode apagar o que os
+    # jobs (lembretes, NPS, aniversários) acabaram de gravar nas chaves irmãs
+    Cevico::SettingMerge.merge_key!(crm, :agenda_config, 'journey') { |journey| apply_settings_params(journey) }
     render json: { settings: Crm::Journey::Settings.new(Current.account, crm_settings: crm).to_h }
   end
 
@@ -218,7 +223,9 @@ class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::Bas
     Crm::Journey::Dispatcher.new(account: Current.account).preview_text(message, values)
   end
 
-  def create_test_contact(phone)
-    Current.account.contacts.create!(name: "Teste jornada #{Current.user.available_name}", phone_number: "+#{phone}")
+  # [contato, nil] quando pode testar; [nil, motivo] quando não — regras em
+  # Crm::Journey::TestContact (só o celular de teste da própria pessoa)
+  def test_contact_for(phone)
+    Crm::Journey::TestContact.new(account: Current.account, user: Current.user, phone: phone, own_phone: params[:own_phone]).resolve
   end
 end

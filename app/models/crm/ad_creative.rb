@@ -81,6 +81,17 @@ class Crm::AdCreative < ApplicationRecord
     transcript['status'] == 'done' && transcript['text'].present?
   end
 
+  # achado #410: já está na fila ou transcrevendo há pouco? (dentro da janela
+  # de travado do job — passou dela, vale como travado e pode tentar de novo)
+  def transcript_in_progress?(statuses: %w[queued processing])
+    return false unless statuses.include?(transcript['status'])
+
+    marked_at = Time.zone.parse(transcript['status_at'].to_s)
+    marked_at.present? && marked_at > Crm::AdVideoTranscribeJob::STUCK_AFTER.ago
+  rescue ArgumentError
+    false
+  end
+
   def text_source
     transcript_done? ? 'video' : 'ad'
   end

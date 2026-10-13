@@ -8,7 +8,13 @@
 class Crm::AgentAlert
   # item 217: 'nao_confirmou' = paciente respondeu NÃO ao lembrete da véspera
   # item 251: 'pos_op_atencao' = sintoma de alerta no pós-operatório (tarefa urgente aberta)
-  KINDS = %w[agente_remarcou agente_cancelou nao_confirmou pos_op_atencao].freeze
+  # auditoria 10/2026 (#458): 'atendimento_atencao' = Atendente de Agendamento /
+  # Pós-agendamento chamou a equipe (urgência, caso clínico, pedido fora do roteiro)
+  # auditoria 10/2026 (#217): 'robo_parado' = um robô (cron) parou ou terminou
+  # em erro 2× seguidas (Crm::CronWatchdogJob) — aviso para o administrador
+  ROBOT_KIND = 'robo_parado'.freeze
+  KINDS = (%w[agente_remarcou agente_cancelou nao_confirmou pos_op_atencao atendimento_atencao] + [ROBOT_KIND]).freeze
+  ATTENTION_KINDS = %w[pos_op_atencao atendimento_atencao].freeze
   TTL = 24.hours
   MAX_ALERTS = 30
   TZ = Crm::AgendaSlots::TZ
@@ -25,14 +31,52 @@ class Crm::AgentAlert
     nil
   end
 
-  # o aviso continua valendo? (24 h, e a consulta ainda existe nesta conta)
+  # o aviso continua valendo? (24 h, e a consulta ainda existe nesta conta;
+  # o de robô parado vale enquanto o robô continuar com problema)
   def self.still_open?(account, alert)
     created = Time.zone.parse(alert['created_at'].to_s)
     return false if created.nil? || created < TTL.ago
+    return robot_still_open?(alert) if alert['kind'] == ROBOT_KIND
 
     account.tasks.exists?(id: alert['task_id'])
   rescue ArgumentError
     false
+  end
+
+  # 🚨 #217: o robô (ou a fila 'sidekiq', que não está em CronHealth::JOBS)
+  # continua com problema?
+  def self.robot_still_open?(alert)
+    return Crm::CronHealth.sidekiq_stalled?(Time.current) if alert['job'].to_s == 'sidekiq'
+
+    Crm::CronHealth.problem_for(alert['job']).present?
+  end
+
+  # 🚨 #217: aviso de ROBÔ PARADO no Radar do Meu Painel, direcionado ao
+  # administrador (não tem paciente nem consulta). Um aviso por robô: o novo
+  # substitui o anterior. Fica fora do popup de prioridade (o popup é de
+  # conversa com paciente — 'lock' => true, como a ligação travada): o
+  # administrador já recebe a tarefa 🔴 e o e-mail.
+  def self.push_robot(account:, problem:, user:, task: nil) # rubocop:disable Metrics/MethodLength
+    alert = {
+      'kind' => ROBOT_KIND, 'job' => problem[:job], 'task_id' => task&.id,
+      'conversation_id' => nil, 'contact_id' => nil,
+      'contact_name' => problem[:label],
+      'stage_name' => problem[:kind] == 'erro' ? 'Robô com erro' : 'Robô parado',
+      'motivo' => problem[:message],
+      'acao' => 'Avisar quem cuida do sistema e, enquanto isso, conferir à mão o que esse robô faria hoje.',
+      'user_id' => user&.id, 'user_name' => user&.name, 'lock' => true,
+      'created_at' => Time.current.iso8601
+    }
+    Cevico::SettingMerge.merge_key!(account, :ai_config, 'opportunity_state') do |state|
+      alerts = Array(state['alerts']).reject { |a| a['kind'] == ROBOT_KIND && a['job'] == problem[:job] }
+      alerts << alert
+      state['alerts'] = alerts.last(MAX_ALERTS)
+      state
+    end
+    alert
+  rescue StandardError => e
+    Rails.logger.warn("[CEVICO saúde dos robôs] aviso do Radar não gravado: #{e.message}")
+    nil
   end
 
   def initialize(account:, kind:, task:, conversation:, agent_key:)
@@ -43,18 +87,18 @@ class Crm::AgentAlert
     @agent_key = agent_key
   end
 
+  # 🔒 Rodada 4 da auditoria (#102): pelo gravador único do crm_settings
+  # (Cevico::SettingMerge) — mesma trava de linha de antes, agora no padrão da
+  # casa; a chave continua opportunity_state.alerts (o Meu Painel lê dali)
   def push
-    settings = CrmSetting.find_or_create_by!(account: @account)
-    settings.with_lock do
-      cfg = settings.ai_config || {}
-      state = cfg['opportunity_state'] || {}
+    alert = build
+    Cevico::SettingMerge.merge_key!(@account, :ai_config, 'opportunity_state') do |state|
       alerts = Array(state['alerts']).reject { |a| a['kind'] == @kind && a['task_id'] == @task.id }
-      alerts << build
+      alerts << alert
       state['alerts'] = alerts.last(MAX_ALERTS)
-      cfg['opportunity_state'] = state
-      settings.update!(ai_config: cfg)
-      alerts.last
+      state
     end
+    alert
   end
 
   private
@@ -78,13 +122,13 @@ class Crm::AgentAlert
   def acao
     case @kind
     when 'nao_confirmou' then 'Ligar para o paciente'
-    when 'pos_op_atencao' then 'Falar com o paciente agora'
+    when *ATTENTION_KINDS then 'Falar com o paciente agora'
     else 'Conferir na Agenda'
     end
   end
 
   def patient_name
-    return (@task.contact&.name.presence || 'Paciente') if @kind == 'pos_op_atencao'
+    return (@task.contact&.name.presence || 'Paciente') if ATTENTION_KINDS.include?(@kind)
 
     @task.title.to_s.sub(/\AConsulta:\s*/i, '').strip.presence || 'Paciente'
   end
@@ -94,29 +138,35 @@ class Crm::AgentAlert
     when 'agente_cancelou' then 'Consulta cancelada'
     when 'nao_confirmou' then 'Não confirmou a consulta'
     when 'pos_op_atencao' then 'Pós-operatório: atenção'
+    when 'atendimento_atencao' then 'Atendimento: a equipe precisa assumir'
     else 'Consulta remarcada'
     end
   end
 
   def motivo
-    if @kind == 'pos_op_atencao'
-      return "#{patient_name}: #{@task.title.to_s.split(' — ').last} — #{AGENT_NAMES[@agent_key] || @agent_key} pediu atenção"
-    end
-
-    at = @task.due_at.in_time_zone(TZ)
-    when_text = "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m %H:%M')} · #{Crm::AgendaSlots::UNIT_LABELS[@task.unit] || @task.unit}"
-    agent = AGENT_NAMES[@agent_key] || @agent_key
-    if @kind == 'nao_confirmou'
-      # item 333: o NÃO também pode vir da ligação com a assistente virtual
-      return "#{patient_name} disse na ligação que NÃO vai à consulta de #{when_text} — ligar para remarcar ou cancelar" if @agent_key == 'voice'
-
-      return "#{patient_name} respondeu NÃO ao lembrete da consulta de #{when_text} — ligar para remarcar ou cancelar"
-    end
+    return "#{patient_name}: #{@task.title.to_s.split(' — ').last} — #{agent_label} pediu atenção" if ATTENTION_KINDS.include?(@kind)
+    return nao_confirmou_motivo if @kind == 'nao_confirmou'
 
     if @kind == 'agente_cancelou'
-      "O #{agent} cancelou a consulta de #{patient_name} que era #{when_text}"
+      "O #{agent_label} cancelou a consulta de #{patient_name} que era #{when_text}"
     else
-      "O #{agent} remarcou a consulta de #{patient_name} para #{when_text}"
+      "O #{agent_label} remarcou a consulta de #{patient_name} para #{when_text}"
     end
+  end
+
+  def nao_confirmou_motivo
+    # item 333: o NÃO também pode vir da ligação com a assistente virtual
+    return "#{patient_name} disse na ligação que NÃO vai à consulta de #{when_text} — ligar para remarcar ou cancelar" if @agent_key == 'voice'
+
+    "#{patient_name} respondeu NÃO ao lembrete da consulta de #{when_text} — ligar para remarcar ou cancelar"
+  end
+
+  def agent_label
+    AGENT_NAMES[@agent_key] || @agent_key
+  end
+
+  def when_text
+    at = @task.due_at.in_time_zone(TZ)
+    "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m %H:%M')} · #{Crm::AgendaSlots::UNIT_LABELS[@task.unit] || @task.unit}"
   end
 end

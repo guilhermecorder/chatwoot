@@ -2,6 +2,10 @@ require 'rails_helper'
 
 # 💸 item 303: Gasto do WhatsApp — atribuição por mensagem + fatura da Meta
 RSpec.describe Crm::WhatsappSpendService do
+  # Relógio fixo ao meio-dia de hoje em São Paulo: das 21h às 23h59 de SP o
+  # contêiner (UTC) já está no dia seguinte e os "dias" da conta não batiam.
+  around { |example| travel_to(ActiveSupport::TimeZone['America/Sao_Paulo'].now.change(hour: 12)) { example.run } }
+
   let(:account) { create(:account) }
   let(:user) { create(:user, account: account, role: :agent, name: 'Vaneide') }
   let(:channel) do

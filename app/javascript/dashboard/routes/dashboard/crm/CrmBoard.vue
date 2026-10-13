@@ -121,6 +121,14 @@ const currentRange = () => {
 };
 
 const periodPayload = () => {
+  // 🫁 #323: "Carregar todos" vem em páginas por coluna e leva a busca junto
+  // (o servidor procura na base toda e devolve só o que bate)
+  if (contactsScope.value === 'all') {
+    return {
+      scope: 'all',
+      q: (filters.value.search || '').trim() || undefined,
+    };
+  }
   if (contactsScope.value !== 'period') return { scope: contactsScope.value };
   const { from, to } = currentRange();
   return { scope: 'period', dateFrom: from, dateTo: to, dateMode: dateMode.value };
@@ -321,11 +329,12 @@ const matchesDatePreset = (dateStr, preset) => {
 const filteredContacts = computed(() => {
   // Busca ativa IGNORA o filtro de período — quem busca um nome quer achar
   // o paciente mesmo que ele seja de outro mês (o padrão é "mês atual").
-  const searching = !!filters.value.search;
+  // 🫁 #323: o termo vai aparado, igual ao servidor ('maria ' = 'maria')
+  const q = (filters.value.search || '').trim().toLowerCase();
+  const searching = !!q;
   return allContacts.value.filter(c => {
     // Search: name, phone, labels, notes
     if (searching) {
-      const q = filters.value.search.toLowerCase();
       const hit = (c.name?.toLowerCase().includes(q)) ||
                   (c.phone_number?.includes(q)) ||
                   (c.labels?.some(l => l.toLowerCase().includes(q))) ||
@@ -437,17 +446,28 @@ const allFilteredOut = computed(() =>
   anyFilteringActive.value && filteredCount.value === 0
 );
 
+// 🫁 #323: "Carregar todos" NÃO baixa mais o funil inteiro: o servidor manda
+// a contagem real de cada coluna + até 200 cards por coluna, e o resto entra
+// pelo "Carregar mais" da coluna. Com busca, o servidor procura na base toda
+// (q=). Cada termo novo refaz a consulta; a resposta velha que chegar depois
+// é descartada no store (só vale a última).
+// Vai SEMPRE em silêncio (silent): o aviso é o "carregando…" do topo. Com
+// spinner, a barra de busca sumia a cada pausa na digitação — perdia o foco
+// e as letras digitadas durante a consulta.
+let loadAllSeq = 0;
 const loadAllContacts = async () => {
-  if (isLoadingAll.value) return;
+  loadAllSeq += 1;
+  const seq = loadAllSeq;
   isLoadingAll.value = true;
   contactsScope.value = 'all';
   try {
     await store.dispatch('crm/fetchContacts', {
       pipelineId: selectedPipelineId.value,
-      scope: 'all',
+      ...periodPayload(),
+      silent: true,
     });
   } finally {
-    isLoadingAll.value = false;
+    if (seq === loadAllSeq) isLoadingAll.value = false;
   }
 };
 
@@ -515,22 +535,34 @@ watch(() => [filters.value.dateFrom, filters.value.dateTo], ([from, to]) => {
   fetchPeriod();
 });
 
-// Buscar precisa enxergar a base toda: se ela ainda não foi carregada,
-// dispara o carregamento completo na primeira busca (o loadAllContacts
-// já se protege contra chamadas duplicadas). Ao LIMPAR a busca, volta
-// para o período da régua.
-watch(() => filters.value.search, (term, oldTerm) => {
-  if (
-    term &&
-    contactsMeta.value.scope !== 'all' &&
-    contactsMeta.value.total > contactsMeta.value.shown
-  ) {
-    loadAllContacts();
+// Buscar precisa enxergar a base toda: se ela ainda não foi carregada, a
+// busca vai para o SERVIDOR (scope=all&q=, em páginas por coluna — #323).
+// Espera a pessoa parar de digitar (~400 ms) para não disparar uma consulta
+// por letra. Ao LIMPAR a busca, volta para o período da régua.
+let boardSearchTimer = null;
+watch(
+  () => filters.value.search,
+  (term, oldTerm) => {
+    clearTimeout(boardSearchTimer);
+    const wanted = (term || '').trim();
+    if (wanted) {
+      const needServer =
+        contactsScope.value === 'all' ||
+        contactsMeta.value.total > contactsMeta.value.shown;
+      if (!needServer) return; // funil pequeno: já está tudo na tela
+      if (
+        contactsScope.value === 'all' &&
+        (contactsMeta.value.q || '') === wanted
+      )
+        return;
+      boardSearchTimer = setTimeout(loadAllContacts, 400);
+      return;
+    }
+    if (oldTerm && contactsScope.value === 'all') {
+      fetchPeriod({ silent: true });
+    }
   }
-  if (!term && oldTerm && contactsScope.value === 'all') {
-    fetchPeriod({ silent: true });
-  }
-});
+);
 
 // ─────────────────────────────────────────────────────────
 
@@ -582,9 +614,19 @@ const contactsByStage = computed(() => {
 // contagem (e o R$ somado) REAL de cada coluna no período. Quando um filtro
 // local (busca, responsável, etiqueta, caixa…) está em jogo, a contagem
 // verdadeira deixaria de bater com o que se vê — aí voltamos ao nº local.
+// 🫁 #323: no "Carregar todos" a busca já foi feita NO SERVIDOR (meta.q) —
+// aí a contagem real de cada coluna continua valendo (são os achados)
+const searchDoneOnServer = computed(
+  () =>
+    contactsMeta.value.scope === 'all' &&
+    (contactsMeta.value.q || '') === (filters.value.search || '').trim()
+);
+const boardPaged = computed(() =>
+  ['period', 'all'].includes(contactsMeta.value.scope)
+);
 const clientRefineActive = computed(() =>
   Boolean(
-    filters.value.search ||
+    (filters.value.search && !searchDoneOnServer.value) ||
     filters.value.assigneeId !== '' ||
     filters.value.labels.length > 0 ||
     filters.value.inboxName ||
@@ -594,14 +636,28 @@ const clientRefineActive = computed(() =>
   )
 );
 
+// 🫁 #323: no "Carregar todos" com filtro local (responsável, etiqueta,
+// caixa…) o "Carregar mais" some (a contagem real não bate com o filtro).
+// Se alguma coluna tem mais no servidor do que o que veio, avisa que o
+// resultado é parcial.
+const allPartial = computed(() => {
+  if (contactsMeta.value.scope !== 'all' || !clientRefineActive.value)
+    return false;
+  const counts = contactsMeta.value.stage_counts || {};
+  return Object.entries(counts).some(
+    ([stageId, n]) =>
+      n > allContacts.value.filter(c => String(c.stage_id) === stageId).length
+  );
+});
+
 const stageTrueCount = stageId => {
-  if (contactsMeta.value.scope !== 'period' || clientRefineActive.value) return null;
+  if (!boardPaged.value || clientRefineActive.value) return null;
   const counts = contactsMeta.value.stage_counts || {};
   return counts[stageId] ?? counts[String(stageId)] ?? 0;
 };
 
 const stageTrueValue = stageId => {
-  if (contactsMeta.value.scope !== 'period' || clientRefineActive.value) return null;
+  if (!boardPaged.value || clientRefineActive.value) return null;
   const values = contactsMeta.value.stage_values || {};
   return values[stageId] ?? values[String(stageId)] ?? null;
 };
@@ -613,11 +669,23 @@ const periodMatching = computed(() =>
 
 const loadingMoreStages = ref({}); // { stageId: true } enquanto pagina
 const loadMoreStage = async stageId => {
-  if (contactsMeta.value.scope !== 'period') return;
+  if (!boardPaged.value) return;
   if (loadingMoreStages.value[stageId]) return;
   loadingMoreStages.value = { ...loadingMoreStages.value, [stageId]: true };
   try {
     const loaded = allContacts.value.filter(c => c.stage_id === stageId).length;
+    if (contactsMeta.value.scope === 'all') {
+      // "Carregar todos": próxima página da base toda (sem datas), 200 por vez
+      await store.dispatch('crm/fetchMoreStage', {
+        pipelineId: selectedPipelineId.value,
+        stageId,
+        offset: loaded,
+        limit: 200,
+        range: 'all',
+        q: contactsMeta.value.q || undefined,
+      });
+      return;
+    }
     const { from, to } = currentRange();
     await store.dispatch('crm/fetchMoreStage', {
       pipelineId: selectedPipelineId.value,
@@ -863,8 +931,9 @@ const deletePipeline = async () => {
       await store.dispatch('crm/fetchContacts', { pipelineId: selectedPipelineId.value, ...periodPayload() });
     }
     useAlert(t('CRM.SUCCESS.PIPELINE_DELETED'));
-  } catch {
-    useAlert(t('CRM.ERROR.GENERIC'));
+  } catch (e) {
+    // o servidor explica por que não apagou (funil com cards, robôs ligados…)
+    useAlert(e?.response?.data?.error || t('CRM.ERROR.GENERIC'));
   }
 };
 
@@ -1369,6 +1438,13 @@ const createAndAddContact = async () => {
           </template>
           <template v-if="contactsMeta.with_conversations">
             · {{ $t('CRM.FILTER.WITH_CONVERSATION', { count: contactsMeta.with_conversations }) }}
+          </template>
+          <template v-if="allPartial">
+            ·
+            <b
+              title="Com filtro ligado, cada coluna mostra só os 200 primeiros. Tire o filtro para usar o “Carregar mais”."
+              >resultado parcial (até 200 por coluna)</b
+            >
           </template>
         </span>
       </div>

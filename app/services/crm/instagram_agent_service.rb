@@ -8,7 +8,7 @@
 # - só oferece horários LIVRES da Agenda interna (Crm::AgendaSlots)
 # - agenda sozinho SÓ na Agenda interna (Crm::AppointmentRecorder);
 #   confirmações oficiais são sempre pelo WhatsApp (equipe/robôs de lá)
-class Crm::InstagramAgentService
+class Crm::InstagramAgentService # rubocop:disable Metrics/ClassLength
   include Crm::AiAgentConfig
 
   AGENT_KEY = 'instagram'.freeze
@@ -180,6 +180,12 @@ class Crm::InstagramAgentService
   end
 
   private
+
+  # (#100) mesmo cliente dos respondedores do WhatsApp: 90 s por chamada e só
+  # 1 nova tentativa — quem responde paciente não segura a conversa por meia hora
+  def client
+    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 90, max_retries: 1)
+  end
 
   # contexto vivo: data/hora de agora + vagas REAIS da agenda interna
   def context_block

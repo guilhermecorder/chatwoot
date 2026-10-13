@@ -14,8 +14,10 @@ import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyP
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 
-// 🔐 rodada 334: quem só VÊ páginas lê e comenta; editar = criar, salvar, publicar, apagar
-const { canEdit } = useCevicoAccess();
+// 🔐 rodada 334: quem só VÊ páginas lê e comenta; editar = criar e salvar
+// rascunhos. Publicar/despublicar, trocar o endereço e mexer em página NO AR
+// é só do administrador (o servidor recusa — auditoria rodada 2).
+const { canEdit, isAdmin } = useCevicoAccess();
 const canEditPages = computed(() => canEdit('marketing.paginas'));
 const currentUserId = useMapGetter('getCurrentUserID');
 
@@ -268,6 +270,14 @@ const showEditor = ref(false);
 const editing = ref(null);
 const saving = ref(false);
 const form = ref({});
+// página NO AR aberta por quem não é admin: o servidor recusa qualquer
+// alteração (403) — o editor avisa em vez de fingir que salvou
+const editingLocked = computed(
+  () =>
+    Boolean(editing.value) &&
+    editing.value.status === 'published' &&
+    !isAdmin.value
+);
 
 const blankPage = () => ({
   title: '',
@@ -463,6 +473,10 @@ const savePage = async (publish = null) => {
     useAlert('Dê um título para a página.');
     return;
   }
+  if (editingLocked.value) {
+    useAlert('Esta página está no ar: só um administrador altera.');
+    return;
+  }
   saving.value = true;
   try {
     const payload = { ...form.value };
@@ -476,7 +490,14 @@ const savePage = async (publish = null) => {
     useAlert(publish ? 'Página publicada! 🎉' : 'Página salva.');
     fetchPages();
   } catch (error) {
-    useAlert(error?.response?.data?.message || 'Não consegui salvar a página.');
+    // o servidor explica o motivo (ex.: página no ar, link do botão fora da régua)
+    const data = error?.response?.data || {};
+    useAlert(
+      data.message ||
+        data.error ||
+        (Array.isArray(data.errors) ? data.errors.join(', ') : '') ||
+        'Não consegui salvar a página.'
+    );
   } finally {
     saving.value = false;
   }
@@ -1572,7 +1593,8 @@ class="text-emerald-600"
             </div>
           </div>
 
-          <label v-if="editing && canEditPages" class="block mb-3">
+          <!-- endereço (slug): só o admin troca — o servidor ignora de quem não é -->
+          <label v-if="editing && isAdmin" class="block mb-3">
             <span class="text-[11px] font-medium text-n-slate-11">Endereço da página (a parte final do link) — mudar quebra links
               já divulgados</span>
             <input
@@ -1582,8 +1604,23 @@ class="text-emerald-600"
             />
           </label>
 
-          <!-- etapa do projeto (gestão: ideia → produção → publicada) -->
-          <div v-if="canEditPages" class="flex items-center gap-2 mb-4 flex-wrap">
+          <!-- etapa do projeto (gestão: ideia → produção → publicada) —
+               só o admin muda; o servidor ignora a etapa enviada por outra pessoa -->
+          <p
+            v-if="editingLocked"
+            class="mb-3 text-[12px] font-medium text-amber-700 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2"
+          >
+            🟢 Esta página está no ar: só um administrador altera. Deixe um
+            comentário acima com o que precisa mudar.
+          </p>
+          <p
+            v-else-if="canEditPages && !isAdmin"
+            class="mb-3 text-[11px] text-n-slate-11"
+          >
+            Etapa: {{ STATUS_META[form.status]?.chip || form.status }} —
+            publicar e despublicar é com o administrador.
+          </p>
+          <div v-if="isAdmin" class="flex items-center gap-2 mb-4 flex-wrap">
             <span class="text-[11px] font-medium text-n-slate-11">Etapa do projeto:</span>
             <div
               class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5"
@@ -1627,16 +1664,21 @@ class="text-emerald-600"
             >
               Cancelar
             </button>
+            <!-- o rótulo diz o que acontece de fato: quem não é admin salva
+                 na etapa atual (nunca publica); página no ar fica travada -->
             <button
               v-if="canEditPages"
               class="px-3 h-9 rounded-lg text-[12px] font-semibold border border-n-weak text-n-slate-12 hover:bg-n-alpha-1 disabled:opacity-60"
-              :disabled="saving"
-              @click="savePage(canEditPages ? null : false)"
+              :disabled="saving || editingLocked"
+              :title="
+                editingLocked ? 'Página no ar: só o administrador altera' : ''
+              "
+              @click="savePage(null)"
             >
-              {{ canEditPages ? 'Salvar' : 'Salvar rascunho' }}
+              {{ isAdmin ? 'Salvar' : 'Salvar (sem publicar)' }}
             </button>
             <button
-              v-if="canEditPages"
+              v-if="isAdmin"
               class="px-4 h-9 rounded-lg text-[12px] font-bold text-[#072A4C] disabled:opacity-60 shadow-sm"
               style="background: linear-gradient(135deg, #d4af37, #f4de8e)"
               :disabled="saving"
@@ -1644,9 +1686,9 @@ class="text-emerald-600"
             >
               {{ saving ? 'Salvando…' : 'Publicar 🚀' }}
             </button>
-            <span v-else
-class="text-[10px] text-n-slate-9"
-              >rascunho salvo vai para o admin publicar</span>
+            <span v-else-if="canEditPages" class="text-[10px] text-n-slate-9">
+              publicar é com o administrador
+            </span>
           </div>
         </div>
       </div>

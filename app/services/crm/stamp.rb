@@ -122,8 +122,8 @@ module Crm::Stamp
   # PRIMEIRA EVIDÊNCIA: carimba o paciente que ainda não tem fonte. Devolve a
   # fonte que ficou. Paciente antigo (de antes do carimbo) segue as regras da
   # cerca de hoje — a evidência nova não reescreve a história dele.
-  def claim_contact!(contact, source_id) # rubocop:disable Metrics/CyclomaticComplexity
-    return contact&.cevico_source_id if contact.blank? || contact.cevico_source_id.present? || source_id.blank?
+  def claim_contact!(contact, source_id)
+    return contact&.cevico_source_id unless stampable?(contact, source_id)
 
     source_id = legacy_source_id(contact) if contact.created_at.present? && contact.created_at < FRESH.ago
     ::Contact.where(id: contact.id, cevico_source_id: nil).update_all(cevico_source_id: source_id) # rubocop:disable Rails/SkipsModelValidations
@@ -133,6 +133,12 @@ module Crm::Stamp
   rescue StandardError => e
     Rails.logger.error "[carimbo] paciente #{contact&.id}: #{e.class}: #{e.message}"
     nil
+  end
+
+  # ainda sem fonte e com evidência para carimbar; o celular de teste da
+  # jornada (R3 #416) não é paciente de fonte nenhuma
+  def stampable?(contact, source_id)
+    contact.present? && contact.cevico_source_id.blank? && source_id.present? && !Crm::Journey::TestContact.test_contact?(contact)
   end
 
   def legacy_source_id(contact)

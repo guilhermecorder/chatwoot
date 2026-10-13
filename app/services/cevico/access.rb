@@ -5,7 +5,10 @@
 #   1. administrador → edita tudo que existe para o ramo da empresa;
 #   2. marcação própria da pessoa (agent_permissions['tree'][uid]);
 #   3. marcação do PAPEL da pessoa (agent_permissions['roles'][…]['tree']);
-#   4. herança: a marcação do pai vale para os filhos sem marcação própria;
+#   4. herança: a marcação do pai vale para os filhos sem marcação própria
+#      — EXCETO nos nós `explicit` do catálogo (ex.: crm.funis), que só
+#      valem com marcação própria (auditoria 12/10: "CRM = editar" não
+#      pode liberar apagar funis por tabela);
 #   5. padrão do catálogo (default de cada nó).
 # Quem ainda não foi configurado no modelo novo é lido pelas concessões
 # antigas (grants/menu/report_keys) convertidas na hora — ninguém perde
@@ -203,13 +206,17 @@ class Cevico::Access
         out[node] = keys.include?(k) ? 'view' : 'none'
       end
     end
-    out
+    # o modelo antigo nunca abre um nó "sem herança" (ninguém tinha essa
+    # porta antes; só marcação própria no modelo novo libera)
+    out.except(*Cevico::AccessCatalog.explicit_keys)
   end
 
   private
 
   def explicit_level(key)
     return explicit_tree[key] if explicit_tree.key?(key)
+    # nó "sem herança": a marcação do pai não desce até aqui
+    return nil if Cevico::AccessCatalog.explicit?(key)
 
     Cevico::AccessCatalog.ancestors(key).each do |anc|
       return explicit_tree[anc] if explicit_tree.key?(anc)

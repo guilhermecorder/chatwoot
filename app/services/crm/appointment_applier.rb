@@ -147,21 +147,37 @@ class Crm::AppointmentApplier
       creator = account.administrators.first || account.users.first
       return false unless creator
 
-      account.tasks.create!(
+      # 🔐 achado #148: a tarefa de revisão é CARD do quadro (tipo de card,
+      # sem data e SEM unidade — a unidade citada vai no texto). Como
+      # 'consulta' sem due_at, ou com `unit` preenchida, ela sumia de Tarefas,
+      # do Meu Painel e da Agenda desde o item 305 (board_cards/isAppointmentTask
+      # tratam unidade como agendamento). O carimbo 'robo' (item 322) é o que
+      # diz à equipe toda que esse card é dela (Task#ai_revision_card?). O
+      # responsável continua sendo quem cuida das consultas (TaskOwner com 'consulta').
+      Crm::Stamp.with(via: 'robo') { account.tasks.create!(revision_task_attrs(result, contact, title, description, creator)) }
+      true
+    end
+
+    def revision_task_attrs(result, contact, title, description, creator)
+      {
         title: title,
-        description: description,
-        unit: result[:unit].presence,
+        description: [description, unit_note(result[:unit])].compact.join("\n"),
         phone: result[:phone].presence || contact.phone_number,
         contact: contact,
         procedure: result[:procedure].presence,
         doctor: result[:doctor].presence,
-        task_type: 'consulta',
+        task_type: 'Atendimento',
         priority: :high,
         status: :todo,
         creator: creator,
-        assignee: Crm::TaskOwner.resolve(account, contact: contact, task_type: 'consulta')
-      )
-      true
+        assignee: Crm::TaskOwner.resolve(contact.account, contact: contact, task_type: 'consulta')
+      }
+    end
+
+    def unit_note(unit)
+      return nil if unit.blank?
+
+      "Unidade citada: #{Crm::AgendaSlots::UNIT_LABELS[unit.to_s] || unit}"
     end
 
     def revision_notes(result, conversation)

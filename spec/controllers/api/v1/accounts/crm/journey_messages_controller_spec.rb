@@ -55,8 +55,13 @@ RSpec.describe 'CEVICO Jornada API', type: :request do
   describe 'fila de hoje' do
     let(:message) { Crm::JourneyMessage.create!(valid.merge(account: account, inbox: inbox, approval: 'review')) }
     let(:contact) { create(:contact, account: account, phone_number: '+5511988887777') }
+    # 🛡️ #426: o despachante agora confere a consulta de verdade — véspera = consulta amanhã
+    let(:task) do
+      account.tasks.create!(task_type: 'consulta', modality: 'avaliacao', unit: 'paulista', creator: admin,
+                            title: 'Consulta: teste', due_at: Crm::Journey::Settings::TZ.now.tomorrow.change(hour: 15), contact: contact)
+    end
     let!(:send) do
-      Crm::JourneySend.create!(account: account, journey_message: message, contact: contact, event_key: 'task:1',
+      Crm::JourneySend.create!(account: account, journey_message: message, contact: contact, source: task, event_key: "task:#{task.id}",
                                scheduled_for: Time.current, status: 'pending_review')
     end
 

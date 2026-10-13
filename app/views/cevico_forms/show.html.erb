@@ -229,6 +229,25 @@
     <!-- Passos (perguntas + cards de mensagem, montados via JS) -->
     <div id="questions-root"></div>
 
+    <!-- 🔐 Rodada 4 (#119): link limpo — se o número já conversa com a
+         clínica, o paciente recebe um código no WhatsApp e digita aqui. A
+         página aparece IGUAL para qualquer telefone (LGPD: não revela quem é
+         paciente). O código NUNCA vem nesta página; só o servidor confere. -->
+    <div class="step" id="step-code">
+      <h2>Confirme que é você 🔒</h2>
+      <p class="subtitle" style="margin-top:8px">
+        Se este número já conversa com a gente pelo WhatsApp, enviamos agora um código de 6 dígitos.
+        Digite aqui para confirmar suas respostas no seu cadastro. Se não chegou nada, pode pular.
+      </p>
+      <input class="id-field" id="code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="Código de 6 dígitos" oninput="codeTyped(this)">
+      <p class="id-hint">Vale por 10 minutos. Se não achar, pode pular: suas respostas já ficaram salvas e a equipe confere com você.</p>
+      <p class="error" id="err-code"></p>
+      <div class="nav">
+        <button class="btn btn-ghost" id="code-skip" onclick="skipCode()">Pular por agora</button>
+        <button class="btn btn-primary" id="code-confirm" onclick="confirmCode()">Confirmar</button>
+      </div>
+    </div>
+
     <!-- a linha que faz a volta na borda do card (final) -->
     <svg id="sweep" aria-hidden="true">
       <defs>
@@ -272,6 +291,11 @@
       STEPS.unshift({ id: '_identity', type: 'identity', label: 'Primeiro, me diga quem é você 😊', required: true });
     }
     const SUBMIT_URL = window.location.pathname;
+    // 🔐 #119: onde o código do WhatsApp é conferido (só existe no link limpo)
+    const VERIFY_URL = '/forms/<%= @form.slug %>/verify';
+    let responseId = null; // id da resposta gravada (para o código)
+    // teto de cada resposta de texto — o mesmo que o servidor aplica (achado #118)
+    const MAX_VALUE_CHARS = <%= CevicoFormsController::MAX_VALUE_CHARS %>;
     // beacon de retenção: avisa 1x quando o paciente CHEGA em cada card —
     // alimenta o gráfico de abandono do hub (falhar não atrapalha nada)
     const trackedCards = new Set();
@@ -444,7 +468,9 @@
         ).join('') + '</div>';
         body += '<div class="qcount" style="margin-top:8px">0 = nada &nbsp;·&nbsp; 10 = muito</div>';
       } else {
-        body += `<textarea id="txt-${i}" placeholder="Escreva aqui..." oninput="answers[STEPS[${i}].id] = this.value"></textarea>`;
+        // limite igual ao do servidor (achado #118): o paciente vê o teto em vez de ter o texto cortado em silêncio
+        body += `<textarea id="txt-${i}" placeholder="Escreva aqui..." maxlength="${MAX_VALUE_CHARS}" oninput="answers[STEPS[${i}].id] = this.value"></textarea>`;
+        body += `<div class="qcount" style="margin-top:6px">até ${MAX_VALUE_CHARS} caracteres</div>`;
       }
 
       body += `<p class="error" id="err-${i}">Essa pergunta é obrigatória 🙏</p>`;
@@ -541,16 +567,94 @@
         });
         // servidor recusou a identificação (telefone inválido): volta pro
         // card de nome/WhatsApp em vez de agradecer em falso
-        if (ASK_IDENTITY && res.status === 422) {
+        if (res.status === 422) {
           const data = await res.json().catch(() => ({}));
-          if (data.error === 'identity') {
+          if (ASK_IDENTITY && data.error === 'identity') {
             const idIdx = STEPS.findIndex(s => s.type === 'identity');
             go(idIdx);
             document.getElementById('err-' + idIdx).style.display = 'block';
             return;
           }
+          // o servidor NÃO gravou (resposta grande demais ou outro erro):
+          // avisa no último card em vez de agradecer em falso
+          const lastIdx = STEPS.length - 1;
+          const errEl = document.getElementById('err-' + lastIdx);
+          if (errEl) {
+            errEl.textContent = data.error === 'too_large'
+              ? 'Suas respostas ficaram grandes demais e não foram salvas. Encurte um pouco os textos e envie de novo 🙏'
+              : data.error === 'limit'
+                ? 'O formulário atingiu o limite de hoje e suas respostas não foram salvas. Fale com a clínica pelo WhatsApp 🙏'
+                : 'Não conseguimos salvar suas respostas. Tente enviar de novo em instantes 🙏';
+            errEl.style.display = 'block';
+          }
+          go(lastIdx);
+          return;
+        }
+        // 🔐 #119: link limpo → sempre oferece o card do código (o servidor
+        // não diz se mandou ou não — LGPD); o código não vem na resposta
+        const data = await res.json().catch(() => ({}));
+        responseId = data.id || null;
+        if (data.verify && data.verify.status === 'check' && responseId) {
+          askCode();
+          return;
         }
       } catch (e) { /* mesmo offline, mostra o obrigado — melhor UX que travar */ }
+      celebrate();
+    }
+
+    // ── card do código (link limpo em cadastro existente) ──
+    function askCode() {
+      current = STEPS.length;
+      setBar();
+      applyPalette(PALETTES.navy);
+      glow(true);
+      show('step-code');
+      const input = document.getElementById('code-input');
+      if (input) input.focus();
+    }
+    function codeTyped(el) {
+      el.value = el.value.replace(/\D/g, '').slice(0, 6);
+    }
+    function skipCode() { celebrate(); }
+    async function confirmCode() {
+      const code = (document.getElementById('code-input').value || '').replace(/\D/g, '');
+      const errEl = document.getElementById('err-code');
+      if (code.length !== 6) {
+        errEl.textContent = 'Digite os 6 dígitos do código 🙏';
+        errEl.style.display = 'block';
+        return;
+      }
+      const btn = document.getElementById('code-confirm');
+      btn.disabled = true;
+      try {
+        const res = await fetch(VERIFY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ response_id: responseId, code })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) { celebrate(); return; }
+        if (data.error === 'wrong' && data.remaining > 0) {
+          errEl.textContent = `Código não confere ou já venceu. Você ainda tem ${data.remaining} tentativa${data.remaining === 1 ? '' : 's'}.`;
+          errEl.style.display = 'block';
+          btn.disabled = false;
+          return;
+        }
+        // venceu / errou tudo: as respostas ficaram salvas como "não confirmadas"
+        errEl.textContent = 'Não deu para confirmar o código. Tudo bem: suas respostas ficaram salvas e a equipe confere com você.';
+        errEl.style.display = 'block';
+        btn.textContent = 'Continuar';
+        btn.disabled = false;
+        btn.onclick = celebrate;
+      } catch (e) {
+        btn.disabled = false;
+        errEl.textContent = 'Não conseguimos conferir agora. Tente de novo ou pule por agora 🙏';
+        errEl.style.display = 'block';
+      }
+    }
+
+    // o clímax do final (barra cheia + volta na borda + agradecimento)
+    function celebrate() {
       current = STEPS.length;
       const bar = document.getElementById('bar');
       bar.style.width = '100%';

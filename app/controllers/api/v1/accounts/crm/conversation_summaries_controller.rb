@@ -37,18 +37,29 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
 
   # POST /crm/conversation_summary/move_stage — move o card do contato de
   # coluna DIRETO da conversa (mesmos disparos de automação do board)
-  def move_stage
+  def move_stage # rubocop:disable Metrics/AbcSize
     card = find_card
     return render json: { error: 'Contato ainda não tem card no CRM.' }, status: :unprocessable_entity if card.blank?
 
     new_stage = Crm::Stage.joins(:pipeline)
                           .where(crm_pipelines: { account_id: Current.account.id })
                           .find(params[:stage_id])
+    # 🧭 Rodada 5 da auditoria (#196): o card NUNCA troca de funil por aqui
+    # (trocar o pipeline_id transformava paciente da CEVICO em "parceiro" —
+    # sem IA nem automação — ou estourava o índice único contato+funil).
+    # A coluna vale para o card do contato NAQUELE funil (padrão do
+    # Crm::AttendanceReflector); sem card lá, recusa — como o board recusa
+    # coluna de outro funil.
+    card = Crm::Contact.find_by(contact_id: card.contact_id, pipeline_id: new_stage.pipeline_id) if card.pipeline_id != new_stage.pipeline_id
+    if card.blank?
+      return render json: { error: 'Esta coluna é de outro funil, onde o contato não tem card.' },
+                    status: :unprocessable_entity
+    end
+
     previous_stage = card.stage
 
     if new_stage.id != card.stage_id
-      # card muda de funil junto, se a coluna for de outro funil
-      card.update!(stage_id: new_stage.id, pipeline_id: new_stage.pipeline_id)
+      card.update!(stage_id: new_stage.id)
 
       CrmAutomationTriggerService.new(crm_contact: card, new_stage: new_stage,
                                       previous_stage: previous_stage, event_type: 'card_entered').call

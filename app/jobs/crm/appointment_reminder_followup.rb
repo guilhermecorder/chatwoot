@@ -47,6 +47,18 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     "#{regua}_inbox"
   end
 
+  # 🚫 #45 (revisão da Rodada 3): id da mensagem do reforço, guardado na marca
+  # da consulta — a rodada seguinte confere se a Meta recusou
+  def self.message_key(regua, number)
+    "#{mark_key(regua, number)}_message_id"
+  end
+
+  # nota "a Meta recusou o reforço" desta régua: nenhum outro reforço dela sai
+  # sozinho (a causa costuma ser a mesma); consulta remarcada = ciclo novo
+  def self.refused_key(regua)
+    "#{regua}_f_refused"
+  end
+
   def self.hours_of(rcfg)
     value = rcfg.dig('followup', 'hours').to_i
     value.positive? ? value.clamp(HOURS_RANGE.min, HOURS_RANGE.max) : DEFAULT_HOURS
@@ -65,6 +77,8 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
   private
 
   def run_followups(account, cfg, now_sp) # rubocop:disable Metrics/CyclomaticComplexity
+    # 🚫 #45: reforço que a Meta recusou deixa de contar (fora da janela também — a recusa pode chegar de noite)
+    reconcile_refused_followups(account, self.class::REGUAS & cfg.keys, now_sp)
     return unless WINDOW_HOURS.cover?(now_sp.hour)
 
     (self.class::REGUAS & cfg.keys).each do |regua|
@@ -119,19 +133,24 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     params = personalized_params(template['template_params'], task, rcfg, template['message_preview'])
     source = self.class::TemplateSource.new(account, inbox, nil, params, template['message_preview'].presence,
                                             "Reforço #{number} do lembrete de consulta (#{regua.upcase})")
-    conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
+    sender = Crm::SendTemplateService.new(source: source, contact: contact)
+    conversation = sender.perform
     if conversation.nil? # nada foi criado: devolve a marca para tentar de novo
       release_followup!(contact, task, regua, number)
       return nil
     end
 
-    entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox, model: template['model'])
+    # a mensagem gravada fica na marca: a rodada seguinte confere se a Meta recusou (#45)
+    remember_reminder_message!(contact, task, Crm::AppointmentReminderFollowup.message_key(regua, number), sender.message&.id)
+    entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox, model: template['model'],
+                             message_id: sender.message&.id)
       .merge('number' => number, 'at' => now_sp.iso8601)
   end
 
   # qual reforço é o da vez (1 ou 2) — nil quando não é hora de nenhum
   def followup_number(entry, regua, rcfg, now_sp) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return nil if entry[regua].blank? || entry['confirmed'].present? || entry['declined'].present?
+    return nil if entry[Crm::AppointmentReminderFollowup.refused_key(regua)].present? # #45: a Meta recusou um reforço desta régua
 
     done = (1..MAX_FOLLOWUPS).take_while { |n| entry[Crm::AppointmentReminderFollowup.mark_key(regua, n)].present? }.size
     number = done + 1
@@ -215,8 +234,67 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     key = Crm::AppointmentReminderFollowup.mark_key(regua, number)
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       marks = attrs['cevico_appt_reminders'] || {}
-      entry = (marks[task.id.to_s] || {}).except(key)
+      entry = (marks[task.id.to_s] || {}).except(key, Crm::AppointmentReminderFollowup.message_key(regua, number))
       attrs.merge('cevico_appt_reminders' => marks.merge(task.id.to_s => entry))
+    end
+  end
+
+  # ── a Meta recusou o reforço (#45, revisão da Rodada 3) ───────────────
+  # Mesmo desenho da conferência do lembrete: lê a marca dN_fK_message_id das
+  # consultas de hoje em diante; a recusada devolve a marca (o 2º reforço não
+  # conta horas de uma mensagem que nunca chegou), ganha a nota que barra
+  # novos reforços desta régua, aparece na lista "Reforços enviados" como
+  # recusada e a responsável é avisada (tarefa por paciente ou resumo).
+  def reconcile_refused_followups(account, reguas, now_sp)
+    hits = refused_followup_hits(account, reguas, now_sp)
+    return if hits.empty?
+
+    hits.each { |hit| refuse_followup!(hit[:contact], hit[:task], hit[:regua], hit[:number], hit[:error]) }
+    record_refused_followups(account, hits)
+    notify_refused_all(account, hits)
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO reforço] conferência das recusas: #{e.message}"
+  end
+
+  def refused_followup_hits(account, reguas, now_sp)
+    return [] if reguas.empty?
+
+    found = upcoming_marks(account, now_sp).flat_map do |task, contact, entry|
+      reguas.product((1..MAX_FOLLOWUPS).to_a).filter_map do |regua, number|
+        id = entry[Crm::AppointmentReminderFollowup.message_key(regua, number)]
+        { task: task, contact: contact, regua: regua, number: number, message_id: id } if id.present?
+      end
+    end
+    with_meta_errors(found)
+  end
+
+  # devolve a marca do reforço recusado e deixa a nota na consulta
+  def refuse_followup!(contact, task, regua, number, error)
+    note = { 'number' => number, 'error' => error.to_s.truncate(160), 'at' => Time.current.iso8601 }
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      marks = attrs['cevico_appt_reminders'] || {}
+      entry = (marks[task.id.to_s] || {})
+              .except(Crm::AppointmentReminderFollowup.mark_key(regua, number), Crm::AppointmentReminderFollowup.message_key(regua, number))
+              .merge(Crm::AppointmentReminderFollowup.refused_key(regua) => note)
+      attrs.merge('cevico_appt_reminders' => marks.merge(task.id.to_s => entry))
+    end
+  end
+
+  # na lista "Reforços enviados", a linha do reforço recusado ganha o erro da Meta
+  def record_refused_followups(account, hits)
+    settings = CrmSetting.find_by(account: account)
+    return if settings.blank?
+
+    texts = hits.to_h { |h| [[h[:regua], h[:task].id, h[:number]], "a Meta recusou: #{h[:error].to_s.truncate(80)}"] }
+    # Rodada 4 (achado #383): sob a trava da linha, só o estado deste robô muda
+    Cevico::SettingMerge.merge_key!(settings, :agenda_config, self.class::STATE_KEY) do |state|
+      state.merge(STATE_LIST => refused_lines(state[STATE_LIST] || {}, texts))
+    end
+  end
+
+  def refused_lines(lists, texts)
+    lists.to_h do |regua, list|
+      [regua, Array(list).map { |e| (text = texts[[regua, e['task_id'], e['number']]]) ? e.merge('refused' => text) : e }]
     end
   end
 
@@ -225,12 +303,10 @@ module Crm::AppointmentReminderFollowup # rubocop:disable Metrics/ModuleLength
     settings = CrmSetting.find_by(account: account)
     return if settings.blank?
 
-    settings.with_lock do
-      agenda = settings.agenda_config || {}
-      state = agenda[self.class::STATE_KEY] || {}
+    # Rodada 4 (achado #383): sob a trava da linha, só o estado deste robô muda
+    Cevico::SettingMerge.merge_key!(settings, :agenda_config, self.class::STATE_KEY) do |state|
       lists = state[STATE_LIST] || {}
-      lists[regua] = (sent.reverse + Array(lists[regua])).first(LIST_CAP)
-      settings.update!(agenda_config: agenda.merge(self.class::STATE_KEY => state.merge(STATE_LIST => lists)))
+      state.merge(STATE_LIST => lists.merge(regua => (sent.reverse + Array(lists[regua])).first(LIST_CAP)))
     end
   rescue StandardError => e
     Rails.logger.warn "[CEVICO reforço] registro: #{e.message}"

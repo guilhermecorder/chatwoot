@@ -40,6 +40,7 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
   ALREADY_SENT = 'já recebeu por esta cirurgia'.freeze
   LIST_CAP = 80
   QUIET_LABELS = %w[nao_perturbe].freeze
+  LOCK_TTL = 10.minutes
 
   # ordem importa: a 1ª que casar vence ("CIRURGIA REFRATIVA - LASIK" é LASIK)
   DEFAULT_RULES = [
@@ -103,17 +104,44 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
   end
 
   # ── envio (cron a cada 15 min; só age na hora da conta) ────────────────
-  def self.run_all(now = nil) # rubocop:disable Metrics/CyclomaticComplexity
+  def self.run_all(now = nil)
     now_sp = (now || TZ.now).in_time_zone(TZ)
     CrmSetting.find_each do |settings|
       cfg = (settings.agenda_config || {})[CONFIG_KEY] || {}
       next unless cfg['enabled'] == true
 
+      run_account(settings, cfg, now_sp)
+    end
+    Crm::CronHealth.ran!('nps') # 🚨 #217: sinal de vida da rodada (o vigia confere)
+  end
+
+  # 🔒 auditoria 10/2026 (NPS sem trava de rodada): o cron dispara 4x por hora e,
+  # com a fila presa, as rodadas acumuladas rodavam AO MESMO TEMPO e cada uma
+  # mandava a pesquisa. Trava por conta no Redis (como a Jornada): quem chega
+  # com a trava ocupada sai sem fazer nada — a próxima rodada de 15 min cobre.
+  # A trava leva uma senha própria e só é solta por quem a pegou: se a rodada
+  # passar do tempo e a seguinte entrar, a primeira não apaga a trava da segunda.
+  # Redis fora do ar vira erro só desta conta (log); as outras contas seguem.
+  def self.run_account(settings, cfg, now_sp)
+    lock_key = "CRM_NPS_LOCK::#{settings.account_id}"
+    token = nil
+    begin
+      token = SecureRandom.uuid
+      unless Redis::Alfred.set(lock_key, token, nx: true, ex: LOCK_TTL.to_i)
+        token = nil
+        Rails.logger.info "[CEVICO NPS] conta #{settings.account_id}: rodada anterior ainda rodando, esta foi pulada"
+        return
+      end
+
       survey = new(settings.account, now_sp)
+      survey.reconcile_refused # 🚫 #45: pesquisa/lembrete que a Meta recusou deixa de contar como enviada
       survey.run if now_sp.hour == (cfg['hour'] || 10).to_i
       survey.send_reminders
     rescue StandardError => e
       Rails.logger.error "[CEVICO NPS] conta #{settings.account_id}: #{e.message}"
+      Crm::CronHealth.failed!('nps', e, account: settings.account) # 🚨 #217: avisa se repetir
+    ensure
+      Redis::Alfred.delete_if_equals(lock_key, token) if token
     end
   end
 
@@ -159,15 +187,29 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
       at = Time.zone.parse(survey['pending_at'].to_s)
       next if at > hours.hours.ago || at < REPLY_WINDOW.ago
       next if reminder_blocked?(contact, at)
+      next if survey['reminder_refused'].present? # #45: a Meta recusou o lembrete desta pesquisa; não repete
+      # marca ANTES de enviar, dentro da trava: outra rodada não manda o mesmo lembrete
+      next unless claim_reminder!(contact)
 
+      reserved_at = Time.current
       source = Crm::TemplateSource.new(@account, inbox, nil, reminder_params(rem, contact), rem['message_preview'].presence,
                                        'Pesquisa de satisfação (lembrete)')
-      next if Crm::SendTemplateService.new(source: source, contact: contact).perform.nil?
-
-      Cevico::AttributeMerge.merge!(contact) do |attrs|
-        attrs.merge(MARK_KEY => (attrs[MARK_KEY] || {}).merge('reminded_at' => Time.current.iso8601))
+      sender = Crm::SendTemplateService.new(source: source, contact: contact)
+      conversation = begin
+        sender.perform
+      rescue StandardError
+        # deu erro no meio do envio: só solta a marca se a mensagem NÃO chegou a ser gravada
+        release_reminder!(contact) unless template_sent_since?(contact, rem['template_params'], reserved_at)
+        raise
       end
-      sent << { 'at' => Time.current.iso8601, 'name' => contact.name.to_s.truncate(40), 'contact_id' => contact.id }
+      if conversation.nil?
+        release_reminder!(contact)
+        next
+      end
+
+      remember_message!(contact, 'reminder_message_id', sender.message&.id)
+      sent << { 'at' => Time.current.iso8601, 'name' => contact.name.to_s.truncate(40), 'contact_id' => contact.id,
+                'message_id' => sender.message&.id }.compact
     rescue StandardError => e
       Rails.logger.warn "[CEVICO NPS] lembrete contato #{contact.id}: #{e.message}"
     end
@@ -275,13 +317,11 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     settings = CrmSetting.find_by(account_id: contact.account_id)
     return if settings.blank?
 
-    settings.with_lock do
-      agenda = settings.agenda_config || {}
-      state = agenda[STATE_KEY] || {}
+    # Rodada 4 (achado #383): sob a trava da linha, só o estado do NPS muda
+    Cevico::SettingMerge.merge_key!(settings, :agenda_config, STATE_KEY) do |state|
       answers = Array(state['answers'])
       answers.unshift({ 'at' => Time.current.iso8601, 'band' => band, 'name' => contact.name.to_s.truncate(40), 'contact_id' => contact.id })
-      state['answers'] = answers.first(LIST_CAP)
-      settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
+      state.merge('answers' => answers.first(LIST_CAP))
     end
   rescue StandardError => e
     Rails.logger.warn "[CEVICO NPS] estado da resposta: #{e.message}"
@@ -305,6 +345,24 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     at.present? && Time.zone.parse(at.to_s) > REPLY_WINDOW.ago
   rescue ArgumentError, TypeError
     false
+  end
+
+  # ── a Meta recusou (#45, auditoria 10/2026) ────────────────────────────
+  # A pesquisa (e o lembrete dela) é dada como enviada quando a mensagem é
+  # gravada; a Meta responde DEPOIS e a mensagem fica `status: failed`. A cada
+  # rodada do cron: pesquisa recusada → a marca é devolvida (a cirurgia deixa
+  # de contar como pesquisada, o Pós-operatório não trata a pessoa como "com
+  # pesquisa recente", nenhum lembrete sai de uma pesquisa que não chegou) e
+  # fica a nota da recusa nesta cirurgia para NÃO reenviar sozinho — ela
+  # aparece nas "puladas" com o erro. Lembrete recusado → só a nota (não há
+  # o que repetir). Sem reenvio automático: a causa (modelo pausado, número
+  # inválido) costuma ser a mesma; a equipe corrige e, se quiser, ajusta a
+  # cirurgia na Agenda para a pesquisa sair de novo.
+  def reconcile_refused
+    reconcile_refused_surveys
+    reconcile_refused_reminders
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO NPS] conferência das recusas conta #{@account.id}: #{e.message}"
   end
 
   private
@@ -331,15 +389,38 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
       return
     end
 
-    source = Crm::TemplateSource.new(@account, inbox, nil, personalized_params(task, rule), @cfg['message_preview'].presence,
-                                     'Pesquisa de satisfação (NPS)')
-    conversation = Crm::SendTemplateService.new(source: source, contact: contact).perform
-    return skip(task, rule, 'envio não saiu (contato/caixa)') if conversation.nil?
+    # marca ANTES de enviar, dentro da trava (como o lembrete de consulta): outra
+    # rodada em paralelo, ou a marca falhando depois do envio, não mandam 2 vezes
+    before = claim_sent!(contact, task)
+    return if before == :taken # outra rodada já reservou esta cirurgia (ou esta pessoa, no intervalo)
 
-    mark_sent!(contact, task)
-    @run['sent'] << entry(task, contact, rule)
+    if deliver_survey(inbox, task, rule, contact, before).nil?
+      release_sent!(contact, before)
+      return skip(task, rule, 'envio não saiu (contato/caixa)')
+    end
+
+    @run['sent'] << sent_entry(task, contact, rule)
   rescue StandardError => e
     skip(task, rule, "erro: #{e.message.truncate(60)}")
+  end
+
+  # manda a pesquisa já reservada; devolve a conversa ou nil. Se o envio LEVANTAR
+  # erro (caixa errada, validação…), a marca só volta ao que era quando a
+  # mensagem NÃO chegou a ser gravada — assim a cirurgia continua candidata sem
+  # risco de sair 2 vezes, e não fica "enviada" sem pesquisa (o que faria sair
+  # o lembrete de uma pesquisa que nunca chegou)
+  def deliver_survey(inbox, task, rule, contact, before)
+    reserved_at = Time.current
+    source = Crm::TemplateSource.new(@account, inbox, nil, personalized_params(task, rule), @cfg['message_preview'].presence,
+                                     'Pesquisa de satisfação (NPS)')
+    sender = Crm::SendTemplateService.new(source: source, contact: contact)
+    @sent_message = nil
+    conversation = sender.perform
+    @sent_message = sender.message # #45: conferido na rodada seguinte
+    conversation
+  rescue StandardError
+    release_sent!(contact, before) unless template_sent_since?(contact, @cfg['template_params'], reserved_at)
+    raise
   end
 
   def skip_reason(task, contact) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
@@ -355,11 +436,33 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     survey = (contact.additional_attributes || {})[MARK_KEY] || {}
     return ALREADY_SENT if Array(survey['task_ids']).include?(task.id)
 
-    last = survey['pending_at'].present? ? Time.zone.parse(survey['pending_at'].to_s) : nil
-    interval = (@cfg['min_interval_days'].presence || 60).to_i
-    return "já recebeu pesquisa há menos de #{interval} dias" if last && last > interval.days.ago
+    refused = refused_reason(survey, task) # #45: a Meta recusou a pesquisa desta cirurgia → listada, sem reenvio automático
+    return refused if refused
+
+    return "já recebeu pesquisa há menos de #{min_interval_days} dias" if within_interval?(survey)
 
     nil
+  end
+
+  def min_interval_days
+    (@cfg['min_interval_days'].presence || 60).to_i
+  end
+
+  # a pessoa recebeu uma pesquisa há menos de `min_interval_days` (segundo olho)?
+  def within_interval?(survey)
+    survey['pending_at'].present? && Time.zone.parse(survey['pending_at'].to_s) > min_interval_days.days.ago
+  end
+
+  # a mensagem modelo deste envio já foi gravada para o contato depois da reserva?
+  # (prova física de que a pesquisa/lembrete saiu, mesmo que o envio tenha
+  # levantado erro logo depois de gravar)
+  def template_sent_since?(contact, template_params, since)
+    name = template_params.to_h['name'].to_s
+    return false if name.blank?
+
+    Message.joins(:conversation).where(conversations: { contact_id: contact.id }, message_type: :outgoing)
+           .where("messages.additional_attributes -> 'template_params' ->> 'name' = ?", name)
+           .exists?(['messages.created_at >= ?', since])
   end
 
   def personalized_params(task, rule) # rubocop:disable Metrics/AbcSize
@@ -405,20 +508,51 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     settings = CrmSetting.find_by(account: @account)
     return if settings.blank?
 
-    settings.with_lock do
-      agenda = settings.agenda_config || {}
-      state = agenda[STATE_KEY] || {}
-      state['reminders'] = (sent + Array(state['reminders'])).first(LIST_CAP)
-      state['last_reminder_at'] = Time.current.iso8601
-      settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
+    Cevico::SettingMerge.merge_key!(settings, :agenda_config, STATE_KEY) do |state|
+      state.merge('reminders' => (sent + Array(state['reminders'])).first(LIST_CAP), 'last_reminder_at' => Time.current.iso8601)
     end
   end
 
-  def mark_sent!(contact, task)
+  # reserva a cirurgia para esta rodada, dentro da trava do contato. Devolve a
+  # marca como estava ANTES (para desfazer se o envio não sair) ou :taken quando
+  # outra rodada já gravou esta cirurgia — ou outra pesquisa para esta pessoa
+  # dentro do intervalo (segundo olho) — entre o skip_reason e aqui.
+  def claim_sent!(contact, task)
+    before = :taken
     Cevico::AttributeMerge.merge!(contact) do |attrs|
       survey = attrs[MARK_KEY] || {}
+      next attrs if Array(survey['task_ids']).include?(task.id) || within_interval?(survey)
+
+      before = survey
       ids = (Array(survey['task_ids']) + [task.id]).last(20)
       attrs.merge(MARK_KEY => { 'pending_at' => Time.current.iso8601, 'task_ids' => ids, 'task_id' => task.id })
+    end
+    before
+  end
+
+  # envio não saiu: a marca volta a ser o que era (a cirurgia continua candidata)
+  def release_sent!(contact, before)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      before.blank? ? attrs.except(MARK_KEY) : attrs.merge(MARK_KEY => before)
+    end
+  end
+
+  # reserva o lembrete dentro da trava; false = já lembrado (por outra rodada)
+  def claim_reminder!(contact)
+    claimed = false
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      survey = attrs[MARK_KEY] || {}
+      next attrs if survey['reminded_at'].present?
+
+      claimed = true
+      attrs.merge(MARK_KEY => survey.merge('reminded_at' => Time.current.iso8601))
+    end
+    claimed
+  end
+
+  def release_reminder!(contact)
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs.merge(MARK_KEY => (attrs[MARK_KEY] || {}).except('reminded_at'))
     end
   end
 
@@ -437,15 +571,101 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
     settings = CrmSetting.find_by(account: @account)
     return if settings.blank?
 
-    settings.with_lock do
-      agenda = settings.agenda_config || {}
-      state = (agenda[STATE_KEY] || {}).merge(
+    Cevico::SettingMerge.merge_key!(settings, :agenda_config, STATE_KEY) do |state|
+      state.merge(
         'last_run_at' => Time.current.iso8601, 'mode' => @shadow ? 'shadow' : 'live',
         'sent' => @run['sent'].first(LIST_CAP), 'skipped' => @run['skipped'].first(LIST_CAP)
       )
-      settings.update!(agenda_config: agenda.merge(STATE_KEY => state))
     end
   rescue StandardError => e
     Rails.logger.warn "[CEVICO NPS] registro da rodada: #{e.message}"
+  end
+
+  # ── conferência das recusas da Meta (#45): ajudantes ───────────────────
+  # [contato, erro] de cada marca `key` cuja mensagem a Meta recusou
+  def refused_by_mark(key)
+    contacts = contacts_with_mark(key)
+    refused = Crm::SendTemplateService.refused(contacts.map { |c| c.additional_attributes.dig(MARK_KEY, key) })
+    contacts.filter_map { |c| (error = refused[c.additional_attributes.dig(MARK_KEY, key)]) && [c, error] }
+  end
+
+  def reconcile_refused_surveys
+    moved = refused_by_mark('message_id').map do |contact, error|
+      task_id = release_refused!(contact, error)
+      { 'task_id' => task_id, 'name' => contact.name.to_s.truncate(40), 'why' => "a Meta recusou: #{error}",
+        'surgery' => surgery_day(task_id) }.compact
+    end
+    record_refused('sent', moved) if moved.any?
+  end
+
+  def reconcile_refused_reminders
+    moved = refused_by_mark('reminder_message_id').map do |contact, error|
+      Cevico::AttributeMerge.merge!(contact) do |attrs|
+        attrs.merge(MARK_KEY => (attrs[MARK_KEY] || {}).except('reminder_message_id').merge('reminder_refused' => error.truncate(160)))
+      end
+      { 'contact_id' => contact.id, 'name' => contact.name.to_s.truncate(40), 'why' => "a Meta recusou: #{error}" }
+    end
+    record_refused('reminders', moved) if moved.any?
+  end
+
+  def surgery_day(task_id)
+    @account.tasks.find_by(id: task_id)&.due_at&.in_time_zone(TZ)&.strftime('%d/%m')
+  end
+
+  def refused_reason(survey, task)
+    return nil unless survey.dig('refused', 'task_id') == task.id
+
+    "a Meta recusou (#{survey.dig('refused', 'error').to_s.truncate(80)})"
+  end
+
+  # a mensagem gravada fica na marca e na lista — a rodada seguinte confere se a Meta recusou (#45)
+  def sent_entry(task, contact, rule)
+    message_id = @sent_message&.id
+    remember_message!(contact, 'message_id', message_id)
+    entry(task, contact, rule).merge('message_id' => message_id).compact
+  end
+
+  # só pesquisas ainda dentro da janela de resposta: message_id fica na marca
+  # de quem recebeu bem, e sem este corte a varredura carregaria TODOS os
+  # contatos já pesquisados a cada rodada (revisão da Rodada 3). pending_at
+  # e o limite são ISO 8601 em UTC — comparam como texto.
+  def contacts_with_mark(key)
+    @account.contacts.where("additional_attributes -> '#{MARK_KEY}' ->> '#{key}' IS NOT NULL")
+            .where("additional_attributes -> '#{MARK_KEY}' ->> 'pending_at' > ?", REPLY_WINDOW.ago.utc.iso8601).to_a
+  end
+
+  # devolve a marca da pesquisa recusada e guarda a nota; devolve o id da cirurgia
+  def release_refused!(contact, error)
+    task_id = nil
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      survey = attrs[MARK_KEY] || {}
+      task_id = survey['task_id']
+      kept = survey.except('pending_at', 'task_id', 'message_id', 'reminded_at', 'reminder_message_id')
+                   .merge('task_ids' => Array(survey['task_ids']) - [task_id],
+                          'refused' => { 'task_id' => task_id, 'error' => error.truncate(160), 'at' => Time.current.iso8601 })
+      attrs.merge(MARK_KEY => kept)
+    end
+    task_id
+  end
+
+  # a lista da rodada: sai das "enviadas" (ou "lembretes") e entra nas "puladas" com o erro
+  def record_refused(list, moved)
+    settings = CrmSetting.find_by(account: @account)
+    return if settings.blank?
+
+    key = ->(e) { e['task_id'] || e['contact_id'] }
+    ids = moved.map(&key)
+    Cevico::SettingMerge.merge_key!(settings, :agenda_config, STATE_KEY) do |state|
+      state.merge(list => Array(state[list]).reject { |e| ids.include?(key.call(e)) },
+                  'skipped' => (moved + Array(state['skipped'])).first(LIST_CAP))
+    end
+  end
+
+  def remember_message!(contact, key, message_id)
+    return if message_id.blank?
+
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      attrs.merge(MARK_KEY => (attrs[MARK_KEY] || {}).merge(key => message_id))
+    end
   end
 end

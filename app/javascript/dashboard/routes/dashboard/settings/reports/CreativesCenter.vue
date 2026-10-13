@@ -76,13 +76,33 @@ const assets = ref(null);
 // 🎬 item 181: transcrição dos vídeos (gancho/corpo/CTA passam a ser o que o vídeo FALA)
 const isTranscribing = ref(false);
 const transcribeVideos = async () => {
+  // achado #410: cada vídeo custa uma chamada à IA — confirma com a quantidade
+  // que o SERVIDOR calculou (inclui anúncios dinâmicos com vídeo). Quem decide
+  // se há algo a enfileirar é o servidor: a tela não bloqueia o botão.
+  const va = assets.value && assets.value.video;
+  const pendentes =
+    va && typeof va.pending === 'number' && va.pending > 0 ? va.pending : null;
+  // o limite por clique vem do servidor (mesmo do job/cron) — a tela não repete o número
+  const limite = va && va.transcribe_limit;
+  let quantos = `até ${pendentes} vídeo(s) sem transcrição`;
+  if (pendentes === null) quantos = 'os vídeos que ainda não têm transcrição';
+  else if (limite && pendentes > limite)
+    quantos = `${limite} dos ${pendentes} vídeos sem transcrição (${limite} por vez — clique de novo para os próximos)`;
+  // eslint-disable-next-line no-alert
+  const ok = window.confirm(
+    `Transcrever ${quantos}? Cada vídeo é enviado à IA uma única vez e tem custo. Os que já estão na fila ou prontos não são enviados de novo.`
+  );
+  if (!ok) return;
   isTranscribing.value = true;
   try {
     const { data: res } = await CevicoCreativesAPI.transcribeVideos();
+    // os que entraram na fila deixam de ser pendentes (o próximo clique mostra o resto)
+    if (va && typeof va.pending === 'number')
+      va.pending = Math.max(va.pending - (res.enqueued || 0), 0);
     useAlert(
       res.enqueued
         ? `${res.enqueued} vídeo(s) na fila de transcrição — volte em alguns minutos.`
-        : 'Todos os vídeos já estão transcritos.'
+        : 'Nenhum vídeo novo para transcrever: todos já estão prontos ou na fila.'
     );
   } catch (e) {
     useAlert(

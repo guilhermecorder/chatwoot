@@ -36,10 +36,11 @@ class Crm::WhatsappPricing
     # salva só o que veio válido; vazio = volta ao padrão
     def save(account, attrs)
       entry = sanitize(attrs)
-      settings = CrmSetting.find_or_create_by!(account: account)
-      cfg = settings.ai_config || {}
-      entry.present? ? cfg[SETTING_KEY] = entry : cfg.delete(SETTING_KEY)
-      settings.update!(ai_config: cfg)
+      # Rodada 4 (achado #383): sob a trava da linha, só a tarifa muda (cria a linha se faltar)
+      Cevico::SettingMerge.merge!(account, :ai_config) do |cfg|
+        entry.present? ? cfg[SETTING_KEY] = entry : cfg.delete(SETTING_KEY)
+        cfg
+      end
       rates(account)
     end
 

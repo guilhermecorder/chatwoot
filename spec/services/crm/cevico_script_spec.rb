@@ -73,6 +73,40 @@ RSpec.describe Crm::CevicoScript do
     end
   end
 
+  # 🔒 auditoria 10/10 (#99/#442): consulta de outra pessoa só com o telefone da consulta; sem casar, passa para a equipe
+  it 'consulta de OUTRA pessoa: o Roteiro pede o telefone cadastrado na consulta e passa para a equipe quando não casa', :aggregate_failures do
+    %w[v1 v2].product(%w[atendente_agendamento atendente_pos]).each do |version, key|
+      prompt = described_class.stage_prompt(account, key, version)
+      expect(prompt).to include('telefone com DDD cadastrado na consulta')
+      expect(prompt).to include('terceiros_ocultos')
+      expect(prompt).to include('ok=false vale igual em sombra')
+      expect(prompt).to include('nome_completo').and include('outra_pessoa=true')
+      expect(prompt).to include('titular pode chamar')
+    end
+    expect(described_class.stage_prompt(account, 'atendente_pos_op')).to include('outra_pessoa=true')
+  end
+
+  # 🙋 auditoria 10/10 (#443/#457/#458): aviso honesto à equipe, cancelar só pela ferramenta, abrir_tarefa nos três
+  it 'é honesto sobre o aviso à equipe, cancela só pela ferramenta (confirma com ok=true) e ensina abrir_tarefa aos três', :aggregate_failures do
+    prompts = described_class::STAGE_PROMPTS
+    expect(prompts['atendente_pos_op']).not_to include('agora; a equipe já foi avisada')
+    expect(prompts['atendente_pos_op']).to include('próximo horário de atendimento')
+    expect(described_class::DEFAULT['handoff']).to include('próximo horário de atendimento').and include('SEJA HONESTO')
+    %w[v1 v2].each do |version|
+      # o v2 (simulador 🧪) segue a mesma honestidade e ensina abrir_tarefa aos três
+      text = described_class.text(account, version)
+      expect(text).to include('SEJA HONESTO').and include('próximo horário de atendimento')
+      expect(text).not_to include('(a equipe assume por aqui mesmo)')
+      pos = described_class.stage_prompt(account, 'atendente_pos', version)
+      expect(pos).to include('chame a ferramenta cancelar_consulta').and include('Só diga que cancelou se o resultado vier ok=true')
+      expect(pos).not_to include('marque cancelar=true, diga que a consulta será cancelada')
+      Crm::ResponderTools::TASK_TOOL_KEYS.each do |key|
+        expect(described_class.stage_prompt(account, key, version)).to include('abrir_tarefa {motivo, detalhes, urgencia (alta|normal)}')
+      end
+    end
+    expect(described_class.stage_prompt(account, 'atendente_agendamento')).to include('chame cancelar_consulta {id, motivo}')
+  end
+
   # 26/09: cada atendente tem o SEU bloco de passos (um heredoc mal fechado já
   # colou o do pós-operatório dentro do Agente de Ligação)
   it 'cada etapa tem o próprio texto: pós-operatório não vaza para a ligação', :aggregate_failures do

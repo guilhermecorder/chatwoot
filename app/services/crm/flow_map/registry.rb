@@ -23,6 +23,8 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::NpsSurvey,
     Crm::FlowMap::Flows::Journey,
     Crm::FlowMap::Flows::FollowupBots,
+    Crm::FlowMap::Flows::FollowupReader, # 🧠 13/10
+    Crm::FlowMap::Flows::FollowupAi,     # item 315
     # Vendas e fechamento
     Crm::FlowMap::Flows::Sales,
     Crm::FlowMap::Flows::Closing,
@@ -44,7 +46,8 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::StalledCards,
     # Infraestrutura
     Crm::FlowMap::Flows::Oftalmofacil,
-    Crm::FlowMap::Flows::DataHygiene # 🏷️ itens 309 + 322
+    Crm::FlowMap::Flows::DataHygiene, # 🏷️ itens 309 + 322
+    Crm::FlowMap::Flows::CronWatchdog # 🚨 Rodada 6 (achado #217)
   ].freeze
 
   module_function

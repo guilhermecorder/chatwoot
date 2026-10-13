@@ -28,6 +28,53 @@ RSpec.describe 'CEVICO Oftalmofácil hub', type: :request do
                           external_ref: 't1', booking_kind: 'registro', contact: contact)
   end
 
+  # Rodada 4 (achado #172): com outra sincronização rodando, os botões avisam (409)
+  describe 'trava do sync nos botões' do
+    let(:lock_key) { Crm::OftalmofacilSyncJob.lock_key(account.id) }
+    let(:on_config) do
+      { 'db_host' => 'h', 'db_name' => 'd', 'db_user' => 'u', 'db_password' => 'p', 'provider_name' => 'CATARATA_SP',
+        'enabled' => true, 'agenda_enabled' => true }
+    end
+
+    before do
+      CrmSetting.find_by(account: account).update!(agenda_config: { 'oftalmofacil' => on_config })
+      Redis::LockManager.new.lock(lock_key, 1.minute)
+    end
+
+    after { Redis::Alfred.delete(lock_key) }
+
+    it '"Trazer para a Agenda" devolve 409 com o aviso, sem reprocessar', :aggregate_failures do
+      allow(Crm::OftalmofacilSyncService).to receive(:new)
+
+      post "#{base}/reconcile_day", params: { date: Date.current.iso8601 }, headers: admin.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body['error']).to eq(Crm::OftalmofacilSyncJob::BUSY_MESSAGE)
+      expect(Crm::OftalmofacilSyncService).not_to have_received(:new)
+    end
+
+    it '"Sincronizar agora" devolve 409 com o aviso e não enfileira o job', :aggregate_failures do
+      allow(Crm::OftalmofacilSyncJob).to receive(:perform_later)
+
+      post "/api/v1/accounts/#{account.id}/crm/settings/sync_oftalmofacil",
+           params: { full: true }, headers: admin.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body['error']).to eq(Crm::OftalmofacilSyncJob::BUSY_MESSAGE)
+      expect(Crm::OftalmofacilSyncJob).not_to have_received(:perform_later)
+    end
+
+    it 'com a trava livre, "Sincronizar agora" enfileira o job normalmente' do
+      Redis::Alfred.delete(lock_key)
+      allow(Crm::OftalmofacilSyncJob).to receive(:perform_later)
+
+      post "/api/v1/accounts/#{account.id}/crm/settings/sync_oftalmofacil", headers: admin.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(Crm::OftalmofacilSyncJob).to have_received(:perform_later).with(account.id, full: false)
+    end
+  end
+
   it 'overview: parceiros com nosso × parceiro, saúde da Agenda e valores só para admin', :aggregate_failures do
     get "#{base}/overview", params: { from: (Date.current - 10).iso8601, to: (Date.current + 10).iso8601 },
                             headers: admin.create_new_auth_token, as: :json
@@ -80,5 +127,28 @@ RSpec.describe 'CEVICO Oftalmofácil hub', type: :request do
     get "#{base}/items/#{Crm::OftalmofacilSurgery.find_by(item_token: 't1').id}", headers: admin.create_new_auth_token, as: :json
     expect(response.parsed_body['card']).to be_nil
     expect(response.parsed_body).to have_key('raw')
+  end
+
+  # Rodada 5 (#173, revisão): o hub nunca marca "realizada" — na lista, no mês
+  # e no chip de filtro, ativa com a data já passada = realizada (concluidas)
+  it 'items: chip "Realizada" usa a régua do resumo e cada item traz a situação para a tela', :aggregate_failures do
+    Crm::OftalmofacilSurgery.create!(account: account, item_token: 't4', status_kind: 'agendada', patient_name: 'Já Operou',
+                                     provider_name: 'CATARATA_SP', surgery_date: Date.current - 4, amount: 5000)
+    Crm::OftalmofacilSurgery.create!(account: account, item_token: 't5', status_kind: 'aguardando_pagamento', patient_name: 'Não Pagou',
+                                     provider_name: 'CATARATA_SP', surgery_date: Date.current - 4)
+
+    get "#{base}/items", params: { status: 'realizada' }, headers: admin.create_new_auth_token, as: :json
+    # antes: só t2 (o rótulo cru do hub); a ativa que já passou ficava de fora
+    expect(response.parsed_body['rows'].map { |r| r['item_token'] }).to contain_exactly('t2', 't4')
+
+    get "#{base}/items", params: { status: 'agendada' }, headers: admin.create_new_auth_token, as: :json
+    expect(response.parsed_body['rows'].map { |r| r['item_token'] }).to contain_exactly('t1', 't3')
+
+    get "#{base}/items", headers: admin.create_new_auth_token, as: :json
+    view = response.parsed_body['rows'].to_h { |r| [r['item_token'], [r['status_view'], r['status_view_label']]] }
+    expect(view['t4']).to eq(%w[realizada Realizada])
+    expect(view['t1']).to eq(%w[agendada Agendada])
+    expect(view['t5']).to eq(['aguardando_pagamento', 'Aguardando pagamento'])
+    expect(response.parsed_body['rows'].find { |r| r['item_token'] == 't4' }['status_kind']).to eq('agendada')
   end
 end

@@ -679,6 +679,20 @@ const retentionTone = p => {
                 >
                   {{ summary.total }}
                 </p>
+                <!-- 🔐 achados #118/#119: link limpo sem o código do WhatsApp = não confirmada -->
+                <p
+                  v-if="summary.unverified_count"
+                  class="text-[11px] text-amber-800"
+                  title="Quem respondeu se identificou só com nome e WhatsApp e não digitou o código enviado no WhatsApp (ou o telefone era desconhecido) — ninguém provou que é o dono do número. Vale conferir com o paciente antes de usar as respostas."
+                >
+                  ⚠️ {{ summary.unverified_count }} não
+                  {{
+                    summary.unverified_count === 1
+                      ? 'confirmada'
+                      : 'confirmadas'
+                  }}
+                  (link limpo, sem código)
+                </p>
               </div>
               <div
                 class="fr-tile cv-sub rounded-2xl p-5 flex flex-col gap-3 min-w-0"

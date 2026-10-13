@@ -20,11 +20,15 @@ end
 
 desc 'Simula uma ligação recebida no WhatsApp (sem Meta) — ACCOUNT_ID= [CONTACT_ID=|PHONE=] [INBOX_ID=] [SCENARIO=ringing|missed]'
 task 'cevico:calls_simulate' => :environment do
+  # 🔒 auditoria #211: comando de teste — fora do desenvolvimento só com CEVICO_SIMULATION_OK=1
+  # e PHONE= de um número que não é de paciente (CONTACT_ID= é recusado lá)
+  Cevico::SimulationGuard.check!('cevico:calls_simulate')
   account = Account.find(ENV.fetch('ACCOUNT_ID'))
   inbox = pick_inbox.call(account)
   abort 'nenhuma caixa encontrada (use INBOX_ID=)' unless inbox
   contact = ENV['CONTACT_ID'].present? ? account.contacts.find(ENV['CONTACT_ID']) : nil
-  wa_id = (ENV['PHONE'].presence || contact&.phone_number || '5511999990000').to_s.gsub(/\D/, '')
+  wa_id = Cevico::SimulationGuard.phone!(account, ENV['PHONE'].presence || contact&.phone_number || Cevico::SimulationGuard::FAKE_PHONE,
+                                         'cevico:calls_simulate')
   call_id = "sim-#{SecureRandom.hex(6)}"
   value = {
     'contacts' => [{ 'wa_id' => wa_id, 'profile' => { 'name' => contact&.name.presence || 'Paciente Simulado' } }],
@@ -52,6 +56,9 @@ end
 
 desc 'Simula o terminate da Meta para uma ligação — CALL_ID= [DURATION=segundos] [STATUS=COMPLETED|FAILED]'
 task 'cevico:calls_end' => :environment do
+  # 🔒 auditoria #211: encerra uma ligação pelo caminho do webhook — fora do
+  # desenvolvimento só com CEVICO_SIMULATION_OK=1 (senão encerraria ligação real)
+  Cevico::SimulationGuard.check!('cevico:calls_end')
   call = Crm::Call.find(ENV.fetch('CALL_ID'))
   now = Time.current
   duration = ENV['DURATION'].presence&.to_i || (call.answered_at ? (now - call.answered_at).to_i : 0)

@@ -16,11 +16,10 @@ class Api::V1::Accounts::Crm::ClosingToolsController < Api::V1::Accounts::BaseCo
   def update_script
     return forbidden unless cevico_can?('metas.ferramentas', :edit)
 
-    settings = CrmSetting.find_or_create_by!(account: Current.account)
-    cfg = settings.agenda_config || {}
-    cfg['closing_script'] = params[:script].to_s[0, 20_000]
-    settings.update!(agenda_config: cfg)
-    render json: { script: cfg['closing_script'] }
+    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
+    script = params[:script].to_s[0, 20_000]
+    Cevico::SettingMerge.merge!(Current.account, :agenda_config) { |cfg| cfg.merge('closing_script' => script) }
+    render json: { script: script }
   end
 
   def generate_map

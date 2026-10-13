@@ -3,7 +3,7 @@
 # Atendente já encontrar tudo lido quando o job dele rodar (6 s depois).
 # Disparado pelo CrmListener nas caixas atendidas pelos Atendentes do WhatsApp.
 class Crm::MediaReadingJob < ApplicationJob
-  queue_as :default
+  queue_as :ai # 🚦 Rodada 6 (RESIL-1): fila da IA, cápsula própria (SIDEKIQ_AI_CONCURRENCY, config/sidekiq.yml)
 
   def perform(message_id)
     message = Message.find_by(id: message_id)

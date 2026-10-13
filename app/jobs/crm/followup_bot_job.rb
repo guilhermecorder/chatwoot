@@ -50,6 +50,18 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # AI_MAX_TRIES vezes; erro de configuração (sem chave) não repete.
   AI_PER_ROUND = 15
   AI_MAX_TRIES = 3
+  # ── FOLLOW-UP INTELIGENTE (13/10) — Crm::FollowupClosure / Crm::FollowupConversationReader ──
+  # Antes da 1ª cutucada de cada silêncio o robô LÊ a conversa (aberta,
+  # encerrada, adiada, recusou) e só cutuca quem ficou com algo a responder.
+  # Config da conta em agenda_config.followup_smart (Automações → Robôs).
+  READS_PER_ROUND = 25          # leituras por rodada; o resto lê na próxima (2 min)
+  COLD_MAX_HOURS = 24           # lead que nunca escreveu: 1 cutucada, dentro de 24h
+  REACTIVATIONS_PER_ROUND = 20  # "adiou" → mensagem modelo dias depois
+  REACTIVATION_STALE_DAYS = 3   # reativação que passou do dia há mais que isso não sai
+  SMART_DEFAULTS = {
+    'leitura' => true, 'fim_de_semana' => true, 'lead_frio' => true,
+    'reativacao' => { 'ativa' => true, 'dias' => 7, 'modelos' => {} }
+  }.freeze
   # ── ETIQUETAS DE ENCERRAMENTO (rodada 158) ──
   # Convenção da base (a mesma da Colheitadeira): quem tem nao_perturbe ou
   # perda_* nunca recebe cutucada, de robô nenhum. O admin acrescenta as
@@ -74,7 +86,16 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     'trava_intervalo_minimo' => 'intervalo mínimo de 30 min entre cutucadas',
     'trava_teto_diario' => 'teto diário de 4 cutucadas atingido',
     'ia_sem_texto' => 'a IA não escreveu o texto (chave/serviço) — etapa tratada sem envio',
-    'ia_fila' => 'teto de chamadas à IA nesta rodada — sai na próxima'
+    'ia_fila' => 'teto de chamadas à IA nesta rodada — sai na próxima',
+    # 🧠 follow-up inteligente (13/10)
+    'conversa_encerrada' => 'conversa encerrada — o robô não cutuca',
+    'conversa_adiada' => 'paciente adiou — volta com mensagem modelo dias depois',
+    'conversa_recusou' => 'paciente recusou — o robô parou',
+    'atendente_encerrou' => 'o Atendente de IA se despediu — o robô não cutuca',
+    'leitura_fila' => 'leitura da conversa na fila — sai na próxima rodada',
+    'lead_frio' => 'lead que nunca escreveu: só 1 cutucada em 24h',
+    'entrega_falhou' => 'a última cutucada não foi entregue (possível bloqueio) — o robô parou',
+    'fim_de_semana' => 'fim de semana: só cutuca quem escreveu no mesmo dia'
   }.freeze
 
   def perform
@@ -86,7 +107,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     return unless lock_manager.lock(lock_key, 10.minutes)
 
     begin
+      @reads = 0 # 🧠 leituras da conversa nesta rodada (teto READS_PER_ROUND)
       Crm::FollowupBot.active.includes(:inbox).find_each { |bot| process_bot(bot) }
+      process_reactivations # 🧠 quem adiou: mensagem modelo dias depois (decisão B, 13/10)
+      Crm::CronHealth.ran!('followup') # 🚨 #217: sinal de vida da rodada (o vigia confere)
     ensure
       lock_manager.unlock(lock_key)
     end
@@ -97,7 +121,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # saiu, o que foi pulado, quando sai a próxima e por quê. Devolve texto
   # pronto em PT-BR (text), a situação (status: proxima | parado | pausado |
   # completa | desligado) e a linha do tempo das etapas.
-  def forecast(bot, conversation)
+  def forecast(bot, conversation) # rubocop:disable Metrics/AbcSize
     steps = bot.ordered_steps
     return { status: 'desligado', text: 'robô sem etapas', sent: 0, total: 0, timeline: [] } if steps.blank?
 
@@ -107,6 +131,8 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     sent = own_nudges(bot, conversation, plan[:anchor])
     timeline = forecast_timeline(steps, plan, sent, now)
     status, text = forecast_text(bot, plan, sent.size, steps.size, now)
+    # 🧠 a 1ª cutucada do silêncio só sai depois da leitura da conversa
+    text = "#{text} · antes, lê a conversa para ver se ainda está aberta" if status == 'proxima' && plan[:leitura_pendente]
     if ai_without_key?(bot, plan) # item 315: etapa de IA sem chave e sem reserva não sai
       status = 'parado'
       text = "#{REASON_TEXT['ia_sem_texto']} · #{sent.size} de #{steps.size} enviadas"
@@ -167,7 +193,12 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       run[:reasons]['erro'] += 1
       events << event_for(conversation, 'error', note: e.message.truncate(120))
       Rails.logger.error("[CEVICO followup] conversa #{conversation.id}: #{e.message}")
+      # 🚨 #217: registra (rastreador 1×/h por conversa) sem marcar o robô inteiro
+      Crm::CronHealth.failed!('followup', e, account: bot.account, item: "conversa #{conversation.id}", count: false)
     end
+    # rodada "com erro" só quando metade ou mais das conversas falharam (1 conversa
+    # com dado ruim não deixa o robô "com erro" para sempre)
+    Crm::CronHealth.mark_round_error!('followup', failed: run[:reasons]['erro'], tried: ids.size)
 
     record_run(bot, **run, events: events)
   end
@@ -199,7 +230,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
   # DECIDE (plan_for, só leitura) e depois AGE: marca as etapas tratadas sem
   # envio, e envia no máximo UMA cutucada por conversa por rodada.
-  def process_conversation(bot, conversation, steps, run, events)
+  def process_conversation(bot, conversation, steps, run, events) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
     plan = plan_for(bot, conversation, steps)
     settle_handled(bot, conversation, plan, events)
 
@@ -208,6 +239,15 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     # item 315: etapa de IA além do teto da rodada fica para a próxima (sem marcar)
     return run[:reasons]['ia_fila'] += 1 if ai_queue_full?(chosen)
+
+    # 🧠 follow-up inteligente: a cutucada venceu — a conversa ainda está aberta?
+    # (uma leitura por silêncio; o que não for "aberta" não recebe nada)
+    if plan[:leitura_pendente]
+      return run[:reasons]['leitura_fila'] += 1 if @reads.to_i >= READS_PER_ROUND
+
+      closed = read_conversation(conversation, plan)
+      return record_skip(run, events, conversation, closed[:reason], closed[:note]) if closed
+    end
 
     # marca ANTES de qualquer coisa (falha segura): se o envio — ou a IA —
     # quebrar no meio, o pior caso é PERDER uma cutucada, nunca duplicar para o
@@ -313,9 +353,16 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     # paciente falou por último → quem deve responder é o atendimento, não o robô
     return plan.merge(reason: 'paciente_falou_ultimo') if anchor.nil?
 
+    # 🧠 follow-up inteligente: entrega falhou, conversa já lida como
+    # encerrada/adiada/recusou, carimbo de despedida do Atendente, lead frio
+    smart_check = closure_check(bot, conversation, anchor)
+    return plan.merge(smart_check) if smart_check[:reason]
+
+    plan.merge!(smart_check)
     stage_entered = stage_entry_at(bot, conversation) # nil se não for robô de coluna
     state = followup_state(conversation, bot, anchor, stage_entered)
     pending = pending_steps(bot, conversation, steps, state, anchor, stage_entered, now)
+    pending = cold_lead_steps(pending, steps) if plan[:cold]
     plan.merge!(anchor: anchor, state: state, pending: pending)
 
     due, waiting = pending.partition { |d| d[:overdue] >= 0 }
@@ -346,7 +393,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     # ANTI-RAJADA: no máximo UMA cutucada por conversa por rodada — a mais
     # antiga da cadência entre as vencidas (ordem das mensagens preservada)
     chosen = fresh.min_by { |d| Crm::FollowupBot.step_delay_hours(d[:step]) }
-    plan[:total] = steps.size
+    plan[:total] = plan[:cold] ? 1 : steps.size # 🧠 lead frio: 1 cutucada só
     apply_physical_locks(bot, plan, conversation, chosen, fresh, now)
   end
 
@@ -355,7 +402,8 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     return 'momento_perdido' if stale.any?
     return 'janela_whatsapp' if unreachable.any?
     return 'protegida_por_etiqueta' if blocked.any?
-    return 'cadencia_completa' if plan[:pending].empty?
+    return (plan[:cold] ? 'lead_frio' : 'cadencia_completa') if plan[:pending].empty?
+    return 'fim_de_semana' if plan[:wait][:weekend]
 
     plan[:wait][:spacing] ? 'aguardando_espacamento' : 'aguardando_prazo'
   end
@@ -395,6 +443,170 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     plan.merge(reason: reason, wait: held)
   end
 
+  # ── 🧠 FOLLOW-UP INTELIGENTE (13/10) ──────────────────────────────────────
+  # config da conta (Automações → Robôs → "Follow-up inteligente"), com padrões
+  def smart(account)
+    @smart_cache ||= {}
+    @smart_cache[account.id] ||= begin
+      cfg = agenda_config(account)['followup_smart'] || {}
+      SMART_DEFAULTS.merge(cfg.slice(*SMART_DEFAULTS.keys)) do |key, default, value|
+        next value unless key == 'reativacao'
+
+        default.merge(value.is_a?(Hash) ? value : {})
+      end
+    end
+  end
+
+  # Só leitura: devolve { reason: } quando a conversa NÃO deve ser cutucada,
+  # ou as marcas do plano (clinic_id, leitura_pendente, atendente_encerrou, cold)
+  def closure_check(bot, conversation, anchor) # rubocop:disable Metrics/CyclomaticComplexity
+    cfg = smart(bot.account)
+    # possível bloqueio: a última cutucada DESTE silêncio voltou como "falhou"
+    last_status = bot_nudges(conversation).where('created_at >= ?', anchor).reorder(id: :desc).pick(:status)
+    return { reason: 'entrega_falhou' } if last_status.to_s == 'failed'
+
+    clinic_id, encerrou = Crm::FollowupClosure.last_clinic(conversation)
+    encerrou = encerrou.to_s == 'true'
+    cached = Crm::FollowupClosure.current(conversation, clinic_id)
+    return { reason: "conversa_#{cached['situacao']}", leitura: cached } if Crm::FollowupClosure::CLOSED.include?(cached&.dig('situacao'))
+    # leitura desligada pelo admin: o carimbo de despedida do Atendente ainda vale
+    return { reason: 'atendente_encerrou' } if encerrou && !cfg['leitura']
+
+    { clinic_id: clinic_id, atendente_encerrou: encerrou, leitura_pendente: cfg['leitura'] && cached.nil?,
+      cold: cfg['lead_frio'] && cold_lead?(conversation) }
+  end
+
+  # lead FRIO = nunca escreveu nada (nesta conversa nem em outra do contato):
+  # só a 1ª etapa da cadência, e só se ela cai nas primeiras 24h
+  def cold_lead?(conversation)
+    return false if last_incoming_at(conversation)
+    return true if conversation.contact_id.nil?
+
+    !Message.where(account_id: conversation.account_id, message_type: :incoming, private: false)
+            .exists?(conversation_id: Conversation.where(contact_id: conversation.contact_id).select(:id))
+  end
+
+  def cold_lead_steps(pending, steps)
+    first = steps.first
+    return [] if first.nil? || Crm::FollowupBot.step_delay_hours(first) > COLD_MAX_HOURS
+
+    pending.select { |d| d[:index].zero? }
+  end
+
+  def last_incoming_at(conversation)
+    @last_incoming ||= {}
+    return @last_incoming[conversation.id] if @last_incoming.key?(conversation.id)
+
+    @last_incoming[conversation.id] = conversation.messages.where(message_type: :incoming, private: false).maximum(:created_at)
+  end
+
+  # sábado/domingo (SP) sem fala do paciente no mesmo dia → segunda na
+  # abertura do horário de envio. nil = pode sair no próprio momento.
+  def weekend_shift(conversation, time) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+    return nil unless smart(conversation.account)['fim_de_semana']
+
+    local = time.in_time_zone(TZ)
+    return nil unless local.saturday? || local.sunday?
+    return nil if last_incoming_at(conversation)&.in_time_zone(TZ)&.to_date == local.to_date
+
+    monday = local.to_date + (local.saturday? ? 2 : 1)
+    TZ.local(monday.year, monday.month, monday.day, (@hours || BUSINESS_HOURS).first)
+  end
+
+  # LÊ a conversa (IA barata, ou a regra de frases) e guarda a leitura.
+  # Devolve nil quando está ABERTA (a cutucada segue) ou { reason:, note: }.
+  def read_conversation(conversation, plan) # rubocop:disable Metrics/AbcSize
+    @reads = @reads.to_i + 1
+    result = Crm::FollowupConversationReader.new(conversation: conversation).call
+    situacao = result[:situacao]
+    fonte = result[:fonte]
+    # carimbo de despedida do Atendente vence um "aberta"
+    if situacao == 'aberta' && plan[:atendente_encerrou]
+      situacao = 'encerrada'
+      fonte = 'atendente'
+    end
+
+    data = { 'key' => plan[:clinic_id], 'situacao' => situacao, 'motivo' => result[:motivo], 'fonte' => fonte,
+             'at' => Time.current.iso8601 }
+    if situacao == 'adiada'
+      days = smart(conversation.account).dig('reativacao', 'dias').to_i.clamp(1, 60)
+      data['reativar_em'] = days.days.from_now.iso8601
+    end
+    Crm::FollowupClosure.save!(conversation, data)
+    return nil if situacao == 'aberta'
+
+    Crm::FollowupClosure.apply_refusal!(conversation, result[:motivo]) if situacao == 'recusou'
+    reason = "conversa_#{situacao}"
+    { reason: reason, note: "#{REASON_TEXT[reason]} (#{result[:motivo].to_s.truncate(80)})" }
+  end
+
+  # ── 🔁 REATIVAÇÃO de quem ADIOU (decisão B dele, 13/10) ──
+  # "ainda não / vou pensar" → UMA mensagem modelo N dias depois (padrão 7),
+  # pela caixa da conversa, com o modelo escolhido para aquela caixa. Só em
+  # dia útil, no horário de envio. Instagram não tem mensagem modelo: não sai.
+  def process_reactivations # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+    due = Conversation.where("conversations.additional_attributes -> '#{Crm::FollowupClosure::ATTR}' ->> 'situacao' = 'adiada'")
+                      .where("conversations.additional_attributes -> '#{Crm::FollowupClosure::ATTR}' ->> 'reativacao' IS NULL")
+                      .where("(conversations.additional_attributes -> '#{Crm::FollowupClosure::ATTR}' ->> 'reativar_em')::timestamptz <= ?",
+                             Time.current)
+    due.distinct.pluck(:account_id).each do |account_id|
+      account = Account.find_by(id: account_id)
+      next if account.nil? || !smart(account).dig('reativacao', 'ativa')
+
+      @hours = send_hours(account)
+      local = TZ.now
+      next unless @hours.cover?(local.hour) && !local.saturday? && !local.sunday?
+
+      due.where(account_id: account_id).includes(:contact, :inbox).limit(REACTIVATIONS_PER_ROUND).each do |conversation|
+        reactivate(conversation)
+      rescue StandardError => e
+        Rails.logger.error("[CEVICO followup] reativação conversa #{conversation.id}: #{e.message}")
+      end
+    end
+  end
+
+  def reactivate(conversation)
+    data = Crm::FollowupClosure.stored(conversation)
+    blocker = reactivation_blocker(conversation, data)
+    # trava ANTES de enviar (falha segura: no pior caso perde a reativação, nunca duplica)
+    Crm::FollowupClosure.save!(conversation, 'reativacao' => blocker || 'enviada', 'reativacao_at' => Time.current.iso8601)
+    return if blocker
+
+    model = smart(conversation.account).dig('reativacao', 'modelos', conversation.inbox_id.to_s)
+    params = render_template_params(model['template_params'], conversation)
+    conversation.messages.create!(
+      account_id: conversation.account_id, inbox_id: conversation.inbox_id, message_type: :outgoing,
+      content: fill_template_text(render_message(model['message'], conversation), params),
+      additional_attributes: { cevico_followup_reativacao: true, template_params: params }
+    )
+  end
+
+  # o texto do modelo vem com {{1}}, {{2}}…: na conversa a equipe vê o texto
+  # preenchido (mesma regra do Crm::SendTemplateService#render_content)
+  def fill_template_text(text, params)
+    values = params.is_a?(Hash) ? (params.dig('processed_params', 'body') || {}) : {}
+    text.to_s.gsub(/\{\{\s*(\d+)\s*\}\}/) { values[Regexp.last_match(1)].presence || Regexp.last_match(0) }
+  end
+
+  # por que NÃO reativar (nil = pode). Fica gravado em leitura.reativacao.
+  def reactivation_blocker(conversation, data) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+    return 'perdida' if Time.zone.parse(data['reativar_em'].to_s) < REACTIVATION_STALE_DAYS.days.ago
+    return 'conversa_mudou' if Crm::FollowupClosure.last_clinic(conversation)&.first.to_i != data['key'].to_i
+    return 'paciente_voltou' if conversation.messages.where(message_type: :incoming).exists?(['created_at > ?', Time.zone.parse(data['at'].to_s)])
+    return 'parceiro' if Crm::PartnerGuard.partner_conversation?(conversation) ||
+                         Crm::PartnerGuard.partner_inbox_ids(conversation.account).include?(conversation.inbox_id)
+    return 'etiqueta' if stop_label?(conversation.account, conversation)
+    return 'pausado' if paused_for_patient?(conversation)
+
+    model = smart(conversation.account).dig('reativacao', 'modelos', conversation.inbox_id.to_s)
+    return 'sem_modelo' if model.blank? || model['template_params'].blank?
+    return 'tem_consulta' if conversation.contact &&
+                             Crm::AppointmentRecorder.future_appointment(conversation.account, conversation.contact.phone_number, nil,
+                                                                         conversation.contact).present?
+
+    nil
+  end
+
   # Etapas ainda não tratadas, cada uma com o momento em que PODE sair
   # (due_at) e o atraso em relação a ele (overdue em horas; negativo = ainda
   # não chegou). due_at considera, nesta ordem:
@@ -404,7 +616,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   #     fechado não sai colada na seguinte quando a janela reabre;
   #  3. a janela de envio da conta: fora dela, espera reabrir (nada é
   #     descartado por vencer de madrugada — fix 03/08).
-  # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists
+  # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists, Metrics/MethodLength
   def pending_steps(bot, conversation, steps, state, anchor, stage_entered, now)
     delays = steps.map { |s| Crm::FollowupBot.step_delay_hours(s) }
     steps.each_with_index.filter_map do |step, index|
@@ -426,11 +638,14 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
         end
       end
       send_at = next_send_moment(due_at)
-      { step: step, index: index, from_stage: from_stage, due_at: send_at, spacing: spacing,
-        overdue: (now - send_at) / 3600.0 }
+      # 🧠 fim de semana: só sai no sábado/domingo se o paciente escreveu no
+      # mesmo dia — senão a etapa espera a segunda (não é descartada)
+      weekend_at = weekend_shift(conversation, send_at)
+      { step: step, index: index, from_stage: from_stage, due_at: weekend_at || send_at, spacing: spacing,
+        weekend: weekend_at.present?, overdue: (now - (weekend_at || send_at)) / 3600.0 }
     end
   end
-  # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists
+  # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists, Metrics/MethodLength
 
   # quando um momento cai FORA da janela de envio, o envio fica para a
   # próxima abertura (hoje, se ainda não abriu; senão amanhã). Dentro da
@@ -656,6 +871,9 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     step = chosen[:step]
     # cada cutucada carrega o robô E o nº da etapa (linha do tempo da previsão)
     attrs = { cevico_followup_bot_id: bot.id, cevico_followup_step: chosen[:index] }
+    # 🧠 medição por coluna do CRM (Resultado do follow-up): a coluna NA HORA do envio
+    stage_id = conversation.contact_id && Crm::Contact.where(contact_id: conversation.contact_id).order(updated_at: :desc).pick(:stage_id)
+    attrs[:cevico_followup_stage_id] = stage_id if stage_id
     attrs[:cevico_followup_ai] = true if Crm::FollowupBot.ai_step?(step) # item 315: escrita pela IA
     # etapa de MENSAGEM MODELO: envia o template oficial (funciona fora da
     # janela de 24h do WhatsApp — ideal para cadências em dias)
@@ -719,7 +937,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
         entry.merge(status: 'proxima', at: at.iso8601, when: at > now + 3.minutes ? fmt_when(at, now) : 'agora')
       elsif pending[i]
         entry.merge(status: 'aguardando', at: pending[i][:due_at].iso8601, when: fmt_when(pending[i][:due_at], now),
-                    note: pending[i][:spacing] ? 'espaçamento da cadência' : nil).compact
+                    note: timeline_wait_note(pending[i])).compact
       else
         entry.merge(status: 'pendente')
       end
@@ -749,10 +967,18 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       why = " (#{REASON_TEXT[reason]})" if reason.to_s.start_with?('trava_')
       ['proxima', "próxima: #{step_label(w[:step])} #{fmt_when(w[:due_at], now)}#{why}#{tail}"]
     else
-      ['parado', "#{REASON_TEXT.fetch(reason, reason.to_s)}#{tail}"]
+      # 🧠 leitura da conversa: diz também o porquê (motivo da IA ou da regra)
+      why = plan[:leitura] && plan[:leitura]['motivo'].present? ? " (#{plan[:leitura]['motivo']})" : ''
+      ['parado', "#{REASON_TEXT.fetch(reason, reason.to_s)}#{why}#{tail}"]
     end
   end
   # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+
+  def timeline_wait_note(pending)
+    return 'fim de semana: espera a segunda' if pending[:weekend]
+
+    pending[:spacing] ? 'espaçamento da cadência' : nil
+  end
 
   # "hoje 15:00" / "amanhã 08:00" / "ontem 18:52" / "12/09 18:52"
   def fmt_when(time, now)

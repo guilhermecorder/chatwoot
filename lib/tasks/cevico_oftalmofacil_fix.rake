@@ -5,7 +5,7 @@
 #
 #   bundle exec rails cevico:oftalmofacil_backdate_agendadas ACCOUNT_ID=1        # só mostra (dry-run)
 #   bundle exec rails cevico:oftalmofacil_backdate_agendadas ACCOUNT_ID=1 DRY=0  # aplica
-namespace :cevico do
+namespace :cevico do # rubocop:disable Metrics/BlockLength
   desc 'Retrodata a entrada em Cirurgia Agendada dos cards vindos do OftalmoFácil'
   task oftalmofacil_backdate_agendadas: :environment do
     account = Account.find(ENV.fetch('ACCOUNT_ID'))
@@ -34,6 +34,49 @@ namespace :cevico do
       fixed += 1
     end
     summary = "#{fixed} entrada(s) retrodatada(s), #{skipped} sem mexer"
+    puts dry ? "DRY-RUN — nada gravado. #{summary} (rode com DRY=0 para aplicar)" : summary
+  end
+
+  # 🔁 auditoria 10/2026 (#462/#472): a mesma consulta lançada pela recepção na
+  # Agenda E vinda do hub nasceu DUAS vezes (duas tasks → dois lembretes pagos no
+  # mesmo dia, e o "sim" do paciente confirmava só uma). O sync adota a da equipe
+  # e, a cada rodada, une as que nasceram na ordem inversa
+  # (Crm::OftalmofacilSyncService#dedupe_tasks!, próximos 14 dias). Este rake é
+  # o atalho manual, sem limite de dias: a task da equipe fica (quem criou,
+  # observações, hora) e ganha o vínculo com o hub; a cópia do hub vai para a
+  # Lixeira com o motivo "duplicada_hub". Resposta do paciente (sim/não) e marcas
+  # de lembrete já enviadas passam para a que fica.
+  #
+  #   bundle exec rails cevico:oftalmofacil_dedupe_tasks ACCOUNT_ID=1          # só mostra (dry-run)
+  #   bundle exec rails cevico:oftalmofacil_dedupe_tasks ACCOUNT_ID=1 DRY=0    # aplica
+  #   PAST=1 → olha também consultas já passadas (padrão: de hoje em diante)
+  desc 'Une a consulta lançada pela recepção com a mesma consulta vinda do Oftalmofácil (uma task, um lembrete)'
+  task oftalmofacil_dedupe_tasks: :environment do
+    account = Account.find(ENV.fetch('ACCOUNT_ID'))
+    dry = ENV.fetch('DRY', '1') != '0'
+    tz = ActiveSupport::TimeZone['America/Sao_Paulo']
+    service = Crm::OftalmofacilSyncService.new(account: account, silent: true, since: nil)
+    abort 'Agenda unificada desligada nesta conta (Integrações → OftalmoFácil → Agenda)' unless service.agenda_enabled?
+
+    # Rodada 4 (achado #172): aplicando (DRY=0), disputa a MESMA trava do
+    # Crm::OftalmofacilSyncJob — com o cron no meio, os dois mexeriam no mesmo
+    # par de consultas. O dry-run só lê e roda sem trava.
+    token = nil
+    unless dry
+      token = Crm::OftalmofacilSyncJob.acquire_lock(account.id)
+      abort Crm::OftalmofacilSyncJob::BUSY_MESSAGE if token.nil?
+    end
+    begin
+      pairs = service.dedupe_tasks!(days: nil, past: ENV['PAST'] == '1', dry: dry)
+    ensure
+      Crm::OftalmofacilSyncJob.release_lock(account.id, token)
+    end
+    pairs.each do |twin, hub|
+      puts "#{dry ? '[dry] ' : ''}##{twin.id} #{twin.title.to_s.first(32)} (#{twin.due_at.in_time_zone(tz).strftime('%d/%m %H:%M')}, " \
+           "por #{twin.creator&.name}) ← adota o hub ##{hub.id} #{twin.external_ref || hub.external_ref}"
+    end
+    service.result.errors.each { |e| puts "erro: #{e}" }
+    summary = "#{pairs.size} consulta(s) duplicada(s) unida(s)"
     puts dry ? "DRY-RUN — nada gravado. #{summary} (rode com DRY=0 para aplicar)" : summary
   end
 end

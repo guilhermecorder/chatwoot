@@ -40,16 +40,17 @@ class Crm::Journey::RadarAlert
     @message = message
   end
 
+  # 🔒 Rodada 4 da auditoria (#81): grava sob a trava da linha relendo a lista
+  # fresca (Cevico::SettingMerge) — nunca por cima do que outro escritor gravou
   def push
-    settings = CrmSetting.find_or_create_by!(account: @send.account)
-    cfg = settings.ai_config || {}
-    state = cfg['opportunity_state'] || {}
-    alerts = Array(state['alerts']).reject { |a| a['kind'] == KIND && a['send_id'] == @send.id }
-    alerts << build
-    state['alerts'] = alerts.last(MAX_ALERTS)
-    cfg['opportunity_state'] = state
-    settings.update!(ai_config: cfg)
-    alerts.last
+    alert = build
+    Cevico::SettingMerge.merge_key!(@send.account, :ai_config, 'opportunity_state') do |state|
+      alerts = Array(state['alerts']).reject { |a| a['kind'] == KIND && a['send_id'] == @send.id }
+      alerts << alert
+      state['alerts'] = alerts.last(MAX_ALERTS)
+      state
+    end
+    alert
   end
 
   private

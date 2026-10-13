@@ -482,11 +482,12 @@ const donutChart = computed(() => {
 const fetchTasks = async () => {
   isLoading.value = true;
   try {
-    const { data } = await TasksAPI.get();
+    // Rodada 7: pede só os cards do quadro (board=1) — não baixa a Agenda
+    const { data } = await TasksAPI.get({ board: 1 });
     // item 305: agendamento feito na Agenda (consulta, retorno, exame,
     // cirurgia) fica SÓ na Agenda — aqui entram os cartões do quadro
     tasks.value = data.filter(x => !isAppointmentTask(x));
-    store.commit('tasks/setTasks', data); // mantém o badge da sidebar em dia
+    store.commit('tasks/setBoardCards', tasks.value); // mantém o badge da sidebar em dia
   } catch {
     useAlert(t('TASKS.ERROR'));
   } finally {

@@ -714,4 +714,71 @@ RSpec.describe Crm::AppointmentReminderSendJob do
       expect(state['sent'].map { |e| e['name'] }).to eq(['Maria Cevico'])
     end
   end
+
+  # 🛡️ Rodada 6 (#257): os outros casos trocam o Crm::SendTemplateService por
+  # um dublê — aqui o serviço REAL roda e a prova vai até a linha gravada:
+  # a mensagem nasce na conversa que a paciente já tem na caixa do WhatsApp
+  # (não numa conversa paralela), com a marca de mensagem automática.
+  describe 'com o envio de verdade (sem dublê)' do
+    let(:wa_inbox) do
+      create(:channel_whatsapp, account: account, provider: 'whatsapp_cloud', sync_templates: false,
+                                validate_provider_config: false).inbox
+    end
+
+    before do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('inbox_id' => wa_inbox.id) } })
+      allow(Crm::SendTemplateService).to receive(:new).and_call_original
+    end
+
+    it 'a mensagem nasce na conversa da caixa (ou numa nova, para quem não tem) com cevico_auto', :aggregate_failures do
+      maria = contact_named('Maria Com Conversa', '+5511999990071')
+      joana = contact_named('Joana Sem Conversa', '+5511999990072')
+      ci = create(:contact_inbox, contact: maria, inbox: wa_inbox, source_id: '5511999990071')
+      conversa_da_maria = create(:conversation, account: account, inbox: wa_inbox, contact: maria, contact_inbox: ci)
+      consulta(maria, '2026-09-28 09:00')
+      consulta(joana, '2026-09-28 10:00')
+
+      expect { described_class.perform_now(now) }.to change(Conversation, :count).by(1) # só a da Joana
+
+      lembrete_maria = conversa_da_maria.messages.outgoing.sole
+      expect(lembrete_maria.inbox_id).to eq(wa_inbox.id)
+      expect(lembrete_maria.content).to eq('Paulista Maria Com Conversa')
+      expect(lembrete_maria.additional_attributes['cevico_auto']).to be_present
+      expect(lembrete_maria.additional_attributes.dig('template_params', 'name')).to eq('confirmacao_consulta_paulista')
+
+      conversa_da_joana = account.conversations.find_by!(contact: joana)
+      expect(conversa_da_joana.inbox_id).to eq(wa_inbox.id)
+      expect(conversa_da_joana.contact_inbox.source_id).to eq('5511999990072')
+      expect(conversa_da_joana.messages.outgoing.sole.additional_attributes['cevico_auto']).to be_present
+
+      # rodada seguinte da mesma hora: ninguém recebe de novo
+      expect { described_class.perform_now(now + 20.minutes) }.not_to change(Message.outgoing, :count)
+    end
+
+    # regra 2 de ponta a ponta: com DOIS números de WhatsApp, a paciente que
+    # conversa pelo segundo recebe por ele (com os modelos dele)
+    it 'com 2 caixas de WhatsApp, a mensagem nasce na conversa da caixa em que a paciente conversa', :aggregate_failures do
+      wa2 = create(:channel_whatsapp, account: account, provider: 'whatsapp_cloud', sync_templates: false,
+                                      validate_provider_config: false).inbox
+      wa2_templates = { 'units' => { 'paulista' => { 'template_params' => tpl.call('confirma_wa2_paulista'),
+                                                     'message_preview' => 'WA2 Paulista {{1}}' } } }
+      settings.update!(agenda_config: { 'appointment_reminders' => {
+                         'd2' => d2_cfg.merge('inbox_id' => wa_inbox.id, 'inbox_ids' => [wa2.id],
+                                              'by_inbox' => { wa2.id.to_s => wa2_templates })
+                       } })
+      bia = contact_named('Bia Do Segundo Numero', '+5511999990073')
+      ci = create(:contact_inbox, contact: bia, inbox: wa2, source_id: '5511999990073')
+      conversa_da_bia = create(:conversation, account: account, inbox: wa2, contact: bia, contact_inbox: ci)
+      consulta(bia, '2026-09-28 09:00')
+
+      expect { described_class.perform_now(now) }.not_to change(Conversation, :count)
+
+      lembrete = conversa_da_bia.messages.outgoing.sole
+      expect(lembrete.inbox_id).to eq(wa2.id)
+      expect(lembrete.content).to eq('WA2 Paulista Bia Do Segundo Numero')
+      expect(lembrete.additional_attributes.dig('template_params', 'name')).to eq('confirma_wa2_paulista')
+      expect(lembrete.additional_attributes['cevico_auto']).to be_present
+      expect(Message.outgoing.where(inbox_id: wa_inbox.id)).to be_empty
+    end
+  end
 end

@@ -2,6 +2,7 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
   # toggle é a CHAVE DE EMERGÊNCIA: qualquer atendente pode pausar/religar
   # um robô que estiver se comportando mal (gerenciar continua admin-only)
   include Crm::AccessControl
+  include Crm::ResolvesPeriod # 🧠 resultado do follow-up na régua de período padrão
 
   before_action :bot, only: [:update, :destroy, :toggle]
 
@@ -56,12 +57,66 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
                    contact_name: conversation.contact&.name, inbox_name: conversation.inbox&.name }
   end
 
+  # ── 🧠 FOLLOW-UP INTELIGENTE (13/10) ──
+  # GET /crm/followup_bots/smart — config da conta (com os padrões)
+  def smart
+    render json: smart_json
+  end
+
+  # PUT /crm/followup_bots/smart — grava SÓ a chave followup_smart pelo gravador
+  # único (Cevico::SettingMerge: trava na linha e relê a coluna fresca), sem
+  # apagar o que outra tela gravou no agenda_config ao mesmo tempo
+  def update_smart
+    Cevico::SettingMerge.merge!(Current.account, :agenda_config) do |cfg|
+      cfg['followup_smart'] = sanitize_smart(cfg['followup_smart'] || {})
+      cfg
+    end
+    render json: smart_json
+  end
+
+  # GET /crm/followup_bots/results?preset=month — resultado por coluna do CRM
+  def results
+    from, to = standard_period_range || [Crm::ResolvesPeriod::PERIOD_TZ.now.beginning_of_month, Time.current]
+    render json: Crm::FollowupResults.new(Current.account, from: from, to: to).call.merge(period: params[:preset].presence || 'month')
+  end
+
   private
+
+  def smart_json
+    Crm::FollowupBotJob.new.send(:smart, Current.account)
+  end
+
+  BOOL = ActiveModel::Type::Boolean.new
+
+  def sanitize_smart(current) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity
+    raw = params.require(:followup_smart)
+    out = current.slice('leitura', 'fim_de_semana', 'lead_frio', 'reativacao')
+    %w[leitura fim_de_semana lead_frio].each { |k| out[k] = BOOL.cast(raw[k]) == true if raw.key?(k) }
+    return out unless raw.key?(:reativacao)
+
+    re = raw[:reativacao]
+    react = (out['reativacao'] || {}).dup
+    react['ativa'] = BOOL.cast(re[:ativa]) == true if re.key?(:ativa)
+    react['dias'] = re[:dias].to_i.clamp(1, 60) if re.key?(:dias)
+    react['modelos'] = sanitize_models(re[:modelos]) if re.key?(:modelos)
+    out.merge('reativacao' => react)
+  end
+
+  # { "<inbox_id>" => { message, template_params } } só das caixas de WhatsApp da conta
+  def sanitize_models(raw)
+    whatsapp = Current.account.inboxes.where(channel_type: 'Channel::Whatsapp').pluck(:id).map(&:to_s)
+    return {} if raw.blank?
+
+    raw.to_unsafe_h.slice(*whatsapp).each_with_object({}) do |(inbox_id, model), acc|
+      next unless model.is_a?(Hash) && model['template_params'].is_a?(Hash) && model['template_params']['name'].present?
+
+      acc[inbox_id] = { 'message' => model['message'].to_s[0, 1500], 'template_params' => model['template_params'] }
+    end
+  end
 
   def bot
     @bot ||= Current.account.crm_followup_bots.find(params[:id])
   end
-
 
   def bot_params
     permitted = params.require(:followup_bot).permit(

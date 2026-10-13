@@ -44,12 +44,14 @@
 
 # rubocop:enable Layout/LineLength
 
-class Contact < ApplicationRecord
+class Contact < ApplicationRecord # rubocop:disable Metrics/ClassLength -- includes CEVICO (Rodadas 5 e 6)
   include Avatarable
   include AvailabilityStatusable
   include Labelable
   include LlmFormattable
   include CevicoSourceStamped # 🏷️ item 322 (CEVICO): de que fonte é o paciente + como nasceu
+  include CevicoLabelTriggers # 🏷️ Rodada 5 (#17): etiqueta mudou → automações "Etiqueta adicionada/removida"
+  include CevicoContactData # 🔒 Rodada 6: card, consultas, anotações... e o que acontece ao apagar o paciente
 
   validates :account_id, presence: true
   validates :email, allow_blank: true, uniqueness: { scope: [:account_id], case_sensitive: false },
@@ -66,8 +68,6 @@ class Contact < ApplicationRecord
   has_many :inboxes, through: :contact_inboxes
   has_many :messages, as: :sender, dependent: :destroy_async
   has_many :notes, dependent: :destroy_async
-  # cards do CRM CEVICO deste contato (1 por funil, na prática 1)
-  has_many :crm_contacts, class_name: 'Crm::Contact', dependent: :destroy_async
   before_validation :prepare_contact_attributes
   after_create_commit :dispatch_create_event, :ip_lookup
   after_update_commit :dispatch_update_event

@@ -107,6 +107,9 @@ class Crm::ConfirmationReflector
       missed = (CrmSetting.find_by(account: account)&.agenda_config || {}).dig('attendance_stages', 'missed_stage_id').to_i
       card.stage_id != missed
     end
+    # público: o Crm::BookingSideEffects usa a MESMA régua na remarcação
+    # (auditoria 10/2026, #197) — mudou aqui, muda lá
+    public :ahead?
 
     def normalize(text)
       text.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase.squeeze(' ').strip

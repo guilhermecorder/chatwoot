@@ -92,6 +92,157 @@ RSpec.describe Crm::NpsSurvey do
     expect(names).to eq(['Atrasada'])
   end
 
+  # 🔒 auditoria 10/2026 (achados #47/#65 + "NPS sem trava de rodada"): a marca
+  # era gravada DEPOIS do envio e não havia trava por conta → duas rodadas
+  # sobrepostas (ou a marca falhando) mandavam a pesquisa duas vezes.
+  describe 'sem pesquisa duplicada' do
+    let(:contact) { patient('Uma Vez', '+5511911110041') }
+    let!(:task) { surgery(contact, 15, procedure: 'Catarata') }
+
+    # conta os envios; `on_send` roda no meio de cada envio (simula outra rodada)
+    def count_sends(results: [], &on_send)
+      sends = 0
+      allow(Crm::SendTemplateService).to receive(:new).and_wrap_original do |m, **kw|
+        svc = m.call(**kw)
+        allow(svc).to receive(:perform) do
+          sends += 1
+          on_send&.call(sends)
+          results.fetch(sends - 1, instance_double(Conversation))
+        end
+        svc
+      end
+      -> { sends }
+    end
+
+    it 'duas rodadas sobrepostas mandam a pesquisa uma vez só (marca gravada ANTES do envio)', :aggregate_failures do
+      sends = count_sends do |n|
+        described_class.new(account, now).run if n == 1 # a rodada das :20 começa no meio da das :05
+      end
+      described_class.new(account, now).run
+      expect(sends.call).to eq(1)
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'task_ids')).to eq([task.id])
+    end
+
+    it 'se a marca falhar, a pesquisa NÃO sai e a próxima rodada manda uma vez só (achado #65)', :aggregate_failures do
+      sends = count_sends
+      calls = 0
+      allow(Cevico::AttributeMerge).to receive(:merge!).and_wrap_original do |m, *args, &blk|
+        calls += 1
+        raise ActiveRecord::Deadlocked, 'contato disputado' if calls == 1
+
+        m.call(*args, &blk)
+      end
+      described_class.new(account, now).run
+      expect(sends.call).to eq(0)
+      expect(settings.reload.agenda_config.dig('nps_survey_state', 'skipped').first['why']).to start_with('erro:')
+      described_class.new(account, now).run
+      expect(sends.call).to eq(1)
+    end
+
+    # guarda do caminho release_sent! (o código antigo também não marcava quando o envio devolvia nil)
+    it 'release_sent!: envio que devolve nil deixa a marca como estava (a cirurgia continua candidata)', :aggregate_failures do
+      old_mark = { 'pending_at' => 100.days.ago.iso8601, 'task_ids' => [999], 'task_id' => 999, 'answered_at' => 99.days.ago.iso8601 }
+      contact.update!(additional_attributes: { described_class::MARK_KEY => old_mark })
+      sends = count_sends(results: [nil])
+      described_class.new(account, now).run
+      expect(sends.call).to eq(1)
+      expect(contact.reload.additional_attributes[described_class::MARK_KEY]).to eq(old_mark)
+      expect(settings.reload.agenda_config.dig('nps_survey_state', 'skipped').first['why']).to eq('envio não saiu (contato/caixa)')
+
+      described_class.new(account, now + 15.minutes).run
+      expect(sends.call).to eq(2)
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'task_ids')).to eq([999, task.id])
+    end
+
+    # o envio LEVANTA erro (caixa errada, validação…) depois da reserva: a marca
+    # volta ao que era, nada de lembrete de pesquisa que nunca chegou, e a
+    # próxima rodada manda uma vez só
+    it 'erro no meio do envio (sem mensagem gravada) solta a marca; sem lembrete fantasma; próxima rodada manda 1 vez', :aggregate_failures do
+      settings.update!(agenda_config: { 'nps_survey' => cfg.merge('reminder' => { 'enabled' => true, 'hours' => 6, 'template_params' => tpl }) })
+      sends = count_sends do |n|
+        raise ActiveRecord::RecordInvalid, Conversation.new if n == 1
+      end
+      described_class.new(account, now).run
+      expect(sends.call).to eq(1)
+      expect(settings.reload.agenda_config.dig('nps_survey_state', 'skipped').first['why']).to start_with('erro:')
+      expect(contact.reload.additional_attributes[described_class::MARK_KEY]).to be_nil
+
+      travel_to(now + 7.hours) { described_class.new(account, now + 7.hours).send_reminders }
+      expect(sends.call).to eq(1) # nenhum lembrete: a pesquisa não saiu
+      expect(described_class.context_text(contact.reload)).to be_nil
+
+      described_class.new(account, now + 15.minutes).run
+      expect(sends.call).to eq(2)
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'task_ids')).to eq([task.id])
+    end
+
+    it 'erro DEPOIS da mensagem já gravada mantém a marca (não reenvia)', :aggregate_failures do
+      sends = count_sends do |n|
+        next unless n == 1
+
+        conv = create(:conversation, account: account, inbox: inbox, contact: contact)
+        create(:message, account: account, inbox: inbox, conversation: conv, message_type: :outgoing, content: 'Oi Uma',
+                         additional_attributes: { 'template_params' => tpl, 'cevico_auto' => 'TemplateSource' })
+        raise 'webhook do envio falhou'
+      end
+      described_class.new(account, now).run
+      expect(sends.call).to eq(1)
+      mark = contact.reload.additional_attributes[described_class::MARK_KEY]
+      expect(mark['task_ids']).to eq([task.id])
+      expect(mark['pending_at']).to be_present
+
+      described_class.new(account, now + 15.minutes).run
+      expect(sends.call).to eq(1)
+    end
+
+    it 'segundo olho na mesma rodada: uma pesquisa só para a pessoa', :aggregate_failures do
+      other = surgery(contact, 15, procedure: 'Catarata OE')
+      sends = count_sends
+      described_class.new(account, now).run
+      expect(sends.call).to eq(1)
+      ids = contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'task_ids')
+      expect(ids.size).to eq(1)
+      expect([task.id, other.id]).to include(ids.first)
+    end
+
+    it 'a rodada pega a trava da conta no Redis com senha própria e solta só a sua no fim', :aggregate_failures do
+      sends = count_sends
+      key = "CRM_NPS_LOCK::#{account.id}"
+      token = nil
+      allow(Redis::Alfred).to receive(:set).and_wrap_original do |m, *args, **kw|
+        token = args[1] if args[0] == key
+        m.call(*args, **kw)
+      end
+      allow(Redis::Alfred).to receive(:delete_if_equals).and_call_original
+      described_class.run_all(now)
+      expect(Redis::Alfred).to have_received(:set).with(key, anything, nx: true, ex: 600)
+      expect(token).to be_present
+      expect(Redis::Alfred).to have_received(:delete_if_equals).with(key, token)
+      expect(Redis::Alfred.get(key)).to be_nil
+      expect(sends.call).to eq(1)
+    end
+
+    it 'com a trava ocupada por outra rodada, sai sem enviar e sem soltar a trava alheia', :aggregate_failures do
+      sends = count_sends
+      allow(Redis::Alfred).to receive(:set).and_return(false)
+      allow(Redis::Alfred).to receive(:delete_if_equals).and_call_original
+      allow(Rails.logger).to receive(:info).and_call_original
+      described_class.run_all(now)
+      expect(sends.call).to eq(0)
+      expect(Redis::Alfred).not_to have_received(:delete_if_equals)
+      expect(Rails.logger).to have_received(:info).with(/rodada anterior ainda rodando/)
+    end
+
+    it 'Redis fora do ar: a rodada desta conta é pulada com erro no log, sem derrubar o job', :aggregate_failures do
+      sends = count_sends
+      allow(Redis::Alfred).to receive(:set).and_raise(Redis::CannotConnectError, 'sem redis')
+      allow(Rails.logger).to receive(:error).and_call_original
+      expect { described_class.run_all(now) }.not_to raise_error
+      expect(sends.call).to eq(0)
+      expect(Rails.logger).to have_received(:error).with(/\[CEVICO NPS\] conta #{account.id}: sem redis/)
+    end
+  end
+
   describe 'lembrete para quem não respondeu' do
     let(:rem_tpl) { tpl.merge('name' => 'nps_lembrete') }
     let(:contact) { patient('Sem Resposta', '+5511911110031') }
@@ -117,6 +268,55 @@ RSpec.describe Crm::NpsSurvey do
       names = sent_names
       travel_to(now) { described_class.run_all(now) }
       expect(names).to be_empty
+    end
+
+    # 🔒 auditoria 10/2026: 'reminded_at' também era gravado DEPOIS do envio
+    it 'duas rodadas sobrepostas mandam o lembrete uma vez só (marca ANTES do envio)', :aggregate_failures do
+      sends = 0
+      allow(Crm::SendTemplateService).to receive(:new).and_wrap_original do |m, **kw|
+        svc = m.call(**kw)
+        allow(svc).to receive(:perform) do
+          sends += 1
+          described_class.new(account, now).send_reminders if sends == 1 # outra rodada no meio do envio
+          instance_double(Conversation)
+        end
+        svc
+      end
+      travel_to(now) { described_class.new(account, now).send_reminders }
+      expect(sends).to eq(1)
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'reminded_at')).to be_present
+    end
+
+    # guarda do caminho release_reminder! (o código antigo também não marcava quando o envio devolvia nil)
+    it 'release_reminder!: lembrete que devolve nil deixa a marca livre (tenta de novo na próxima rodada)', :aggregate_failures do
+      allow(Crm::SendTemplateService).to receive(:new).and_wrap_original do |m, **kw|
+        svc = m.call(**kw)
+        allow(svc).to receive(:perform).and_return(nil)
+        svc
+      end
+      travel_to(now) { described_class.new(account, now).send_reminders }
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'reminded_at')).to be_nil
+      expect(settings.reload.agenda_config.dig('nps_survey_state', 'reminders')).to be_nil
+    end
+
+    it 'lembrete que LEVANTA erro no envio (sem mensagem gravada) solta a marca e a próxima rodada manda 1 vez', :aggregate_failures do
+      sends = 0
+      allow(Crm::SendTemplateService).to receive(:new).and_wrap_original do |m, **kw|
+        svc = m.call(**kw)
+        allow(svc).to receive(:perform) do
+          sends += 1
+          raise 'Unsupported operation for this channel' if sends == 1
+
+          instance_double(Conversation)
+        end
+        svc
+      end
+      travel_to(now) { described_class.new(account, now).send_reminders }
+      expect(sends).to eq(1)
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'reminded_at')).to be_nil
+      travel_to(now + 15.minutes) { described_class.new(account, now + 15.minutes).send_reminders }
+      expect(sends).to eq(2)
+      expect(contact.reload.additional_attributes.dig(described_class::MARK_KEY, 'reminded_at')).to be_present
     end
   end
 

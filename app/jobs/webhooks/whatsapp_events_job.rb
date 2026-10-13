@@ -1,5 +1,7 @@
 class Webhooks::WhatsappEventsJob < MutexApplicationJob
-  queue_as :low
+  # 🚦 CEVICO Rodada 6 (RESIL-1): era :low (fundo da fila). A mensagem do
+  # paciente entrando no sistema não pode esperar lote de robô nem relatório.
+  queue_as :medium
   # Retry budget (19 × 2s = 38s) must exceed the 30s lock TTL set in `perform`, otherwise
   # a webhook that arrives just after the lock is acquired can exhaust retries before the
   # holder finishes and silently drop its message.

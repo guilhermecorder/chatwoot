@@ -135,6 +135,16 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
   private
 
+  # (#100) cliente da IA dos RESPONDEDORES: 90 s por chamada e só 1 nova
+  # tentativa (o padrão do Crm::AiAgentConfig é 300 s × 3 tentativas, feito
+  # para o Copywriter/Construtor gerar páginas inteiras). Quem responde
+  # paciente não pode segurar a conversa por meia hora: o retry_later do job
+  # (item 291) já cobre o erro passageiro, e a trava por conversa expira em
+  # Crm::ResponderAgentJob::LOCK_TTL (conta feita em cima desses números).
+  def client
+    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 90, max_retries: 1)
+  end
+
   # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação — mesmo Roteiro,
   # regras de voz e etapa da ligação real, com as ferramentas mapeadas para as
   # deste motor (Crm::VoiceAgent::Script::SIMULATOR_TOOLS). As "mensagens" da

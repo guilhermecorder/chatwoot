@@ -53,16 +53,18 @@ class Api::V1::Accounts::Crm::GoalPlansController < Api::V1::Accounts::BaseContr
 
   # rotinas do time + ferramentas importantes (aparecem no Meu Painel)
   def update_routines # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    cfg = agenda_cfg
-    cfg['team_routines'] = Array(params[:routines]).first(20).map { |r| r.to_s[0, 200] }.reject(&:blank?) if params.key?(:routines)
-    if params.key?(:tools)
-      cfg['important_tools'] = Array(params[:tools]).first(20).filter_map do |t|
-        next if t[:label].blank?
+    # Rodada 4 (#413): mexe só nas chaves recebidas, sob trava e em cima da foto fresca
+    cfg = Cevico::SettingMerge.merge!(crm_settings, :agenda_config) do |fresh|
+      fresh['team_routines'] = Array(params[:routines]).first(20).map { |r| r.to_s[0, 200] }.reject(&:blank?) if params.key?(:routines)
+      if params.key?(:tools)
+        fresh['important_tools'] = Array(params[:tools]).first(20).filter_map do |t|
+          next if t[:label].blank?
 
-        { 'label' => t[:label].to_s[0, 80], 'url' => t[:url].to_s[0, 500] }
+          { 'label' => t[:label].to_s[0, 80], 'url' => t[:url].to_s[0, 500] }
+        end
       end
+      fresh
     end
-    crm_settings.update!(agenda_config: cfg)
     render json: { routines: cfg['team_routines'] || [], tools: cfg['important_tools'] || [] }
   end
 

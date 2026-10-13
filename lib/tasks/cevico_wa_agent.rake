@@ -14,6 +14,8 @@
 namespace :cevico do # rubocop:disable Metrics/BlockLength
   desc 'Simula um paciente conversando com o Atendente de Agendamento (sombra), com a IA de verdade'
   task :wa_agent_simulate, [:account_id, :messages] => :environment do |_t, args| # rubocop:disable Metrics/BlockLength
+    # 🔒 auditoria #212: comando de teste — fora do desenvolvimento só com CEVICO_SIMULATION_OK=1
+    Cevico::SimulationGuard.check!('cevico:wa_agent_simulate')
     account = Account.find(args[:account_id] || 3)
     cfg = CrmSetting.find_by(account: account)&.ai_config || {}
     agent = cfg.dig('agents', 'atendente_agendamento') || {}
@@ -23,7 +25,10 @@ namespace :cevico do # rubocop:disable Metrics/BlockLength
     end
 
     inbox = account.inboxes.find(Array(agent['inbox_ids']).first)
-    phone = "+5511#{rand(900_000_000..999_999_999)}"
+    # 🔒 auditoria #212: número claramente INVÁLIDO (no Brasil nenhum número começa
+    # com 0 depois do DDD) — antes era um celular de São Paulo sorteado, que podia
+    # ser de uma pessoa real. O sufixo sorteado só evita bater com simulação anterior.
+    phone = "+551100#{rand(100_000..999_999)}"
     contact = account.contacts.create!(name: "Paciente Simulado #{Time.zone.now.strftime('%d/%m %H:%M')}", phone_number: phone)
     contact_inbox = ContactInbox.create!(contact: contact, inbox: inbox, source_id: phone.delete('+'))
     conversation = Conversation.create!(account: account, inbox: inbox, contact: contact, contact_inbox: contact_inbox,
@@ -32,7 +37,8 @@ namespace :cevico do # rubocop:disable Metrics/BlockLength
     messages = (ENV['MSGS'].presence || args[:messages]).to_s.split('|').map(&:strip).compact_blank
     messages = ['oi, quero saber sobre cirurgia refrativa'] if messages.empty?
 
-    mode = Crm::ResponderAgentJob.live_mode?(agent) ? 'AO VIVO' : 'sombra'
+    # conversa simulada roda SEMPRE em sombra dentro do job (auditoria #212), mesmo com o agente ao vivo
+    mode = Crm::ResponderAgentJob.live_mode?(agent) ? 'sombra (agente ao vivo, mas conversa simulada nunca sai)' : 'sombra'
     puts "Conversa ##{conversation.display_id} · #{contact.name} · caixa #{inbox.name} · modo: #{mode}"
     messages.each do |text|
       message = conversation.messages.create!(account_id: account.id, inbox_id: inbox.id, message_type: :incoming, content: text, sender: contact)

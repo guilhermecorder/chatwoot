@@ -10,6 +10,7 @@ import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
 import EmojiFx from 'dashboard/components-next/cevico/EmojiFx.vue';
 import TileAura from 'dashboard/components-next/radar/TileAura.vue';
@@ -27,6 +28,10 @@ import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
 import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
 import { IMAC_PALETTES, FRUIT_PALETTES } from 'dashboard/helper/cevicoPalettes';
+// 🧭 item 336: vitrine giratória do guia arejado (frase do dia + equipe)
+import CvVitrine from 'dashboard/components-next/cevico/guia/CvVitrine.vue';
+import VisaoGeral from 'dashboard/components-next/cevico/guia/VisaoGeral.vue';
+import { fraseDoDia } from 'dashboard/helper/cevicoFrases';
 import {
   PANEL_PRESETS,
   PRESET_BY_KEY,
@@ -76,6 +81,20 @@ const allTasks = useMapGetter('tasks/getTasks');
 const crmSettings = useMapGetter('crm/getSettings');
 const teamAgents = useMapGetter('agents/getAgents');
 const { isAdmin } = useAdmin();
+// 🔒 auditoria R2 (#350, 12/10): quem não tem a área Financeiro (EDITAR, a
+// mesma régua do servidor em home#kpis) não vê card de dinheiro no Meu Painel
+// (o servidor já tira revenue/wa_cost do cesto; aqui o card nem aparece, em
+// vez de ficar vazio). Gasto do WhatsApp = só admin.
+// DECISÃO PENDENTE (Guilherme): se "só ver" o Financeiro também deve abrir o
+// faturamento, trocar 'edit' por 'view' aqui e em can_see_revenue? no servidor.
+const { can: cevicoCan } = useCevicoAccess();
+const canSeeRevenue = computed(
+  () => isAdmin.value || cevicoCan('financeiro', 'edit')
+);
+const MONEY_VARS = ['revenue', 'wa_cost', 'wa_cost_meta'];
+const canSeeMoneyVar = v =>
+  v === 'revenue' ? canSeeRevenue.value : isAdmin.value;
+// (hiddenMoneyKpi fica junto de withCustomVars, mais abaixo)
 
 const isLoading = ref(true);
 const data = ref(null);
@@ -97,6 +116,17 @@ const period = ref({ preset: 'today', from: hojeStr, to: hojeStr });
 // próximas consultas, Radar) e desempenho das pessoas não mudam com ela.
 const { uiSettings, updateUISettings } = useUISettings();
 const sourceLens = ref(uiSettings.value?.cevico_home_source || 'cevico');
+// 🧭 item 338 (12/10 noite): DUAS VERSÕES do Meu Painel, escolha por pessoa.
+//   classico = a tela de sempre (hero em degradê, salada de frutas, blocos)
+//   novo     = guia arejado (hero chapado + vitrine + Visão geral, sem os
+//              blocos antigos de conteúdo nem Tarefas)
+// Padrão: clássico — ninguém muda de tela sem escolher.
+const estiloPainel = ref(uiSettings.value?.cevico_home_estilo || 'classico');
+const estiloClassico = computed(() => estiloPainel.value !== 'novo');
+const setEstiloPainel = key => {
+  estiloPainel.value = key;
+  updateUISettings({ cevico_home_estilo: key });
+};
 const sourceParams = () => ({ source: sourceLens.value });
 
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
@@ -549,6 +579,43 @@ const bdayNeeded = computed(
 const bdayToday = computed(() => birthdays.value?.today || []);
 const bdayMonth = computed(() => birthdays.value?.month || []);
 const bdayMissing = computed(() => birthdays.value?.missing);
+
+// 🧭 item 336: VITRINE GIRATÓRIA — frase do dia (a mesma para todos) e o
+// destaque da equipe (aniversário de hoje ou o próximo do mês). Sem destaque,
+// a vitrine fica só com a frase.
+const vitrinePaineis = computed(() => {
+  const frase = fraseDoDia();
+  const paineis = [
+    {
+      etiqueta: 'Frase do dia',
+      titulo: `“${frase.texto}”`,
+      texto: frase.fonte,
+      tom: 'dia',
+    },
+  ];
+  const hoje = new Date().getDate();
+  const first = n => String(n || '').split(' ')[0];
+  if (bdayToday.value.length) {
+    const nomes = bdayToday.value.map(e => first(e.name)).join(' e ');
+    paineis.push({
+      etiqueta: 'Equipe',
+      titulo: `Hoje é aniversário de ${nomes}`,
+      texto: 'Um abraço da equipe. Vale um café.',
+      tom: 'apoio',
+    });
+  } else {
+    const proximo = bdayMonth.value.find(e => e.day > hoje);
+    if (proximo) {
+      paineis.push({
+        etiqueta: 'Equipe',
+        titulo: `Dia ${proximo.day} é aniversário de ${first(proximo.name)}`,
+        texto: 'Já anota para não passar em branco.',
+        tom: 'apoio',
+      });
+    }
+  }
+  return paineis;
+});
 const bdayLabel = e =>
   `${String(e.day).padStart(2, '0')}/${String(e.month).padStart(2, '0')}`;
 const bdayFirst = name =>
@@ -1403,6 +1470,29 @@ const withCustomVars = (base, skipId = null) => {
   return out;
 };
 
+// 🔒 auditoria R2 (#350): true = card de dinheiro que ESTA pessoa não pode
+// ver (marcado "só finance" pelo modelo pronto, ou cuja fórmula cita
+// faturamento/gasto do WhatsApp). Item 241: a fórmula pode citar outro card
+// (`kpi_<id>`); se esse card for de dinheiro, este também some — resolve em
+// cadeia, com trava de ciclo.
+const hiddenMoneyKpi = (def, visiting = new Set()) => {
+  if (!def) return false;
+  if (def.finance === true && !canSeeRevenue.value) return true;
+  const defs = crmSettings.value?.custom_kpis || [];
+  const byVar = Object.fromEntries(
+    defs.filter(d => d.id).map(d => [customVarName(d), d])
+  );
+  return variablesIn(def.expr || '').some(v => {
+    if (MONEY_VARS.includes(v)) return !canSeeMoneyVar(v);
+    const dep = byVar[v];
+    if (!dep || dep === def || visiting.has(v)) return false;
+    visiting.add(v);
+    const hidden = hiddenMoneyKpi(dep, visiting);
+    visiting.delete(v);
+    return hidden;
+  });
+};
+
 // ── CARDS DO "+" (item 141): indicador pronto ou FÓRMULA sobre o cesto ──
 const bagMetrics = computed(() => kpiBag.value?.metrics || {});
 // só o cesto (sem os seus indicadores) — base da prévia do construtor
@@ -1440,7 +1530,8 @@ const deltaLine = (value, prev, format, bag = null) => {
 };
 const customKpiDefs = computed(() =>
   (crmSettings.value?.custom_kpis || []).filter(
-    k => k.panel === 'all' || k.panel === panelBase.value
+    k =>
+      (k.panel === 'all' || k.panel === panelBase.value) && !hiddenMoneyKpi(k)
   )
 );
 // ── item 241: ÍCONE que combina com o nome e a intenção do indicador. O NOME
@@ -2106,7 +2197,7 @@ const saveKpiMulti = async () => {
   isSavingKpi.value = true;
   try {
     const base = kpiBuilder.value || newKpiDef();
-    const list = [...(crmSettings.value?.custom_kpis || [])];
+    const list = []; // Rodada 4 (#351): só os cards novos; o servidor junta pelo id
     kpiMulti.value.forEach((m, i) => {
       list.push({
         ...base,
@@ -2119,7 +2210,7 @@ const saveKpiMulti = async () => {
         color: base.color || '',
       });
     });
-    await CrmAPI.updateCustomKpis(list);
+    await CrmAPI.patchCustomKpis({ upsert: list });
     await store.dispatch('crm/fetchSettings');
     kpiMulti.value = [];
     kpiBuilder.value = null;
@@ -2326,11 +2417,13 @@ const saveKpiBuilder = async () => {
   if (!def?.label?.trim() || !kpiPreview.value.ok) return;
   isSavingKpi.value = true;
   try {
-    const list = [...(crmSettings.value?.custom_kpis || [])];
-    const idx = def.id ? list.findIndex(k => k.id === def.id) : -1;
-    if (idx >= 0) list[idx] = def;
-    else list.push({ ...def, id: `k${Date.now().toString(36)}` });
-    await CrmAPI.updateCustomKpis(list);
+    // Rodada 4 (#351): manda só este card (editado ou novo); o servidor junta
+    // pelo id em cima da lista do banco
+    const exists =
+      def.id &&
+      (crmSettings.value?.custom_kpis || []).some(k => k.id === def.id);
+    const card = exists ? def : { ...def, id: `k${Date.now().toString(36)}` };
+    await CrmAPI.patchCustomKpis({ upsert: [card] });
     await store.dispatch('crm/fetchSettings');
     kpiBuilder.value = null;
   } finally {
@@ -2350,12 +2443,10 @@ const deleteKpi = async def => {
     )
   )
     return;
-  const list = (crmSettings.value?.custom_kpis || []).filter(
-    k => k.id !== def.id
-  );
   isSavingKpi.value = true;
   try {
-    await CrmAPI.updateCustomKpis(list);
+    // Rodada 4 (#351): apaga só este card pelo id
+    await CrmAPI.patchCustomKpis({ remove: [def.id] });
     await store.dispatch('crm/fetchSettings');
     kpiBuilder.value = null;
     kpiModal.value = null;
@@ -2590,9 +2681,14 @@ const toggleEditMode = () => {
   // saiu da edição: busca o que a pausa do auto-refresh segurou
   if (!organizeMode.value) refreshAll();
 };
+// 🔒 Rodada 4 (#351c): o layout que a tela JÁ MANDOU e o servidor ainda não
+// devolveu ({ [painel]: layout }). O próximo ajuste parte dele, não da foto
+// velha do store — senão clicar ✕ em dois cards seguidos fazia o 1º voltar.
+const kpiLayoutDraft = ref({});
 // variante por pessoa sem layout próprio ainda NASCE com o layout do base
 const kpiLayout = computed(
   () =>
+    kpiLayoutDraft.value[selectedPanel.value] ||
     crmSettings.value?.kpi_layout?.[selectedPanel.value] ||
     (currentPanel.value.variant
       ? crmSettings.value?.kpi_layout?.[panelBase.value]
@@ -2644,12 +2740,34 @@ const hiddenTiles = computed(() => {
   return allPanelTiles.value.filter(t => hidden.has(t.id));
 });
 const isSavingLayout = ref(false);
+// 🔒 Rodada 4 (#351c): os saves de layout (cards e blocos) saem UM DE CADA VEZ,
+// na ordem dos cliques — cada um espera o anterior e o fetchSettings dele.
+let layoutQueue = Promise.resolve();
+let layoutSaves = 0;
+const queueLayoutSave = async job => {
+  layoutSaves += 1;
+  isSavingLayout.value = true;
+  const run = layoutQueue.then(job);
+  layoutQueue = run.catch(() => {}); // um save que falhou não trava a fila
+  try {
+    return await run;
+  } finally {
+    layoutSaves -= 1;
+    isSavingLayout.value = layoutSaves > 0;
+  }
+};
 const saveKpiLayout = async patch => {
-  const all = { ...(crmSettings.value?.kpi_layout || {}) };
+  // 🔒 Rodada 4 (#351): manda SÓ o painel editado — o servidor mescla painel a
+  // painel, então dois admins (ou duas abas) em painéis diferentes não se apagam
+  const panel = selectedPanel.value;
   // variante sem layout próprio ainda: parte do que ela está MOSTRANDO (o do
-  // painel base), senão o 1º ajuste apagaria tamanhos/espaços herdados
-  const cur = all[selectedPanel.value] || kpiLayout.value;
-  all[selectedPanel.value] = {
+  // painel base), senão o 1º ajuste apagaria tamanhos/espaços herdados.
+  // Save ainda no ar: parte do que já foi mandado (rascunho), não do store.
+  const cur =
+    kpiLayoutDraft.value[panel] ||
+    crmSettings.value?.kpi_layout?.[panel] ||
+    kpiLayout.value;
+  const layout = {
     order: patch.order ?? cur.order ?? [],
     hidden: patch.hidden ?? cur.hidden ?? [],
     colors: patch.colors ?? cur.colors ?? {},
@@ -2665,12 +2783,23 @@ const saveKpiLayout = async patch => {
     grid_units: patch.grid_units ?? cur.grid_units ?? false,
     grid_free: patch.grid_free ?? cur.grid_free ?? false,
   };
-  isSavingLayout.value = true;
+  // a tela já mostra o ajuste e o PRÓXIMO clique parte dele
+  kpiLayoutDraft.value = { ...kpiLayoutDraft.value, [panel]: layout };
+  const dropDraft = () => {
+    // só se ninguém mandou outro ajuste depois deste (aí o rascunho é o dele)
+    if (kpiLayoutDraft.value[panel] !== layout) return;
+    const rest = { ...kpiLayoutDraft.value };
+    delete rest[panel];
+    kpiLayoutDraft.value = rest;
+  };
   try {
-    await CrmAPI.updateKpiLayout(all);
-    await store.dispatch('crm/fetchSettings');
+    await queueLayoutSave(async () => {
+      await CrmAPI.updateKpiLayout({ [panel]: layout });
+      await store.dispatch('crm/fetchSettings');
+    });
   } finally {
-    isSavingLayout.value = false;
+    // deu certo: o store já tem este layout; deu erro: volta ao que está salvo
+    dropDraft();
   }
 };
 // ── 🧲 item 266b (28/09, pedido: "o recurso de mudar de tamanho e etc. deve ser
@@ -3190,11 +3319,12 @@ const applyPreset = async preset => {
       metrics: bagMetrics.value,
       fixedIds,
     });
-    const prefix = `${base}_p_`;
-    const list = (crmSettings.value?.custom_kpis || []).filter(
-      k => !String(k.id).startsWith(prefix)
-    );
-    await CrmAPI.updateCustomKpis([...list, ...defs]);
+    // Rodada 4 (#351): troca só os cards do modelo pronto deste painel
+    // (prefixo) — os cards criados à mão por outro admin ficam
+    await CrmAPI.patchCustomKpis({
+      remove_prefix: `${base}_p_`,
+      upsert: defs,
+    });
     await store.dispatch('crm/fetchSettings');
     const keep = new Set(layout.order);
     const hidden = allPanelTiles.value
@@ -3281,7 +3411,7 @@ const tileMenu = tile => {
   };
 };
 const saveBlockLayout = async () => {
-  const all = { ...(crmSettings.value?.block_layout || {}) };
+  const all = {}; // Rodada 4 (#351): só o painel editado; o servidor mescla por painel
   const orderOf = list =>
     [...list].sort((a, b) => a.y - b.y || a.x - b.x).map(i => i.id);
   const strip = list => list.map(({ id, x, y, w }) => ({ id, x, y, w }));
@@ -3296,21 +3426,22 @@ const saveBlockLayout = async () => {
     grid_main: strip(mainGrid.value),
     locked: blocksLocked.value,
   };
-  isSavingLayout.value = true;
-  try {
+  // na fila dos saves de layout (#351c): dois arrastos seguidos chegam ao
+  // servidor na ordem certa
+  await queueLayoutSave(async () => {
     await CrmAPI.updateBlockLayout(all);
     await store.dispatch('crm/fetchSettings');
-  } finally {
-    isSavingLayout.value = false;
-  }
+  });
 };
 const resetBlockLayout = async () => {
-  const all = { ...(crmSettings.value?.block_layout || {}) };
-  if (!all[selectedPanel.value]) return;
-  delete all[selectedPanel.value];
+  if (!crmSettings.value?.block_layout?.[selectedPanel.value]) return;
   try {
-    await CrmAPI.updateBlockLayout(all);
-    await store.dispatch('crm/fetchSettings');
+    // Rodada 4 (#351): null = apaga só o layout deste painel (os outros ficam)
+    const panel = selectedPanel.value;
+    await queueLayoutSave(async () => {
+      await CrmAPI.updateBlockLayout({ [panel]: null });
+      await store.dispatch('crm/fetchSettings');
+    });
   } catch {
     // sem drama: o padrão volta no próximo carregamento
   }
@@ -3888,6 +4019,8 @@ const radarFx = ref(null);
 // dali mesmo, sem precisar ir até Conversas
 const radarChat = ref(null);
 const openChatBalloon = alert => {
+  // aviso de robô parado (#217) não tem conversa: o card só informa
+  if (alert?.kind === 'robo_parado') return;
   radarChat.value = {
     contact_id: alert.contact_id,
     name: alert.contact_name,
@@ -3915,6 +4048,12 @@ const onRadarChatResolved = ({ status }) => {
   if (status === 'resolved') onRadarChatReplied();
 };
 const attendNow = (alert, event) => {
+  // aviso de robô parado (#217): "Ok, vi" só tira o cartão da fila desta tela —
+  // não é atendimento (não chama o servidor nem conta na eficácia do Radar)
+  if (alert?.kind === 'robo_parado') {
+    radarQueue.value = radarQueue.value.filter(a => a !== alert);
+    return;
+  }
   if (radarFx.value && event) {
     radarFx.value.burstAt(event.clientX, event.clientY, ['✅'], 3);
   }
@@ -3988,12 +4127,25 @@ const ALERT_KIND_META = {
     label: 'Pós-operatório: atenção agora',
     color: '#be123c',
   },
+  // auditoria 10/2026 (#458): Atendente de Agendamento / Pós-agendamento chamou a equipe (o agente fica pausado)
+  atendimento_atencao: {
+    icon: 'i-lucide-hand',
+    label: 'Atendimento: a equipe precisa assumir',
+    color: '#be123c',
+  },
+  // auditoria 10/2026 (#217): um robô (lembretes, NPS, jornada…) parou ou deu erro 2× seguidas — só o admin vê
+  robo_parado: {
+    icon: 'i-lucide-bot-off',
+    label: 'Robô parado — avise quem cuida do sistema',
+    color: '#b91c1c',
+  },
 };
 const alertKindMeta = alert => ALERT_KIND_META[alert?.kind] || null;
 const isAgentAlert = alert =>
   String(alert?.kind || '').startsWith('agente_') ||
   alert?.kind === 'nao_confirmou' ||
-  alert?.kind === 'pos_op_atencao';
+  alert?.kind === 'pos_op_atencao' ||
+  alert?.kind === 'atendimento_atencao';
 const openAgendaFromAlert = alert =>
   router.push({
     name: 'agenda_board',
@@ -4278,7 +4430,12 @@ const perfTilesFor = col => {
         return {
           key,
           display: r.surgeries?.count ?? 0,
-          label: `cirurgias fechadas · ${perfBrl(r.surgeries?.revenue)}`,
+          // 🔒 auditoria R2: o servidor só manda `revenue` para quem pode ver
+          // dinheiro; sem ele, a linha fica só com a contagem
+          label:
+            r.surgeries?.revenue === undefined || r.surgeries?.revenue === null
+              ? 'cirurgias fechadas'
+              : `cirurgias fechadas · ${perfBrl(r.surgeries.revenue)}`,
         };
       case 'attendance':
         return {
@@ -4696,7 +4853,20 @@ const refreshAll = () => {
   // no MODO EDIÇÃO a atualização automática pausa: um refresh no meio do
   // arrasto trocava as listas do vuedraggable e quebrava o movimento
   if (organizeMode.value) return;
-  store.dispatch('tasks/fetch').catch(() => {});
+  // 🐢 Rodada 7: versão LEVE e sem canceladas, desde 35 dias atrás — cobre
+  // o que o painel calcula (comparecimento 30 dias, cirurgias do mês,
+  // ocupação ±7/14 dias, próxima cirurgia); cards do quadro vêm sempre.
+  // Sem 'to' de propósito: o fim fica no padrão do servidor (+365 dias)
+  // para a "próxima cirurgia" nunca sumir; cada linha vem enxuta (leve)
+  const since = new Date();
+  since.setDate(since.getDate() - 35);
+  store
+    .dispatch('tasks/fetch', {
+      light: 1,
+      canceled: 0,
+      from: since.toISOString(),
+    })
+    .catch(() => {});
   // item 237: mês/ano/personalizado mudam devagar e custam caro — a
   // atualização automática só refaz os períodos curtos (o servidor guarda
   // os longos por 10 min de qualquer forma)
@@ -4749,6 +4919,11 @@ const fbSignature = computed(() =>
 // painel do gestor, mostrando o STATUS DA CONTA na Meta (qualidade +
 // limite de envio), não um "funcionando" genérico
 const whatsappStatus = computed(() => data.value?.whatsapp_status || null);
+// 🚨 #217: robôs parados/com erro (o servidor lê do Redis pelo web — aparece
+// mesmo com a fila dos robôs parada inteira); só vem para o admin
+const robotProblems = computed(() =>
+  Array.isArray(data.value?.robot_problems) ? data.value.robot_problems : []
+);
 const waProblem = computed(() =>
   (whatsappStatus.value || []).some(
     w =>
@@ -4839,6 +5014,7 @@ onUnmounted(() => {
 <template>
   <div
     class="cv-page h-full w-full overflow-y-auto bg-n-surface-1"
+    :class="estiloClassico ? '' : 'cvg-arejado'"
     :style="cvVars"
   >
     <!-- 28/09 (pedido: "no desktop quero poder usar todo esse espaço para
@@ -4848,12 +5024,17 @@ onUnmounted(() => {
            de vidro com o dia e o painel, saudação grande, lead do painel, o
            PULSO do momento em vidros clicáveis e o olho CEVICO como marca
            d'água. A cor continua sendo a do painel escolhido. -->
+      <!-- 🧭 item 336 (guia arejado): fundo CHAPADO na cor do dia (os 60%),
+           um brilho só, sem o degradê — o olho CEVICO continua -->
       <div
-        class="cevico-hero rounded-3xl p-6 sm:p-8 text-white shadow-lg mb-6 relative overflow-hidden transition-all"
-        :style="{ background: pagePalette.hero }"
+        class="cevico-hero rounded-3xl p-6 sm:p-8 text-white mb-6 relative overflow-hidden transition-all"
+        :class="estiloClassico ? 'shadow-lg' : 'cvg-cab-inicio'"
+        :style="{ background: estiloClassico ? pagePalette.hero : 'var(--cv)' }"
       >
-        <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
-        <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
+        <template v-if="estiloClassico">
+          <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
+          <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
+        </template>
         <img
           :src="HERO_EYE"
           alt=""
@@ -4906,6 +5087,25 @@ onUnmounted(() => {
                   · {{ currentPanel.who }}</template
                 >
               </span>
+              <!-- 🧭 item 338: chavinha das DUAS VERSÕES (clássico × novo), por pessoa -->
+              <span class="cevico-hero-chip cevico-hero-chip-seg" title="Duas versões do Meu Painel para comparar: a clássica (colorida, blocos de sempre) e a nova (visão geral com gráficos). Cada pessoa escolhe a sua.">
+                <button
+                  type="button"
+                  class="cevico-hero-seg-btn"
+                  :class="estiloClassico ? 'cevico-hero-seg-on' : ''"
+                  @click="setEstiloPainel('classico')"
+                >
+                  Clássico
+                </button>
+                <button
+                  type="button"
+                  class="cevico-hero-seg-btn"
+                  :class="!estiloClassico ? 'cevico-hero-seg-on' : ''"
+                  @click="setEstiloPainel('novo')"
+                >
+                  Novo
+                </button>
+              </span>
               <!-- 🧑‍🤝‍🧑 painel por pessoa: o admin edita nome/pessoas daqui -->
               <button
                 v-if="isAdmin && currentPanel.variant"
@@ -4953,12 +5153,17 @@ onUnmounted(() => {
           </div>
           <div>
             <h1
+              v-if="estiloClassico"
               class="text-3xl sm:text-[40px] font-bold leading-none tracking-tight"
               style="color: #fff"
             >
               {{ greeting
               }}<template v-if="firstName">, {{ firstName }}</template
               >! 👋
+            </h1>
+            <h1 v-else class="cvg-titulo-ambiente cvg-cab-h1">
+              {{ greeting
+              }}<template v-if="firstName">, {{ firstName }}</template>
             </h1>
             <p
               class="text-sm sm:text-[15px] mt-2.5 max-w-2xl leading-relaxed"
@@ -4992,7 +5197,7 @@ onUnmounted(() => {
                   p.value
                 }}</span>
                 <span
-                  class="text-[11px] mt-1"
+                  class="text-[13px] mt-1"
                   style="color: rgba(255, 255, 255, 0.82)"
                   >{{ p.label }}</span
                 >
@@ -5001,6 +5206,18 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+
+      <!-- 🧭 item 336: VITRINE GIRATÓRIA (frase do dia + equipe), some no modo edição -->
+      <div v-if="!organizeMode && !estiloClassico" class="cvg-arejado-vitrine">
+        <CvVitrine :paineis="vitrinePaineis" lembrar="cevico:vitrine:inicio" />
+      </div>
+
+      <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin) -->
+      <VisaoGeral
+        v-if="!organizeMode && !estiloClassico"
+        :source="sourceLens"
+        :vars="cvVars"
+      />
 
       <!-- ✏️ BARRA DO MODO EDIÇÃO (item 143): gruda no topo enquanto o modo
            está ativo — dicas, cards ocultos, voltar ao padrão e Concluir
@@ -5279,6 +5496,25 @@ onUnmounted(() => {
               depois
             </button>
           </div>
+        </div>
+
+        <!-- 🚨 #217: faixa vermelha de robôs parados (só o admin recebe a lista) -->
+        <div
+          v-if="robotProblems.length"
+          class="mb-4 px-4 py-3 rounded-xl text-xs"
+          style="background: #fef2f2; border: 1px solid #fecaca; color: #7f1d1d"
+        >
+          <p class="font-semibold text-sm mb-1" style="color: #b91c1c">
+            <span class="i-lucide-bot-off align-middle mr-1" />Robôs parados ou
+            com erro ({{ robotProblems.length }})
+          </p>
+          <p v-for="r in robotProblems" :key="r.job" class="leading-snug">
+            <b>{{ r.label }}:</b> {{ r.message }}
+          </p>
+          <p class="mt-1" style="color: #991b1b">
+            O que fazer: avise quem cuida do sistema e, enquanto isso, confira à
+            mão o que esse robô faria hoje.
+          </p>
         </div>
 
         <!-- 🎂 item 331: aniversariantes do mês -->
@@ -5849,6 +6085,7 @@ onUnmounted(() => {
                                 <PatientSpaceIcon :size="24" />
                               </button>
                               <button
+                                v-if="radarFront.kind !== 'robo_parado'"
                                 class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
                                 style="
                                   color: #2563eb;
@@ -5886,9 +6123,11 @@ onUnmounted(() => {
                                 @click.stop="attendNow(radarFront, $event)"
                               >
                                 {{
-                                  isAgentAlert(radarFront)
-                                    ? 'Ver conversa →'
-                                    : 'Atender agora →'
+                                  radarFront.kind === 'robo_parado'
+                                    ? 'Ok, vi'
+                                    : isAgentAlert(radarFront)
+                                      ? 'Ver conversa →'
+                                      : 'Atender agora →'
                                 }}
                               </button>
                             </div>
@@ -5906,7 +6145,7 @@ onUnmounted(() => {
                   </div>
                 </template>
 
-                <template v-else-if="blockId === 'tarefas'">
+                <template v-else-if="blockId === 'tarefas' && estiloClassico">
                   <!-- 📋 Tarefas e notas (redesenho 27/09, "clean e organizado"):
                        UMA lista por vez (abas), linhas com fio em vez de caixinhas,
                        sem coluna vazia ocupando espaço -->
@@ -6253,6 +6492,8 @@ onUnmounted(() => {
           </template>
         </MagnetBoard>
 
+        <!-- 🧭 item 338: daqui até o fim dos blocos de conteúdo = só na versão CLÁSSICA -->
+        <template v-if="estiloClassico">
         <!-- Seletor de painel (cada pessoa no seu) -->
         <div class="flex items-center gap-2 flex-wrap mb-3">
           <div class="cv-seg overflow-x-auto">
@@ -8060,6 +8301,7 @@ onUnmounted(() => {
             </section>
           </template>
         </MagnetBoard>
+        </template>
       </template>
 
       <!-- Admin: quem vê qual painel -->

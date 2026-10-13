@@ -126,7 +126,9 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
       kind: params[:kind].to_s,
       category: params[:category].to_s.presence,
       description: params[:description].to_s.strip[0, 300],
-      amount: params[:amount].to_f.round(2)
+      # Rodada 6 (#260): regra única do dinheiro — "5.000" é R$ 5.000,00 (o to_f dava 5,00);
+      # o que não é dinheiro vira 0 e a validação (> 0) recusa
+      amount: Cevico::Money.parse(params[:amount]) || 0.0
     }
   end
 

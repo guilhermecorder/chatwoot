@@ -5,7 +5,7 @@
 # a caixa de entrada da conversa, as etiquetas do paciente, nome e telefone,
 # e os atalhos: abrir a conversa, Espaço do Paciente e ligar.
 # Fonte: tasks do tipo 'consulta' (a mesma Agenda). Aberto ao time inteiro.
-class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseController
+class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   include Crm::ResolvesPeriod
 
   LIMIT = 500
@@ -13,14 +13,23 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   #   agendada     = consulta NOVA criada no período (robô ou equipe)
   #   lancada      = consulta que já estava marcada fora do sistema e foi só
   #                  lançada na Agenda (booking_kind 'registro') — não é agendamento
-  #   reagendada   = mudou de dia/hora
+  #   reagendada   = mudou de dia/hora (carimbo da remarcação, nunca o updated_at)
   #   confirmada   = paciente respondeu SIM ao lembrete da véspera
   #   nao_confirmou= paciente respondeu NÃO ao lembrete (consulta segue na Agenda)
   #   cancelada    = desmarcada
   # No modo "registradas" cada ACONTECIMENTO do período vira uma linha (a
   # mesma consulta pode ter sido marcada e confirmada no período).
   KINDS = %w[agendada lancada reagendada confirmada nao_confirmou cancelada].freeze
-  EVENT_GAP = 5.seconds
+  # 🔁 auditoria 10/2026 (#2/#133): remarcação no período = carimbo próprio
+  # (Task#rescheduled_times, lista `comments`), nunca o updated_at. O CASE
+  # garante que só a linha de remarcação vira data (um comentário comum com
+  # 'at' estranho não derruba o feed — o banco não promete a ordem do AND)
+  RESCHEDULED_IN_PERIOD_SQL = "(tasks.rescheduled_count > 0 AND CASE WHEN jsonb_typeof(tasks.comments) = 'array' " \
+                              'THEN EXISTS (SELECT 1 FROM jsonb_array_elements(tasks.comments) AS stamp ' \
+                              "WHERE stamp->>'kind' = 'rescheduled' " \
+                              "AND (CASE WHEN stamp->>'kind' = 'rescheduled' " \
+                              "THEN ((stamp->>'at')::timestamptz AT TIME ZONE 'UTC') END) BETWEEN :s AND :u) " \
+                              'ELSE FALSE END)'.freeze
   # quem marcou: rastro que o Secretário/Atendente deixa na descrição
   IA_MARKS = Crm::BookingSource::IA_MARKS # regra única (item 267)
   TZ = Crm::AgendaSlots::TZ
@@ -80,7 +89,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
 
     scope.where('(tasks.created_at BETWEEN :s AND :u) OR (tasks.canceled_at BETWEEN :s AND :u) ' \
                 'OR (tasks.confirmed_at BETWEEN :s AND :u) OR (tasks.declined_at BETWEEN :s AND :u) ' \
-                'OR (tasks.rescheduled_count > 0 AND tasks.updated_at BETWEEN :s AND :u)', s: since, u: until_at)
+                "OR #{RESCHEDULED_IN_PERIOD_SQL}", s: since, u: until_at)
          .order(updated_at: :desc)
   end
 
@@ -119,12 +128,10 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
     ev << ['confirmada', task.confirmed_at] if task.confirmed_at && range.cover?(task.confirmed_at)
     ev << ['nao_confirmou', task.declined_at] if task.declined_at && range.cover?(task.declined_at)
     ev << ['cancelada', task.canceled_at] if task.canceled_at && range.cover?(task.canceled_at)
-    # reagendamento não tem carimbo próprio: vale o updated_at, desde que não
-    # seja só o rastro de outro acontecimento (criação/confirmação/cancelamento)
-    if task.rescheduled_count.to_i.positive? && range.cover?(task.updated_at) &&
-       [task.created_at, task.confirmed_at, task.declined_at, task.canceled_at].compact.none? { |t| (task.updated_at - t).abs < EVENT_GAP }
-      ev << ['reagendada', task.updated_at]
-    end
+    # 🔁 #2/#133: vale o carimbo da remarcação (a última dentro do período) —
+    # marcar ✓ compareceu, trocar médico ou mandar para a Lixeira não é remarcar
+    rescheduled = task.rescheduled_count.to_i.positive? && task.rescheduled_times.reverse.find { |t| range.cover?(t) }
+    ev << ['reagendada', rescheduled] if rescheduled
     ev.presence || [[kind_of(task), event_at(task)]]
   end
 
@@ -181,7 +188,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
   # estado atual da consulta (modo "consultas do período": uma linha por consulta)
   def kind_of(task)
     return 'cancelada' if task.canceled_at.present?
-    return 'reagendada' if task.rescheduled_count.to_i.positive?
+    return 'reagendada' if rescheduled_last?(task)
     return 'nao_confirmou' if task.declined_at.present?
     return 'confirmada' if task.confirmed_at.present?
     return 'lancada' if task.registered_only?
@@ -191,11 +198,22 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
 
   def event_at(task)
     return task.canceled_at if task.canceled_at.present?
-    return task.updated_at if task.rescheduled_count.to_i.positive?
+    return task.rescheduled_at || task.updated_at if rescheduled_last?(task)
     return task.declined_at if task.declined_at.present?
     return task.confirmed_at if task.confirmed_at.present?
 
     task.created_at
+  end
+
+  # 🔁 #133: remarcada e SEM resposta do paciente depois disso. Confirmou (ou
+  # disse não) DEPOIS da remarcação → vale a resposta. Remarcação antiga, sem
+  # carimbo: qualquer resposta registrada vence (a Task já limpa o "sim" velho
+  # quando a data muda).
+  def rescheduled_last?(task)
+    return false unless task.rescheduled_count.to_i.positive?
+
+    at = task.rescheduled_at
+    [task.confirmed_at, task.declined_at].compact.none? { |answered| at.nil? || answered >= at }
   end
 
   # a conversa de onde a consulta saiu — regra compartilhada com o Meu Painel

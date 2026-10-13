@@ -8,6 +8,13 @@
 # - a consulta tem que ser DESTA conta, de hoje 00:00 (fuso SP) em diante,
 #   não cancelada e não concluída — fora disso é "não encontrada";
 # - telefone de TERCEIRO nunca sai inteiro (só os 4 finais);
+# - 🔒 auditoria 10/10 (achados #99/#442): consulta de OUTRA pessoa (não é
+#   do contato nem do telefone deste WhatsApp) só aparece inteira, e só é
+#   remarcada/cancelada/confirmada, com PROVA FORTE: telefone completo (com
+#   DDD) cadastrado na consulta + nome completo, ditados por quem conversa.
+#   Sem a prova, buscar não lista a consulta (só avisa quantas ficaram
+#   ocultas, sem id, nome ou telefone) e as outras ferramentas não executam:
+#   abrem tarefa para a equipe e devolvem ok=false;
 # - em SOMBRA nenhuma ferramenta escreve: só valida e responde `simulado`.
 # `acoes` acumula o que foi feito, para a nota de sombra e os balões da tela
 # (montado aqui, nunca pelo modelo).
@@ -15,13 +22,43 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   TZ = Crm::AgendaSlots::TZ
   MAX_RESULTS = 5
   LOCK_TTL = 30.seconds
+  # prova forte de consulta de outra pessoa: telefone com DDD (10+ dígitos)
+  PROOF_MIN_DIGITS = 10
+  PROOF_FIELDS = {
+    telefone: { type: 'string', description: 'Só para consulta de OUTRA pessoa: telefone COMPLETO com DDD cadastrado na ' \
+                                             'consulta, ditado por quem conversa' },
+    nome_completo: { type: 'string', description: 'Só para consulta de OUTRA pessoa: nome completo do paciente da consulta, ' \
+                                                  'ditado por quem conversa' }
+  }.freeze
+  # nome com menos letras do que isso não procura consulta de terceiro ("a", "Ma")
+  NAME_MIN_LETTERS = 3
+  HIDDEN_NOTICE = 'Há consulta de OUTRA pessoa (terceiros_ocultos) que NÃO aparece na lista: os dados ficam ocultos até ' \
+                  'o paciente ditar o nome completo e o telefone COMPLETO (com DDD) cadastrado nela. Peça os dois e busque ' \
+                  'de novo com nome + telefone. Se continuar oculta, não mexa nessa consulta: diga que vai passar para a ' \
+                  'equipe e marque chamar_humano.'.freeze
+  SHORT_NAME_NOTICE = 'Nome curto demais para procurar a consulta de outra pessoa: peça o nome completo do paciente.'.freeze
+  PROOF_HINT = 'Só dá para mexer nessa consulta com o telefone COMPLETO (com DDD) cadastrado nela e o nome completo, ' \
+               'ditados por quem conversa (campos telefone e nome_completo).'.freeze
+  THIRD_PARTY_TEXTS = {
+    opened: 'Esta consulta é de OUTRA pessoa (não é deste WhatsApp) e NADA foi alterado. A equipe já recebeu uma tarefa ' \
+            'para conferir com o titular. Diga ao paciente que a equipe vai cuidar disso (ou que o titular pode chamar ' \
+            'pelo WhatsApp dele) e marque chamar_humano.',
+    failed: 'Esta consulta é de OUTRA pessoa (não é deste WhatsApp) e NADA foi alterado. Não foi possível avisar a equipe ' \
+            'automaticamente: diga ao paciente que vai verificar e marque chamar_humano.',
+    shadow: 'Esta consulta é de OUTRA pessoa (não é deste WhatsApp) e NADA foi alterado. Em sombra a recusa vale igual ' \
+            '(a tarefa para a equipe não é aberta de verdade): diga ao paciente que vai passar para a equipe e marque ' \
+            'chamar_humano.'
+  }.freeze
   NAMES = %w[buscar_consulta remarcar_consulta cancelar_consulta confirmar_presenca horarios_do_dia].freeze
   TASK_TOOL_NAME = 'abrir_tarefa'.freeze
   ALL_NAMES = (NAMES + [TASK_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
-  # 🩺 item 251: só o Atendente de Pós-operatório abre tarefa para a equipe
-  TASK_TOOL_KEYS = %w[atendente_pos_op].freeze
+  # 🩺 item 251: o Atendente de Pós-operatório abre tarefa para a equipe.
+  # 🙋 auditoria 10/2026 (#458): os três atendentes do WhatsApp abrem tarefa —
+  # urgência clínica ou pedido fora do roteiro num paciente novo também
+  # precisa de alguém da equipe avisado, não só de uma nota na conversa.
+  TASK_TOOL_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op].freeze
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
 
   attr_reader :acoes
@@ -56,7 +93,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
           motivo: { type: 'string', description: 'Motivo em UMA frase curta (ex.: "dor forte no olho direito há 2h")' },
           detalhes: { type: 'string', description: 'O que o paciente relatou, com as palavras dele, e o que você respondeu' },
           urgencia: { type: 'string', enum: %w[alta normal],
-                      description: 'alta = sintoma/alerta (equipe avisada na hora); normal = dúvida/documento' }
+                      description: 'alta = sintoma/alerta (tarefa urgente + aviso no painel da equipe, que vê no próximo ' \
+                                   'horário de atendimento); normal = dúvida/documento' }
         },
         required: %w[motivo urgencia],
         additionalProperties: false
@@ -70,7 +108,9 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
         name: 'buscar_consulta',
         description: 'Busca consultas marcadas na Agenda da clínica (de hoje em diante). Sem filtro devolve as do próprio ' \
                      'paciente desta conversa. Com nome e/ou dia encontra também a consulta de OUTRA pessoa (mãe, filho, ' \
-                     'esposa). Devolve id, paciente, dia, hora, unidade, médico e os 4 últimos dígitos do telefone.',
+                     'esposa). Devolve id, paciente, dia, hora, unidade, médico e os 4 últimos dígitos do telefone. ' \
+                     'Consulta de outra pessoa só aparece quando o telefone informado (com DDD) é o cadastrado nela; ' \
+                     'sem isso ela NÃO entra na lista: vem só a contagem terceiros_ocultos e o aviso.',
         input_schema: {
           type: 'object',
           properties: {
@@ -86,7 +126,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
         description: 'Move uma consulta existente para outro dia/hora/unidade. Use SÓ depois de o paciente dizer SIM a um horário ' \
                      'específico que você propôs ("Fica bom pra você [dia] às [hora]?"). Pergunta ou contraproposta dele ("tem 16h?", ' \
                      '"final do dia?") NÃO é confirmação: responda e pergunte de novo. Devolve ok=true quando remarcou; ok=false com ' \
-                     'motivo quando a vaga não está livre (ofereça outra) ou quando o paciente ainda não confirmou.',
+                     'motivo quando a vaga não está livre (ofereça outra) ou quando o paciente ainda não confirmou. ' \
+                     'Consulta de OUTRA pessoa exige telefone e nome_completo ditados por quem conversa.',
         input_schema: {
           type: 'object',
           properties: {
@@ -94,30 +135,32 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
             dia: { type: 'string', description: 'Novo dia, YYYY-MM-DD' },
             hora: { type: 'string', description: 'Nova hora, HH:MM' },
             unidade: { type: 'string', enum: %w[tatuape paulista] }
-          },
+          }.merge(PROOF_FIELDS),
           required: %w[id dia hora unidade],
           additionalProperties: false
         }
       },
       {
         name: 'cancelar_consulta',
-        description: 'Cancela uma consulta (sem novo horário). Use SÓ depois de o paciente manter o cancelamento.',
+        description: 'Cancela uma consulta (sem novo horário). Use SÓ depois de o paciente manter o cancelamento. ' \
+                     'Consulta de OUTRA pessoa exige telefone e nome_completo ditados por quem conversa.',
         input_schema: {
           type: 'object',
           properties: {
             id: { type: 'integer', description: 'id da consulta' },
             motivo: { type: 'string', description: 'Motivo dito pelo paciente, em poucas palavras' }
-          },
+          }.merge(PROOF_FIELDS),
           required: %w[id],
           additionalProperties: false
         }
       },
       {
         name: 'confirmar_presenca',
-        description: 'Registra que o paciente confirmou que vai à consulta ("confirmo", "estarei lá").',
+        description: 'Registra que o paciente confirmou que vai à consulta ("confirmo", "estarei lá"). ' \
+                     'Consulta de OUTRA pessoa exige telefone e nome_completo ditados por quem conversa.',
         input_schema: {
           type: 'object',
-          properties: { id: { type: 'integer', description: 'id da consulta' } },
+          properties: { id: { type: 'integer', description: 'id da consulta' } }.merge(PROOF_FIELDS),
           required: %w[id],
           additionalProperties: false
         }
@@ -180,27 +223,46 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   private
 
   # ── buscar ──────────────────────────────────────────────────────────────
-  def buscar(args) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def buscar(args) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     name = args['nome'].to_s.strip
     digits = args['telefone'].to_s.gsub(/\D/, '')
     day = parse_date(args['dia'])
 
     found = own_appointments
     found |= by_phone(digits, day) if digits.length >= 8
-    found |= by_name(name, day) if name.present?
+    found |= by_name(name, day) if name_searchable?(name)
     found = found.uniq(&:id).sort_by(&:due_at)
-    total = found.size
-    aviso = nil
+    # 🔒 #99/#442: consulta de outra pessoa só entra na lista com o telefone
+    # (com DDD) casando; as outras viram só uma contagem, sem id/nome/telefone
+    visible, hidden = found.partition { |t| visible?(t, digits) }
+    total = visible.size
+    avisos = []
+    avisos << SHORT_NAME_NOTICE if name.present? && !name_searchable?(name)
     if total > MAX_RESULTS
-      found = found.first(MAX_RESULTS)
-      aviso = if day
-                'Há mais consultas do que as listadas; peça o nome completo do paciente e busque de novo.'
-              else
-                'Muitas consultas com esse nome; pergunte o DIA da consulta e busque de novo com nome + dia.'
-              end
+      visible = visible.first(MAX_RESULTS)
+      avisos << if day
+                  'Há mais consultas do que as listadas; peça o nome completo do paciente e busque de novo.'
+                else
+                  'Muitas consultas com esse nome; pergunte o DIA da consulta e busque de novo com nome + dia.'
+                end
     end
-    log_acao('buscar_consulta', true, resumo_busca(found, total))
-    { consultas: found.map { |t| serialize(t) }, total: total, aviso: aviso }.compact
+    avisos << HIDDEN_NOTICE if hidden.any?
+    log_acao('buscar_consulta', true, resumo_busca(visible, total, hidden))
+    result = { consultas: visible.map { |t| serialize(t) }, total: total }
+    result[:terceiros_ocultos] = hidden.size if hidden.any?
+    result[:aviso] = avisos.join(' ') if avisos.any?
+    result
+  end
+
+  # nome com 3+ letras (sem contar espaços/pontuação) serve para procurar terceiros
+  def name_searchable?(name)
+    I18n.transliterate(name.to_s).scan(/[a-z0-9]/i).size >= NAME_MIN_LETTERS
+  end
+
+  # a consulta pode aparecer inteira? própria, ou o telefone informado (com
+  # DDD, mesma régua da prova forte) casa com o dela
+  def visible?(task, digits)
+    own?(task) || (digits.length >= PROOF_MIN_DIGITS && Crm::AppointmentRecorder.same_phone_line?(digits, task.phone))
   end
 
   # sempre entram: as do próprio contato (contact_id) e as do telefone deste WhatsApp
@@ -230,13 +292,14 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     end
   end
 
-  def resumo_busca(found, total)
-    return 'buscou consulta: nenhuma encontrada' if total.zero?
+  def resumo_busca(visible, total, hidden)
+    hidden_text = hidden.any? ? " + #{hidden.size} de outra pessoa oculta#{'s' if hidden.size > 1} (telefone não casou)" : ''
+    return "buscou consulta: nenhuma encontrada#{hidden_text}" if total.zero?
 
-    first = found.first
+    first = visible.first
     at = first.due_at.in_time_zone(TZ)
     day = at.to_date == TZ.now.to_date ? 'hoje' : "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m')}"
-    "buscou consulta: #{total} encontrada#{'s' if total > 1} (#{patient_name(first)}, #{day} #{at.strftime('%H:%M')})"
+    "buscou consulta: #{total} encontrada#{'s' if total > 1} (#{patient_name(first)}, #{day} #{at.strftime('%H:%M')})#{hidden_text}"
   end
 
   # ── remarcar ────────────────────────────────────────────────────────────
@@ -252,6 +315,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def remarcar(args) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     task = find_task(args['id'])
     return not_found('remarcar_consulta') unless task
+    return third_party('remarcar_consulta', task, args, 'remarcar a consulta') unless allowed?(task, args)
 
     date = parse_date(args['dia'])
     time = args['hora'].to_s.strip
@@ -301,6 +365,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def cancelar(args) # rubocop:disable Metrics/AbcSize
     task = find_task(args['id'])
     return not_found('cancelar_consulta') unless task
+    return third_party('cancelar_consulta', task, args, 'cancelar a consulta') unless allowed?(task, args)
 
     motivo = args['motivo'].to_s.strip.truncate(200)
     unless @live
@@ -323,6 +388,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def confirmar(args)
     task = find_task(args['id'])
     return not_found('confirmar_presenca') unless task
+    return third_party('confirmar_presenca', task, args, 'confirmar presença na consulta') unless allowed?(task, args)
 
     unless @live
       log_acao('confirmar_presenca', true, "confirmaria presença de #{patient_name(task)} (simulado)")
@@ -399,6 +465,68 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
   def not_found(tool)
     refuse(tool, 'Consulta não encontrada (confira o id com buscar_consulta).')
+  end
+
+  # ── 🔒 dono da consulta (auditoria 10/10, achados #99/#442) ─────────────
+  # Remarcar/cancelar/confirmar só na consulta do PRÓPRIO contato (own?) ou
+  # com prova forte: telefone completo (com DDD) cadastrado na consulta + nome
+  # completo, os dois ditados por quem conversa. A regra vale igual em sombra.
+  def allowed?(task, args)
+    own?(task) || strong_proof?(task, args)
+  end
+
+  def strong_proof?(task, args)
+    digits = args['telefone'].to_s.gsub(/\D/, '')
+    return false if digits.length < PROOF_MIN_DIGITS
+    return false unless Crm::AppointmentRecorder.same_phone_line?(digits, task.phone)
+
+    name_matches?(args['nome_completo'], task)
+  end
+
+  # nome completo ditado (2+ palavras de verdade, com o primeiro nome) tem que
+  # bater com o nome da consulta — mesma régua do reagendamento pela IA
+  def name_matches?(given, task)
+    Crm::AppointmentRecorder.same_patient_name?(given, patient_name(task))
+  end
+
+  # consulta de outra pessoa sem prova: nada é executado; ao vivo abre tarefa
+  # para a equipe conferir com o titular; a IA recebe ok=false com a orientação
+  # certa para o que aconteceu (tarefa aberta, falhou ou sombra). Sem o campo
+  # `simulado`: a recusa vale igual em sombra, não é "faça de conta que fez".
+  def third_party(tool, task, args, verb)
+    motivo = "Pediu para #{verb} de outra pessoa (#{patient_name(task)}, #{when_label(task)})"
+    opened = @live && open_handoff!(motivo, args)
+    status = if opened
+               :opened
+             elsif @live
+               :failed
+             else
+               :shadow
+             end
+    resumo = { opened: 'tarefa aberta para a equipe', failed: 'tarefa para a equipe NÃO foi aberta (falha)',
+               shadow: 'abriria tarefa para a equipe (simulado)' }[status]
+    log_acao(tool, false, "#{motivo}: não executado, #{resumo}", 'outra_pessoa' => true, 'tarefa_aberta' => opened)
+    { ok: false, outra_pessoa: true, motivo: "#{THIRD_PARTY_TEXTS[status]} #{PROOF_HINT}" }
+  end
+
+  # true quando a tarefa foi aberta (ou complementada); false quando falhou
+  def open_handoff!(motivo, args)
+    Crm::HandoffTask.open!(account: @account, contact: @contact, conversation: @conversation, agent_key: @agent_key,
+                           motivo: motivo, detalhes: handoff_details(args), urgencia: 'normal')
+    true
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderTools] tarefa de outra pessoa: #{e.message}"
+    false
+  end
+
+  def handoff_details(args)
+    who = @contact&.name.presence || 'sem nome'
+    phone = @contact&.phone_number.presence || 'desconhecido'
+    lines = ["Quem conversa: #{who} · telefone deste WhatsApp: #{phone}"]
+    lines << "Telefone ditado: #{args['telefone']}" if args['telefone'].present?
+    lines << "Nome ditado: #{args['nome_completo']}" if args['nome_completo'].present?
+    lines << 'A IA não executou: conferir com o titular da consulta antes de mexer.'
+    lines.join("\n")
   end
 
   def refuse(tool, motivo)
@@ -496,7 +624,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     Rails.logger.warn "[Crm::ResponderTools] nota: #{e.message}"
   end
 
-  def log_acao(ferramenta, success, resumo)
-    @acoes << { 'ferramenta' => ferramenta, 'ok' => success == true, 'resumo' => resumo.to_s }
+  # extra: marcas a mais para o job (ex.: 'outra_pessoa' => true, 'tarefa_aberta' => true)
+  def log_acao(ferramenta, success, resumo, extra = {})
+    @acoes << { 'ferramenta' => ferramenta, 'ok' => success == true, 'resumo' => resumo.to_s }.merge(extra)
   end
 end

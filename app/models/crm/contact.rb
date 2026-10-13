@@ -28,7 +28,7 @@
 # Foreign Keys
 #
 #  fk_rails_...  (assignee_id => users.id)
-#  fk_rails_...  (contact_id => contacts.id)
+#  fk_rails_...  (contact_id => contacts.id) ON DELETE => cascade
 #  fk_rails_...  (pipeline_id => crm_pipelines.id)
 #  fk_rails_...  (stage_id => crm_stages.id)
 #
@@ -41,9 +41,38 @@ class Crm::Contact < ApplicationRecord
   belongs_to :pipeline, class_name: 'Crm::Pipeline'
   belongs_to :stage,    class_name: 'Crm::Stage'
   belongs_to :assignee, class_name: 'User', optional: true
-  has_many   :stage_logs, class_name: 'Crm::StageLog', foreign_key: :crm_contact_id, dependent: :destroy
+  # 🔒 R2 da auditoria (#300): SEM dependent: :destroy — o histórico de colunas
+  # ("entrou em X em tal dia") fica guardado no banco mesmo quando o card sai
+  # do funil (a tabela não tem chave estrangeira; crm_contact_id não aceita
+  # nulo, por isso não dá para "desligar" o log do card sem migration).
+  # ATENÇÃO: os painéis por coluna fazem join com crm_contacts (KpiBagService,
+  # FunnelService, home#..., StageLogBulk), então o card removido SAI desses
+  # painéis; só a taxa de agendamento (BookingRate, sem join) continua contando.
+  # Para o removido voltar a contar precisa de soft-delete = migration da
+  # Rodada 6 (Lixeira de card), se o Guilherme quiser.
+  has_many   :stage_logs, class_name: 'Crm::StageLog', foreign_key: :crm_contact_id, inverse_of: :crm_contact # rubocop:disable Rails/HasManyOrHasOneDependent
 
   validates :contact_id, uniqueness: { scope: :pipeline_id, message: 'already exists in this pipeline' }
+
+  # "Remover do funil" com rastro (R2 #300): fecha o log da coluna atual (o
+  # tempo na coluna fica certo), escreve uma nota na ficha do paciente dizendo
+  # QUEM removeu e de qual funil/coluna, registra no log do servidor e só então
+  # apaga o card. Os stage_logs ficam (ver has_many acima).
+  def remove_from_pipeline!(by: nil)
+    now = Time.current
+    who = by&.name.presence || 'sistema'
+    transaction do
+      stage_logs.where(left_at: nil).find_each { |log| log.close!(now) }
+      contact.notes.create!(
+        user_id: by&.id,
+        content: "Removido do funil «#{pipeline.name}» (estava em «#{stage.name}») por #{who}. " \
+                 'O histórico de colunas deste card fica guardado no banco (sai dos painéis por coluna).'
+      )
+      destroy!
+    end
+    Rails.logger.info("[CEVICO crm] card #{id} (contato #{contact_id}) removido do funil #{pipeline_id} por #{who} (user #{by&.id})")
+    true
+  end
 
   after_create  :log_initial_stage
   # 🏷️ item 322: o 1º card é evidência de quem é o paciente (primeira evidência carimba)

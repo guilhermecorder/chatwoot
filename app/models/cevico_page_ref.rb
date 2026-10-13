@@ -27,7 +27,7 @@
 #
 #  fk_rails_...  (account_id => accounts.id)
 #  fk_rails_...  (cevico_page_id => cevico_pages.id)
-#  fk_rails_...  (contact_id => contacts.id)
+#  fk_rails_...  (contact_id => contacts.id) ON DELETE => cascade
 #
 class CevicoPageRef < ApplicationRecord
   belongs_to :account

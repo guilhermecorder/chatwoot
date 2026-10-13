@@ -29,11 +29,10 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
   def save_profiles
     return render json: { error: 'Só administradores editam os perfis médicos.' }, status: :forbidden unless Current.account_user.administrator?
 
-    settings = CrmSetting.find_or_create_by!(account: account)
-    cfg = settings.agenda_config || {}
-    cfg['doctor_profiles'] = sanitize_doctor_profiles
-    settings.update!(agenda_config: cfg)
-    render json: { profiles: cfg['doctor_profiles'] }
+    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
+    profiles = sanitize_doctor_profiles
+    Cevico::SettingMerge.merge!(account, :agenda_config) { |cfg| cfg.merge('doctor_profiles' => profiles) }
+    render json: { profiles: profiles }
   end
 
   private
@@ -213,10 +212,7 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
     digits = phone.to_s.gsub(/\D/, '')
     return { booked: false, value: 0.0 } if digits.length < 8
 
-    booked = account.tasks.where(task_type: 'cirurgia', canceled_at: nil)
-                    .where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-                    .exists?
-    return { booked: false, value: 0.0 } unless booked
+    return { booked: false, value: 0.0 } unless surgery_booked_for_digits?(digits)
 
     contact = Task.match_contact(account, phone)
     value = contact&.additional_attributes&.dig('surgery_closing', 'value').to_f
@@ -227,6 +223,15 @@ class Api::V1::Accounts::Crm::DoctorsDashboardsController < Api::V1::Accounts::B
       value = card&.value.to_f
     end
     { booked: true, value: value }
+  end
+
+  # auditoria 10/2026 (#239): o final de 8 dígitos só acha candidatos; a
+  # MESMA linha (DDD confere) é decidida pelo mesmo critério do recorder
+  def surgery_booked_for_digits?(digits)
+    account.tasks.where(task_type: 'cirurgia', canceled_at: nil)
+           .where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+           .pluck(:phone)
+           .any? { |task_phone| Crm::AppointmentRecorder.same_phone_line?(digits, task_phone) }
   end
 
   # NPS dos pacientes das tasks: 1 query pelos contact_ids (Fase 0)

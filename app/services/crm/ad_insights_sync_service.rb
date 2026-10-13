@@ -165,10 +165,24 @@ class Crm::AdInsightsSyncService # rubocop:disable Metrics/ClassLength
     }
   end
 
+  # achado #410 (detalhe do revisor): entre o keep_transcripts! (leitura) e
+  # este upsert, um job de transcrição pode ter gravado 'processing'/'done'.
+  # A gravação preserva, no próprio banco, a transcrição e a duração QUE ESTÃO
+  # LÁ AGORA — nada de voltar um texto já pago para "pendente".
+  UPSERT_ON_DUPLICATE = Arel.sql(<<~SQL.squish).freeze
+    ad_name = EXCLUDED.ad_name, adset_id = EXCLUDED.adset_id, adset_name = EXCLUDED.adset_name,
+    campaign_id = EXCLUDED.campaign_id, campaign_name = EXCLUDED.campaign_name,
+    effective_status = EXCLUDED.effective_status, format = EXCLUDED.format,
+    creative = EXCLUDED.creative || jsonb_strip_nulls(jsonb_build_object(
+      'transcript', cevico_ad_creatives.creative -> 'transcript',
+      'video_length', cevico_ad_creatives.creative -> 'video_length')),
+    synced_at = EXCLUDED.synced_at, updated_at = EXCLUDED.updated_at
+  SQL
+
   def upsert_creatives(rows)
     return if rows.empty?
 
-    Crm::AdCreative.upsert_all(rows, unique_by: [:account_id, :ad_id]) # rubocop:disable Rails/SkipsModelValidations
+    Crm::AdCreative.upsert_all(rows, unique_by: [:account_id, :ad_id], on_duplicate: UPSERT_ON_DUPLICATE) # rubocop:disable Rails/SkipsModelValidations
   end
 
   # ── 2) métricas diárias ───────────────────────────────────────────────────

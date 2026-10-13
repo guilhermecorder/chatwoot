@@ -9,6 +9,7 @@ import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
@@ -36,6 +37,10 @@ const cardMenu = () =>
   props.menu ? props.menu(props.contact, { openPatient }) : null;
 
 const { isAdmin } = useAdmin();
+// 💰 R2 da auditoria (#287): valor em R$ = admin ou quem vê o Financeiro
+// (mesma regra da ficha e do servidor)
+const { canView } = useCevicoAccess();
+const canSeeValue = computed(() => isAdmin.value || canView('financeiro'));
 const accountLabels = useMapGetter('labels/getLabels');
 const accountInboxes = useMapGetter('inboxes/getInboxes');
 
@@ -147,8 +152,8 @@ const channelIcon = (channelType) => {
       <span v-if="extraLabels > 0" class="cv-tag cv-tag-more">+{{ extraLabels }}</span>
     </div>
 
-    <!-- Valor (só admin vê valores) -->
-    <div v-if="isAdmin && contact.value" class="mt-1.5">
+    <!-- Valor (só quem vê o Financeiro) -->
+    <div v-if="canSeeValue && contact.value" class="mt-1.5">
       <span class="cv-crm-value">
         R$&nbsp;{{ Number(contact.value).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) }}
       </span>

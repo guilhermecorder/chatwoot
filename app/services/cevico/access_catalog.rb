@@ -59,6 +59,16 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     node(key)&.dig('admin') == true
   end
 
+  # nó que NÃO herda do pai: só vale com marcação própria (auditoria 12/10,
+  # ex.: crm.funis — "CRM = editar" não pode liberar apagar funis por tabela)
+  def explicit?(key)
+    node(key)&.dig('explicit') == true
+  end
+
+  def explicit_keys
+    keys.select { |k| explicit?(k) }
+  end
+
   # o maior nível que o nó aceita ('view' ou 'edit')
   def max_level(key)
     levels = node(key)&.dig('levels') || %w[view]
@@ -168,7 +178,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/acquisition_costs' => { node: 'financeiro.cac', view: %w[show] },
     # ── Automações ──
     'crm/automations' => { node: 'automacoes.robos', view: %w[index] },
-    'crm/followup_bots' => { node: 'automacoes.robos', view: %w[index ai_preview], skip: %w[toggle] },
+    'crm/followup_bots' => { node: 'automacoes.robos', view: %w[index ai_preview smart results], skip: %w[toggle] },
     'crm/flows' => { node: 'automacoes.fluxos', view: %w[index show] },
     'crm/automations_dashboards' => { node: 'automacoes.resultados', view: %w[show] },
     'crm/agent_guidances' => { node: 'automacoes.agentes_ia', view: %w[index] },
@@ -183,7 +193,8 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     # ── Marketing ──
     'crm/creatives' => { node: 'marketing.criativos',
                          view: %w[index show timeline history assets analytics graph sync_status load_history export] },
-    'crm/pages' => { node: 'marketing.paginas', view: %w[index generate_status] },
+    # quem só VÊ páginas lê e COMENTA (delete_comment confere autor/admin sozinho)
+    'crm/pages' => { node: 'marketing.paginas', view: %w[index generate_status add_comment delete_comment] },
     'crm/content_items' => { node: 'marketing.paginas', view: %w[index] },
     'crm/pages_dashboards' => { node: 'marketing.resultados', view: %w[show] },
     'crm/pages_reports' => { node: 'marketing.resultados', view: %w[show] },
@@ -253,6 +264,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
         'levels' => Array(raw['levels']).map(&:to_s).presence || %w[view],
         'default' => raw['default'].to_s.presence || (raw['admin'] ? 'none' : 'inherit'),
         'admin' => raw['admin'] == true,
+        'explicit' => raw['explicit'] == true,
         'segment' => raw['segment'].to_s.presence,
         'children' => normalize(raw['children'], key)
       }

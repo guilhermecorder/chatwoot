@@ -67,3 +67,5 @@ class ContactMergeAction
 end
 
 ContactMergeAction.prepend_mod_with('ContactMergeAction')
+# 🔒 CEVICO Rodada 6: leva card, consultas, anotações clínicas etc. para o contato que fica
+ContactMergeAction.prepend(Cevico::ContactMergeRecords)

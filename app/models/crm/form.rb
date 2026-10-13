@@ -48,8 +48,17 @@ class Crm::Form < ApplicationRecord
 
   before_validation :ensure_slug, on: :create
   before_validation :normalize_slug
+  # 🔐 achado #118: o id '_cevico' é reservado para a marca "não confirmada"
+  # dentro das respostas — nenhuma pergunta pode usar esse id
+  validate :questions_sem_id_reservado
 
   QUESTION_TYPES = %w[choice multi text scale yesno message].freeze
+
+  # 🔐 Rodada 4 (achado #119): teto diário GLOBAL de pacientes NOVOS criados
+  # pelo link limpo de cada formulário (telefone desconhecido). Passou disso,
+  # o envio é recusado até o dia seguinte e o administrador recebe tarefa 🔴.
+  # Ver Crm::FormVerification.new_contact_allowed?
+  DAILY_NEW_CONTACTS = ENV.fetch('CEVICO_FORM_DAILY_NEW_CONTACTS', '200').to_i
 
   # incremento atômico da retenção ({'open'=>n, 'q:<id>'=>n, 'done'=>n}) —
   # SQL puro para aguentar respostas simultâneas sem perder contagem
@@ -103,6 +112,12 @@ class Crm::Form < ApplicationRecord
   # ("Pré Avaliação" → "pre-avaliacao")
   def normalize_slug
     self.slug = slug.to_s.parameterize if slug.present?
+  end
+
+  def questions_sem_id_reservado
+    return unless Array(questions).any? { |q| q.is_a?(Hash) && q['id'].to_s == Crm::FormResponse::META_ID }
+
+    errors.add(:questions, "o id '#{Crm::FormResponse::META_ID}' é reservado pelo sistema e não pode ser usado em pergunta")
   end
 
   def base_url

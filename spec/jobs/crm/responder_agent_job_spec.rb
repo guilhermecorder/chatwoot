@@ -146,6 +146,23 @@ RSpec.describe Crm::ResponderAgentJob do
       end
     end
 
+    # 🚨 (#443): ao vivo mas fora da janela, urgência clínica não fica só na nota de sombra
+    it 'fora da janela, urgência clínica abre a tarefa 🔴 de verdade (sem responder ao paciente)', :aggregate_failures do
+      travel_to(now) do
+        live_cfg = { 'mode' => 'live', 'live_days' => [1] }
+        settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => live_cfg }))
+        stub_ai(ai_reply.merge(chamar_humano: true, mensagens: ['Procure um pronto atendimento oftalmológico agora.'],
+                               leitura: 'Dor forte e perda súbita de visão.', acoes: []))
+        run
+        expect(conversation.messages.where(message_type: :outgoing)).to be_empty
+        task = account.tasks.find_by(task_type: 'pos_op')
+        expect(task.priority).to eq('urgent')
+        expect(task.description).to include('Fora da janela ao vivo')
+        expect(settings.reload.ai_config.dig('atendente_agendamento_state', 'events').first).to include('type' => 'urgencia_fora_da_janela')
+        expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_nil # sombra não pausa
+      end
+    end
+
     it 'dentro da janela responde AO VIVO ao paciente e não escreve nota de sombra', :aggregate_failures do
       travel_to(now) do
         live_cfg = { 'mode' => 'live', 'live_days' => [6, 0], 'hours_start' => '08:00', 'hours_end' => '18:00' }
@@ -189,6 +206,45 @@ RSpec.describe Crm::ResponderAgentJob do
       end
     end
 
+    # 💰 auditoria 10/2026 (#132): a IA não grava mais "R$ 150" fixo — o valor vem do pré-configurado (item 324)
+    it 'ao vivo, agendar grava a consulta SEM preço fixo na observação (o lembrete usa o pré-configurado)', :aggregate_failures do
+      travel_to(now) do
+        settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
+        stub_ai(ai_reply.merge(agendar: true, agendamento: { nome: 'Maria Silva', telefone: '11999990000', dia: '2026-09-28', hora: '08:30',
+                                                             unidade: 'paulista' }))
+        allow(Crm::AgendaSlots).to receive_messages(slot_available?: true, doctor_at: nil)
+        run
+        task = account.tasks.find_by!(title: 'Consulta: Maria Silva')
+        expect(task.description).not_to include('R$ 150')
+        expect(Crm::AppointmentPrice.from_notes(task.description)).to be_nil
+        cfg = Crm::AppointmentPrice::DEFAULTS.merge('avaliacao' => '200,00')
+        expect(Crm::AppointmentPrice.resolve(cfg, task)).to include(text: '200,00', source: 'preset')
+      end
+    end
+
+    it 'ao vivo, agendar sem dia/hora pede o que falta (não diz que o horário foi preenchido) e não grava nada', :aggregate_failures do
+      travel_to(now) do
+        settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
+        stub_ai(ai_reply.merge(agendar: true, agendamento: { nome: 'Maria Silva', telefone: '11999990000', dia: '', hora: '', unidade: 'paulista' }))
+        run
+        expect(conversation.messages.where(message_type: :outgoing).map(&:content)).to eq([described_class::MISSING_SLOT_TEXT])
+        expect(account.tasks.count).to eq(0)
+      end
+    end
+
+    it 'ao vivo, a Agenda não gravou (:skipped): não confirma ao paciente', :aggregate_failures do
+      travel_to(now) do
+        settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
+        stub_ai(ai_reply.merge(agendar: true, agendamento: { nome: 'Maria Silva', telefone: '11999990000', dia: '2026-09-28', hora: '08:30',
+                                                             unidade: 'paulista' }))
+        allow(Crm::AgendaSlots).to receive_messages(slot_available?: true, doctor_at: nil)
+        allow(Crm::AppointmentRecorder).to receive(:record).and_return(:skipped)
+        run
+        expect(conversation.messages.where(message_type: :outgoing).map(&:content)).to eq([described_class::SLOT_TAKEN_TEXT])
+        expect(conversation.messages.where(message_type: :activity).where('content LIKE ?', '📅%')).to be_empty
+      end
+    end
+
     it 'ao vivo, remarcação feita pela ferramenta não tenta reservar de novo' do
       travel_to(now) do
         settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
@@ -198,6 +254,261 @@ RSpec.describe Crm::ResponderAgentJob do
         run
         expect(conversation.messages.where(message_type: :outgoing).order(:id).map(&:content)).to eq(ai_reply[:mensagens])
         expect(account.tasks.count).to eq(0)
+      end
+    end
+  end
+
+  # 🚧 auditoria 10/2026 (#63/#98/#253/#459): a cerca dos parceiros mora DENTRO do
+  # job — venha de onde vier (listener, resgate, nova tentativa), nada sai
+  describe 'cerca dos parceiros' do
+    before { contact.add_labels(%w[oftalmofacil of_clinica_parceira]) }
+
+    it 'ao vivo: não chama a IA nem manda balão para paciente do Oftalmofácil', :aggregate_failures do
+      settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
+      stub_ai(ai_reply)
+      allow(Crm::PartnerGuard).to receive(:block!).and_call_original
+      run
+      expect(Crm::ResponderAgentService).not_to have_received(:new)
+      expect(conversation.messages.where(message_type: :outgoing)).to be_empty
+      expect(Crm::PartnerGuard).to have_received(:block!).with('atendente atendente_agendamento', conversation: conversation)
+    end
+
+    it 'em sombra: nem a nota interna é escrita' do
+      stub_ai(ai_reply)
+      expect { run }.not_to(change { conversation.messages.where(message_type: :activity).count })
+      expect(Crm::ResponderAgentService).not_to have_received(:new)
+    end
+  end
+
+  # 🔒 auditoria 10/2026 (#100): a mesma mensagem nunca é respondida duas vezes
+  describe 'trava por conversa e "já respondi"' do
+    let(:lock_key) { format(described_class::LOCK_KEY, id: conversation.id) }
+
+    before do
+      settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
+      stub_ai(ai_reply)
+    end
+
+    after { Redis::LockManager.new.unlock(lock_key) }
+
+    it 'não repete a tentativa pelo Sidekiq (o retry_later e o resgate cuidam disso), mas o erro aparece em "Mortos"' do
+      expect(described_class.get_sidekiq_options['retry']).to eq(0)
+    end
+
+    it 'com a conversa ocupada por outro job, NÃO sai: volta à fila em 15 s e responde quando a trava libera', :aggregate_failures do
+      Redis::LockManager.new.lock(lock_key, 60)
+      expect { run }.to have_enqueued_job(described_class).with(conversation.id, incoming.id, 'atendente_agendamento')
+      expect(Crm::ResponderAgentService).not_to have_received(:new)
+      expect(conversation.messages.where(message_type: :outgoing)).to be_empty
+
+      Redis::LockManager.new.unlock(lock_key)
+      run
+      expect(conversation.messages.where(message_type: :outgoing).count).to eq(2)
+      expect(Crm::ResponderAgentService).to have_received(:new).once
+    end
+
+    it 'conversa ocupada há tempo demais: para de voltar à fila (o resgate cuida)' do
+      Redis::LockManager.new.lock(lock_key, 60)
+      allow(Redis::Alfred).to receive(:incr).and_return(described_class::BUSY_MAX + 1)
+      allow(Redis::Alfred).to receive(:expire)
+      expect { run }.not_to have_enqueued_job(described_class)
+    end
+
+    it 'WhatsApp do Agente de Ligação (voice) depois da mensagem NÃO conta como "já respondi"' do
+      incoming
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'Tentei ligar e não atendeu.',
+                       additional_attributes: { 'cevico_ia_agent' => 'voice' })
+      expect { run }.to change { conversation.messages.where(message_type: :outgoing).count }.by(2)
+    end
+
+    it 'solta a trava ao terminar (a mensagem seguinte é respondida normalmente)', :aggregate_failures do
+      run
+      expect(Redis::LockManager.new.locked?(lock_key)).to be(false)
+      expect(conversation.messages.where(message_type: :outgoing).count).to eq(2)
+    end
+
+    it 'solta a trava mesmo se a IA estourar um erro' do
+      allow(Crm::ResponderAgentService).to receive(:new).and_raise(StandardError, 'caiu')
+      expect { run }.to raise_error(StandardError, 'caiu')
+      expect(Redis::LockManager.new.locked?(lock_key)).to be(false)
+    end
+
+    it 'segundo job da MESMA mensagem (resgate depois do original) não manda os balões de novo', :aggregate_failures do
+      run
+      expect { run }.not_to(change { conversation.messages.where(message_type: :outgoing).count })
+      expect(Crm::ResponderAgentService).to have_received(:new).once
+    end
+
+    it 'balão do agente ANTES da mensagem do paciente não conta como "já respondi"' do
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'Oi!',
+                       additional_attributes: { 'cevico_ia_agent' => 'atendente_agendamento' })
+      incoming
+      expect { run }.to change { conversation.messages.where(message_type: :outgoing).count }.by(2)
+    end
+  end
+
+  # 🚨 auditoria 10/2026 (#443/#457/#458): chamar humano abre tarefa com dono nos
+  # três atendentes; urgência não deixa o paciente no silêncio; cancelar=true
+  # sem ferramenta cancela de verdade (ou fala a verdade)
+  describe 'passagem para humano e cancelamento AO VIVO (#443/#457/#458)' do
+    let(:vaneide) { create(:user, account: account, role: :agent, name: 'Vaneide') }
+    let(:handoff_reply) do
+      ai_reply.merge(mensagens: ['Pelo que você descreve, o ideal é procurar um pronto atendimento oftalmológico agora, combinado?'],
+                     etapa: 'sondagem', chamar_humano: true, leitura: 'Dor forte e perda súbita de visão: urgência.', acoes: [])
+    end
+
+    def new_incoming(content)
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: content)
+    end
+
+    before do
+      settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
+    end
+
+    it 'chamar_humano no Atendente de Agendamento abre tarefa urgente com responsável, aviso no Radar e pausa por urgência', :aggregate_failures do
+      settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'task_assignee_id' => vaneide.id } }))
+      stub_ai(handoff_reply)
+      run
+      task = account.tasks.find_by(task_type: 'pos_op')
+      expect(task).to be_present
+      expect(task.priority).to eq('urgent')
+      expect(task.assignee).to eq(vaneide)
+      expect(task.title).to start_with('🔴 Atendimento · Maria Silva')
+      alert = settings.reload.ai_config.dig('opportunity_state', 'alerts').last
+      expect(alert).to include('kind' => 'atendimento_atencao', 'task_id' => task.id, 'user_id' => vaneide.id, 'acao' => 'Falar com o paciente agora')
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa'])
+        .to include('paused' => true, 'reason' => 'chamou_humano', 'urgente' => true)
+      expect(conversation.messages.where(message_type: :outgoing).count).to eq(1)
+      expect(conversation.messages.where(message_type: :activity).pluck(:content).join).to include('tarefa aberta no Meu Painel')
+    end
+
+    it 'sem responsável configurado, a tarefa vai para o administrador da conta' do
+      stub_ai(handoff_reply)
+      run
+      expect(account.tasks.find_by(task_type: 'pos_op').assignee).to eq(account.administrators.order(:id).first)
+    end
+
+    it 'chamar_humano sem urgência clínica abre tarefa NORMAL (sem vermelho no Radar) e pausa sem a marca de urgência', :aggregate_failures do
+      # a palavra "urgência" sozinha ("sem urgência") não pode marcar a conversa como urgente
+      stub_ai(handoff_reply.merge(mensagens: ['Vou pedir para a equipe conferir o pedido médico, tudo bem?'],
+                                  leitura: 'Exame avulso com pedido médico, sem urgência.'))
+      run
+      task = account.tasks.find_by(task_type: 'pos_op')
+      expect(task.priority).to eq('high')
+      expect(task.title).to start_with('🙋 Atendimento')
+      expect(Array(settings.reload.ai_config.dig('opportunity_state', 'alerts')).map { |a| a['kind'] }).not_to include('atendimento_atencao')
+      state = conversation.reload.additional_attributes['cevico_atendente_wa']
+      expect(state).to include('paused' => true)
+      expect(state).not_to include('urgente')
+    end
+
+    it 'depois que uma pessoa da equipe respondeu, a mensagem seguinte do paciente pausado por urgência fica em silêncio', :aggregate_failures do
+      stub_ai(handoff_reply)
+      run
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'vem agora pra clínica',
+                       sender: vaneide)
+      expect { run(new_incoming('ok, estou indo')) }.not_to(change { conversation.messages.where(message_type: :outgoing).count })
+      expect(Crm::ResponderAgentService).to have_received(:new).once
+    end
+
+    it 'pausado por urgência, a mensagem seguinte recebe a orientação fixa sem chamar a IA (uma vez por hora)', :aggregate_failures do
+      stub_ai(handoff_reply)
+      run
+      run(new_incoming('piorou, e agora?'))
+      expect(Crm::ResponderAgentService).to have_received(:new).once
+      sent = conversation.messages.where(message_type: :outgoing).order(:id)
+      expect(sent.count).to eq(2)
+      expect(sent.last.content).to eq(described_class::URGENT_WAIT_TEXT)
+      state = conversation.reload.additional_attributes['cevico_atendente_wa']
+      expect(state).to include('paused' => true, 'urgente' => true)
+      expect(state['orientacao_at']).to be_present
+      expect { run(new_incoming('socorro')) }.not_to(change { conversation.messages.where(message_type: :outgoing).count })
+      expect(settings.reload.ai_config.dig('atendente_agendamento_state', 'events').first).to include('type' => 'orientacao_urgencia')
+    end
+
+    it 'pausado sem urgência, a mensagem seguinte fica em silêncio (a equipe assume)' do
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true, 'reason' => 'chamou_humano' } })
+      stub_ai(ai_reply)
+      expect { run }.not_to(change { conversation.messages.where(message_type: :outgoing).count })
+      expect(Crm::ResponderAgentService).not_to have_received(:new)
+    end
+
+    describe 'cancelar=true sem a IA ter chamado a ferramenta (#457)' do
+      let(:admin) { account.administrators.first }
+      let(:tz) { Crm::AgendaSlots::TZ }
+      let(:cancel_reply) do
+        ai_reply.merge(mensagens: ['Tudo bem, sua consulta será cancelada.', 'Te chamo daqui a duas semanas pra ver se faz sentido remarcar?'],
+                       etapa: 'reagendamento', cancelar: true, leitura: 'Paciente manteve o cancelamento.', acoes: [])
+      end
+
+      def consulta(title, phone:, contact: nil)
+        account.tasks.create!(title: title, task_type: 'consulta', due_at: tz.now + 3.days, unit: 'paulista', phone: phone,
+                              contact: contact, creator: admin, status: :todo)
+      end
+
+      it 'cancela a consulta do PRÓPRIO contato pela ferramenta ANTES de falar e deixa o rastro', :aggregate_failures do
+        own = consulta('Consulta: Maria Silva', phone: '+5511999990000', contact: contact)
+        stub_ai(cancel_reply)
+        run
+        expect(own.reload.canceled_at).to be_present
+        expect(own.description).to include('Cancelada pelo Atendente de Agendamento')
+        expect(conversation.messages.where(message_type: :outgoing).order(:id).map(&:content)).to eq(cancel_reply[:mensagens])
+        expect(settings.reload.ai_config.dig('opportunity_state', 'alerts').last).to include('kind' => 'agente_cancelou', 'task_id' => own.id)
+        expect(settings.ai_config.dig('atendente_agendamento_state', 'events').first['note']).to include('cancelou a consulta de Maria Silva')
+        expect(account.tasks.where(task_type: 'pos_op')).to be_empty
+      end
+
+      it 'sem consulta própria na Agenda: NÃO diz que cancelou, abre tarefa para a equipe e fala a verdade', :aggregate_failures do
+        other = consulta('Consulta: João Pereira', phone: '+5511977776666')
+        stub_ai(cancel_reply)
+        run
+        expect(other.reload.canceled_at).to be_nil
+        expect(conversation.messages.where(message_type: :outgoing).map(&:content)).to eq([described_class::CANCEL_PENDING_TEXT])
+        handoff = account.tasks.find_by(task_type: 'pos_op')
+        expect(handoff.title).to include('cancelar a consulta')
+        expect(handoff.assignee).to eq(admin)
+        expect(settings.reload.ai_config.dig('atendente_agendamento_state', 'events').first).to include('type' => 'cancelar_pendente')
+        # a equipe assume daqui: pausa como em qualquer passagem (senão o "ok" seguinte repetiria o pedido)
+        expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to include('paused' => true, 'reason' => 'chamou_humano')
+        expect(conversation.messages.where(message_type: :activity).pluck(:content).join).to include('tarefa aberta no Meu Painel')
+      end
+
+      it 'IA chamou cancelar_consulta com id errado (não encontrada) e ainda marcou cancelar=true: cancela a do próprio contato antes de falar',
+         :aggregate_failures do
+        own = consulta('Consulta: Maria Silva', phone: '+5511999990000', contact: contact)
+        wrong = [{ 'ferramenta' => 'cancelar_consulta', 'ok' => false, 'resumo' => 'Consulta não encontrada (confira o id com buscar_consulta).' }]
+        stub_ai(cancel_reply.merge(acoes: wrong))
+        run
+        expect(own.reload.canceled_at).to be_present
+        expect(conversation.messages.where(message_type: :outgoing).order(:id).map(&:content)).to eq(cancel_reply[:mensagens])
+      end
+
+      it 'pedido de cancelar a consulta da MÃE: não cancela a do próprio contato no lugar; tarefa para a equipe', :aggregate_failures do
+        own = consulta('Consulta: Maria Silva', phone: '+5511999990000', contact: contact)
+        stub_ai(cancel_reply.merge(leitura: 'Paciente quer cancelar a consulta da mãe e não vai remarcar.'))
+        run
+        expect(own.reload.canceled_at).to be_nil
+        expect(conversation.messages.where(message_type: :outgoing).map(&:content)).to eq([described_class::CANCEL_PENDING_TEXT])
+        expect(account.tasks.find_by(task_type: 'pos_op').title).to include('OUTRA pessoa')
+      end
+
+      it 'cancelar junto com chamar_humano por urgência: a passagem não se perde (pausa com a marca de urgência)', :aggregate_failures do
+        stub_ai(cancel_reply.merge(chamar_humano: true, leitura: 'Quer cancelar porque está com dor forte no olho.'))
+        run
+        state = conversation.reload.additional_attributes['cevico_atendente_wa']
+        expect(state).to include('paused' => true, 'reason' => 'chamou_humano', 'urgente' => true)
+        expect(account.tasks.find_by(task_type: 'pos_op').priority).to eq('urgent')
+      end
+
+      it 'se a IA já chamou cancelar_consulta e a ferramenta recusou (outra pessoa), não cancela a do contato no lugar', :aggregate_failures do
+        own = consulta('Consulta: Maria Silva', phone: '+5511999990000', contact: contact)
+        refused = [{ 'ferramenta' => 'cancelar_consulta', 'ok' => false, 'resumo' => 'Pediu para cancelar a consulta de outra pessoa: não fez' }]
+        stub_ai(cancel_reply.merge(mensagens: ['Essa consulta é de outra pessoa; a equipe vai cuidar disso com o titular, tudo bem?'],
+                                   acoes: refused))
+        run
+        expect(own.reload.canceled_at).to be_nil
+        expect(conversation.messages.where(message_type: :outgoing).count).to eq(1)
+        expect(account.tasks.where(task_type: 'pos_op')).to be_empty
       end
     end
   end

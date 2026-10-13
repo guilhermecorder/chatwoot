@@ -132,12 +132,14 @@ class Crm::ObjectionMapService
                 .join("\n")
   end
 
+  # 🔒 Rodada 4 da auditoria (#102): sob a trava da linha, relendo a config
+  # fresca (Cevico::SettingMerge) — o mapa não apaga o que outro gravou
   def save_map(map)
-    settings = CrmSetting.find_or_create_by!(account: @account)
-    cfg = settings.ai_config || {}
-    cfg['agents'] ||= {}
-    cfg['agents']['sales'] ||= {}
-    cfg['agents']['sales']['objection_map'] = map
-    settings.update!(ai_config: cfg)
+    Cevico::SettingMerge.merge!(@account, :ai_config) do |cfg|
+      cfg['agents'] ||= {}
+      cfg['agents']['sales'] ||= {}
+      cfg['agents']['sales']['objection_map'] = map
+      cfg
+    end
   end
 end

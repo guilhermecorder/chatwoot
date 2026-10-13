@@ -6,6 +6,7 @@
 // indicadores do período (presets + PERSONALIZADO com datas livres),
 // histórico de 12 meses em LINHA (mesma linguagem dos outros painéis)
 // e comparação de dois meses lado a lado.
+import { parseMoneyBR } from 'dashboard/helper/cevicoMoney';
 import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
@@ -126,13 +127,9 @@ const monthShort = iso =>
 const monthLong = iso =>
   new Date(`${iso}T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
-// aceita "1.234,56", "1234,56" e "1234.56"
-const parseAmount = raw => {
-  let s = String(raw || '').replace(/[R$\s]/g, '');
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
-};
+// aceita "1.234,56", "1234,56", "5.000" e "1234.56" — Rodada 6: mesma
+// regra do servidor (cevicoMoney); antes "5.000" virava 5 e saía R$ 5,00
+const parseAmount = raw => parseMoneyBR(raw) ?? 0;
 
 const periodLabel = computed(() => {
   const p = data.value?.period;

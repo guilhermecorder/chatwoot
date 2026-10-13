@@ -5,7 +5,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   def conversation_created(event)
     conversation, account = extract_conversation_and_account(event)
     contact = conversation.contact
-    return if contact.blank?
+    return unless patient_contact?(contact)
 
     # 🏷️ item 322: a 1ª conversa é evidência de quem é o paciente — a caixa em
     # que ela nasceu diz a fonte (primeira evidência carimba)
@@ -29,6 +29,12 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
     # corrida entre eventos simultâneos do mesmo contato — card já existe
     nil
+  end
+
+  # 🧪 celular de teste da jornada (R3 #416) não é paciente: sem carimbo de
+  # origem e sem card no funil (não entra em indicador, público nem IA)
+  def patient_contact?(contact)
+    contact.present? && !Crm::Journey::TestContact.test_contact?(contact)
   end
 
   # 🏷️ item 322: como nasceu o card de uma conversa nova — o paciente escreveu
@@ -253,6 +259,8 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     task = pending_confirmation_task(contact, marks)
     return if task.nil?
 
+    # as outras consultas do mesmo dia são respondidas junto, dentro de
+    # Crm::AppointmentConfirmation (mesmo caminho da ligação e do botão da equipe)
     confirmed ? record_confirmation(message, contact, task) : record_decline(message, contact, task)
   rescue StandardError => e
     Rails.logger.error "[CrmListener] confirmação de consulta: #{e.message}"
@@ -279,14 +287,19 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   # a consulta dos próximos dias que RECEBEU um lembrete de confirmação (1 a 7
   # dias antes — item 253) e ainda não foi confirmada — sem lembrete enviado, um
   # "sim" solto não marca nada. Janela de 8 dias cobre o lembrete mais longe.
-  def pending_confirmation_task(contact, marks)
+  # Devolve TODAS as pendentes, da mais próxima para a mais longe.
+  def pending_confirmation_tasks(contact, marks)
     today = ActiveSupport::TimeZone['America/Sao_Paulo'].now.beginning_of_day
     contact.account.tasks
            .where(id: marks.keys.map(&:to_i), task_type: 'consulta', canceled_at: nil)
            .where(due_at: today..(today + 8.days))
            .where(attendance: [nil, ''])
            .order(:due_at)
-           .find { |t| awaiting_confirmation?(marks[t.id.to_s]) }
+           .select { |t| awaiting_confirmation?(marks[t.id.to_s]) }
+  end
+
+  def pending_confirmation_task(contact, marks)
+    pending_confirmation_tasks(contact, marks).first
   end
 
   CONFIRMATION_MARKS = (1..7).map { |n| "d#{n}" }.freeze
@@ -301,15 +314,19 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     # indicador "Consultas confirmadas"); um NÃO anterior é desfeito. Item 300:
     # o card anda para "Consulta Confirmada" — no funil do Oftalmofácil quando o
     # paciente é de lá (sem automação), senão no da CEVICO. Item 333: o mesmo
-    # caminho da ligação (Crm::AppointmentConfirmation)
+    # caminho da ligação (Crm::AppointmentConfirmation) — as outras consultas do
+    # mesmo dia (#462/#472) vão junto; a nota cita todas as horas confirmadas
+    tz = ActiveSupport::TimeZone['America/Sao_Paulo']
+    outras = Crm::AppointmentConfirmation.same_day_pending(task, :confirmed_at).map { |t| t.due_at.in_time_zone(tz).strftime('%H:%M') }
     moved_to = Crm::AppointmentConfirmation.confirm!(account: contact.account, task: task, contact: contact)
-    dia = task.due_at.in_time_zone(ActiveSupport::TimeZone['America/Sao_Paulo'])
+    dia = task.due_at.in_time_zone(tz)
     message.conversation.messages.create!(
       account_id: contact.account_id,
       inbox_id: message.conversation.inbox_id,
       message_type: :outgoing,
       private: true,
       content: "✅ Paciente CONFIRMOU a consulta de #{dia.strftime('%d/%m às %H:%M')} respondendo ao lembrete." \
+               "#{" (também a das #{outras.join(', ')} do mesmo dia.)" if outras.any?}" \
                "#{" Card → #{moved_to}." if moved_to.present?}"
     )
   end
@@ -427,7 +444,9 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
 
       if Crm::ResponderAgentJob.live_mode?(agents[key])
         state = conversation.additional_attributes&.[](RESPONDER_STATE_KEY) || {}
-        return if state['paused']
+        # 🚨 auditoria 10/2026 (#443): pausado por URGÊNCIA clínica, a mensagem
+        # ainda vai ao job — ele só repete a orientação de pronto atendimento
+        return if state['paused'] && !state['urgente']
       end
       # item 200: responde entre 5 e 10 s da mensagem do paciente (config
       # reply_delay_seconds do agente; padrão 6 s; junta mensagens picadas)
@@ -442,6 +461,13 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       if message.content.to_s.strip == '👍'
         set_responder_pause(conversation, false)
         note_instagram(conversation, '▶️ Atendente IA do WhatsApp reativado nesta conversa (👍 do atendimento).')
+      elsif state['urgente']
+        # 🚨 auditoria 10/2026 (#443): pausada por URGÊNCIA clínica e uma pessoa
+        # da equipe respondeu: a urgência agora é dela — a pausa continua, mas
+        # sem a marca (o job para de repetir a orientação de pronto atendimento
+        # no meio da conversa humana)
+        set_responder_pause(conversation, true, reason: 'humano_assumiu', by: human_name(message))
+        note_instagram(conversation, "🙋 #{human_name(message)} assumiu esta conversa — o agente para de repetir a orientação de urgência.")
       elsif !state['paused']
         set_responder_pause(conversation, true, reason: 'humano_assumiu', by: human_name(message))
         note_instagram(conversation, "⏸ Atendente IA do WhatsApp pausado — #{human_name(message)} assumiu esta conversa. " \
@@ -586,8 +612,24 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     throttle = automation.action_config&.dig('throttle_minutes').to_i
     return false unless throttle.positive?
 
-    Crm::AutomationLog.where(automation: automation, contact_id: contact.id)
-                      .where('fired_at > ?', throttle.minutes.ago)
-                      .exists?
+    return true if Crm::AutomationLog.where(automation: automation, contact_id: contact.id)
+                                     .exists?(['fired_at > ?', throttle.minutes.ago])
+
+    # achado #194 da auditoria: o log de disparo só nasce no FIM do job —
+    # entre enfileirar e terminar, outra mensagem do paciente enfileirava um
+    # segundo disparo da mesma automação. A reserva da marca "já enfileirado"
+    # no Redis É a própria checagem (grava só se ainda não existe): quem não
+    # consegue a chave está freado — assim duas mensagens chegando no mesmo
+    # instante em dois processos não enfileiram duas vezes.
+    !reserve_queued_mark(automation, contact, throttle)
+  end
+
+  # marca "já enfileirado" por (automação, paciente): vale do enfileirar até
+  # o fim da janela (atraso + freio) ou até o job terminar — aí o
+  # CrmAutomationFireJob apaga a marca e o log de disparo assume o freio.
+  # Devolve true se reservou (ninguém tinha enfileirado antes).
+  def reserve_queued_mark(automation, contact, throttle)
+    ttl = (automation.delay_minutes.to_i + throttle).minutes.to_i
+    Redis::LockManager.new.lock(CrmAutomationFireJob.queued_key(automation.id, contact.id), ttl)
   end
 end

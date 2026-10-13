@@ -65,11 +65,44 @@ RSpec.describe Crm::HandoffTask do
       expect(live.definitions.map { |d| d[:name] }).to include('abrir_tarefa')
     end
 
-    it 'os outros atendentes não recebem a ferramenta' do
-      tools = Crm::ResponderTools.new(conversation: conversation, agent_key: 'atendente_pos', live: true)
-      expect(tools.definitions.map { |d| d[:name] }).not_to include('abrir_tarefa')
-      expect(tools.call('abrir_tarefa', 'motivo' => 'x', 'urgencia' => 'alta')[:ok]).to be(false)
+    # 🙋 auditoria 10/10 (#458): antes só o pós-op abria tarefa; urgência num paciente novo ficava só em nota + pausa
+    it 'os três atendentes do WhatsApp recebem a ferramenta; o Agente de Ligação não', :aggregate_failures do
+      %w[atendente_agendamento atendente_pos].each do |key|
+        tools = Crm::ResponderTools.new(conversation: conversation, agent_key: key, live: true)
+        expect(tools.definitions.map { |d| d[:name] }).to include('abrir_tarefa')
+        expect(tools.call('abrir_tarefa', 'motivo' => 'dor forte no olho', 'urgencia' => 'alta')[:ok]).to be(true)
+      end
+      expect(account.tasks.where(task_type: 'pos_op').count).to eq(1) # a 2ª chamada complementou a mesma tarefa
+      voice = Crm::ResponderTools.new(conversation: conversation, agent_key: 'voice', live: true)
+      expect(voice.definitions.map { |d| d[:name] }).not_to include('abrir_tarefa')
+      expect(voice.call('abrir_tarefa', 'motivo' => 'x', 'urgencia' => 'alta')[:ok]).to be(false)
     end
+  end
+
+  # 🔴 auditoria 10/10 (#443): tarefa urgente nunca fica "sem responsável definido"
+  it 'sem pessoa no card nem dono de coluna, a tarefa vai para o primeiro administrador e diz de qual atendente veio', :aggregate_failures do
+    settings.update!(ai_config: { 'api_key' => 'sk-teste', 'agents' => { 'atendente_agendamento' => { 'enabled' => true } } })
+    task = described_class.open!(account: account, contact: contact, conversation: conversation, agent_key: 'atendente_agendamento',
+                                 motivo: 'dor forte e perda súbita de visão', urgencia: 'alta')[:task]
+    expect(task.assignee).to eq(admin)
+    expect(task.priority).to eq('urgent')
+    expect(task.title).to eq('🔴 Atendimento · Carlos Operado — dor forte e perda súbita de visão')
+    alert = settings.reload.ai_config.dig('opportunity_state', 'alerts').last
+    expect(alert).to include('kind' => 'atendimento_atencao', 'task_id' => task.id, 'user_id' => admin.id,
+                             'stage_name' => 'Atendimento: a equipe precisa assumir', 'acao' => 'Falar com o paciente agora')
+    expect(alert['motivo']).to include('Atendente de Agendamento pediu atenção')
+    expect(conversation.messages.where(message_type: :activity).last.content).to include("para #{admin.name}")
+    expect(conversation.messages.where(message_type: :activity).last.content).not_to include('sem responsável definido')
+  end
+
+  it 'entre os administradores, prefere quem ATENDE a caixa da conversa (membro dela), mesmo não sendo o mais antigo', :aggregate_failures do
+    settings.update!(ai_config: { 'api_key' => 'sk-teste', 'agents' => { 'atendente_agendamento' => { 'enabled' => true } } })
+    balcao = create(:user, account: account, role: :administrator, name: 'Admin do Balcão')
+    create(:inbox_member, user: balcao, inbox: inbox)
+    task = described_class.open!(account: account, contact: contact, conversation: conversation, agent_key: 'atendente_agendamento',
+                                 motivo: 'pediu atestado', urgencia: 'normal')[:task]
+    expect(balcao.id).to be > admin.id
+    expect(task.assignee).to eq(balcao)
   end
 
   describe 'quem é o dono da conversa (CrmListener) e chamar humano no job' do

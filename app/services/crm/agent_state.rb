@@ -20,16 +20,13 @@ module Crm::AgentState
   end
 
   # mexe SÓ na chave de estado do agente; o bloco recebe uma cópia e devolve a nova
-  def update(account, agent_key)
+  def update(account, agent_key, &)
     settings = CrmSetting.find_by(account: account)
     return if settings.blank?
 
-    settings.with_lock do
-      cfg = settings.ai_config || {}
-      state = yield((cfg[key(agent_key)] || {}).deep_dup)
-      cfg[key(agent_key)] = state
-      settings.update!(ai_config: cfg)
-    end
+    # 🔒 Rodada 4 da auditoria: pelo gravador único do crm_settings (mesma
+    # trava de linha + releitura fresca de antes, agora no padrão da casa)
+    Cevico::SettingMerge.merge_key!(settings, :ai_config, key(agent_key), &)
   rescue StandardError => e
     Rails.logger.warn "[Crm::AgentState##{agent_key}] estado: #{e.message}"
   end

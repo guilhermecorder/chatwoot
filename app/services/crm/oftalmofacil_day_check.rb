@@ -63,7 +63,24 @@ class Crm::OftalmofacilDayCheck # rubocop:disable Metrics/ClassLength
 
   # traz para a Agenda o que dá para trazer: primeiro pelo hub (linhas frescas);
   # se o hub não responder, pelo espelho. Devolve o relatório depois da correção.
+  # Rodada 4 (achado #172): disputa a MESMA trava do Crm::OftalmofacilSyncJob —
+  # com o cron ou o "Sincronizar agora" no meio, devolve o aviso em vez de
+  # processar a mesma linha duas vezes (paciente/card/consulta duplicados).
   def reconcile!
+    # trava com senha própria: só quem pegou solta (ver Crm::OftalmofacilSyncJob)
+    token = Crm::OftalmofacilSyncJob.acquire_lock(account.id)
+    return report(hub: false).merge(fixed: 0, errors: [Crm::OftalmofacilSyncJob::BUSY_MESSAGE]) if token.nil?
+
+    begin
+      reconcile_now!
+    ensure
+      Crm::OftalmofacilSyncJob.release_lock(account.id, token)
+    end
+  end
+
+  private
+
+  def reconcile_now!
     before = report(hub: true)
     if config['agenda_enabled'] != true && before[:summary]['problemas'].to_i.positive?
       return before.merge(fixed: 0,
@@ -77,8 +94,6 @@ class Crm::OftalmofacilDayCheck # rubocop:disable Metrics/ClassLength
     report(hub: false).merge(fixed: result.pulled, tasks_created: result.tasks_created, tasks_updated: result.tasks_updated,
                              errors: result.errors.first(10))
   end
-
-  private
 
   def mirror_rows(mirror, tokens)
     tasks = account.tasks.where(external_ref: tokens).index_by(&:external_ref)

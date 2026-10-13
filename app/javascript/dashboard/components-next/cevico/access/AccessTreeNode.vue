@@ -112,6 +112,14 @@ const visibleKids = computed(() => children.value.filter(k => tree.visible(k)));
           <span v-if="lockedNode" class="cv-tag cv-acc-lock">
             🔒 só administradores
           </span>
+          <!-- nó "sem herança" (auditoria 12/10): a marcação do pai não desce -->
+          <span
+            v-else-if="node.explicit"
+            class="cv-tag cv-acc-lock"
+            title="não herda do pai: só vale com marcação própria aqui"
+          >
+            ✋ não herda
+          </span>
         </div>
         <p v-if="node.hint" class="cv-acc-hint">{{ node.hint }}</p>
       </div>

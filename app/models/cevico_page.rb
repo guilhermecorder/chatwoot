@@ -99,6 +99,51 @@ class CevicoPage < ApplicationRecord
 
   before_validation :generate_slug, on: :create
 
+  # 🔒 destino do botão (auditoria rodada 2, #20/#150/#399/#428): a página
+  # pública redireciona para o cta_url sem perguntar nada — então só entra
+  # WhatsApp (wa.me, api.whatsapp.com, whatsapp:), caminho do próprio site
+  # ("/forms/…") ou https de um domínio da clínica (domínio público geral,
+  # domínio da empresa, host do sistema e a lista extra CEVICO_CTA_HOSTS).
+  # Vale quando o campo MUDA: página antiga com valor fora da régua continua
+  # salvando o resto (comentários, IA) até alguém trocar o link.
+  CTA_WHATSAPP = %r{\A(https://(wa\.me|api\.whatsapp\.com)(/|\z)|whatsapp:)}i
+  CTA_MESSAGE = 'só aceita link do WhatsApp (wa.me) ou endereço https do site da clínica'.freeze
+
+  # grava sem espaços nas pontas: ' https://wa.me/55 ' passava na régua mas o
+  # clique público não reconhecia o WhatsApp e mandava para um link quebrado
+  before_validation { self.cta_url = cta_url.to_s.strip.presence if will_save_change_to_cta_url? }
+  validate :cta_url_allowed, if: -> { cta_url.present? && will_save_change_to_cta_url? }
+
+  def self.cta_url_allowed?(url, account: nil)
+    url = url.to_s.strip
+    return true if url.blank? || url.match?(CTA_WHATSAPP) || local_path?(url)
+
+    host = https_host(url)
+    host.present? && clinic_hosts(account).any? { |allowed| host == allowed || host.end_with?(".#{allowed}") }
+  end
+
+  # caminho do próprio site ("/forms/x"); "//outro.com" NÃO é caminho
+  def self.local_path?(url)
+    url.start_with?('/') && !url.start_with?('//')
+  end
+
+  # host de um link https (sem "www."); nil para qualquer outra coisa
+  def self.https_host(url)
+    uri = URI.parse(url)
+    uri.is_a?(URI::HTTPS) ? uri.host.to_s.downcase.delete_prefix('www.').presence : nil
+  rescue URI::InvalidURIError
+    nil
+  end
+
+  # domínios da clínica onde o botão pode levar o paciente
+  def self.clinic_hosts(account = nil)
+    extra = ENV.fetch('CEVICO_CTA_HOSTS', '').split(',')
+    [Cevico::PublicSite.host, Cevico::PublicSite.app_host,
+     (account && Cevico::Company.for(account).public_host), *extra]
+      .filter_map { |h| Cevico::PublicSite.normalize(h.to_s)&.downcase&.delete_prefix('www.') }
+      .uniq
+  end
+
   scope :published, -> { where(status: 'published') }
 
   def published?
@@ -326,6 +371,10 @@ class CevicoPage < ApplicationRecord
   end
 
   private
+
+  def cta_url_allowed
+    errors.add(:cta_url, CTA_MESSAGE) unless self.class.cta_url_allowed?(cta_url, account: account)
+  end
 
   # marca de qual página do funil o visitante veio ({"de" => {slug => n}})
   def record_origin(day, source)

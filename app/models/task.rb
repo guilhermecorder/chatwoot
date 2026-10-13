@@ -61,10 +61,10 @@
 #  fk_rails_...  (account_id => accounts.id)
 #  fk_rails_...  (assignee_id => users.id)
 #  fk_rails_...  (canceled_by_id => users.id)
-#  fk_rails_...  (contact_id => contacts.id)
+#  fk_rails_...  (contact_id => contacts.id) ON DELETE => nullify
 #  fk_rails_...  (creator_id => users.id)
 #
-class Task < ApplicationRecord
+class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   belongs_to :account
   belongs_to :creator, class_name: 'User'
   belongs_to :assignee, class_name: 'User', optional: true
@@ -78,7 +78,9 @@ class Task < ApplicationRecord
   # tela — vai para a Lixeira (canceled_at + quem + motivo) e pode voltar.
   # Só card de tarefa comum (sem paciente) continua sendo apagado de verdade.
   APPOINTMENT_TYPES = %w[consulta cirurgia].freeze
-  CANCEL_REASONS = %w[excluida_agenda cancelada_equipe paciente_desmarcou oftalmofacil].freeze
+  # 'excluida_tarefas' = card ⚠️ do robô excluído no quadro de Tarefas (fica com rastro)
+  # duplicada_hub = cópia vinda do Oftalmofácil unida à consulta da equipe (auditoria 10/2026, #462/#472)
+  CANCEL_REASONS = %w[excluida_agenda cancelada_equipe paciente_desmarcou oftalmofacil excluida_tarefas duplicada_hub].freeze
 
   def appointment?
     APPOINTMENT_TYPES.include?(task_type)
@@ -94,6 +96,57 @@ class Task < ApplicationRecord
 
   def to_trash!(by:, reason: 'excluida_agenda')
     update!(canceled_at: Time.current, canceled_by: by, cancel_reason: reason)
+  end
+
+  # 🔐 Auditoria 10/2026 (achados #18/#130/#131/#315): o que é DA CLÍNICA TODA
+  # (qualquer pessoa da equipe vê e edita): consulta/cirurgia — com ou sem
+  # unidade (a IA grava consulta sem unidade), agendamento antigo só com
+  # unidade, agendamento vindo de outro sistema (source) e as tarefas "⚠️" que
+  # o ROBÔ abre para a equipe conferir. O resto é tarefa PESSOAL: só quem criou,
+  # quem é o responsável ou o administrador. A regra é uma só, usada pela
+  # lista (index/agenda_details) e pelas portas de editar/apagar.
+  #
+  # A tarefa ⚠️ do robô é reconhecida pelo carimbo `cevico_born_via = 'robo'`
+  # (item 322) + o prefixo no título — o título sozinho não basta, porque
+  # qualquer pessoa edita o título: um card pessoal renomeado para "⚠️ …" pela
+  # equipe (born_via 'equipe') continua pessoal. Linhas antigas, de antes do
+  # carimbo (born_via vazio), só contam quando quem criou é administrador
+  # (a IA sempre cria em nome do primeiro admin).
+  REVISION_PREFIX = '⚠️'.freeze
+  ADMIN_CREATOR_SQL = 'tasks.creator_id IN (SELECT account_users.user_id FROM account_users ' \
+                      'WHERE account_users.account_id = tasks.account_id AND account_users.role = 1)'.freeze
+  REVISION_CARD_SQL = "(tasks.title LIKE :rev AND (tasks.cevico_born_via = 'robo' " \
+                      "OR (tasks.cevico_born_via IS NULL AND #{ADMIN_CREATOR_SQL})))".freeze
+  scope :visible_to, lambda { |user|
+    where('tasks.assignee_id = :uid OR tasks.creator_id = :uid OR tasks.task_type IN (:types) ' \
+          "OR (tasks.unit IS NOT NULL AND tasks.unit <> '') OR tasks.source IS NOT NULL OR #{REVISION_CARD_SQL}",
+          uid: user.id, types: APPOINTMENT_TYPES, rev: "#{REVISION_PREFIX}%")
+  }
+
+  def shared_with_team?
+    appointment? || unit.present? || source.present? || ai_revision_card?
+  end
+
+  # tarefa "⚠️ …" aberta pelo robô (ou antiga, criada em nome de um admin)
+  def ai_revision_card?
+    return false unless title.to_s.start_with?(REVISION_PREFIX)
+    return true if cevico_born_via == 'robo'
+
+    cevico_born_via.nil? && account.administrators.exists?(id: creator_id)
+  end
+
+  # 🗑️ o que a tela da Agenda desenha como agendamento (mesma regra do front,
+  # isAppointmentTask): consulta/cirurgia, ou agendamento antigo só com
+  # unidade e data. "Excluir" isso vai para a Lixeira, nunca apaga de vez.
+  def agenda_entry?
+    appointment? || (unit.present? && due_at.present?)
+  end
+
+  # "Excluir" guarda rastro (Lixeira) em vez de apagar: agendamento e a tarefa
+  # ⚠️ do robô — ela é a prova de quem escapou da IA. O card ⚠️ também sai do
+  # quadro (archived_at), porque o quadro de Tarefas não lê a Lixeira.
+  def keeps_trace_on_delete?
+    agenda_entry? || ai_revision_card?
   end
 
   def restore!
@@ -163,6 +216,32 @@ class Task < ApplicationRecord
   before_save :track_completion
   before_save :reset_confirmation_on_reschedule
   before_create :infer_consulta_modality
+  after_update :stamp_reschedule!, if: :rescheduled_in_this_save?
+
+  # 🔁 Auditoria 10/2026 (#2/#133): REMARCAÇÃO com carimbo próprio. Antes o
+  # painel usava o updated_at — qualquer toque na consulta (✓ compareceu,
+  # trocar médico, Lixeira…) virava "reagendada" no dia do toque. Agora, toda
+  # vez que o rescheduled_count sobe (Agenda, IA, ferramentas), entra uma linha
+  # { kind: 'rescheduled', at, from, to, by } na lista `comments` da consulta
+  # (jsonb que já existe — sem migration). Se um dia virar coluna
+  # rescheduled_at, só estas leituras mudam.
+  RESCHEDULE_KIND = 'rescheduled'.freeze
+
+  # todos os momentos em que a consulta foi remarcada (mais antigo primeiro)
+  def rescheduled_times
+    Array(comments).filter_map do |entry|
+      next unless entry.is_a?(Hash) && entry['kind'] == RESCHEDULE_KIND
+
+      Time.zone.parse(entry['at'].to_s)
+    rescue ArgumentError
+      nil
+    end.sort
+  end
+
+  # a ÚLTIMA remarcação (nil = nunca remarcada, ou remarcada antes do carimbo existir)
+  def rescheduled_at
+    rescheduled_times.last
+  end
 
   # Tudo do paciente em um lugar só: casa por contact_id (unificado) e,
   # para registros antigos sem link, pelo telefone — sem repetir o regexp
@@ -172,21 +251,61 @@ class Task < ApplicationRecord
     scope = account.tasks
     return scope.where(contact_id: contact.id) if digits.length < 8
 
-    scope.where(
-      "contact_id = :cid OR (contact_id IS NULL AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE :tail)",
-      cid: contact.id, tail: "%#{digits.last(8)}"
-    )
+    # auditoria 10/2026 (#239): registro antigo sem link só entra se for a
+    # MESMA linha (DDD confere) — o final de 8 dígitos só acha candidatos
+    legacy_ids = scope.where(contact_id: nil)
+                      .where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+                      .pluck(:id, :phone)
+                      .select { |_id, task_phone| Crm::AppointmentRecorder.same_phone_line?(digits, task_phone) }
+                      .map(&:first)
+    return scope.where(contact_id: contact.id) if legacy_ids.empty?
+
+    scope.where('contact_id = :cid OR id IN (:ids)', cid: contact.id, ids: legacy_ids)
   end
 
-  # Contato da conta cujo telefone bate (últimos 8 dígitos) — critério
-  # único do sistema para casar telefone com contato.
+  # Contato da conta cujo telefone bate — critério único do sistema para casar
+  # telefone com contato. Auditoria 10/2026 (#239, fecha o A16 de julho): os
+  # últimos 8 dígitos só acham CANDIDATOS; quem decide é a mesma linha
+  # (DDD confere — Crm::AppointmentRecorder.same_phone_line?). Quando mais de
+  # um cadastro bate com a linha, desempata ANTES de desistir (revisão da
+  # Rodada 3): 1º quem tem o número exatamente igual ao informado (com ou sem
+  # +55 — cadastro duplicado da mesma linha devolve o mais antigo, como sempre
+  # foi); 2º número SEM DDD prefere o cadastro do DDD da clínica (mesma
+  # convenção do Crm::AppointmentOrigin.normalize_phone). Só então, se ainda
+  # não dá para saber de quem é → nil (o chamador trata como "sem cadastro").
   def self.match_contact(account, phone)
     digits = phone.to_s.gsub(/\D/, '')
     return nil if digits.length < 8
 
-    account.contacts
-           .where("regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-           .order(:id).first
+    found = account.contacts
+                   .where("regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+                   .order(:id)
+                   .select { |contact| Crm::AppointmentRecorder.same_phone_line?(digits, contact.phone_number) }
+    return found.first if found.size <= 1
+
+    untied = untie_phone_match(found, digits)
+    return untied if untied
+
+    Rails.logger.info "[Task.match_contact] telefone ambíguo (#{found.size} cadastros batem com a mesma linha) — sem vínculo"
+    nil
+  end
+
+  # desempate entre cadastros que batem com a mesma linha: número exatamente
+  # igual (com ou sem +55) vence; sem DDD, vence o cadastro do DDD da clínica
+  def self.untie_phone_match(found, digits)
+    key = phone_key(digits)
+    exact = found.find { |contact| phone_key(contact.phone_number) == key }
+    return exact if exact
+    return nil unless key.length.between?(8, 9)
+
+    found.find { |contact| phone_key(contact.phone_number) == "#{Crm::AppointmentOrigin::DEFAULT_DDD}#{key}" }
+  end
+
+  # dígitos do telefone sem o +55 e sem zero na frente, para comparar
+  # "exatamente igual" entre o que foi informado e o cadastro
+  def self.phone_key(phone)
+    digits = phone.to_s.gsub(/\D/, '').sub(/\A0+/, '')
+    digits.start_with?('55') && digits.length >= 12 ? digits[2..] : digits
   end
 
   private
@@ -220,6 +339,32 @@ class Task < ApplicationRecord
     self.declined_at = nil
   end
 
+  def rescheduled_in_this_save?
+    saved_change_to_rescheduled_count? && rescheduled_count.to_i > rescheduled_count_before_last_save.to_i
+  end
+
+  # grava o carimbo da remarcação SOMANDO no banco (sem "lê, altera, grava" da
+  # lista inteira — um comentário escrito ao mesmo tempo não se perde)
+  def stamp_reschedule!
+    from, to = saved_change_to_due_at || [due_at, due_at]
+    who = Current.user
+    entry = {
+      'kind' => RESCHEDULE_KIND, 'at' => Time.current.iso8601(3),
+      'from' => from&.iso8601, 'to' => to&.iso8601, 'by' => who&.id,
+      'user_id' => who&.id, 'name' => who&.name.presence || 'Robô',
+      'text' => "🔁 Remarcada: #{reschedule_label(from)} → #{reschedule_label(to)}"
+    }
+    Task.where(id: id).update_all( # rubocop:disable Rails/SkipsModelValidations
+      ["comments = (CASE WHEN jsonb_typeof(comments) = 'array' THEN comments ELSE '[]'::jsonb END) || ?::jsonb", [entry].to_json]
+    )
+    self.comments = Array(comments) + [entry]
+    clear_attribute_changes(%w[comments])
+  end
+
+  def reschedule_label(time)
+    time ? time.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M') : 'sem data'
+  end
+
   def track_completion
     return unless status_changed?
 
@@ -244,10 +389,13 @@ class Task < ApplicationRecord
         digits = phone.to_s.gsub(/\D/, '')
         return self.modality = 'avaliacao' if digits.length < 8
 
+        # auditoria 10/2026 (#239): consulta anterior só conta se for a MESMA linha (DDD confere)
         account.tasks
                .where(task_type: 'consulta')
                .where('due_at < ?', due_at || Time.current)
-               .exists?(["regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}"])
+               .where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+               .pluck(:phone)
+               .any? { |task_phone| Crm::AppointmentRecorder.same_phone_line?(digits, task_phone) }
       end
     self.modality = had_before ? 'retorno' : 'avaliacao'
   end
