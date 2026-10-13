@@ -25,6 +25,9 @@ Rails.application.config.after_initialize do
   # antigos (o "Chatwoot" de fábrica ou os nomes que já usamos) — assim o título
   # da aba vira o nome oficial do pacote sem ninguém mexer em painel. O resto
   # (logos, cores) continua vindo do banco.
+  # Sem banco de verdade (ex.: montagem da imagem no GitHub, assets:precompile)
+  # o Rails 7.2 avisa com ActiveRecord::DatabaseConnectionError (filha de
+  # ConnectionNotEstablished) — por isso o rescue abaixo cobre as duas famílias.
   if MARCA['id'] == 'cevico'
     begin
       if ActiveRecord::Base.connection.data_source_exists?('installation_configs')
@@ -37,7 +40,7 @@ Rails.application.config.after_initialize do
           Rails.logger&.info("[marca] nome da instalação atualizado para '#{MARCA['nome']}'")
         end
       end
-    rescue ActiveRecord::NoDatabaseError, PG::ConnectionBad => e
+    rescue ActiveRecord::NoDatabaseError, ActiveRecord::ConnectionNotEstablished, PG::Error => e
       Rails.logger&.warn("[marca] nome adiado (banco indisponível): #{e.class}")
     end
     next
@@ -63,7 +66,7 @@ Rails.application.config.after_initialize do
     end
     GlobalConfig.clear_cache
     Rails.logger&.info("[marca] instalação vestiu a marca '#{MARCA['id']}'")
-  rescue ActiveRecord::NoDatabaseError, PG::ConnectionBad => e
+  rescue ActiveRecord::NoDatabaseError, ActiveRecord::ConnectionNotEstablished, PG::Error => e
     # banco ainda não existe/está fora (ex.: durante o prepare) — sem drama,
     # na próxima subida a marca é aplicada.
     Rails.logger&.warn("[marca] adiado (banco indisponível): #{e.class}")
