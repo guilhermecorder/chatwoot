@@ -17,4 +17,11 @@ export default defineConfig({
     allowedHosts: true,
   },
   resolve: { alias: aliases },
+  // CEVICO 13/10/2026: não calcular o tamanho "gzip" de cada pedaço no fim do
+  // build. É só um relatório no terminal, mas comprime de novo os pedaços
+  // gigantes (dashboard ~7 MB, ícones ~15 MB) e era o que estourava a memória
+  // da máquina do GitHub. Não muda nada nos arquivos gerados.
+  build: {
+    reportCompressedSize: false,
+  },
 });
