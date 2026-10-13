@@ -21,7 +21,9 @@ ENV RAILS_ENV ${RAILS_ENV}
 
 # 🗺️ CEVICO (item 170): o mermaid deixou o build do Vite mais pesado — com 4096
 # o Node estourava o heap ("JavaScript heap out of memory") no assets:precompile
-ARG NODE_OPTIONS="--max-old-space-size=6144 --openssl-legacy-provider"
+# 13/10/2026 (auditoria): o build de produção passou a usar ~6,1 GB (medido) e
+# estourou os 6144 no GitHub (máquina de 16 GB). 10240 dá folga sem esgotar a máquina.
+ARG NODE_OPTIONS="--max-old-space-size=10240 --openssl-legacy-provider"
 ENV NODE_OPTIONS ${NODE_OPTIONS}
 
 ENV BUNDLE_PATH="/gems"
