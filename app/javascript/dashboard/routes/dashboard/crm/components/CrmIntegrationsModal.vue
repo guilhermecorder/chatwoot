@@ -739,11 +739,13 @@ const fetchWorkflows = async () => {
               :key="r.target"
               class="flex items-start gap-1.5 px-3 py-1.5 rounded-lg bg-n-alpha-1 text-n-slate-11"
             >
-              <span class="flex-shrink-0">{{ r.ok ? '✅' : '❌' }}</span>
+              <span class="flex-shrink-0">{{ r.skipped ? '⚪' : r.ok ? '✅' : '❌' }}</span>
               <span class="min-w-0">
                 <b class="text-n-slate-12">{{ r.target }}</b>
-                <template v-if="r.ok">
+                <template v-if="r.skipped"> — {{ r.note }}</template>
+                <template v-else-if="r.ok">
                   — chegou na Meta<span v-if="r.token"> (chave {{ r.token === 'caixa' ? 'da caixa' : 'do sistema' }})</span>
+                  <span v-if="r.note" class="text-n-slate-10"> · {{ r.note }}</span>
                 </template>
                 <template v-else> — {{ r.error || 'a Meta recusou' }}</template>
               </span>

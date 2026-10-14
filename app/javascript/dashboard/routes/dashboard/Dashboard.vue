@@ -74,8 +74,12 @@ export default {
       showCreateAccountModal: false,
       showShortcutModal: false,
       isMobileSidebarOpen: false,
-      // título que veio do servidor (nome da instalação) — é o padrão da aba
-      baseTabTitle: (document.title || '').trim() || 'CEVICO S.Un',
+      // título que veio do servidor (nome da instalação) — é o padrão da aba.
+      // 🏷️ item 345: "Chatwoot" de fábrica nunca vira título (14/10 a aba
+      // voltou a mostrar Chatwoot em produção)
+      baseTabTitle: /^(chatwoot)?$/i.test((document.title || '').trim())
+        ? 'CEVICO S.Un'
+        : document.title.trim(),
     };
   },
   computed: {

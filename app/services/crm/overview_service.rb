@@ -198,6 +198,15 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
       taxa_agendamento: pct(ag_novos, novos),
       taxa_agendamento_anterior: pct(ag_novos_prev, novos_prev),
       taxa_formula: 'Agendaram (novos) ÷ contatos novos do período — a mesma turma em cima e embaixo.',
+      # 📈 item 345b (14/10, "hoje mesmo o total de agendamentos foi 17… gostaria
+      # dessa taxa de conversão também"): RENDIMENTO do período = todos que
+      # agendaram (novos + base) ÷ contatos novos. Mistura turmas (quem agendou
+      # hoje pode ter chegado semana passada) — por isso fica AO LADO da taxa
+      # novo → consulta, nunca no lugar dela.
+      taxa_geral: pct(ag_total, novos),
+      taxa_geral_anterior: pct(ag_total_prev, novos_prev),
+      taxa_geral_formula: 'Todos que agendaram no período (novos + base) ÷ contatos novos do período — rendimento: ' \
+                          'quantos agendamentos saíram para cada contato novo que entrou.',
       taxa_orcamento: pct(orcamento_ids.size, novos),
       # 4 · tempo até agendar (quem chegou E agendou no período)
       tempo: tempo_json(dias),

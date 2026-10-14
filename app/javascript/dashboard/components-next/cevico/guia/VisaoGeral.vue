@@ -172,6 +172,12 @@ const ctxTaxa = computed(() => {
   if (!e) return '';
   return `${n(e.agendaram_novos.valor)} de ${n(e.novos.valor)} que chegaram ${nomePeriodo.value} já agendaram. ${ctxCoortes.value}`;
 });
+// 📈 item 345b: rendimento — todos que agendaram no período ÷ novos
+const ctxTaxaGeral = computed(() => {
+  const e = entrada.value;
+  if (!e?.agendaram_total) return '';
+  return `${n(e.agendaram_total.valor)} agendaram ${nomePeriodo.value} (${n(e.agendaram_novos.valor)} novos + ${n(e.agendaram_base.valor)} da base) para ${n(e.novos.valor)} contatos novos — rendimento do período.`;
+});
 const ctxOcupacao = computed(() => {
   const o = agenda.value?.ocupacao;
   if (!o) return '';
@@ -584,7 +590,7 @@ const pessoaSub = p => {
         icon="i-lucide-door-open"
       >
         <div class="cvg-bloco-pilha">
-          <div class="cvg-fila cvg-fila--4">
+          <div class="cvg-fila cvg-fila--5">
             <CvIndicador
               rotulo="Contatos novos"
               :valor="n(entrada.novos.valor)"
@@ -656,6 +662,14 @@ const pessoaSub = p => {
               "
               :contexto="ctxTaxa"
               pe="novos que agendaram ÷ novos"
+            />
+            <!-- 📈 item 345b: rendimento do período (novos + base ÷ novos) -->
+            <CvIndicador
+              rotulo="Agendamentos ÷ novos"
+              :valor="pctTxt(entrada.taxa_geral)"
+              :comparacao="cmpPct(entrada.taxa_geral, entrada.taxa_geral_anterior)"
+              :contexto="ctxTaxaGeral"
+              pe="novos + base ÷ novos"
             />
           </div>
           <div class="cvg-graficos">

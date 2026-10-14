@@ -80,6 +80,8 @@ RSpec.describe Crm::OverviewService do
     expect(entrada[:agendaram_base][:valor]).to eq(1)
     expect(entrada[:agendaram_total][:valor]).to eq(2)
     expect(entrada[:taxa_agendamento]).to eq(50.0)
+    # item 345b: rendimento = todos que agendaram (Ana nova + Beto da base) ÷ novos
+    expect(entrada[:taxa_geral]).to eq(100.0)
     expect(entrada[:pessoas][:agendaram].pluck(:nome)).to eq(['Ana'])
     expect(entrada[:pessoas][:agendaram_base].pluck(:nome, :dias)).to eq([['Beto', 10]])
   end

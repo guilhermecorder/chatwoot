@@ -21,6 +21,14 @@ RSpec.describe Crm::MetaAdsTestService do
     channel.inbox
   end
 
+  # lead que chegou por anúncio de WhatsApp nesta caixa (o clique dele é real)
+  def ad_lead!(inbox, clid: 'CLIQUE_REAL')
+    contact = create(:contact, account: account, phone_number: '+5511988887777',
+                               additional_attributes: { 'meta_ads' => { 'ctwa_clid' => clid } })
+    create(:conversation, account: account, inbox: inbox, contact: contact)
+    contact
+  end
+
   def sent_body(target)
     body = nil
     expect(WebMock).to(have_requested(:post, target).with { |req| body = JSON.parse(req.body) })
@@ -37,7 +45,8 @@ RSpec.describe Crm::MetaAdsTestService do
     result = described_class.new(account: account).call
 
     expect(result).to include(success: true, test_event_code: 'TEST_CEVICO')
-    expect(result[:results]).to eq([{ target: 'Site (pixel PIXEL1)', dataset_id: 'PIXEL1', ok: true, error: nil, token: 'sistema' }])
+    expect(result[:results].size).to eq(1)
+    expect(result[:results].first).to include(target: 'Site (pixel PIXEL1)', dataset_id: 'PIXEL1', ok: true, error: nil, token: 'sistema')
     body = sent_body(site_endpoint)
     expect(body['test_event_code']).to eq('TEST_CEVICO')
     expect(body['data'].first['user_data']['ph']).to eq([Digest::SHA256.hexdigest('5511999999999')])
@@ -53,6 +62,7 @@ RSpec.describe Crm::MetaAdsTestService do
 
   it 'tests each WhatsApp inbox on its own dataset and skips the partner inbox' do
     instagram = whatsapp_inbox('WABA_A', 'INSTAGRAM')
+    ad_lead!(instagram)
     partner = whatsapp_inbox('WABA_P', 'Oftalmofácil')
     setting.update!(agenda_config: { 'oftalmofacil' => { 'partner_inbox_ids' => [partner.id] } })
     stub_request(:get, %r{v19\.0/WABA_A/dataset}).to_return(status: 200, body: { data: [] }.to_json, headers: json)
@@ -66,13 +76,15 @@ RSpec.describe Crm::MetaAdsTestService do
     expect(result[:results].last).to include(dataset_id: 'DS_A', ok: true, token: 'sistema')
     event = sent_body(%r{v19\.0/DS_A/events})['data'].first
     expect(event).to include('action_source' => 'business_messaging', 'messaging_channel' => 'whatsapp', 'event_name' => 'LeadSubmitted')
-    expect(event['user_data']).to include('whatsapp_business_account_id' => 'WABA_A')
+    expect(event['user_data']).to include('whatsapp_business_account_id' => 'WABA_A', 'ctwa_clid' => 'CLIQUE_REAL',
+                                          'ph' => [Digest::SHA256.hexdigest('5511988887777')])
     expect(WebMock).not_to have_requested(:any, /WABA_P/)
     expect(setting.reload.meta_ads_config['waba_datasets']).to eq('WABA_A' => 'DS_A')
   end
 
   it 'reports what Meta answered for each target, and which token worked' do
     inbox = whatsapp_inbox('WABA_A', 'INSTAGRAM')
+    ad_lead!(inbox)
     setting.update!(meta_ads_config: setting.meta_ads_config.merge('waba_datasets' => { 'WABA_A' => 'DS_A' }))
     stub_request(:post, site_endpoint).to_return(
       status: 400, headers: json,
@@ -93,6 +105,22 @@ RSpec.describe Crm::MetaAdsTestService do
     )
     expect(result[:results].last).to include(target: "Caixa #{inbox.id} INSTAGRAM", ok: true, token: 'caixa')
     expect(result.to_s).not_to include('key_WABA_A')
+  end
+
+  # 14/10: com clique inventado a Meta sempre recusava ("ctwa_clid inválido")
+  it 'caixa sem lead de anúncio na semana: conjunto pronto, nada a testar (sem erro falso)' do
+    inbox = whatsapp_inbox('WABA_A', 'INSTAGRAM')
+    old = ad_lead!(inbox)
+    old.conversations.update_all(created_at: 10.days.ago) # rubocop:disable Rails/SkipsModelValidations
+    setting.update!(meta_ads_config: setting.meta_ads_config.merge('waba_datasets' => { 'WABA_A' => 'DS_A' }))
+    stub_request(:get, %r{v19\.0/WABA_A/dataset}).to_return(status: 200, body: { data: [{ id: 'DS_A' }] }.to_json, headers: json)
+
+    result = described_class.new(account: account).call
+
+    expect(result[:success]).to be(true)
+    expect(result[:results].last).to include(ok: true, skipped: true, dataset_id: 'DS_A')
+    expect(result[:results].last[:note]).to include('nenhum lead de anúncio')
+    expect(WebMock).not_to have_requested(:post, %r{DS_A/events})
   end
 
   it 'reports the inbox when its dataset cannot be found nor created' do
