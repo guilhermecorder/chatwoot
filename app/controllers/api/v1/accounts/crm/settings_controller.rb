@@ -357,12 +357,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: meta_ads_json(crm_settings)
   end
 
+  # 📣 item 345 (14/10): testa o site E cada caixa do WhatsApp (conjunto da
+  # conta), sempre com código de teste — resposta em lista, um por destino
   def test_meta_ads
-    result = MetaAdsConversionsService.new(
-      account: Current.account,
-      event_name: 'PageView'
-    ).call
-    render json: result
+    render json: Crm::MetaAdsTestService.new(account: Current.account).call
   end
 
   # ── 🌾 Colheitadeira da Base (item 128) ──────────────────────────────────────
@@ -1416,6 +1414,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       h_end = raw['end'].to_i.clamp(1, 24)
       cfg['followup_hours'] = { 'start' => h_start, 'end' => h_end } if h_start < h_end
     end
+    # 🚦 RITMO DE ENVIO por número (item 345): até N cutucadas a cada M min
+    # por caixa — evita a rajada das 08:00 que parece spam para a Meta.
+    # Inválido → padrão 5 a cada 5; per_window 0 = sem limite. Só admin.
+    if params.key?(:followup_pace) && Current.account_user.administrator?
+      cfg['followup_pace'] = Crm::FollowupBotJob.pace_config(params.require(:followup_pace).permit(:per_window, :minutes).to_h)
+    end
     # 🏷️ ETIQUETAS QUE ENCERRAM O FOLLOW-UP (rodada 158): contato ou conversa
     # com uma delas não recebe cutucada de NENHUM robô (além das fixas
     # nao_perturbe / perda_* do job). Ex.: att_encerrado. Só admin.
@@ -1466,6 +1470,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       performance_metrics: cfg['performance_metrics'] || {},
       clinical_access: cfg['clinical_access'] || {},
       followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 },
+      followup_pace: Crm::FollowupBotJob.pace_config(cfg['followup_pace']), # 🚦 item 345
       followup_stop_labels: cfg['followup_stop_labels'] || [],
       appointment_reminders: cfg['appointment_reminders'] || {},
       appointment_reminders_state: cfg[Crm::AppointmentReminderSendJob::STATE_KEY] || {},
@@ -2320,6 +2325,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_theme: (s.agenda_config || {})['theme'],
       # 🕐 janela de envio dos robôs de follow-up (item 147; padrão 08h–20h)
       followup_hours: (s.agenda_config || {})['followup_hours'] || { 'start' => 8, 'end' => 20 },
+      # 🚦 ritmo de envio por número (item 345; padrão 5 a cada 5 min)
+      followup_pace: Crm::FollowupBotJob.pace_config((s.agenda_config || {})['followup_pace']),
       # 🏷️ etiquetas que encerram o follow-up de todos os robôs (rodada 158)
       followup_stop_labels: (s.agenda_config || {})['followup_stop_labels'] || [],
       # 📅 lembretes do dia da consulta D-1/D-0 (item 156)
@@ -2686,8 +2693,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       ad_account_id: cfg['ad_account_id'],
       test_event_code: cfg['test_event_code'],
       configured: cfg['pixel_id'].present? && cfg['access_token'].present?,
-      insights_configured: cfg['ad_account_id'].present? && cfg['access_token'].present?
+      insights_configured: cfg['ad_account_id'].present? && cfg['access_token'].present?,
+      whatsapp_datasets: meta_whatsapp_datasets(s, cfg)
     }
+  end
+
+  # 📣 item 345: caixa do WhatsApp → conjunto de dados da conta (só leitura)
+  def meta_whatsapp_datasets(setting, cfg)
+    Crm::MetaWabaDatasets.new(setting.account, cfg).overview
+  rescue StandardError => e
+    Rails.logger.warn "[MetaWabaDatasets] lista da tela falhou: #{e.message}"
+    []
   end
 
   # cor escolhida pelo admin por card da fileira (item 143): só strings de

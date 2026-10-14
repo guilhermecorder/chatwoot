@@ -129,4 +129,18 @@ RSpec.describe 'Faturamento fechado sem carga em massa (Meu Painel e PRO MAX)' d
       expect(revenue['values'][4]).to eq(4000.0)
     end
   end
+
+  # 👤 item 345 (14/10): "Entrou em X" conta PESSOAS, não passagens
+  describe 'Entrou em <coluna> por pessoa' do
+    it 'o card que sai e volta no mesmo dia conta 1; entrada corrigida pela limpeza não conta', :aggregate_failures do
+      c = card(0)
+      enter(c, booking, tz.local(2026, 7, 14, 8, 0))
+      enter(c, booking, tz.local(2026, 7, 14, 8, 22)) # vai-e-volta do Cristiano
+      enter(card(0), booking, tz.local(2026, 7, 14, 9, 0))
+      enter(card(0), booking, tz.local(2026, 7, 14, 10, 0), event_type: Crm::FalseBookingCleanup::WRONG)
+
+      expect(metric("stage_#{booking.id}")[:value]).to eq(2.0)
+      expect(metric('appointments_created')[:value]).to eq(2.0)
+    end
+  end
 end

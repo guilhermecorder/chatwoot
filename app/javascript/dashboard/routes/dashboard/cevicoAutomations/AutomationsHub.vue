@@ -3186,6 +3186,8 @@ const REASON_LABELS = {
   trava_intervalo_minimo: 'trava: 30 min mínimos entre cutucadas',
   trava_teto_diario: 'trava: teto de 4 cutucadas por dia',
   trava_cadencia_completa: 'trava: cadência já saiu inteira (mensagens reais)',
+  // 🚦 item 345: número no teto do ritmo de envio — espera a próxima rodada
+  ritmo: 'na fila do ritmo de envio (sai nas próximas rodadas)',
   erro: 'erro ao enviar',
 };
 const reasonLine = run =>
@@ -3253,6 +3255,55 @@ const saveFollowupHours = async (start, end) => {
     useAlert('Erro ao salvar o horário de envio');
   } finally {
     savingFollowupHours.value = false;
+  }
+};
+
+// 🚦 RITMO DE ENVIO (item 345) — até N cutucadas a cada M minutos POR NÚMERO
+// (somando todos os robôs e a reativação). Às 08h tudo o que venceu de
+// madrugada saía de uma vez e parecia spam para a Meta. Quem tem a janela de
+// 24h do WhatsApp mais perto de fechar sai primeiro. 0 = sem limite.
+const followupPace = ref({ per_window: 5, minutes: 5 });
+const savingFollowupPace = ref(false);
+watch(
+  settings,
+  s => {
+    const p = s?.followup_pace;
+    if (p && p.per_window != null)
+      followupPace.value = {
+        per_window: Number(p.per_window),
+        minutes: Number(p.minutes),
+      };
+  },
+  { immediate: true }
+);
+const saveFollowupPace = async (perWindow, minutes) => {
+  // mesma faixa do backend: 0–100 mensagens, 1–120 minutos; campo vazio ou
+  // lixo mantém o valor atual (não vira "sem limite" sem querer)
+  const toInt = (v, fallback) => {
+    const x = Number(v);
+    return v === '' || !Number.isFinite(x) ? fallback : Math.round(x);
+  };
+  const n = Math.min(
+    Math.max(toInt(perWindow, followupPace.value.per_window), 0),
+    100
+  );
+  const m = Math.min(
+    Math.max(toInt(minutes, followupPace.value.minutes), 1),
+    120
+  );
+  followupPace.value = { per_window: n, minutes: m };
+  savingFollowupPace.value = true;
+  try {
+    await CrmAPI.updateFollowupPace({ per_window: n, minutes: m });
+    useAlert(
+      n === 0
+        ? 'Ritmo de envio sem limite'
+        : `Até ${n} mensagens a cada ${m} min por número`
+    );
+  } catch {
+    useAlert('Erro ao salvar o ritmo de envio');
+  } finally {
+    savingFollowupPace.value = false;
   }
 };
 
@@ -3535,6 +3586,77 @@ onUnmounted(() => {
               dela a etapa de texto é pulada (fica no registro) e só mensagem
               modelo entrega.
             </p>
+
+            <!-- 🚦 Ritmo de envio (item 345): até N cutucadas a cada M min
+               por número — evita a rajada das 08h que parece spam -->
+            <div class="mt-3 pt-3 border-t border-n-weak">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="i-lucide-gauge text-sm" style="color: #0f5fa6" />
+                <p class="text-sm font-semibold text-n-slate-12">
+                  Ritmo de envio
+                </p>
+                <span class="text-xs font-medium text-n-brand">{{
+                  followupPace.per_window === 0
+                    ? 'sem limite'
+                    : `até ${followupPace.per_window} a cada ${followupPace.minutes} min`
+                }}</span>
+                <Spinner
+                  v-if="savingFollowupPace"
+                  :size="14"
+                  class="text-n-brand"
+                />
+              </div>
+              <div class="mt-2.5 flex items-center gap-2 flex-wrap">
+                <span class="text-xs text-n-slate-11">até</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  :value="followupPace.per_window"
+                  class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
+                  style="width: 70px; margin-bottom: 0"
+                  @change="
+                    saveFollowupPace($event.target.value, followupPace.minutes)
+                  "
+                />
+                <span class="text-xs text-n-slate-11">mensagens a cada</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="120"
+                  :value="followupPace.minutes"
+                  class="text-sm border border-n-weak rounded-lg px-2 py-1 bg-n-solid-1"
+                  style="width: 70px; margin-bottom: 0"
+                  @change="
+                    saveFollowupPace(
+                      followupPace.per_window,
+                      $event.target.value
+                    )
+                  "
+                />
+                <span class="text-xs text-n-slate-11">
+                  minutos por número (evita parecer spam)
+                </span>
+                <button
+                  class="text-[11px] px-2.5 py-1 rounded-full border transition-colors"
+                  :class="
+                    followupPace.per_window === 5 && followupPace.minutes === 5
+                      ? 'border-n-brand text-n-brand font-semibold'
+                      : 'border-n-weak text-n-slate-10 hover:text-n-brand'
+                  "
+                  @click="saveFollowupPace(5, 5)"
+                >
+                  Padrão 5 a cada 5 min
+                </button>
+              </div>
+              <p class="mt-2 text-[11px] text-n-slate-10 leading-relaxed">
+                Vale para todos os robôs e para a reativação de quem adiou,
+                somados por número de WhatsApp. Quem passa do limite
+                <b>não perde a cutucada</b>: espera a vez e sai nas próximas
+                rodadas. A fila começa por quem está com a janela de 24h do
+                WhatsApp mais perto de fechar. Use 0 para não limitar.
+              </p>
+            </div>
 
             <!-- 🏷️ Etiquetas que encerram o follow-up (rodada 158) -->
             <div class="mt-3 pt-3 border-t border-n-weak">

@@ -67,6 +67,24 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # perda_* nunca recebe cutucada, de robô nenhum. O admin acrescenta as
   # suas (ex.: att_encerrado) em Automações → Robôs → "Etiquetas que
   # encerram o follow-up" (agenda_config.followup_stop_labels).
+  # ── 🚦 RITMO DE ENVIO POR NÚMERO (item 345, 14/10) ──
+  # Tudo o que vencia de madrugada ia para as 08:00 e saía DE UMA VEZ —
+  # dezenas de mensagens do mesmo número no mesmo minuto parecem SPAM para a
+  # Meta. Agora cada caixa (número) manda no máximo N cutucadas em qualquer
+  # janela de M minutos (padrão: 5 a cada 5), somando TODOS os robôs e a
+  # reativação de quem adiou. A rodada vira UMA fila: quem tem a janela de
+  # 24h do WhatsApp mais perto de fechar sai primeiro. Quem passou do teto
+  # espera a próxima rodada SEM ser marcado (a etapa continua valendo).
+  # Config: agenda_config.followup_pace {per_window, minutes} (Automações →
+  # Robôs, ao lado do "Horário de envio"); per_window 0 = sem limite.
+  PACE_DEFAULTS = { 'per_window' => 5, 'minutes' => 5 }.freeze
+  PACE_LIMITS = { 'per_window' => (0..100), 'minutes' => (1..120) }.freeze
+  PACE_HOLD_TTL = 24.hours # quanto tempo a etapa "na fila do ritmo" fica livre do descarte por atraso
+  PACE_SLICE = 100         # conversas carregadas por vez ao andar na fila da rodada
+  WINDOW_HOURS = 24        # janela de atendimento do WhatsApp (prioridade da fila)
+  # mensagens que contam no ritmo: cutucadas de qualquer robô + reativações
+  PACE_MESSAGES_SQL = "(messages.additional_attributes ->> 'cevico_followup_bot_id' IS NOT NULL " \
+                      "OR messages.additional_attributes ->> 'cevico_followup_reativacao' = 'true')".freeze
   STOP_LABELS_FIXED = %w[nao_perturbe].freeze
   STOP_LABEL_PREFIXES = %w[perda_].freeze
   NEXT_STATUSES = %w[proxima aguardando].freeze # etapas que ainda vão sair (previsão)
@@ -95,8 +113,21 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     'leitura_fila' => 'leitura da conversa na fila — sai na próxima rodada',
     'lead_frio' => 'lead que nunca escreveu: só 1 cutucada em 24h',
     'entrega_falhou' => 'a última cutucada não foi entregue (possível bloqueio) — o robô parou',
-    'fim_de_semana' => 'fim de semana: só cutuca quem escreveu no mesmo dia'
+    'fim_de_semana' => 'fim de semana: só cutuca quem escreveu no mesmo dia',
+    # 🚦 item 345
+    'ritmo' => 'na fila do ritmo de envio (limite de mensagens por número) — sai nas próximas rodadas'
   }.freeze
+
+  # 🚦 item 345: ritmo de envio normalizado — o controlador grava por aqui
+  # também. Campo ausente, inválido ou fora da faixa → padrão (5 a cada 5 min);
+  # per_window 0 = sem limite.
+  def self.pace_config(raw)
+    cfg = raw.is_a?(Hash) ? raw.stringify_keys : {}
+    PACE_DEFAULTS.to_h do |key, default|
+      value = cfg[key].to_s.strip.match?(/\A\d+\z/) ? cfg[key].to_s.to_i : nil
+      [key, value && PACE_LIMITS[key].cover?(value) ? value : default]
+    end
+  end
 
   def perform
     # TRAVA: cron a cada 2 min. Se uma rodada demora mais que isso (muitas
@@ -108,8 +139,9 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     begin
       @reads = 0 # 🧠 leituras da conversa nesta rodada (teto READS_PER_ROUND)
-      Crm::FollowupBot.active.includes(:inbox).find_each { |bot| process_bot(bot) }
-      process_reactivations # 🧠 quem adiou: mensagem modelo dias depois (decisão B, 13/10)
+      # 🚦 item 345: todos os robôs numa fila só (ritmo por número vale para a rodada inteira)
+      process_bots(Crm::FollowupBot.active.includes(:inbox).order(:id).to_a)
+      process_reactivations # 🧠 quem adiou: mensagem modelo dias depois (decisão B, 13/10) — mesmo ritmo
       Crm::CronHealth.ran!('followup') # 🚨 #217: sinal de vida da rodada (o vigia confere)
     ensure
       lock_manager.unlock(lock_key)
@@ -121,7 +153,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # saiu, o que foi pulado, quando sai a próxima e por quê. Devolve texto
   # pronto em PT-BR (text), a situação (status: proxima | parado | pausado |
   # completa | desligado) e a linha do tempo das etapas.
-  def forecast(bot, conversation) # rubocop:disable Metrics/AbcSize
+  def forecast(bot, conversation) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
     steps = bot.ordered_steps
     return { status: 'desligado', text: 'robô sem etapas', sent: 0, total: 0, timeline: [] } if steps.blank?
 
@@ -137,6 +169,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       status = 'parado'
       text = "#{REASON_TEXT['ia_sem_texto']} · #{sent.size} de #{steps.size} enviadas"
     end
+    text = pace_forecast(bot, conversation, timeline, text) if status == 'proxima' && plan[:chosen]
     {
       status: status, text: text, sent: sent.size, total: steps.size,
       next_at: timeline.find { |t| NEXT_STATUSES.include?(t[:status]) }&.dig(:at),
@@ -159,7 +192,27 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     CrmSetting.find_by(account: bot.account)&.ai_config&.dig('api_key').blank?
   end
 
+  # um robô sozinho (specs e chamadas avulsas) = uma rodada com só ele
   def process_bot(bot)
+    process_bots([bot])
+  end
+
+  # 🚦 item 345: a rodada junta as conversas de TODOS os robôs numa FILA só,
+  # ordenada pela janela de 24h do WhatsApp (#priority_queue), e anda nela uma
+  # a uma — assim o ritmo por número vale para a rodada inteira e quem tem
+  # menos tempo para conversar passa na frente. Cada robô continua com o seu
+  # registro de atividade (motivos, envios) e o seu teto de IA.
+  def process_bots(bots)
+    @pace_base = {}            # já enviado por caixa nos últimos M min (lido 1× por caixa na rodada)
+    @pace_sent = Hash.new(0)   # enviado por caixa NESTA rodada
+    work = bots.filter_map { |bot| prepare_bot(bot) }
+    priority_queue(work).each_slice(PACE_SLICE) { |slice| process_slice(slice) }
+    work.each { |item| finish_bot(item) }
+  end
+
+  # confere janela/horário/etapas do robô e lista as conversas candidatas;
+  # nil quando o robô não roda nesta rodada (já registrado)
+  def prepare_bot(bot) # rubocop:disable Metrics/MethodLength
     unless bot.within_window? # janela "começa em / para em"
       record_run(bot, status: 'fora_da_janela')
       return
@@ -172,35 +225,79 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     end
 
     steps = bot.ordered_steps
-    return record_run(bot, status: 'sem_etapas') if steps.blank?
+    if steps.blank?
+      record_run(bot, status: 'sem_etapas')
+      return
+    end
 
     # UMA conversa por contato: a de última atividade (caixa prioritária) —
     # evita cutucar o mesmo paciente em várias caixas de entrada ao mesmo tempo.
     ids = conversations(bot)
           .select('DISTINCT ON (conversations.contact_id) conversations.id')
           .order('conversations.contact_id, conversations.last_activity_at DESC')
-          .map(&:id)
+          .map(&:id).sort
+    # ai_calls: item 315 — chamadas à IA deste robô nesta rodada (teto AI_PER_ROUND)
+    { bot: bot, steps: steps, ids: ids, ai_calls: 0, events: [],
+      run: { status: 'ok', candidates: ids.size, sent: 0, reasons: Hash.new(0) } }
+  end
 
-    run = { status: 'ok', candidates: ids.size, sent: 0, reasons: Hash.new(0) }
-    events = []
-    @ai_calls = 0 # item 315: chamadas à IA nesta rodada (teto AI_PER_ROUND)
+  # 🚦 a FILA da rodada: pares [robô, conversa]. Primeiro quem está com a
+  # janela de 24h do WhatsApp aberta, da última fala do paciente mais ANTIGA
+  # (janela fechando antes) para a mais nova; depois quem não tem janela
+  # aberta (lead que nunca escreveu, paciente sumido há mais de 24h — só
+  # mensagem modelo entrega), na ordem de antes (robô, nº da conversa).
+  def priority_queue(work)
+    pairs = work.flat_map { |item| item[:ids].map { |id| [item, id] } }
+    opened = window_opened_at(pairs.map(&:last).uniq)
+    pairs.each_with_index
+         .sort_by { |(_, id), i| [opened[id] ? 0 : 1, opened[id].to_f, i] }
+         .map(&:first)
+  end
 
-    # eager-load do contato + inbox: evita 1 query por conversa só pra achar o
-    # contato/etiquetas na hora de decidir a cutucada
-    Conversation.where(id: ids).includes(:contact, :inbox).find_each do |conversation|
-      process_conversation(bot, conversation, steps, run, events)
-    rescue StandardError => e
-      run[:reasons]['erro'] += 1
-      events << event_for(conversation, 'error', note: e.message.truncate(120))
-      Rails.logger.error("[CEVICO followup] conversa #{conversation.id}: #{e.message}")
-      # 🚨 #217: registra (rastreador 1×/h por conversa) sem marcar o robô inteiro
-      Crm::CronHealth.failed!('followup', e, account: bot.account, item: "conversa #{conversation.id}", count: false)
+  # última fala do paciente dentro das 24h, por conversa (uma consulta)
+  def window_opened_at(conversation_ids)
+    return {} if conversation_ids.empty?
+
+    Message.unscope(:order)
+           .where(conversation_id: conversation_ids, message_type: :incoming, private: false)
+           .where('created_at > ?', WINDOW_HOURS.hours.ago)
+           .group(:conversation_id).maximum(:created_at)
+  end
+
+  # carrega um pedaço da fila (eager-load do contato + inbox: evita 1 query
+  # por conversa só pra achar o contato/etiquetas). Cada robô recebe a SUA
+  # instância da conversa, como antes (o estado de um não vaza no outro).
+  def process_slice(slice)
+    loaded = slice.group_by { |item, _| item[:bot].id }.transform_values do |pairs|
+      Conversation.where(id: pairs.map(&:last)).includes(:contact, :inbox).index_by(&:id)
     end
+    slice.each do |item, id|
+      conversation = loaded.dig(item[:bot].id, id)
+      process_candidate(item, conversation) if conversation # sumiu entre a busca e agora: pula
+    end
+  end
+
+  def process_candidate(item, conversation)
+    bot = item[:bot]
+    @hours = send_hours(bot.account)
+    @ai_calls = item[:ai_calls]
+    process_conversation(bot, conversation, item[:steps], item[:run], item[:events])
+  rescue StandardError => e
+    item[:run][:reasons]['erro'] += 1
+    item[:events] << event_for(conversation, 'error', note: e.message.truncate(120))
+    Rails.logger.error("[CEVICO followup] conversa #{conversation.id}: #{e.message}")
+    # 🚨 #217: registra (rastreador 1×/h por conversa) sem marcar o robô inteiro
+    Crm::CronHealth.failed!('followup', e, account: bot.account, item: "conversa #{conversation.id}", count: false)
+  ensure
+    item[:ai_calls] = @ai_calls.to_i
+  end
+
+  def finish_bot(item)
+    run = item[:run]
     # rodada "com erro" só quando metade ou mais das conversas falharam (1 conversa
     # com dado ruim não deixa o robô "com erro" para sempre)
-    Crm::CronHealth.mark_round_error!('followup', failed: run[:reasons]['erro'], tried: ids.size)
-
-    record_run(bot, **run, events: events)
+    Crm::CronHealth.mark_round_error!('followup', failed: run[:reasons]['erro'], tried: item[:ids].size)
+    record_run(item[:bot], **run, events: item[:events])
   end
 
   def conversations(bot)
@@ -230,12 +327,21 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
   # DECIDE (plan_for, só leitura) e depois AGE: marca as etapas tratadas sem
   # envio, e envia no máximo UMA cutucada por conversa por rodada.
-  def process_conversation(bot, conversation, steps, run, events) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength
+  def process_conversation(bot, conversation, steps, run, events) # rubocop:disable Metrics/AbcSize,Metrics/MethodLength,Metrics/CyclomaticComplexity
     plan = plan_for(bot, conversation, steps)
     settle_handled(bot, conversation, plan, events)
 
     chosen = plan[:chosen]
     return run[:reasons][plan[:reason]] += 1 if chosen.nil?
+
+    # 🚦 item 345: o número desta conversa já mandou o teto do ritmo — espera a
+    # vez na próxima rodada SEM marcar nada (nem mark_steps nem persist_state);
+    # fica só o lembrete "na fila" que protege a etapa do descarte por atraso.
+    # Vem antes da leitura e da IA: não gasta chamada com quem nem pode sair agora.
+    if pace_full?(bot.account, conversation.inbox_id)
+      remember_pace_hold(bot, conversation, chosen)
+      return run[:reasons]['ritmo'] += 1
+    end
 
     # item 315: etapa de IA além do teto da rodada fica para a próxima (sem marcar)
     return run[:reasons]['ia_fila'] += 1 if ai_queue_full?(chosen)
@@ -264,6 +370,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     end
 
     send_nudge(bot, conversation, chosen, outcome[:text])
+    pace_count!(conversation.inbox_id)
     run[:sent] += 1
     events << event_for(conversation, 'sent', note: step_label(chosen[:step]))
   end
@@ -385,7 +492,14 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     # Só o que venceu há HORAS (deploy/queda longa) perde o momento — é
     # marcado como tratado SEM enviar. As demais vencidas NÃO são absorvidas
     # (fix 03/08): sai UMA por rodada, na ORDEM da cadência.
-    stale, fresh = due.partition { |d| d[:overdue] > STALE_HOURS }
+    # 🚦 item 345: etapa que estava NO PRAZO quando o ritmo de envio a segurou
+    # (lembrete "na fila" no Redis, #remember_pace_hold) não é descartada por
+    # atraso — a demora é da fila do número, não de queda/deploy. Escolhemos
+    # ISENTAR (em vez de recalcular o atraso a partir de um momento deslocado)
+    # porque a fila não tem hora certa para andar: depende de quantos estão
+    # na frente. A isenção vale até PACE_HOLD_TTL (24h) depois da 1ª espera;
+    # passou disso, volta a regra normal do momento perdido.
+    stale, fresh = due.partition { |d| d[:overdue] > STALE_HOURS && !pace_held?(bot, conversation, d) }
     stale.each { |d| plan[:handled] << d.merge(note: "#{step_label(d[:step])} venceu há #{d[:overdue].round}h — não enviada") }
 
     return plan.merge(reason: no_send_reason(stale, unreachable, blocked, plan)) if fresh.empty?
@@ -544,7 +658,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # "ainda não / vou pensar" → UMA mensagem modelo N dias depois (padrão 7),
   # pela caixa da conversa, com o modelo escolhido para aquela caixa. Só em
   # dia útil, no horário de envio. Instagram não tem mensagem modelo: não sai.
-  def process_reactivations # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+  # 🚦 item 345: a reativação entra no MESMO ritmo por número — sai depois das
+  # cutucadas da rodada (mensagem modelo não depende da janela de 24h) e,
+  # com o número no teto, espera a próxima rodada sem gravar nada.
+  def process_reactivations # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity,Metrics/MethodLength
     due = Conversation.where("conversations.additional_attributes -> '#{Crm::FollowupClosure::ATTR}' ->> 'situacao' = 'adiada'")
                       .where("conversations.additional_attributes -> '#{Crm::FollowupClosure::ATTR}' ->> 'reativacao' IS NULL")
                       .where("(conversations.additional_attributes -> '#{Crm::FollowupClosure::ATTR}' ->> 'reativar_em')::timestamptz <= ?",
@@ -557,20 +674,26 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       local = TZ.now
       next unless @hours.cover?(local.hour) && !local.saturday? && !local.sunday?
 
-      due.where(account_id: account_id).includes(:contact, :inbox).limit(REACTIVATIONS_PER_ROUND).each do |conversation|
-        reactivate(conversation)
+      tried = 0 # teto REACTIVATIONS_PER_ROUND conta tentativas, como antes; quem espera o ritmo não conta
+      due.where(account_id: account_id).includes(:contact, :inbox).order(:id).limit(REACTIVATIONS_PER_ROUND * 5).each do |conversation|
+        break if tried >= REACTIVATIONS_PER_ROUND
+        next if pace_full?(account, conversation.inbox_id)
+
+        tried += 1
+        pace_count!(conversation.inbox_id) if reactivate(conversation)
       rescue StandardError => e
         Rails.logger.error("[CEVICO followup] reativação conversa #{conversation.id}: #{e.message}")
       end
     end
   end
 
+  # true quando a mensagem saiu (conta no ritmo do número)
   def reactivate(conversation)
     data = Crm::FollowupClosure.stored(conversation)
     blocker = reactivation_blocker(conversation, data)
     # trava ANTES de enviar (falha segura: no pior caso perde a reativação, nunca duplica)
     Crm::FollowupClosure.save!(conversation, 'reativacao' => blocker || 'enviada', 'reativacao_at' => Time.current.iso8601)
-    return if blocker
+    return false if blocker
 
     model = smart(conversation.account).dig('reativacao', 'modelos', conversation.inbox_id.to_s)
     params = render_template_params(model['template_params'], conversation)
@@ -579,6 +702,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       content: fill_template_text(render_message(model['message'], conversation), params),
       additional_attributes: { cevico_followup_reativacao: true, template_params: params }
     )
+    true
   end
 
   # o texto do modelo vem com {{1}}, {{2}}…: na conversa a equipe vê o texto
@@ -641,7 +765,8 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       # 🧠 fim de semana: só sai no sábado/domingo se o paciente escreveu no
       # mesmo dia — senão a etapa espera a segunda (não é descartada)
       weekend_at = weekend_shift(conversation, send_at)
-      { step: step, index: index, from_stage: from_stage, due_at: weekend_at || send_at, spacing: spacing,
+      # base: âncora/entrada na coluna (identifica a etapa no lembrete do ritmo, item 345)
+      { step: step, index: index, from_stage: from_stage, base: base_time, due_at: weekend_at || send_at, spacing: spacing,
         weekend: weekend_at.present?, overdue: (now - (weekend_at || send_at)) / 3600.0 }
     end
   end
@@ -728,6 +853,69 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       h_end = cfg.key?('end') ? cfg['end'].to_i.clamp(1, 24) : BUSINESS_HOURS.last
       h_start < h_end ? (h_start...h_end) : BUSINESS_HOURS
     end
+  end
+
+  # ── 🚦 RITMO DE ENVIO POR NÚMERO (item 345) ──
+  # config da conta (Automações → Robôs → "Ritmo de envio"), com padrões
+  def pace(account)
+    @pace_cache ||= {}
+    @pace_cache[account.id] ||= self.class.pace_config(agenda_config(account)['followup_pace'])
+  end
+
+  # a caixa (número) já mandou o teto de mensagens na janela do ritmo?
+  def pace_full?(account, inbox_id)
+    cfg = pace(account)
+    return false if cfg['per_window'].zero? # 0 = sem limite
+
+    pace_used(inbox_id, cfg['minutes']) >= cfg['per_window']
+  end
+
+  # Fonte da VERDADE = mensagens já enviadas pela caixa nos últimos M min
+  # (cutucadas de qualquer robô + reativações), lidas UMA vez por caixa na
+  # rodada (sempre antes do 1º envio dela), + o que esta rodada já enviou.
+  # Se a rodada demora, a soma só erra para MAIS (as antigas que saíram da
+  # janela continuam contadas) — nunca deixa passar do teto. A trava da
+  # rodada garante que ninguém mais envia cutucada nesse meio-tempo.
+  def pace_used(inbox_id, minutes)
+    @pace_base ||= {}
+    @pace_base[inbox_id] ||= Message.unscope(:order)
+                                    .where(inbox_id: inbox_id, message_type: :outgoing)
+                                    .where('messages.created_at >= ?', minutes.minutes.ago)
+                                    .where(PACE_MESSAGES_SQL).count
+    @pace_base[inbox_id] + pace_sent[inbox_id]
+  end
+
+  def pace_sent
+    @pace_sent ||= Hash.new(0)
+  end
+
+  def pace_count!(inbox_id)
+    pace_sent[inbox_id] += 1
+  end
+
+  # lembrete "na fila do ritmo" de UMA etapa (robô + conversa + etapa + base
+  # da cadência): gravado na 1ª vez que o ritmo segurou a etapa, vale 24h.
+  # Fica no Redis, NÃO na conversa — a etapa não é marcada como tratada.
+  def pace_hold_key(bot, conversation, due)
+    "CEVICO_FOLLOWUP_PACE_HOLD:#{bot.id}:#{conversation.id}:#{due[:from_stage] ? 's' : 'a'}#{due[:index]}:#{due[:base].to_i}"
+  end
+
+  def remember_pace_hold(bot, conversation, due)
+    Redis::Alfred.set(pace_hold_key(bot, conversation, due), Time.current.to_i, nx: true, ex: PACE_HOLD_TTL.to_i)
+  end
+
+  def pace_held?(bot, conversation, due)
+    Redis::Alfred.exists?(pace_hold_key(bot, conversation, due))
+  end
+
+  # previsão: a próxima cutucada já venceu, mas o número está no teto do ritmo
+  def pace_forecast(bot, conversation, timeline, text)
+    return text unless pace_full?(bot.account, conversation.inbox_id)
+
+    cfg = pace(bot.account)
+    timeline.each { |t| t[:note] = 'na fila do ritmo de envio' if t[:status] == 'proxima' }
+    qty = cfg['per_window'] == 1 ? '1 mensagem' : "#{cfg['per_window']} mensagens"
+    "#{text} · na fila do ritmo de envio (até #{qty} a cada #{cfg['minutes']} min por número)"
   end
 
   # etiquetas de encerramento configuradas pelo admin (além das fixas)

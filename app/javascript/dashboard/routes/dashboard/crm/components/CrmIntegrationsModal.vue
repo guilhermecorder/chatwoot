@@ -335,9 +335,16 @@ const testMeta = async () => {
   metaTestResult.value = null;
   try {
     const result = await store.dispatch('crm/testMetaAds');
-    metaTestResult.value = result.success
-      ? { success: true, message: `Evento de teste enviado! (${result.events_received ?? 1} recebido pela Meta)` }
-      : { success: false, message: result.error || 'Falha no envio.' };
+    // 📣 item 345: um resultado por destino (site + cada caixa do WhatsApp)
+    const results = result.results || [];
+    metaTestResult.value = {
+      success: !!result.success,
+      results,
+      message: results.length
+        ? `${result.success ? 'Tudo chegou na Meta.' : 'Algum destino foi recusado — veja abaixo.'} Teste com o código ${result.test_event_code}: aparece só em "Testar eventos" da Meta e não conta nas campanhas.`
+        : result.error || 'Falha no envio.',
+    };
+    store.dispatch('crm/fetchSettings'); // atualiza a lista de conjuntos do WhatsApp
   } catch {
     metaTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
   } finally {
@@ -726,6 +733,29 @@ const fetchWorkflows = async () => {
             />
             {{ metaTestResult.message }}
           </div>
+          <ul v-if="metaTestResult?.results?.length" class="mt-2 space-y-1 text-xs">
+            <li
+              v-for="r in metaTestResult.results"
+              :key="r.target"
+              class="flex items-start gap-1.5 px-3 py-1.5 rounded-lg bg-n-alpha-1 text-n-slate-11"
+            >
+              <span class="flex-shrink-0">{{ r.ok ? '✅' : '❌' }}</span>
+              <span class="min-w-0">
+                <b class="text-n-slate-12">{{ r.target }}</b>
+                <template v-if="r.ok">
+                  — chegou na Meta<span v-if="r.token"> (chave {{ r.token === 'caixa' ? 'da caixa' : 'do sistema' }})</span>
+                </template>
+                <template v-else> — {{ r.error || 'a Meta recusou' }}</template>
+              </span>
+            </li>
+          </ul>
+          <p v-if="metaStatus.whatsapp_datasets?.length" class="mt-2 text-xs text-n-slate-10">
+            <b class="text-n-slate-11">Conjuntos do WhatsApp:</b>
+            <span v-for="(d, i) in metaStatus.whatsapp_datasets" :key="d.waba_id">
+              {{ i ? ' · ' : ' ' }}Caixa {{ d.inbox_id }} {{ d.inbox_name }} →
+              <span class="font-mono">{{ d.dataset_id || 'ainda não criado (o Testar envio cria)' }}</span>
+            </span>
+          </p>
 
           <!-- Atribuição de anúncio (CTWA) — automática -->
           <div class="mt-3 bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">

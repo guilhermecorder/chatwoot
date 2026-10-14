@@ -3,13 +3,16 @@
 class CrmAutomationTriggerService
   # Aceita crm_contact (Crm::Contact) ou contact (Contact legado)
   # label: etiqueta específica (para eventos label_added/label_removed)
-  def initialize(crm_contact: nil, contact: nil, new_stage:, previous_stage: nil, event_type: 'card_entered', label: nil)
+  # by_person: a etiqueta foi posta por uma PESSOA da equipe (tela, com login)?
+  # nil = descobre sozinho (Current.user presente = pessoa) — item 345
+  def initialize(crm_contact: nil, contact: nil, new_stage:, previous_stage: nil, event_type: 'card_entered', label: nil, by_person: nil) # rubocop:disable Metrics/ParameterLists
     @crm_contact    = crm_contact
     @contact        = crm_contact&.contact || contact
     @new_stage      = new_stage
     @previous_stage = previous_stage
     @event_type     = event_type
     @label          = label
+    @by_person      = by_person.nil? ? Current.user.is_a?(User) : by_person
   end
 
   # 🏷️ Rodada 5 da auditoria (#17): a etiqueta do CONTATO mudou de verdade
@@ -55,7 +58,7 @@ class CrmAutomationTriggerService
     if @label.present?
       automations = automations.select do |a|
         filter = a.action_config&.dig('label_filter')
-        filter.blank? || filter.strip.downcase == @label.strip.downcase
+        filter.blank? ? any_label_allowed? : filter.strip.downcase == @label.strip.downcase
       end
     end
 
@@ -81,6 +84,18 @@ class CrmAutomationTriggerService
 
   def label_event?
     @event_type.in?(%w[label_added label_removed]) && @label.present?
+  end
+
+  # 🚧 item 345 (14/10): automação de "QUALQUER etiqueta" (sem filtro) só
+  # dispara com etiqueta posta por uma PESSOA da equipe. Caso real de 13–14/10:
+  # a "Ag. Consulta – Google" estava sem filtro e, depois que a Rodada 5 (#17)
+  # fez toda etiqueta do sistema disparar, cada etiqueta de robô (refrativa,
+  # att_encerrado…) jogava o lead em Agendamento de Consulta — 86 cards num dia,
+  # taxa de agendamento em 81,5% e conversões falsas no Google. Etiqueta posta
+  # por robô (IA, automação, follow-up, N8N sem login) só dispara a automação
+  # que pediu AQUELA etiqueta pelo nome.
+  def any_label_allowed?
+    @by_person
   end
 
   # 🛑 Rodada 5 (#17): agora TODA etiqueta posta pelo sistema dispara

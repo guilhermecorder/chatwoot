@@ -362,6 +362,13 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🚦 ritmo de envio por número (item 345): { per_window, minutes }
+  updateFollowupPace(pace) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      followup_pace: pace,
+    });
+  }
+
   // 🏷️ etiquetas que encerram o follow-up de todos os robôs (rodada 158)
   updateFollowupStopLabels(labels) {
     return axios.post(`${this.url}/settings/update_agenda`, {

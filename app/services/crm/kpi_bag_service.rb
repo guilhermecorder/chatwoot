@@ -155,13 +155,17 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     # passagem pelas colunas do funil + faturamento (mesma fonte do PRO MAX)
     # item 328: com a lente, as colunas dos funis das OUTRAS fontes entram
     # depois das da casa (o nome do funil vai junto, para não confundir colunas iguais)
+    # 👤 item 345 (14/10): "Entrou em X" conta PESSOAS (card distinto por dia),
+    # não passagens — o card que saiu e voltou no mesmo dia contava 2× (caso
+    # do Cristiano, 13–14/10: 44 "consultas marcadas" num dia de ~6)
     pipelines = funnels
     pipelines.each_with_index do |pipeline, index|
       suffix = index.zero? ? '' : " · #{pipeline.name}"
       pipeline.stages.order(:position).each do |stage|
         add.call("stage_#{stage.id}", "Entrou em #{stage.name}#{suffix}", 'n',
                  stage_entries(pipeline, stage.id, since, until_at),
-                 stage_entries(pipeline, stage.id, prev_since, prev_until), 'crm_contact_stage_logs.entered_at')
+                 stage_entries(pipeline, stage.id, prev_since, prev_until), 'crm_contact_stage_logs.entered_at',
+                 distinct: 'crm_contact_stage_logs.crm_contact_id')
       end
     end
     if pipelines.any?

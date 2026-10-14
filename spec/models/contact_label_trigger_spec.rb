@@ -25,6 +25,15 @@ RSpec.describe Contact, type: :request do
   end
 
   before { clear_enqueued_jobs }
+  after { Current.reset }
+
+  # etiqueta posta por uma PESSOA da equipe (tela com login)
+  def as_person
+    Current.user = admin
+    yield
+  ensure
+    Current.user = nil
+  end
 
   describe 'etiqueta aplicada fora das telas do CRM' do
     it 'tela Contatos do Chatwoot (PUT /contacts/:id/labels) dispara "Etiqueta adicionada"' do
@@ -65,7 +74,7 @@ RSpec.describe Contact, type: :request do
       here = automation!('label_added')
       there = automation!('label_added', on_stage: other_stage)
 
-      contact.add_labels(['catarata'])
+      as_person { contact.add_labels(['catarata']) }
 
       expect(fire_jobs_for(here).size).to eq(1)
       expect(fire_jobs_for(there).size).to eq(1)
@@ -208,7 +217,7 @@ RSpec.describe Contact, type: :request do
                                         action_type: 'apply_label', delay_minutes: 0, active: true,
                                         action_config: { 'label' => 'revisar' })
 
-      contact.add_labels([Crm::OptOut::LABEL])
+      as_person { contact.add_labels([Crm::OptOut::LABEL]) }
 
       expect(fire_jobs_for(webhook)).to be_empty
       expect(fire_jobs_for(interna).size).to eq(1)
@@ -217,9 +226,58 @@ RSpec.describe Contact, type: :request do
     it 'quem não está em silêncio segue recebendo normalmente' do
       webhook = automation!('label_added')
 
-      contact.add_labels(['catarata'])
+      as_person { contact.add_labels(['catarata']) }
 
       expect(fire_jobs_for(webhook).size).to eq(1)
+    end
+  end
+
+  # 🚧 item 345 (14/10): a "Ag. Consulta – Google" sem filtro jogava em
+  # Agendamento todo lead que ganhava etiqueta de robô (refrativa, att_encerrado…)
+  describe '"Qualquer etiqueta" só com etiqueta posta por pessoa' do
+    let(:move_to) { Crm::Stage.create!(pipeline: pipeline, name: 'Agendamento de Consulta') }
+
+    def mover!(filter: nil)
+      Crm::Automation.create!(stage: stage, name: 'Ag. Consulta', trigger_type: 'label_added', action_type: 'move_card',
+                              delay_minutes: 0, active: true,
+                              action_config: { 'target_stage_id' => move_to.id, 'label_filter' => filter }.compact)
+    end
+
+    it 'etiqueta de ROBÔ (sem pessoa logada) não dispara a automação sem filtro' do
+      automation = mover!
+
+      contact.add_labels(['refrativa'])
+      contact.add_labels(['att_encerrado'])
+
+      expect(fire_jobs_for(automation)).to be_empty
+    end
+
+    it 'etiqueta de robô continua disparando a automação que pediu ESSA etiqueta' do
+      automation = mover!(filter: 'consulta_google')
+
+      contact.add_labels(['consulta_google'])
+
+      expect(fire_jobs_for(automation).size).to eq(1)
+    end
+
+    it 'etiqueta posta pela equipe na tela dispara a automação sem filtro' do
+      automation = mover!
+
+      post "/api/v1/accounts/#{account.id}/contacts/#{contact.id}/labels",
+           params: { labels: ['refrativa'] }, headers: admin.create_new_auth_token, as: :json
+
+      expect(response).to have_http_status(:success)
+      expect(fire_jobs_for(automation).size).to eq(1)
+    end
+
+    it 'remover etiqueta por robô também não dispara a automação sem filtro' do
+      contact.update_labels(['refrativa'])
+      removed = automation!('label_removed')
+      clear_enqueued_jobs
+
+      contact.update_labels([])
+
+      expect(fire_jobs_for(removed)).to be_empty
     end
   end
 end

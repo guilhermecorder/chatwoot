@@ -159,6 +159,83 @@ RSpec.describe CrmAutomationFireJob do
       expect(log.error_message).to include('token vencido')
     end
 
+    # item 345 -------------------------------------------------------------
+    describe 'conversão uma vez por paciente a cada 7 dias' do
+      let(:service) { instance_double(GoogleAdsConversionsService, call: { success: true }) }
+
+      before { allow(GoogleAdsConversionsService).to receive(:new).and_return(service) }
+
+      it 'o card que sai e volta para a coluna não manda a mesma conversão de novo' do
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'agendou_consulta' })
+        job.perform(automation.id, contact.id)
+        Redis::LockManager.new.unlock("CRM_CONVERSION_ONCE::#{automation.id}::#{contact.id}")
+
+        described_class.new.perform(automation.id, contact.id)
+
+        expect(GoogleAdsConversionsService).to have_received(:new).once
+        skipped = Crm::AutomationLog.find_by(automation: automation, contact_id: contact.id, status: 'cancelled')
+        expect(skipped.error_message).to include('não repete em 7 dias')
+      end
+
+      it 'depois de 7 dias a conversão sai de novo (ex.: cirurgia do 2º olho)' do
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'fechou_cirurgia' })
+        Crm::AutomationLog.create!(automation: automation, contact_id: contact.id, status: 'fired', payload: {}, created_at: 8.days.ago)
+
+        job.perform(automation.id, contact.id)
+
+        expect(GoogleAdsConversionsService).to have_received(:new).once
+      end
+
+      it 'uma tentativa que FALHOU não segura a próxima' do
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'agendou_consulta' })
+        Crm::AutomationLog.create!(automation: automation, contact_id: contact.id, status: 'failed', payload: {})
+
+        job.perform(automation.id, contact.id)
+
+        expect(GoogleAdsConversionsService).to have_received(:new).once
+      end
+
+      it 'outras ações (mensagem, mover…) seguem disparando a cada entrada' do
+        automation = create_automation('nps_score')
+        allow(job).to receive(:nps_score)
+        Crm::AutomationLog.create!(automation: automation, contact_id: contact.id, status: 'fired', payload: {})
+
+        job.perform(automation.id, contact.id)
+
+        expect(job).to have_received(:nps_score)
+      end
+    end
+
+    describe 'valor da conversão na coluna de agendamento' do
+      let(:booking) { Crm::Stage.create!(pipeline: pipeline, name: 'Agendamento de Consulta') }
+      let(:service) { instance_double(GoogleAdsConversionsService, call: { success: true }) }
+
+      before { allow(GoogleAdsConversionsService).to receive(:new).and_return(service) }
+
+      it 'sem valor digitado, leva o valor da consulta marcada (o mesmo da confirmação)' do
+        booking
+        account.tasks.create!(title: 'Consulta: Paciente', task_type: 'consulta', contact: contact, creator: create(:user, account: account),
+                              due_at: 2.days.from_now, procedure: 'CONSULTA | JÁ PAC | R$350')
+        automation = booking.automations.create!(name: 'Conversão Google (Consulta)', trigger_type: 'card_entered',
+                                                 action_type: 'google_ads_conversion', delay_minutes: 0,
+                                                 action_config: { 'ga4_event_name' => 'agendou_consulta' })
+
+        job.perform(automation.id, contact.id)
+
+        expect(GoogleAdsConversionsService).to have_received(:new).with(hash_including(params: hash_including(value: 350.0)))
+      end
+
+      it 'valor digitado na automação continua valendo' do
+        automation = booking.automations.create!(name: 'Conversão Google (Consulta)', trigger_type: 'card_entered',
+                                                 action_type: 'google_ads_conversion', delay_minutes: 0,
+                                                 action_config: { 'ga4_event_name' => 'agendou_consulta', 'conversion_value' => '150' })
+
+        job.perform(automation.id, contact.id)
+
+        expect(GoogleAdsConversionsService).to have_received(:new).with(hash_including(params: hash_including(value: 150.0)))
+      end
+    end
+
     it 'does nothing when the automation is inactive' do
       automation = create_automation('nps_score', active: false)
       allow(job).to receive(:nps_score)

@@ -246,7 +246,11 @@ const save = async () => {
 </script>
 
 <template>
-  <div class="cv-page cv-overlay" :style="cvVars">
+  <!-- 🧭 item 344: rolagem própria (a tela cresceu e o fim ficava escondido) -->
+  <div
+    class="cv-page cv-overlay flex flex-col h-full overflow-y-auto bg-n-surface-1"
+    :style="cvVars"
+  >
     <CevicoHero
       :pal="pal"
       title="Ambientes do CRM"

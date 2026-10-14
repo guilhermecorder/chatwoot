@@ -48,6 +48,7 @@ class CrmAutomationFireJob < ApplicationJob
     end
 
     return unless should_fire?(automation, contact)
+    return if conversion_already_sent?(automation, contact)
 
     payload = build_payload(automation, contact, stage, pipeline, extra_payload)
 
@@ -396,14 +397,60 @@ class CrmAutomationFireJob < ApplicationJob
   end
 
   # valor digitado na automação vence; evento de FECHAMENTO sem valor digitado
-  # leva o valor do card (o preço da cirurgia)
+  # leva o valor do card (o preço da cirurgia); 💰 item 345: automação na
+  # coluna de AGENDAMENTO sem valor digitado leva o valor da consulta marcada
+  # (o mesmo da confirmação — item 324/340: 150, 350, particular do médico…)
   def conversion_value(automation, contact, pipeline, closing:)
     typed = automation.action_config['conversion_value']
     return typed.to_f if typed.present?
+    return booked_consult_value(contact) if !closing && booking_stage?(automation)
     return unless closing
 
     card_value = Crm::Contact.find_by(contact_id: contact.id, pipeline_id: pipeline.id)&.value.to_f
     card_value.positive? ? card_value : nil
+  end
+
+  def booking_stage?(automation)
+    automation.stage_id == Crm::BookingRate.stage(automation.stage.pipeline.account)&.id
+  end
+
+  # a consulta que o paciente acabou de marcar: a próxima futura (ou a marcada
+  # nos últimos 2 dias, se já passou) — valor em número; texto ("sem custo") = nil
+  def booked_consult_value(contact)
+    scope = contact.account.tasks.where(contact_id: contact.id, task_type: 'consulta', canceled_at: nil)
+    task = scope.where('due_at > ?', Time.current).order(:due_at).first ||
+           scope.where('created_at > ?', 2.days.ago).order(created_at: :desc).first
+    return nil unless task
+
+    price = Crm::AppointmentPrice.resolve(Crm::AppointmentPrice.config(contact.account), task)
+    number = Crm::AppointmentPrice.to_number(price&.dig(:text))
+    number&.positive? ? number.to_f : nil
+  rescue StandardError => e
+    Rails.logger.warn "[CrmAutomation] valor da consulta (contato #{contact.id}): #{e.message}"
+    nil
+  end
+
+  # 🔁 item 345 (14/10): CONVERSÃO (Google/Meta) sai UMA vez por paciente a
+  # cada 7 dias por automação. A automação dispara a cada ENTRADA na coluna —
+  # card que sai e volta (desmarcou e remarcou, ou o vai-e-volta de 13–14/10)
+  # contava a mesma consulta duas vezes no Google. Cirurgia do 2º olho depois
+  # de 7 dias conta de novo, como deve. O pulo fica no histórico ('cancelled').
+  CONVERSION_ACTIONS = %w[meta_ads_event google_ads_conversion].freeze
+  CONVERSION_ONCE_WINDOW = 7.days
+
+  def conversion_already_sent?(automation, contact)
+    return false unless CONVERSION_ACTIONS.include?(automation.action_type)
+
+    # trava curta: dois disparos simultâneos do mesmo paciente não passam juntos
+    lock = "CRM_CONVERSION_ONCE::#{automation.id}::#{contact.id}"
+    locked = Redis::LockManager.new.lock(lock, 2.minutes)
+    last = Crm::AutomationLog.where(automation_id: automation.id, contact_id: contact.id, status: 'fired')
+                             .where('created_at > ?', CONVERSION_ONCE_WINDOW.ago).maximum(:created_at)
+    return false if locked && last.nil?
+
+    note = last ? "conversão já enviada para este paciente em #{last.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')} — não repete em 7 dias" : 'conversão deste paciente já está saindo agora'
+    Crm::AutomationLog.create!(automation: automation, contact_id: contact.id, status: 'cancelled', payload: {}, error_message: note)
+    true
   end
 
   # Roda o Analista de Conversas (Claude) na conversa mais recente do
