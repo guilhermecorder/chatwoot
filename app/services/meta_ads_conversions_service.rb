@@ -183,8 +183,20 @@ class MetaAdsConversionsService
   end
 
   # gravado pelo Crm::AdAttributionService quando o lead chega por anúncio
+  # 🔗 item 345b: clique e conta do WhatsApp saem da MESMA conversa (a do
+  # anúncio) — clique de uma caixa com a conta de outra = recusa da Meta
+  # (subcode 2804117, "ctwa_clid gerado para uma Página diferente"). Sem
+  # clique na conversa, vale o do contato (primeiro toque), como antes.
   def ctwa_clid
-    @ctwa_clid ||= @contact&.additional_attributes&.dig('meta_ads', 'ctwa_clid').to_s
+    @ctwa_clid ||= (ad_conversation_clid.presence || @contact&.additional_attributes&.dig('meta_ads', 'ctwa_clid')).to_s
+  end
+
+  def ad_conversation_clid
+    return nil if @contact.nil?
+
+    ad_whatsapp_conversation&.additional_attributes&.dig('meta_ads', 'ctwa_clid')
+  rescue StandardError
+    nil
   end
 
   def normalize_phone(phone)

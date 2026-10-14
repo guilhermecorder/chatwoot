@@ -71,11 +71,14 @@ class Crm::MetaAdsTestService
       token: result[:token], skipped: skipped, note: note }
   end
 
-  # o lead de anúncio de WhatsApp mais recente desta caixa (o clique dele é real)
+  # a conversa de anúncio de WhatsApp mais recente DESTA caixa — o clique
+  # carimbado NA CONVERSA (não o do contato: o contato pode ter vindo de um
+  # anúncio de outra caixa e a Meta recusa clique de outra Página, subcode
+  # 2804117 — caixas 1 e 5 em 14/10)
   def ad_lead(inbox_id)
     @account.conversations.where(inbox_id: inbox_id).where('conversations.created_at > ?', CLICK_WINDOW.ago)
-            .joins(:contact).where("COALESCE(contacts.additional_attributes -> 'meta_ads' ->> 'ctwa_clid', '') <> ''")
-            .reorder('conversations.created_at DESC').first&.contact
+            .where("COALESCE(conversations.additional_attributes -> 'meta_ads' ->> 'ctwa_clid', '') <> ''")
+            .includes(:contact).reorder('conversations.created_at DESC').first
   end
 
   # erro de rede num destino não derruba a lista inteira (e não vaza token)
@@ -101,7 +104,7 @@ class Crm::MetaAdsTestService
   def messaging_event(waba, lead)
     event = base_event('LeadSubmitted', 'business_messaging')
     event[:messaging_channel] = 'whatsapp'
-    phone = lead.phone_number.to_s.gsub(/\D/, '')
+    phone = lead.contact&.phone_number.to_s.gsub(/\D/, '')
     event[:user_data] = event[:user_data].merge(ctwa_clid: lead.additional_attributes.dig('meta_ads', 'ctwa_clid'),
                                                 whatsapp_business_account_id: waba)
     event[:user_data][:ph] = [Digest::SHA256.hexdigest(phone)] if phone.present?

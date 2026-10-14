@@ -66,6 +66,19 @@ RSpec.describe MetaAdsConversionsService do
         expect(event['user_data']).to include('ctwa_clid' => 'CLIQUE123', 'whatsapp_business_account_id' => waba_id)
       end
 
+      # 🔗 item 345b: clique e conta do WhatsApp da MESMA conversa (subcode 2804117)
+      it 'uses the click stamped on the ad conversation, paired with that conversation account' do
+        ad_conv = whatsapp_conversation('WABA999')
+        ad_conv.update!(additional_attributes: { 'meta_ads' => { 'ctwa_clid' => 'CLIQUE_DA_CONVERSA' } })
+        waba_id = ad_conv.inbox.channel.provider_config['business_account_id']
+        save_datasets(waba_id => 'DS777')
+
+        described_class.new(account: account, event_name: 'Lead', contact: contact).call
+
+        expect(sent_event(dataset_endpoint)['user_data']).to include('ctwa_clid' => 'CLIQUE_DA_CONVERSA',
+                                                                     'whatsapp_business_account_id' => waba_id)
+      end
+
       it 'retries once with the inbox token when Meta refuses the system token' do
         waba_id = whatsapp_conversation('WABA999').inbox.channel.provider_config['business_account_id']
         save_datasets(waba_id => 'DS777')

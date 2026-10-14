@@ -25,7 +25,8 @@ RSpec.describe Crm::MetaAdsTestService do
   def ad_lead!(inbox, clid: 'CLIQUE_REAL')
     contact = create(:contact, account: account, phone_number: '+5511988887777',
                                additional_attributes: { 'meta_ads' => { 'ctwa_clid' => clid } })
-    create(:conversation, account: account, inbox: inbox, contact: contact)
+    create(:conversation, account: account, inbox: inbox, contact: contact,
+                          additional_attributes: { 'meta_ads' => { 'ctwa_clid' => clid } })
     contact
   end
 
@@ -120,6 +121,21 @@ RSpec.describe Crm::MetaAdsTestService do
     expect(result[:success]).to be(true)
     expect(result[:results].last).to include(ok: true, skipped: true, dataset_id: 'DS_A')
     expect(result[:results].last[:note]).to include('nenhum lead de anúncio')
+    expect(WebMock).not_to have_requested(:post, %r{DS_A/events})
+  end
+
+  # 14/10: o contato veio de anúncio de OUTRA caixa e só conversou nesta —
+  # o clique dele é de outra Página (subcode 2804117); a caixa fica ⚪
+  it 'ignora contato com clique de outra caixa (só vale a conversa de anúncio desta caixa)' do
+    inbox = whatsapp_inbox('WABA_A', 'GOOGLE')
+    contact = create(:contact, account: account, additional_attributes: { 'meta_ads' => { 'ctwa_clid' => 'CLIQUE_DE_OUTRA_CAIXA' } })
+    create(:conversation, account: account, inbox: inbox, contact: contact)
+    setting.update!(meta_ads_config: setting.meta_ads_config.merge('waba_datasets' => { 'WABA_A' => 'DS_A' }))
+    stub_request(:get, %r{v19\.0/WABA_A/dataset}).to_return(status: 200, body: { data: [{ id: 'DS_A' }] }.to_json, headers: json)
+
+    result = described_class.new(account: account).call
+
+    expect(result[:results].last).to include(ok: true, skipped: true)
     expect(WebMock).not_to have_requested(:post, %r{DS_A/events})
   end
 
