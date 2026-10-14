@@ -1793,11 +1793,13 @@ const packAgentFields = key => {
       30,
       Math.max(3, Number(a.reply_delay_seconds) || 6)
     );
+    // 🔁 item 343: quem recebe as tarefas nos três atendentes ('retorno_team' = a equipe dos retornos)
+    fields.task_assignee_id =
+      a.task_assignee_id === 'retorno_team'
+        ? 'retorno_team'
+        : Number(a.task_assignee_id) || null;
     if (key === 'atendente_pos_op') {
-      // 🩺 quem recebe as tarefas + janela de cirurgia recente pela Agenda (0 = só pela coluna)
-      fields.task_assignee_id = a.task_assignee_id
-        ? Number(a.task_assignee_id)
-        : null;
+      // 🩺 janela de cirurgia recente pela Agenda (0 = só pela coluna)
       fields.recent_surgery_days = Math.min(
         365,
         Math.max(0, Number(a.recent_surgery_days) || 0)
@@ -5044,14 +5046,15 @@ onUnmounted(() => {
                       </div>
 
                       <!-- 🩺 pós-op (item 251): quem recebe as tarefas + cirurgia recente pela Agenda -->
+                      <!-- 🔁 item 343: "Responsável pelas tarefas" nos três atendentes (+ Equipe dos retornos) -->
                       <div
-                        v-if="key === 'atendente_pos_op'"
+                        v-if="RESPONDER_WA_KEYS.includes(key)"
                         class="grid grid-cols-1 sm:grid-cols-2 gap-3"
                       >
                         <div>
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
-                            >Quem recebe as tarefas
+                            >Responsável pelas tarefas
                             <span class="text-n-slate-9 font-normal"
                               >(Meu Painel)</span
                             ></label
@@ -5064,6 +5067,9 @@ onUnmounted(() => {
                             <option value="">
                               — quem cuida da coluna do paciente —
                             </option>
+                            <option value="retorno_team">
+                              Equipe dos retornos (as duas veem)
+                            </option>
                             <option
                               v-for="u in teamAgents"
                               :key="`pos-op-owner-${u.id}`"
@@ -5075,11 +5081,19 @@ onUnmounted(() => {
                           <p class="text-[10px] text-n-slate-9 mt-1">
                             Sem escolha: vale quem cuida da coluna do paciente
                             (Painéis) ou o responsável pela conferência de
-                            cirurgia. Sintoma de alerta também acende o aviso no
-                            painel.
+                            {{
+                              key === 'atendente_pos_op'
+                                ? 'cirurgia'
+                                : 'consulta'
+                            }}.
+                            <template v-if="key !== 'atendente_pos_op'"
+                              >Paciente de retorno vai sempre para a Equipe dos
+                              retornos (Agenda → Conferência do dia).</template
+                            >
+                            Urgência também acende o aviso no painel.
                           </p>
                         </div>
-                        <div>
+                        <div v-if="key === 'atendente_pos_op'">
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Cirurgia recente na Agenda

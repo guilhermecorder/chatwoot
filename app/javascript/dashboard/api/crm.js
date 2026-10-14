@@ -385,10 +385,17 @@ class CrmAPI extends ApiClient {
 
   // 📅 item 253: agente "Confirmação de consulta" (Agentes de IA) — lembretes
   // (dN = N dias antes) e/ou o interruptor geral; manda só o que vier
-  saveAppointmentConfirmation({ reminders, enabled } = {}) {
+  // 🔁 item 343: taskAssigneeId = quem recebe as tarefas (id, 'retorno_team' ou null)
+  saveAppointmentConfirmation({ reminders, enabled, taskAssigneeId } = {}) {
     const body = {};
     if (reminders !== undefined) body.appointment_reminders = reminders;
     if (enabled !== undefined) body.appointment_confirmation = { enabled };
+    if (taskAssigneeId !== undefined) {
+      body.appointment_confirmation = {
+        ...(body.appointment_confirmation || {}),
+        task_assignee_id: taskAssigneeId,
+      };
+    }
     return axios.post(`${this.url}/settings/update_agenda`, body);
   }
 
@@ -647,6 +654,13 @@ class CrmAPI extends ApiClient {
   updateAttendanceOwners(attendanceOwners) {
     return axios.post(`${this.url}/settings/update_agenda`, {
       attendance_owners: attendanceOwners,
+    });
+  }
+
+  // 🔁 item 343: Equipe dos retornos (ids; só administrador)
+  updateRetornoTeam(userIds) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      retorno_team_user_ids: userIds,
     });
   }
 
@@ -1509,6 +1523,15 @@ class CrmAPI extends ApiClient {
   }
 
   // apply: false = prévia do que seria carimbado; true = grava
+  // 🧩 item 344: pré-definição das colunas do funil do Oftalmofácil
+  getFunnelPreset() {
+    return axios.get(`${this.url}/sources/funnel_preset`);
+  }
+
+  applyFunnelPreset() {
+    return axios.post(`${this.url}/sources/funnel_preset`);
+  }
+
   backfillSources(apply = false) {
     return axios.post(`${this.url}/sources/backfill`, { apply });
   }

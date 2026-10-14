@@ -6,7 +6,7 @@
 # - envia as mensagens da IA (marcadas como do agente), agenda na Agenda
 #   interna quando a IA confirmou dados + horário LIVRE, e pausa a conversa
 #   quando a função termina (confirmação 😊) ou quando pede humano
-class Crm::InstagramAgentJob < ApplicationJob
+class Crm::InstagramAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   queue_as :ai # 🚦 Rodada 6 (RESIL-1): fila da IA, cápsula própria (SIDEKIQ_AI_CONCURRENCY, config/sidekiq.yml)
   # (#100) aqui a nova tentativa do Sidekiq FICA (diferente do Atendente do
   # WhatsApp): o resgate (item 291) não cobre o Instagram, então um job que
@@ -79,6 +79,7 @@ class Crm::InstagramAgentJob < ApplicationJob
       return
     end
 
+    read_media(conversation, trigger_message_id)
     result = Crm::InstagramAgentService.new(conversation: conversation).call
     if result[:error]
       log_event(account, conversation, 'erro', result[:error].to_s.truncate(120))
@@ -114,6 +115,19 @@ class Crm::InstagramAgentJob < ApplicationJob
 
     log_event(account, conversation, result[:agendar] ? 'agendou' : 'respondeu',
               "etapa #{result[:etapa]} · #{Array(result[:mensagens]).size} msg(s)")
+  end
+
+  # 👂 item 340: áudio/imagem do direct viram texto antes da IA responder
+  # (mesmo leitor do WhatsApp; sem chave do Gemini não faz nada). Aqui não
+  # há MediaReadingJob antes: espera/lê a mensagem que disparou e as recentes.
+  def read_media(conversation, trigger_message_id)
+    return unless Crm::MediaReadingService.configured?(conversation.account)
+
+    trigger = conversation.messages.find_by(id: trigger_message_id)
+    Crm::MediaReadingService.settle!(trigger) if trigger&.incoming?
+    Crm::MediaReadingService.read_pending!(conversation)
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::InstagramAgentJob] leitura de mídia falhou: #{e.message}"
   end
 
   def agent_state(conversation)

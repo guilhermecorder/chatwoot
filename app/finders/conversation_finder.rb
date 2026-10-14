@@ -187,6 +187,16 @@ class ConversationFinder # rubocop:disable Metrics/ClassLength
 
     @conversations = @conversations.joins(contact: :crm_contacts)
                                    .where(crm_contacts: { stage_id: params[:crm_stage_id] })
+    exclude_foreign_inboxes(Crm::Stage.where(id: params[:crm_stage_id]).pick(:pipeline_id))
+  end
+
+  # 🧭 item 341 (Ambientes do CRM): filtro por funil/coluna não mostra conversa
+  # de caixa de OUTRO ambiente (ex.: caixa 12 Oftalmofácil no funil da CEVICO)
+  def exclude_foreign_inboxes(pipeline_id)
+    return if pipeline_id.blank?
+
+    foreign = Crm::Environments.foreign_inbox_ids(current_account, pipeline_id.to_i)
+    @conversations = @conversations.where.not(inbox_id: foreign) if foreign.any?
   end
 
   # item 212 (23/09): filtro "quem cuida" da lista de Conversas — os avatares
@@ -208,6 +218,7 @@ class ConversationFinder # rubocop:disable Metrics/ClassLength
 
     @conversations = @conversations.joins(contact: :crm_contacts)
                                    .where(crm_contacts: { pipeline_id: params[:crm_pipeline_id] })
+    exclude_foreign_inboxes(params[:crm_pipeline_id])
   end
 
   def filter_by_source_id

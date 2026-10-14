@@ -61,17 +61,54 @@ class Crm::SourceLens
 
   # ── filtros ───────────────────────────────────────────────────────────
   def tasks(scope)
-    by_stamp(scope, 'tasks', legacy_task_sql)
+    without_partner_patients(by_stamp(scope, 'tasks', legacy_task_sql), 'tasks.contact_id')
   end
 
   def cards(scope)
-    by_stamp(scope, 'crm_contacts', pipeline_case('crm_contacts.pipeline_id'))
+    without_partner_patients(by_stamp(scope, 'crm_contacts', pipeline_case('crm_contacts.pipeline_id')), 'crm_contacts.contact_id')
   end
 
   def stage_logs(scope)
     legacy = "(SELECT #{pipeline_case('lens_cards.pipeline_id')} FROM crm_contacts lens_cards " \
              'WHERE lens_cards.id = crm_contact_stage_logs.crm_contact_id)'
-    by_stamp(scope, 'crm_contact_stage_logs', legacy)
+    scope = by_stamp(scope, 'crm_contact_stage_logs', legacy)
+    ids = partner_contact_ids
+    return scope if ids.empty?
+
+    scope.where('NOT EXISTS (SELECT 1 FROM crm_contacts lens_partner WHERE lens_partner.id = crm_contact_stage_logs.crm_contact_id ' \
+                'AND lens_partner.contact_id IN (:ids))', ids: ids)
+  end
+
+  # 🧹 item 342 (13/10, "indicador de agendamento descontaminado"): paciente do
+  # Oftalmofácil que ganhou card no funil da CEVICO contava como da casa — o
+  # card e a entrada em coluna levam o carimbo do FUNIL, não do paciente. Na
+  # lente da casa, sai todo registro de quem é do outro ambiente:
+  #   · paciente carimbado com a fonte parceira, OU
+  #   · paciente que só conversou por caixa de parceiro (nenhuma conversa
+  #     numa caixa da casa).
+  # Lista curta em cache (como a da cerca dos parceiros) e com teto.
+  PARTNER_IDS_TTL = 10.minutes
+  PARTNER_IDS_LIMIT = 50_000
+
+  def partner_contact_ids
+    return [] unless own?
+
+    @partner_contact_ids ||= Rails.cache.fetch("cevico:lens:partner_contacts:#{account.id}", expires_in: PARTNER_IDS_TTL) do
+      compute_partner_contact_ids
+    end
+  end
+
+  def compute_partner_contact_ids
+    foreign_sources = Crm::Sources.list(account).reject(&:own?).map(&:id)
+    ids = foreign_sources.any? ? account.contacts.where(cevico_source_id: foreign_sources).limit(PARTNER_IDS_LIMIT).pluck(:id) : []
+    taken = foreign_inbox_ids
+    if taken.any?
+      ids |= account.conversations.where(inbox_id: taken).where.not(contact_id: nil)
+                    .where('NOT EXISTS (SELECT 1 FROM conversations own_conv WHERE own_conv.account_id = conversations.account_id ' \
+                           'AND own_conv.contact_id = conversations.contact_id AND own_conv.inbox_id NOT IN (:taken))', taken: taken)
+                    .distinct.limit(PARTNER_IDS_LIMIT).pluck(:contact_id)
+    end
+    ids.first(PARTNER_IDS_LIMIT)
   end
 
   # paciente sem carimbo = ainda sem evidência → vale a cerca (parceiro × casa)
@@ -81,7 +118,8 @@ class Crm::SourceLens
 
     fenced = Crm::PartnerGuard.excluded_contact_ids(account).presence || [0]
     unstamped = own? ? 'contacts.id NOT IN (:fenced)' : 'contacts.id IN (:fenced)'
-    scope.where("contacts.cevico_source_id = :id OR (contacts.cevico_source_id IS NULL AND #{unstamped})", id: source.id, fenced: fenced)
+    scope = scope.where("contacts.cevico_source_id = :id OR (contacts.cevico_source_id IS NULL AND #{unstamped})", id: source.id, fenced: fenced)
+    without_partner_patients(scope, 'contacts.id')
   end
 
   # conversas e mensagens: pela caixa de entrada (caixa que nenhuma fonte pegou = da casa)
@@ -115,6 +153,14 @@ class Crm::SourceLens
   end
 
   private
+
+  # item 342: na lente da casa, tira os pacientes do outro ambiente
+  def without_partner_patients(scope, column)
+    ids = partner_contact_ids
+    return scope if ids.empty?
+
+    scope.where("#{column} IS NULL OR #{column} NOT IN (?)", ids)
+  end
 
   def by_stamp(scope, table, legacy_sql)
     return scope if all?

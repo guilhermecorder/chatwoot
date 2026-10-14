@@ -110,6 +110,26 @@ RSpec.describe Crm::OftalmofacilSyncService do
     expect(exam.title).to eq('Exame: Maria Parceira')
   end
 
+  # 🧩 item 344 (13/10): "retorno vindo do oftalmofácil é consulta de retorno" e
+  # consulta do hub não vai mais para "Cirurgia Agendada"
+  it 'retorno do hub vira consulta de RETORNO e o card do parceiro vai para a coluna de consulta', :aggregate_failures do
+    booked = partners.stages.create!(name: 'Consulta Agendada', color: '#000', position: -1)
+    run_with([row('SCH_ITE_TOKEN' => 'tok-r', 'PRO_TYP_VALUE' => 'Retorno', 'PRO_NAME' => 'Retorno')])
+    task = account.tasks.find_by(external_ref: 'tok-r')
+    expect(task.task_type).to eq('consulta')
+    expect(task.modality).to eq('retorno')
+    expect(task.title).to eq('Retorno: Maria Parceira')
+    card = Crm::Contact.find_by(contact_id: task.contact_id, pipeline_id: partners.id)
+    expect(card.stage_id).to eq(booked.id)
+    expect(Crm::OftalmofacilSyncService.kind_for(Struct.new(:procedure_type).new('Retorno pós-operatório'))[:modality]).to eq('pos_op')
+  end
+
+  it 'consulta de paciente NOSSO (CATARATA_SP) não move card no funil da CEVICO (quem move consulta é a Agenda)' do
+    run_with([row('SCH_ITE_TOKEN' => 'tok-c', 'PROV_NAME' => 'CATARATA_SP', 'PRO_TYP_VALUE' => 'Consulta', 'PRO_NAME' => 'Consulta')])
+    contact = account.contacts.find_by(phone_number: '+5511988887777')
+    expect(Crm::Contact.where(contact_id: contact.id, pipeline_id: cevico.id, stage_id: cevico.stages.find_by(name: 'Cirurgia Agendada').id)).to be_empty
+  end
+
   it 'respeita a janela da Agenda e não cria card de parceiro sem funil configurado', :aggregate_failures do
     old = row('SCH_ITE_TOKEN' => 'tok-old', 'SCH_ITE_DATE' => '10/09/2026', 'SCH_PATIENT_PHONE' => '11955554444',
               'SCH_PATIENT_CPF' => '11122233344')

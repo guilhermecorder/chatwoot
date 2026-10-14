@@ -72,6 +72,11 @@ class Crm::InstagramAgentService # rubocop:disable Metrics/ClassLength
     - Não repita perguntas já respondidas; não reinicie a conversa se a
       pessoa disser "oi" no meio dela; apresente-se só no primeiro contato.
     - Não pergunte mais de 2 vezes se a pessoa quer agendar.
+    - Áudio e imagem: o sistema entrega o conteúdo entre colchetes
+      ("[áudio transcrito: …]", "[imagem (receita): …]"). Trate como se a
+      pessoa tivesse escrito. Se vier "[áudio sem transcrição …]", RESPONDA
+      SEMPRE pedindo com gentileza para escrever; em outro áudio assim, peça
+      de novo com outras palavras.
 
     FLUXO (paciente novo): recepção → sondagem (para quem é? qual
     procedimento? quando quer resolver? UMA pergunta por vez) → autoridade →
@@ -205,22 +210,34 @@ class Crm::InstagramAgentService # rubocop:disable Metrics/ClassLength
     CTX
   end
 
-  def build_transcript
+  # 👂 item 340: áudio/imagem do direct entram como texto lido pelo Gemini
+  # (Crm::MediaReadingService, o mesmo do WhatsApp) — antes a mensagem só com
+  # anexo (content vazio) sumia da conversa e o áudio ficava sem resposta
+  def build_transcript # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     # reorder: o default_scope do Message (created_at ASC) vence um .order
     # comum, então pegava as N mensagens mais ANTIGAS e a IA nunca via as novas
     messages = @conversation.messages
                             .where(message_type: [:incoming, :outgoing])
                             .where(private: false)
-                            .where.not(content: [nil, ''])
+                            .where("COALESCE(messages.content, '') <> '' OR EXISTS (SELECT 1 FROM attachments " \
+                                   'WHERE attachments.message_id = messages.id AND attachments.file_type IN (?))',
+                                   Attachment.file_types.values_at(*Crm::MediaReadingService::KINDS))
+                            .includes(:attachments)
                             .reorder(created_at: :desc)
                             .limit(MAX_MESSAGES)
                             .reverse
 
-    return nil if messages.empty?
+    lines = messages.filter_map do |m|
+      # só áudio e imagem DO PACIENTE (story, post, reel e anexo da clínica seguem fora, como antes)
+      media = m.incoming? ? m.attachments.select { |a| Crm::MediaReadingService::KINDS.include?(a.file_type.to_s) } : []
+      marks = media.map { |a| Crm::MediaReadingService.transcript_label(a) }
+      body = m.content.to_s.strip.truncate(500)
+      text = [body.presence, marks.presence&.join(' ')].compact.join(' ')
+      next if text.blank?
 
-    messages.map do |m|
       author = m.incoming? ? 'PACIENTE' : 'CLÍNICA'
-      "[#{m.created_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}] #{author}: #{m.content.to_s.strip.truncate(500)}"
-    end.join("\n")
+      "[#{m.created_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}] #{author}: #{text.truncate(marks.any? ? 2400 : 500)}"
+    end
+    lines.empty? ? nil : lines.join("\n")
   end
 end

@@ -189,6 +189,7 @@ const makeDefaultFilters = () => ({
   dateFrom: '',    // período do lead (data real do contato) — De
   dateTo: '',      // período do lead — Até
   awaitingOnly: false, // só pacientes sem resposta
+  kind: '', // 🏷️ item 344: tipo do atendimento (consulta, exame, cirurgia…)
 });
 
 const filters = ref(makeDefaultFilters());
@@ -382,8 +383,29 @@ const filteredContacts = computed(() => {
     if (filters.value.awaitingOnly && !c.last_conversation?.awaiting_reply) {
       return false;
     }
+    // 🏷️ item 344: tipo do atendimento ('sem' = sem agendamento)
+    if (filters.value.kind) {
+      const k = c.appointment_kind?.key || 'sem';
+      if (k !== filters.value.kind) return false;
+    }
     return true;
   });
+});
+
+// 🏷️ item 344 (13/10): "as colunas ficaram assim para as meninas se
+// organizarem" — o TIPO saiu das colunas (que viraram etapas da jornada) e
+// virou estes botões: Consulta, Exame, Cirurgia, Lente, Retorno, Pós-op,
+// Intravítrea — só os que existem nos cards carregados, com a contagem
+const KIND_ORDER = ['consulta', 'exame', 'cirurgia', 'lente', 'retorno', 'pos_op', 'intravitrea'];
+const kindOptions = computed(() => {
+  const seen = {};
+  allContacts.value.forEach(c => {
+    const k = c.appointment_kind;
+    if (!k) return;
+    seen[k.key] = seen[k.key] || { key: k.key, label: k.label, color: k.color, count: 0 };
+    seen[k.key].count += 1;
+  });
+  return KIND_ORDER.filter(k => seen[k]).map(k => seen[k]);
 });
 
 // Total de pacientes sem resposta (independente do toggle)
@@ -439,6 +461,7 @@ const anyFilteringActive = computed(() =>
   !!filters.value.inboxName ||
   filters.value.stageIds.length > 0 ||
   filters.value.awaitingOnly ||
+  !!filters.value.kind ||
   !!filters.value.dateFrom || !!filters.value.dateTo
 );
 
@@ -632,7 +655,8 @@ const clientRefineActive = computed(() =>
     filters.value.inboxName ||
     filters.value.createdAt ||
     filters.value.lastActivity ||
-    filters.value.awaitingOnly
+    filters.value.awaitingOnly ||
+    filters.value.kind
   )
 );
 
@@ -1346,6 +1370,25 @@ const createAndAddContact = async () => {
             {{ awaitingCount }}
           </span>
         </button>
+
+        <!-- 🏷️ item 344: TIPO do atendimento (sai sozinho da Agenda) -->
+        <div
+          v-if="kindOptions.length"
+          class="cv-seg cv-seg-sm flex-nowrap md:flex-wrap flex-shrink-0"
+          title="Tipo do atendimento (do próximo agendamento do paciente)"
+        >
+          <button class="cv-seg-item" :class="!filters.kind ? 'cv-seg-on' : ''" @click="filters.kind = ''">Todos</button>
+          <button
+            v-for="k in kindOptions"
+            :key="k.key"
+            class="cv-seg-item"
+            :class="filters.kind === k.key ? 'cv-seg-on' : ''"
+            @click="filters.kind = filters.kind === k.key ? '' : k.key"
+          >
+            <span class="inline-block w-2 h-2 rounded-full mr-1" :style="{ background: k.color }" />{{ k.label }}
+            <span class="opacity-60 ml-0.5">{{ k.count }}</span>
+          </button>
+        </div>
 
         <!-- Ordenação (compacto — a busca é quem manda no espaço) -->
         <select

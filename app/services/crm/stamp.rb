@@ -141,8 +141,9 @@ module Crm::Stamp
     contact.present? && contact.cevico_source_id.blank? && source_id.present? && !Crm::Journey::TestContact.test_contact?(contact)
   end
 
+  # 🧭 item 341 (G3): o ambiente do paciente já olha a CAIXA — quem só
+  # conversou pela caixa do Oftalmofácil não é mais carimbado como CEVICO
   def legacy_source_id(contact)
-    account = contact.account
-    Crm::PartnerGuard.partner_contact?(contact) ? Crm::Sources.partner_id(account) : Crm::Sources.own_id(account)
+    Crm::Environments.contact_environment_id(contact.account, contact)
   end
 end

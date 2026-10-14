@@ -347,7 +347,12 @@ namespace :crm do
   post 'appointment_reminders/run', to: 'appointment_reminders#run'
   # 🏷️ Fontes de pacientes (item 322, só admin): cadastro + retrato do carimbo + carimbar o passado
   resources :sources, only: [:index, :create, :update] do
-    collection { post :backfill }
+    collection do
+      post :backfill
+      # 🧩 item 344: pré-definição das colunas do funil do Oftalmofácil (prévia × aplicar)
+      get :funnel_preset
+      post :funnel_preset, action: :apply_funnel_preset
+    end
   end
   # 💰 Financeiro & CAC (item 318): CAC de anúncios × total, canais, campanhas
   resource :acquisition_cost, only: [:show], controller: 'acquisition_costs'

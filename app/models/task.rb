@@ -216,6 +216,8 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   before_save :track_completion
   before_save :reset_confirmation_on_reschedule
   before_create :infer_consulta_modality
+  # 🔁 item 343: retorno novo nasce sem dono individual (equipe dos retornos)
+  before_create -> { Crm::TaskOwner.apply_retorno_team!(self) }
   after_update :stamp_reschedule!, if: :rescheduled_in_this_save?
 
   # 🔁 Auditoria 10/2026 (#2/#133): REMARCAÇÃO com carimbo próprio. Antes o

@@ -478,8 +478,11 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
 // ── 💰 item 324 (05/10): VALOR do agendamento ─────────────────────────
 // O servidor (Crm::AppointmentPrice) é quem decide o valor que vai na
 // mensagem; aqui é a MESMA regra para o card mostrar antes de salvar:
-// lançado à mão → escrito na observação → pré-configurado do tipo
-// (particular por médico, exames, avaliação, retorno, pós-op) → valor padrão.
+// lançado à mão → "Valor: X" escrito na observação → "R$ X" escrito no TIPO
+// DE CONSULTA (item 340) → pré-configurado do tipo (particular por médico,
+// exames, avaliação, retorno, pós-op) → outro "R$ X" na observação → valor
+// padrão. 🤖 item 340: o que a IA gravava na observação até a auditoria
+// ("Valor da consulta: R$ 150" fixo, bloco "Reagendada pela IA:") não conta.
 export const moneyToNumber = text => {
   const t = String(text ?? '')
     .trim()
@@ -543,6 +546,34 @@ export const presetAppointmentPrice = (prices, appt) => {
   const text = prices[type];
   return text ? { text, label: PRICE_TYPE_LABELS[type].toLowerCase() } : null;
 };
+// 🤖 item 340: a observação sem as linhas que a IA escrevia nos blocos
+// antigos (mesma regra de Crm::AppointmentPrice.human_notes). Num parágrafo
+// com o carimbo "— agendado pela IA", tudo até o carimbo é da IA; o bloco
+// "Reagendada pela IA:" sem carimbo é dela inteiro; sem carimbo, só o
+// "Valor da consulta: R$ 150" fixo que abre a observação é da IA.
+const VALUE_PATTERN = /valor\s*:\s*(?:R\$\s*)?([\d.]+(?:,\d{1,2})?)/i;
+const REAL_PATTERN = /R\$\s*([\d.]+(?:,\d{1,2})?)/i;
+const AI_FIXED_VALUE_LINE = /^\s*Valor da consulta:\s*R\$\s*150(?:,00)?\s*$/i;
+const AI_STAMP_LINE = /agendado pela IA\s*$/i;
+const AI_RESCHEDULE_LINE = /^\s*Reagendada pela IA:/i;
+export const humanNotes = text =>
+  String(text ?? '')
+    .split(/\n[ \t]*\n/)
+    .flatMap((paragraph, index) => {
+      const lines = paragraph.split('\n');
+      let stamp = -1;
+      lines.forEach((line, i) => {
+        if (AI_STAMP_LINE.test(line)) stamp = i;
+      });
+      let aiUntil = -1;
+      if (stamp >= 0) aiUntil = stamp;
+      else if (AI_RESCHEDULE_LINE.test(lines[0] || ''))
+        aiUntil = lines.length - 1;
+      else if (index === 0 && AI_FIXED_VALUE_LINE.test(lines[0] || ''))
+        aiUntil = 0;
+      return lines.filter((_line, i) => i > aiUntil);
+    })
+    .join('\n');
 // o valor que VALE para o agendamento: { text, source, label }
 export const effectiveAppointmentPrice = (prices, appt) => {
   const manual = (appt.charges || []).filter(c =>
@@ -554,24 +585,39 @@ export const effectiveAppointmentPrice = (prices, appt) => {
       source: 'manual',
       label: 'lançado à mão neste card',
     };
-  const note =
-    /valor\s*:\s*(?:R\$\s*)?([\d.]+(?:,\d{1,2})?)/i.exec(
-      appt.description || ''
-    ) || /R\$\s*([\d.]+(?:,\d{1,2})?)/i.exec(appt.description || '');
-  if (note)
+  const notes = humanNotes(appt.description);
+  const explicit = VALUE_PATTERN.exec(notes);
+  if (explicit)
     return {
-      text: sumPrices([note[1]]),
+      text: sumPrices([explicit[1]]),
       source: 'observacao',
       label: 'escrito na observação',
     };
-  if (appt.kind === 'cirurgias') return null;
-  const preset = presetAppointmentPrice(prices, appt);
+  const written =
+    VALUE_PATTERN.exec(appt.procedure || '') ||
+    REAL_PATTERN.exec(appt.procedure || '');
+  if (written)
+    return {
+      text: sumPrices([written[1]]),
+      source: 'procedimento',
+      label: 'escrito no tipo de consulta',
+    };
+  const surgery = appt.kind === 'cirurgias';
+  const preset = surgery ? null : presetAppointmentPrice(prices, appt);
   if (preset)
     return {
       ...preset,
       source: 'preset',
       label: `pré-configurado · ${preset.label}`,
     };
+  const loose = REAL_PATTERN.exec(notes);
+  if (loose)
+    return {
+      text: sumPrices([loose[1]]),
+      source: 'observacao',
+      label: 'escrito na observação',
+    };
+  if (surgery) return null;
   return {
     text: '',
     source: 'padrao',

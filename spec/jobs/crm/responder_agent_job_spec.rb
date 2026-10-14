@@ -44,6 +44,28 @@ RSpec.describe Crm::ResponderAgentJob do
     expect(midia['note']).to eq('1 áudio(s) transcrito(s) · 2 imagem(ns) lida(s)')
   end
 
+  # 🔁 item 340: antes de responder, espera a leitura do áudio da MENSAGEM que disparou
+  it 'espera/lê o áudio da mensagem que disparou antes da IA e soma no registro', :aggregate_failures do
+    order = []
+    allow(Crm::MediaReadingService).to receive(:settle!) do |msg|
+      order << [:settle, msg.id]
+      { 'audio' => 1 }
+    end
+    allow(Crm::MediaReadingService).to receive(:read_pending!) do
+      order << [:pending]
+      { 'image' => 1 }
+    end
+    allow(Crm::ResponderAgentService).to receive(:new) do
+      order << [:ia]
+      instance_double(Crm::ResponderAgentService, call: ai_reply)
+    end
+
+    run
+    expect(order).to eq([[:settle, incoming.id], [:pending], [:ia]])
+    midia = settings.reload.ai_config.dig('atendente_agendamento_state', 'events').find { |e| e['type'] == 'midia' }
+    expect(midia['note']).to eq('1 áudio(s) transcrito(s) · 1 imagem(ns) lida(s)')
+  end
+
   describe 'SOMBRA' do
     it 'escreve a nota interna com o que teria respondido e NÃO manda nada ao paciente', :aggregate_failures do
       stub_ai(ai_reply)

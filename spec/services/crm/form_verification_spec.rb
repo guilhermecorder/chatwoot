@@ -87,10 +87,12 @@ RSpec.describe Crm::FormVerification do
       expect(saidas(c)).to be_empty
     end
 
+    # 🧭 item 341: quem só conversou pela caixa dos parceiros agora é paciente
+    # de parceiro (a caixa conta) — o motivo passa a ser 'parceiro'
     it 'conversa na caixa dos PARCEIROS não serve para o código' do
       CrmSetting.create!(account: account, agenda_config: { 'oftalmofacil' => { 'partner_inbox_ids' => [inbox.id] } })
       c = conversa
-      expect(described_class.start!(resposta)).to eq(status: 'none', reason: 'sem_janela')
+      expect(described_class.start!(resposta)).to eq(status: 'none', reason: 'parceiro')
       expect(saidas(c)).to be_empty
     end
 

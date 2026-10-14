@@ -84,7 +84,9 @@ RSpec.describe Crm::Stamp do
     it 'paciente novo com 1º card no funil dos parceiros é do Oftalmofácil' do
       caio = contact('Caio')
       Crm::Contact.create!(contact: caio, pipeline: partners, stage: partners.stages.first)
-      Crm::Contact.create!(contact: caio, pipeline: cevico, stage: cevico.stages.first)
+      # 🧭 item 341: a cerca do ambiente já não deixa nascer o card da CEVICO — o carimbo não muda
+      expect { Crm::Contact.create!(contact: caio, pipeline: cevico, stage: cevico.stages.first) }.to raise_error(ActiveRecord::RecordInvalid)
+      Crm::CardRouter.bypass('admin') { Crm::Contact.create!(contact: caio, pipeline: cevico, stage: cevico.stages.first) }
       expect(caio.reload.cevico_source_id).to eq(partner.id)
     end
 

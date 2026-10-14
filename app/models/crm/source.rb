@@ -6,9 +6,10 @@
 # entrada (config.pipeline_ids / config.inbox_ids). A fonte da casa (`own`,
 # chave `cevico`) fica com tudo o que nenhuma outra fonte pegou.
 #
-# Oftalmofácil (chave `oftalmofacil`): enquanto a cerca dos parceiros (item
-# 231) for quem manda, o funil e as caixas dela continuam vindo do card do
-# OftalmoFácil em Integrações — uma verdade só, sem cadastro em dois lugares.
+# Oftalmofácil (chave `oftalmofacil`): 🧭 item 341 (13/10) — o funil e as
+# caixas dela agora se escolhem na tela Ambientes do CRM (config, como as
+# outras fontes); o que o card do OftalmoFácil em Integrações já guardava
+# continua somando (compatibilidade), e salvar a tela atualiza o card também.
 #
 # == Schema Information
 #
@@ -55,20 +56,20 @@ class Crm::Source < ApplicationRecord
     kind == 'own'
   end
 
-  # a fonte cujo ambiente ainda é configurado no card do OftalmoFácil
+  # a fonte do hub de parceiros (Oftalmofácil): soma o que está no card de Integrações
   def legacy_partner?
     key == PARTNER_KEY
   end
 
   def pipeline_ids
     ids = Array(config['pipeline_ids']).map(&:to_i)
-    ids |= [Crm::PartnerGuard.partner_pipeline_id(account)].compact if legacy_partner?
+    ids |= [Crm::PartnerGuard.legacy_pipeline_id(account)].compact if legacy_partner?
     ids.select(&:positive?)
   end
 
   def inbox_ids
     ids = Array(config['inbox_ids']).map(&:to_i)
-    ids |= Crm::PartnerGuard.partner_inbox_ids(account) if legacy_partner?
+    ids |= Crm::PartnerGuard.legacy_inbox_ids(account) if legacy_partner?
     ids.select(&:positive?)
   end
 end

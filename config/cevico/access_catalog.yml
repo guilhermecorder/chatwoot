@@ -73,8 +73,8 @@
       levels: [view]
       default: view
     - key: fontes
-      label: Fontes de {{paciente_plural}}
-      hint: carimbo de origem e ambientes de parceiros
+      label: Ambientes do CRM (fontes de {{paciente_plural}})
+      hint: qual número e qual funil ficam em qual ambiente; carimbo de origem
       levels: [view, edit]
       admin: true
 

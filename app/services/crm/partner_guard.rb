@@ -23,6 +23,13 @@
 # CEVICO. Continuam protegidos mesmo assim: a conversa na caixa dos parceiros
 # (partner_inbox?) e os agendamentos do parceiro (partner_task?).
 #
+# 🧭 item 341 (13/10, Ambientes do CRM): o funil e as caixas do Oftalmofácil
+# agora se escolhem na tela Ambientes do CRM (config da fonte `oftalmofacil`);
+# o que estava no card do OftalmoFácil em Integrações continua valendo (soma).
+# E a CAIXA passou a contar de verdade: quem só conversou pela caixa dos
+# parceiros é paciente de parceiro (antes só a conversa era) — a regra B mora
+# em Crm::Environments.own_first_ids (conversa da casa ANTES também conta).
+#
 # Cada bloqueio deixa uma linha "[cerca OF] bloqueado: …" no log.
 module Crm::PartnerGuard
   module_function
@@ -37,12 +44,29 @@ module Crm::PartnerGuard
   end
 
   def partner_pipeline_id(account)
+    legacy_pipeline_id(account) || source_config_ids(account, 'pipeline_ids').first
+  end
+
+  def partner_inbox_ids(account)
+    legacy_inbox_ids(account) | source_config_ids(account, 'inbox_ids')
+  end
+
+  # 🧭 item 341: o que o card do OftalmoFácil em Integrações guardou (compatibilidade)
+  def legacy_pipeline_id(account)
     id = config(account)['partner_pipeline_id'].to_i
     id.positive? ? id : nil
   end
 
-  def partner_inbox_ids(account)
+  def legacy_inbox_ids(account)
     Array(config(account)['partner_inbox_ids']).map(&:to_i).select(&:positive?)
+  end
+
+  # 🧭 item 341: o que a tela Ambientes do CRM gravou na fonte do Oftalmofácil
+  def source_config_ids(account, key)
+    return [] if account.blank?
+
+    cfg = Crm::Source.where(account_id: account.id, key: Crm::Source::PARTNER_KEY).pick(:config) || {}
+    Array(cfg[key]).map(&:to_i).select(&:positive?)
   end
 
   def partner_inbox?(account, inbox_id)
@@ -72,10 +96,16 @@ module Crm::PartnerGuard
     task.partner_origin? || (task.source == 'oftalmofacil' && task.source_detail.present?)
   end
 
+  # 🧭 item 341: ancorado no Oftalmofácil — marca de parceiro OU conversa na
+  # caixa dos parceiros (G1: antes a caixa não contava aqui), menos a regra B
   def partner_contact?(contact)
-    return false if contact.blank?
+    return false if contact.blank? || contact.account.blank?
 
-    partner_marked?(contact) && !cevico_first?(contact)
+    account = contact.account
+    candidates = Crm::Environments.partner_candidate_ids(account, contact)
+    return false if candidates.empty?
+
+    candidates.include?(Crm::Sources.partner_id(account)) && !cevico_first?(contact)
   end
 
   # tem alguma marca de parceiro (atributo, etiqueta of_ ou card no funil deles)
@@ -92,28 +122,12 @@ module Crm::PartnerGuard
     contact.present? && cevico_first_ids(contact.account, [contact.id]).any?
   end
 
-  # dos ids informados, os que têm card num funil da CEVICO criado ANTES da
-  # entrada no parceiro (1º card no funil dos parceiros ou 1º item de parceiro
-  # marcado no hub; sem nenhum dos dois = CEVICO)
-  def cevico_first_ids(account, ids) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    ids = Array(ids).compact
-    return [] if account.blank? || ids.empty?
-
-    pid = partner_pipeline_id(account)
-    own = Crm::Contact.where(contact_id: ids)
-    own = own.where.not(pipeline_id: pid) if pid
-    own_first = own.group(:contact_id).minimum(:created_at)
-    return [] if own_first.empty?
-
-    starts = pid ? Crm::Contact.where(contact_id: own_first.keys, pipeline_id: pid).group(:contact_id).minimum(:created_at) : {}
-    items = Crm::OftalmofacilSurgery.where(account_id: account.id, contact_id: own_first.keys)
-    own_name = own_provider_name(account)
-    items = items.where.not('LOWER(provider_name) LIKE ?', "%#{own_name}%") if own_name.present?
-    item_starts = items.group(:contact_id).minimum(Arel.sql('COALESCE(of_created_at, created_at)'))
-    own_first.select do |cid, t|
-      start = [starts[cid], item_starts[cid]].compact.min
-      start.nil? || t < start
-    end.keys
+  # dos ids informados, os que falaram com a CEVICO ANTES de entrar no
+  # parceiro. 🧭 item 341 (G2): a 1ª conversa na caixa dos parceiros também é
+  # "entrada no parceiro", e o card automático que essa caixa abria no funil
+  # da CEVICO (antes do item 231) não conta mais como "já era da CEVICO".
+  def cevico_first_ids(account, ids)
+    Crm::Environments.own_first_ids(account, ids)
   end
 
   def partner_conversation?(conversation)
@@ -131,7 +145,13 @@ module Crm::PartnerGuard
     Rails.cache.fetch("cevico:partner_guard:ids:#{account.id}", expires_in: IDS_CACHE_TTL) { compute_excluded_ids(account) }
   end
 
-  def compute_excluded_ids(account) # rubocop:disable Metrics/AbcSize
+  def compute_excluded_ids(account)
+    ids = marked_contact_ids(account)
+    ids - cevico_first_ids(account, ids) # regra B: quem já era da CEVICO continua lead da CEVICO
+  end
+
+  # todos com alguma evidência do Oftalmofácil, ANTES da regra B
+  def marked_contact_ids(account) # rubocop:disable Metrics/AbcSize
     ids = []
     pid = partner_pipeline_id(account)
     ids |= Crm::Contact.where(pipeline_id: pid).pluck(:contact_id) if pid
@@ -146,8 +166,11 @@ module Crm::PartnerGuard
     ids |= account.conversations.where(inbox_id: inbox_ids).where.not(contact_id: nil).distinct.pluck(:contact_id) if inbox_ids.any?
 
     ids |= account.contacts.where("COALESCE(additional_attributes->>'parceiro', '') <> ''").pluck(:id)
-    ids = ids.compact.uniq
-    ids - cevico_first_ids(account, ids) # regra B: quem já era da CEVICO continua lead da CEVICO
+    # 🧭 item 341: carimbados como Oftalmofácil e agendamentos de parceiro também
+    stamped = Crm::Sources.id_for_key(account, Crm::Source::PARTNER_KEY)
+    ids |= account.contacts.where(cevico_source_id: stamped).pluck(:id) if stamped
+    ids |= account.tasks.where.not(contact_id: nil).where(Crm::Environments::PARTNER_TASK_SQL).distinct.pluck(:contact_id)
+    ids.compact.uniq
   end
 
   # apaga o cache (o sync chama depois de rodar)

@@ -220,8 +220,9 @@ const allowedTasks = computed(() =>
 );
 const visibleTasks = computed(() => {
   if (filterAssignee.value === 'me') {
+    // 🔁 item 343: os cards da Equipe dos retornos também são "meus" para quem é da equipe
     return allowedTasks.value.filter(
-      x => x.assignee?.id === currentUser.value.id
+      x => x.assignee?.id === currentUser.value.id || x.retorno_team
     );
   }
   if (filterAssignee.value) {

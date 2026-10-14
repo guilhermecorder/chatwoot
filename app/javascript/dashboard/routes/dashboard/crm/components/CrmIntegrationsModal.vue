@@ -295,7 +295,8 @@ const saveOftalmo = async () => {
       partners_enabled: oftalmo.value.partners_enabled,
       partner_pipeline_id: oftalmo.value.partner_pipeline_id || null,
       own_pipeline_id: oftalmo.value.own_pipeline_id || null,
-      partner_inbox_ids: oftalmo.value.partner_inbox_ids, // 🚧 item 231
+      // 🧭 item 341: as caixas da cerca agora se escolhem só em "Ambientes do CRM"
+      // (este card não manda mais partner_inbox_ids — não sobrescreve a tela nova)
       agenda_enabled: oftalmo.value.agenda_enabled,
       agenda_from: oftalmo.value.agenda_from || null,
       clinics: Object.fromEntries(oftalmoClinics.value.filter(c => c.name.trim() && c.unit).map(c => [c.name.trim(), c.unit])),
@@ -1270,12 +1271,14 @@ const fetchWorkflows = async () => {
             <div class="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 dark:bg-amber-900/10 dark:border-amber-800 p-2">
               <p class="text-[11px] font-medium text-n-slate-12">🚧 Cerca dos parceiros — caixa(s) por onde a equipe fala com esses pacientes</p>
               <p class="text-[10px] text-n-slate-9 mt-0.5">Paciente de parceiro (card no funil dos parceiros, etiqueta <code>of_…</code> ou conversa nessas caixas) <b>nunca</b> recebe agente de IA, robô de follow-up, automação de coluna, lembrete, jornada, campanha, régua, colheita nem ligação da IA — e não ganha card no funil da CEVICO nem conta como lead. Só gente fala com ele, por aqui.</p>
+              <!-- 🧭 item 341: só leitura — a escolha mora em CRM → Ambientes do CRM -->
               <div class="flex flex-wrap gap-1.5 mt-1.5">
-                <label v-for="ib in allInboxes" :key="'pib' + ib.id" class="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border cursor-pointer" :class="oftalmo.partner_inbox_ids.includes(ib.id) ? 'border-amber-400 bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100' : 'border-n-weak text-n-slate-11'">
-                  <input v-model="oftalmo.partner_inbox_ids" type="checkbox" :value="ib.id" class="rounded" /> {{ ib.name }}
-                </label>
-                <span v-if="!allInboxes.length" class="text-[10px] text-n-slate-9">nenhuma caixa de entrada cadastrada</span>
+                <span v-for="ib in allInboxes.filter(i => oftalmo.partner_inbox_ids.includes(i.id))" :key="'pib' + ib.id" class="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-amber-400 bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100">
+                  <span class="i-lucide-inbox text-[10px]" /> {{ ib.name }}
+                </span>
+                <span v-if="!oftalmo.partner_inbox_ids.length" class="text-[10px] text-n-slate-9">nenhuma caixa na cerca</span>
               </div>
+              <p class="text-[10px] text-n-slate-9 mt-1">Para trocar as caixas, use <b>CRM → Ambientes do CRM</b> (um número fica em um ambiente só).</p>
             </div>
             <div v-if="oftalmoPartnersSeen.length" class="mt-2 flex flex-wrap gap-1">
               <span v-for="p in oftalmoPartnersSeen" :key="'ps' + p.name" class="text-[10px] px-2 py-0.5 rounded-full border" :class="p.own ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-n-weak text-n-slate-11'" :title="p.own ? 'É a CEVICO' : 'Parceiro'">

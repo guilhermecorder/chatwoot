@@ -570,7 +570,8 @@ const visibleTasks = computed(() => {
   if (view.value === 'clinic') return list.filter(isAppointment).filter(inKind);
   if (activeUnit.value) return list.filter(x => x.unit === activeUnit.value).filter(inKind);
   if (activeDoctor.value) return list.filter(x => isAppointment(x) && x.doctor === activeDoctor.value).filter(inKind);
-  if (view.value === 'me') return list.filter(x => !x.unit && x.assignee?.id === currentUser.value.id);
+  // 🔁 item 343: card da Equipe dos retornos aparece em "Minha agenda" de quem é da equipe
+  if (view.value === 'me') return list.filter(x => !x.unit && (x.assignee?.id === currentUser.value.id || x.retorno_team));
   return list.filter(x => !x.unit && x.assignee?.id === Number(view.value));
 });
 
@@ -1423,6 +1424,11 @@ const attendanceStages = ref({
   surgery_done_stage_id: '', surgery_missed_stage_id: '',
 });
 const attendanceOwners = ref({ consulta_user_id: '', cirurgia_user_id: '', deadline: '19:00' });
+// 🔁 item 343: Equipe dos retornos — retorno sem dono individual, as pessoas daqui veem todos (só admin escolhe)
+const retornoTeam = ref([]);
+const toggleRetornoTeam = id => {
+  retornoTeam.value = retornoTeam.value.includes(id) ? retornoTeam.value.filter(x => x !== id) : [...retornoTeam.value, id];
+};
 const isSavingAttendanceCfg = ref(false);
 
 const loadCrmStages = async () => {
@@ -1436,6 +1442,7 @@ const loadCrmStages = async () => {
       cirurgia_user_id: own.cirurgia_user_id || '',
       deadline: own.deadline || '19:00',
     };
+    retornoTeam.value = (crmSettings.value?.retorno_team_user_ids || []).map(Number);
     const cfg = crmSettings.value?.attendance_stages || {};
     attendanceStages.value = {
       attended_stage_id: cfg.attended_stage_id || '',
@@ -1464,6 +1471,7 @@ const saveAttendanceStages = async () => {
       cirurgia_user_id: attendanceOwners.value.cirurgia_user_id || null,
       deadline: attendanceOwners.value.deadline || '19:00',
     });
+    if (isAdmin.value) await CrmAPI.updateRetornoTeam(retornoTeam.value);
     useAlert('Conferência do dia configurada!');
   } catch {
     useAlert('Erro ao salvar a configuração.');
@@ -3219,6 +3227,16 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <input v-model="attendanceOwners.deadline" type="time" class="cv-input w-full !h-8 text-xs" />
               </div>
             </div>
+          </div>
+          <!-- 🔁 item 343: Equipe dos retornos (admin) -->
+          <div v-if="isAdmin" class="cv-row p-2.5 space-y-2">
+            <p class="text-[10px] font-semibold text-n-slate-11">🔁 Equipe dos retornos — retorno não fica no nome de quem marcou: as pessoas marcadas aqui veem todos os retornos (tarefas e avisos) e quem pegar primeiro assume</p>
+            <div class="flex flex-wrap gap-1.5">
+              <button v-for="agent in agents" :key="`ret-${agent.id}`" type="button" class="cv-chip" :class="retornoTeam.includes(agent.id) ? 'cv-chip-on' : ''" @click="toggleRetornoTeam(agent.id)">
+                {{ retornoTeam.includes(agent.id) ? '✓ ' : '' }}{{ agent.name }}
+              </button>
+            </div>
+            <p class="text-[10px] text-n-slate-9">Ninguém marcado = como antes (retorno fica com quem marcou).</p>
           </div>
           <div class="space-y-2">
             <div v-for="opt in [

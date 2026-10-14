@@ -2,19 +2,24 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   # Toda nova conversa garante um card no funil de entrada do CRM.
   # O card nasce na primeira coluna (menor position) do primeiro pipeline;
   # se o contato já tem card nesse pipeline, nada acontece.
-  def conversation_created(event)
+  def conversation_created(event) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     conversation, account = extract_conversation_and_account(event)
     contact = conversation.contact
     return unless patient_contact?(contact)
 
     # 🏷️ item 322: a 1ª conversa é evidência de quem é o paciente — a caixa em
     # que ela nasceu diz a fonte (primeira evidência carimba)
-    Crm::Stamp.claim_contact!(contact, Crm::Sources.id_for_inbox(account, conversation.inbox_id))
+    env_id = Crm::Environments.environment_id_for_inbox(account, conversation.inbox_id)
+    Crm::Stamp.claim_contact!(contact, env_id)
+    # 🧭 item 341 (Ambientes do CRM): caixa de OUTRO ambiente (ex.: caixa 12
+    # Oftalmofácil) → o card nasce no funil DESSE ambiente, em "Novo Contato";
+    # nunca no funil da CEVICO
+    return place_environment_card(account, conversation, contact, env_id) if Crm::Environments.partner_environment_id?(account, env_id)
     # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub / conversa
     # na caixa dos parceiros NÃO ganha card no funil da CEVICO
     return if Crm::PartnerGuard.partner_conversation?(conversation)
 
-    pipeline = account.crm_pipelines.order(:position).first
+    pipeline = Crm::Environments.entry_pipeline(account, Crm::Environments.own_id(account))
     return if pipeline.blank?
 
     entry_stage = entry_stage_for(account, pipeline, contact)
@@ -29,6 +34,27 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
     # corrida entre eventos simultâneos do mesmo contato — card já existe
     nil
+  end
+
+  # 🧭 item 341: card de entrada no funil do ambiente da caixa. Paciente que já
+  # era da CEVICO (regra B) e escreveu na caixa do parceiro não ganha card lá
+  # (nem aqui — a conversa continua só da caixa do parceiro)
+  def place_environment_card(account, conversation, contact, env_id) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return nil unless Crm::Environments.contact_environment_id(account, contact) == env_id
+
+    source = Crm::Environments.source(account, env_id)
+    Crm::Stamp.with(via: conversation_via(conversation)) do
+      next Crm::PartnerFunnel.place!(account, contact, :new) if source&.legacy_partner?
+
+      pipeline = Crm::Environments.entry_pipeline(account, env_id)
+      stage = pipeline&.stages&.order(:position)&.first
+      next nil if stage.nil?
+
+      Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) do |card|
+        card.stage_id = stage.id
+        card.origin = conversation.inbox&.name
+      end
+    end
   end
 
   # 🧪 celular de teste da jornada (R3 #416) não é paciente: sem carimbo de

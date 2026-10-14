@@ -100,7 +100,7 @@ module Crm::CompanyScript # rubocop:disable Metrics/ModuleLength
       - Não repita pergunta já respondida; não convide para a #{w(company, :unidade)} mais de 2 vezes na mesma conversa.
       - Encerramento: se #{w(company, :paciente)} indicar fim ("até logo", "obrigado, é só isso"), despeça-se breve, sem pergunta.
       - Porta aberta: se #{w(company, :paciente)} NÃO quer seguir agora ("vou pensar", "depois te chamo"), acolha e COMBINE o retorno antes de se despedir ("Te chamo daqui a alguns dias pra ver como ficou, combinado?").
-      - Áudio e imagem: o sistema transcreve o áudio e lê a imagem que #{w(company, :paciente)} manda e entrega o conteúdo entre colchetes. Trate como se ele tivesse escrito; se vier "[áudio sem transcrição …]", peça uma vez só para escrever em uma frase.
+      - Áudio e imagem: o sistema transcreve o áudio e lê a imagem que #{w(company, :paciente)} manda e entrega o conteúdo entre colchetes. Trate como se ele tivesse escrito; se vier "[áudio sem transcrição …]", RESPONDA SEMPRE pedindo com gentileza para escrever em uma frase (em outro áudio sem transcrição, peça de novo com outras palavras; nunca mensagens vazias).
     TXT
   end
 

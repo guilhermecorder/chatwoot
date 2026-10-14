@@ -34,7 +34,26 @@ class Crm::SourceOverview
     { id: source.id, key: source.key, name: source.name, kind: source.kind, color: source.color,
       legacy_partner: source.legacy_partner?,
       pipeline_ids: owned_ids(source, sources, :pipeline_ids, pipelines), inbox_ids: owned_ids(source, sources, :inbox_ids, inboxes),
-      counts: counts(source), entries: entries(source) }
+      counts: counts(source), entries: entries(source), conference: conference(source) }
+  end
+
+  # 🧭 item 341 (Ambientes do CRM): CONFERÊNCIA — quantos cards em funil de
+  # OUTRO ambiente ainda existem para os pacientes deste ambiente (o rake
+  # cevico:ambientes_migrar resolve). A casa não tem conferência.
+  def conference(source)
+    return nil if source.own?
+
+    contact_ids = anchors.select { |_cid, env| env == source.id }.keys
+    cards = contact_ids.empty? ? 0 : Crm::Contact.where(contact_id: contact_ids).where.not(pipeline_id: source.pipeline_ids).count
+    { foreign_cards: cards, patients: contact_ids.size,
+      command: "bundle exec rake cevico:ambientes_migrar ACCOUNT_ID=#{@account.id} DRY=1" }
+  rescue StandardError => e
+    Rails.logger.error "[Crm::SourceOverview] conferência #{source.id}: #{e.message}"
+    nil
+  end
+
+  def anchors
+    @anchors ||= Crm::Environments.anchored_partner_map(@account, Crm::Environments.partner_evidence_ids(@account))
   end
 
   # a fonte da casa fica com tudo o que nenhuma outra pegou

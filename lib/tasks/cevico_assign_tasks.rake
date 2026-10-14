@@ -23,7 +23,8 @@ namespace :cevico do
 
     scope.includes(:contact).find_each do |task|
       contact = task.contact || Task.match_contact(account, task.phone)
-      owner = Crm::TaskOwner.resolve(account, contact: contact, task_type: task.task_type)
+      # 🔁 item 343: retorno fica com a equipe dos retornos (sem dono individual)
+      owner = Crm::TaskOwner.resolve(account, contact: contact, task_type: task.task_type, retorno: Crm::TaskOwner.retorno?(task))
       if owner.nil?
         skipped += 1
         next

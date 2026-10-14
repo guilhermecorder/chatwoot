@@ -916,10 +916,11 @@ const rawPanelTiles = computed(() => {
         gk: 'booking_conversion',
         pct: true,
         sub: `${d.appointments_created ?? 0} entraram na coluna Agendamento ÷ ${d.new_leads ?? 0} leads novos`,
-        breakdowns: bdSections(
-          d.booked_breakdown,
-          'Consultas marcadas no período'
-        ),
+        // item 342: primeiro as PESSOAS (somam o número de cima), depois a Agenda
+        breakdowns: [
+          ...peopleSections(d.booking_people),
+          ...bdSections(d.booked_breakdown, 'Na Agenda (outra régua)'),
+        ],
         components: ['new_leads', 'appointments_created'],
         compare: [
           { label: 'leads', value: d.new_leads ?? 0 },
@@ -1311,11 +1312,34 @@ const bookedSub = bd => {
   if (inboxes.length) parts.push(inboxes.join(' · '));
   return parts.join(' · ');
 };
-const bdSections = (bd, title = 'Consultas marcadas') => {
-  if (!bd || !bd.total) return [];
+// 🧹 item 342 (13/10): "Entrou em Agendamento" conta PESSOAS (mudança de
+// coluna) — esta quebra soma exatamente o número de cima. As consultas da
+// Agenda (bdSections) são OUTRA régua e dizem quantas pessoas são.
+const peopleSections = bp => {
+  if (!bp || !bp.total) return [];
   return [
     {
-      title: `${title}: quem é o paciente`,
+      title: `Quem entrou na coluna de agendamento: ${bp.total} pessoa(s)`,
+      items: [
+        { label: 'Lead novo (chegou no período)', value: bp.new_leads },
+        { label: 'Paciente da base (chegou antes)', value: bp.base },
+      ],
+    },
+    {
+      title: 'De qual caixa de entrada a pessoa chegou',
+      items: bdRows(bp.by_origin_inbox),
+    },
+  ].filter(sec => sec.items.some(i => Number(i.value) > 0));
+};
+const bdSections = (bd, title = 'Consultas marcadas') => {
+  if (!bd || !bd.total) return [];
+  // item 342: o total é de CONSULTAS — diz quantas pessoas são
+  const quantas = bd.people
+    ? ` (${bd.total} consulta(s) de ${bd.people} pessoa(s))`
+    : ` (${bd.total} consulta(s))`;
+  return [
+    {
+      title: `${title}${quantas}: quem é o paciente`,
       items: [
         { label: 'Leads novos (chegaram há até 30 dias)', value: bd.new_leads },
         {
@@ -1326,7 +1350,10 @@ const bdSections = (bd, title = 'Consultas marcadas') => {
     },
     {
       // item 332: a FONTE pelo carimbo de origem (CEVICO × Oftalmofácil…)
-      title: 'Fonte de pacientes (carimbo de origem)',
+      // item 342: contada SEM a chavinha de fonte — com ela dava 100% da fonte escolhida
+      title: bd.by_stamp_all_sources
+        ? 'Fonte de pacientes (todas as fontes, para comparar)'
+        : 'Fonte de pacientes (carimbo de origem)',
       items: bdRows(bd.by_stamp),
     },
     {
@@ -1435,8 +1462,14 @@ const modalBreakdowns = computed(() => {
   const pd = data.value?.panel_data || {};
   const label = String(m.label || '');
   if (/cirurgia/i.test(label)) return surgerySections(pd.surgery_breakdown);
-  if (/agendamento|consultas marcadas/i.test(label))
+  if (/consultas marcadas/i.test(label))
     return bdSections(pd.booked_breakdown, 'Consultas marcadas no período');
+  // item 342: "Entrou em Agendamento" = pessoas; a Agenda vem depois, como outra régua
+  if (/agendamento/i.test(label))
+    return [
+      ...peopleSections(pd.booking_people),
+      ...bdSections(pd.booked_breakdown, 'Na Agenda (outra régua)'),
+    ];
   return [];
 });
 

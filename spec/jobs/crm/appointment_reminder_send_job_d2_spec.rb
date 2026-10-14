@@ -178,6 +178,19 @@ RSpec.describe Crm::AppointmentReminderSendJob do
       expect(sources.size).to eq(2)
     end
 
+    # 💰 item 340: Alessandro recebeu "R$ 150" com a Agenda mostrando R$ 350
+    it 'valor escrito no tipo de consulta vai no {{valor}}, a linha antiga da IA não conta e a lista guarda de onde saiu',
+       :aggregate_failures do
+      consulta(contact_named('Alessandro Pires', '+5511999990089'), '2026-09-28 09:00',
+               procedure: 'CONSULTA | JÁ PAC | R$350',
+               description: "Obs da recepção\n\nReagendada pela IA:\nValor da consulta: R$ 150\nConversa #3 — agendado pela IA")
+      described_class.perform_now(now)
+
+      expect(sources.first[3].dig('processed_params', 'body', '4')).to eq('350,00')
+      entry = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent').first
+      expect(entry).to include('value' => '350,00', 'value_source' => 'escrito no tipo de consulta')
+    end
+
     it 'rodadas seguintes da mesma hora não apagam a lista de quem recebeu', :aggregate_failures do
       consulta(contact_named('Primeira Rodada', '+5511999990082'), '2026-09-28 09:00')
       described_class.perform_now(now)

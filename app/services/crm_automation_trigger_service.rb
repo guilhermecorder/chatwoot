@@ -45,6 +45,9 @@ class CrmAutomationTriggerService
 
   def call
     return unless @contact
+    # 🧭 item 341: card que a cerca do ambiente mandou para o funil do parceiro
+    # não dispara as automações da coluna da CEVICO que o caminho pediu
+    return if @event_type == 'card_entered' && @crm_contact && @new_stage && @crm_contact.pipeline_id != @new_stage.pipeline_id
 
     automations = @new_stage.automations.where(active: true, trigger_type: trigger_type_for_event)
 

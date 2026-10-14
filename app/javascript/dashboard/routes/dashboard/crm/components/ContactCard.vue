@@ -63,6 +63,15 @@ const labelColorMap = computed(() => {
   return map;
 });
 
+// 🏷️ item 344: o TIPO do atendimento (do próximo agendamento; sem próximo, o
+// último) — Consulta, Exame, Cirurgia, Lente Rígida, Retorno, Pós-op, Intravítrea
+const kind = computed(() => props.contact.appointment_kind || null);
+const kindWhen = computed(() => {
+  if (!kind.value?.at) return '';
+  const d = new Date(kind.value.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  return kind.value.upcoming ? d : `último ${d}`;
+});
+
 const visibleLabels = computed(() => props.contact.labels?.slice(0, 4) ?? []);
 const extraLabels = computed(() => Math.max(0, (props.contact.labels?.length ?? 0) - 4));
 
@@ -138,8 +147,18 @@ const channelIcon = (channelType) => {
       <p class="line-clamp-2">{{ unreadPreview }}</p>
     </div>
 
-    <!-- Etiquetas no design Apple (tinta da própria cor) -->
-    <div v-if="visibleLabels.length" class="flex flex-wrap gap-1 mt-2">
+    <!-- Etiquetas no design Apple (tinta da própria cor); item 344: o TIPO vem primeiro -->
+    <div v-if="kind || visibleLabels.length" class="flex flex-wrap gap-1 mt-2">
+      <span
+        v-if="kind"
+        class="cv-tag cv-tag-kind"
+        :style="{ '--lb': kind.color }"
+        :title="`Tipo do atendimento: ${kind.label}${kindWhen ? ` · ${kindWhen}` : ''}`"
+      >
+        <span class="cv-tag-dot" />
+        <b class="truncate">{{ kind.label }}</b>
+        <span v-if="kindWhen" class="opacity-70">· {{ kindWhen }}</span>
+      </span>
       <span
         v-for="label in visibleLabels"
         :key="label"

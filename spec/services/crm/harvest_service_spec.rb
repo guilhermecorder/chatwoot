@@ -254,7 +254,8 @@ RSpec.describe Crm::HarvestService do
       parceiro = create(:contact, account: account, name: 'Parceiro', phone_number: '+5511944440002', last_activity_at: 90.days.ago,
                                   additional_attributes: { 'parceiro' => 'CLINICA VISAO NORTE' })
       Crm::Contact.create!(contact: parceiro, pipeline: partners, stage: partner_stage, created_at: 10.days.ago)
-      Crm::Contact.create!(contact: parceiro, pipeline: stage.pipeline, stage: stage, value: 9000)
+      # 🧭 item 341: hoje a cerca do ambiente não deixaria esse card nascer — passe livre para montar o cenário
+      Crm::CardRouter.bypass('carga') { Crm::Contact.create!(contact: parceiro, pipeline: stage.pipeline, stage: stage, value: 9000) }
       cold_lead('Quieto', '+5511944440003').add_labels(['nao_perturbe'])
       cold_lead('Colhido', '+5511944440004').add_labels(['colheita_2026_09'])
 

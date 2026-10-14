@@ -215,7 +215,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
     if shadow
       run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner, inbox: inbox,
-                                              general: template&.dig('general'), model: template&.dig('model'))
+                                              general: template&.dig('general'), model: template&.dig('model'),
+                                              price: appointment_price(task, rcfg))
       return
     end
 
@@ -239,7 +240,8 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     # message_id: a rodada seguinte confere se a Meta recusou (#45/RESIL-7) — na marca e na lista
     remember_reminder_message!(contact, task, self.class.message_key(regua), sender.message&.id)
     run['sent'] << entry_for(task, contact, template: template.dig('template_params', 'name'), partner: partner, inbox: inbox,
-                                            general: template['general'], model: template['model'], message_id: sender.message&.id)
+                                            general: template['general'], model: template['model'], message_id: sender.message&.id,
+                                            price: appointment_price(task, rcfg))
   rescue StandardError => e
     Rails.logger.error "[CEVICO lembretes] task #{task.id}: #{e.message}"
     skip(run, task, "erro: #{e.message.truncate(60)}")
@@ -407,10 +409,18 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   # → escrito na observação → pré-configurado do tipo (particular por médico,
   # exames, avaliação, retorno, pós-op) → valor padrão deste lembrete
   def appointment_value(task, rcfg)
+    appointment_price(task, rcfg)&.dig(:text) || rcfg['default_value'].presence || DEFAULT_VALUE
+  end
+
+  # 💰 item 340: o valor E de onde saiu ({ text:, label: }) — vai também para a
+  # lista de "Enviados" ("R$ 350 · escrito no tipo de consulta")
+  def appointment_price(task, rcfg)
     @price_cfg ||= {}
     cfg = (@price_cfg[task.account_id] ||= Crm::AppointmentPrice.config(task.account))
-    Crm::AppointmentPrice.resolve(cfg, task, fallback: rcfg['default_value'].presence || DEFAULT_VALUE)&.dig(:text) ||
-      rcfg['default_value'].presence || DEFAULT_VALUE
+    Crm::AppointmentPrice.resolve(cfg, task, fallback: rcfg['default_value'].presence || DEFAULT_VALUE)
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO lembretes] valor da task #{task.id}: #{e.message}"
+    nil
   end
 
   def patient_name(task)
@@ -461,13 +471,15 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   # ── registro da rodada: quem recebeu / receberia e quem foi pulado ──
   # general: saiu o modelo "geral" (não o da unidade) — a lista avisa
   # model: saiu um modelo PERSONALIZADO (item 327) — "Retorno · Dra. Roberta Negri"
-  def entry_for(task, contact, template: nil, partner: false, inbox: nil, general: nil, model: nil, message_id: nil) # rubocop:disable Metrics/ParameterLists
+  # price (item 340): o valor que foi no {{valor}} e de onde saiu
+  def entry_for(task, contact, template: nil, partner: false, inbox: nil, general: nil, model: nil, message_id: nil, price: nil) # rubocop:disable Metrics/ParameterLists, Metrics/CyclomaticComplexity
     at = task.due_at&.in_time_zone(TZ)
     { 'task_id' => task.id, 'name' => patient_name(task), 'phone_tail' => contact.phone_number.to_s.last(4),
       'when' => at&.strftime('%d/%m %H:%M'), 'unit' => unit_label(task), 'template' => template, 'contact_id' => contact.id,
       'general' => (general ? true : nil), 'model' => model.presence,
       'inbox' => inbox&.name, # item 310: por qual caixa saiu / sairia
       'message_id' => message_id, # #45: a mensagem gravada, para conferir depois se a Meta recusou
+      'value' => price&.dig(:text).presence, 'value_source' => price&.dig(:label).presence,
       'partner' => (partner ? partner_name(task).presence || 'Oftalmofácil' : nil) }.compact
   end
 

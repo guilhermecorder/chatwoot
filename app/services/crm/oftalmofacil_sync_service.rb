@@ -163,6 +163,23 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   end
 
   # ── conexão (usuário só-leitura) ───────────────────────────────────────
+  # tipo da task da Agenda pelo procedimento do hub (público: o rake
+  # cevico:of_colunas, item 344, reclassifica com a MESMA regra)
+  def self.kind_for(surgery)
+    t = surgery.procedure_type.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase
+    return { task_type: 'consulta', modality: 'exames', prefix: 'Exame' } if t.include?('exam')
+    return { task_type: 'consulta', modality: 'pos_op', prefix: 'Pós-operatório' } if t.match?(/p[o]s.?op|pos.?operat|retorno p/) # item 234
+    # 🧩 item 344 (13/10): "retorno vindo do oftalmofácil é consulta de retorno"
+    # (antes caía no fim e virava CIRURGIA)
+    return { task_type: 'consulta', modality: 'retorno', prefix: 'Retorno' } if t.include?('retorno')
+    # 🧩 item 344: adaptação de lente rígida/escleral é consulta (não cirurgia);
+    # "lente" sozinho não — catarata é "facectomia com LIO (lente intraocular)"
+    return { task_type: 'consulta', modality: 'avaliacao', prefix: 'Lente Rígida' } if t.match?(Crm::AppointmentKind::LENTE)
+    return { task_type: 'consulta', modality: 'avaliacao', prefix: 'Consulta' } if t.include?('consult')
+
+    { task_type: 'cirurgia', modality: nil, prefix: 'Cirurgia' }
+  end
+
   def self.configured?(config)
     %w[db_host db_name db_user db_password provider_name].all? { |k| config[k].present? }
   end
@@ -695,16 +712,41 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
 
   # nosso → funil da CEVICO; parceiro → funil dos parceiros (sem funil
   # configurado, o parceiro não ganha card: fica no espelho e na Agenda)
-  def target_stage(surgery) # rubocop:disable Metrics/CyclomaticComplexity
+  def target_stage(surgery) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     pipeline = own_provider?(surgery.provider_name) ? own_pipeline : partner_pipeline
     return nil unless pipeline
+    return consult_stage(surgery, pipeline) if task_kind(surgery)[:task_type] == 'consulta'
 
+    # 🧩 item 344: no funil do parceiro a coluna é achada pelo PAPEL (em
+    # produção ela se chama só "Cirurgia" — o nome exato não era achado e a
+    # cirurgia de parceiro ficava sem card)
+    partner = pipeline.id == partner_pipeline&.id
     case surgery.status_kind
-    when 'agendada', 'aguardando_pagamento' then stage_like('cirurgia agendada', pipeline)
+    when 'agendada', 'aguardando_pagamento'
+      partner ? Crm::PartnerFunnel.find_stage(pipeline, :surgery) : stage_like('cirurgia agendada', pipeline)
     when 'realizada'
       recent = surgery.surgery_date.present? && surgery.surgery_date >= RECENT_DAYS.days.ago.to_date
-      recent ? stage_like('cirurgia realizada', pipeline) : (stage_like('pós operat', pipeline) || stage_like('pos operat', pipeline))
+      key = recent ? :realized : :postop
+      next_stage = partner && Crm::PartnerFunnel.find_stage(pipeline, key)
+      next_stage || (recent ? stage_like('cirurgia realizada', pipeline) : (stage_like('pós operat', pipeline) || stage_like('pos operat', pipeline)))
     end
+  end
+
+  # 🧩 item 344 (13/10): consulta, exame, retorno e pós-op do hub NÃO são
+  # cirurgia — antes todo item "agendada" ia para "Cirurgia Agendada" e todo
+  # "realizada" para "Cirurgia Realizada" (inflava as cirurgias do parceiro).
+  # Só no funil do PARCEIRO: no da CEVICO quem move consulta é a Agenda/IA
+  # (uma entrada do sync em "Agendamento de Consulta" contaria como agendamento).
+  def consult_stage(surgery, pipeline) # rubocop:disable Metrics/CyclomaticComplexity
+    return nil if pipeline.id != partner_pipeline&.id
+
+    modality = task_kind(surgery)[:modality]
+    key = case surgery.status_kind
+          when 'agendada', 'aguardando_pagamento' then :booked
+          when 'ausente' then :missed
+          when 'realizada' then modality == 'pos_op' ? :postop : :consulted
+          end
+    key && Crm::PartnerFunnel.find_stage(pipeline, key)
   end
 
   # coluna pelo nome, DENTRO do funil escolhido (antes procurava em qualquer
@@ -951,12 +993,7 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   # tipo do agendamento pelo tipo do procedimento lá: exame → trilho Exames,
   # consulta → Consultas (avaliação), o resto → Cirurgias
   def task_kind(surgery)
-    t = surgery.procedure_type.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase
-    return { task_type: 'consulta', modality: 'exames', prefix: 'Exame' } if t.include?('exam')
-    return { task_type: 'consulta', modality: 'pos_op', prefix: 'Pós-operatório' } if t.match?(/p[o]s.?op|pos.?operat|retorno p/) # item 234
-    return { task_type: 'consulta', modality: 'avaliacao', prefix: 'Consulta' } if t.include?('consult')
-
-    { task_type: 'cirurgia', modality: nil, prefix: 'Cirurgia' }
+    self.class.kind_for(surgery)
   end
 
   def sync_description(surgery, partner)

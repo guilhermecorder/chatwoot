@@ -74,6 +74,10 @@ class Crm::Contact < ApplicationRecord
     true
   end
 
+  # 🧭 item 341 (Ambientes do CRM): paciente de OUTRO ambiente (ex.: caixa 12
+  # Oftalmofácil) nunca ganha card no funil da CEVICO — o card nasce no funil
+  # do ambiente dele, na coluna equivalente (Crm::CardRouter)
+  before_validation(on: :create) { Crm::CardRouter.route!(self) }
   after_create  :log_initial_stage
   # 🏷️ item 322: o 1º card é evidência de quem é o paciente (primeira evidência carimba)
   after_create  -> { Crm::Stamp.claim_contact!(contact, cevico_source_id) }
@@ -86,6 +90,8 @@ class Crm::Contact < ApplicationRecord
   private
 
   def reflect_confirmation
+    return if Crm::CardRouter.quiet? # 🧭 item 341: a migração entre ambientes não mexe na Agenda
+
     Crm::ConfirmationReflector.from_stage(self)
   end
 

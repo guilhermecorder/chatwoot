@@ -38,6 +38,38 @@ RSpec.describe Crm::InstagramAgentJob do
     expect(Redis::LockManager.new.locked?(lock_key)).to be(false)
   end
 
+  # 👂 item 340: áudio do direct vira texto antes da IA (mesmo leitor do WhatsApp)
+  describe 'áudio no direct' do
+    let(:audio_msg) { create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: nil) }
+    let!(:audio) do
+      audio_msg.attachments.create!(account_id: account.id, file_type: :audio,
+                                    file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.ogg'), 'audio/ogg'))
+    end
+
+    it 'com a chave do Gemini, espera/lê o áudio da mensagem ANTES de chamar a IA', :aggregate_failures do
+      CrmSetting.find_by(account: account).update!(ai_config: CrmSetting.find_by(account: account).ai_config.merge('gemini_api_key' => 'AIza'))
+      order = []
+      allow(Crm::MediaReadingService).to receive(:settle!) { |msg| order << [:settle, msg.id] }
+      allow(Crm::MediaReadingService).to receive(:read_pending!) { order << [:pending] }
+      allow(Crm::InstagramAgentService).to receive(:new) do
+        order << [:ia]
+        instance_double(Crm::InstagramAgentService, call: ai_reply)
+      end
+
+      run(audio_msg)
+      expect(order).to eq([[:settle, audio_msg.id], [:pending], [:ia]])
+    end
+
+    it 'a conversa da IA mostra o áudio (transcrito ou pedindo para escrever) — antes a mensagem sem texto sumia', :aggregate_failures do
+      allow(Crm::InstagramAgentService).to receive(:new).and_call_original
+      service = Crm::InstagramAgentService.new(conversation: conversation)
+      expect(service.send(:build_transcript)).to include('PACIENTE: [áudio sem transcrição')
+
+      audio.update!(meta: { 'transcribed_text' => 'quero saber da refrativa', 'cevico_media' => { 'status' => 'done' } })
+      expect(service.send(:build_transcript)).to include('PACIENTE: [áudio transcrito: "quero saber da refrativa"]')
+    end
+  end
+
   it 'cerca dos parceiros: paciente do Oftalmofácil (etiqueta of_) não recebe IA', :aggregate_failures do
     contact.add_labels(%w[oftalmofacil of_clinica_parceira])
     allow(Crm::PartnerGuard).to receive(:block!).and_call_original

@@ -86,10 +86,12 @@ const cevicoCards = computed(() => [
   // 🏷️ item 322: de quem é cada paciente (CEVICO × Oftalmofácil × …) — tela própria
   {
     key: 'sources',
-    name: 'Fontes de pacientes',
+    // 🧭 item 341: virou "Ambientes do CRM" (qual número fica em qual CRM)
+    name: 'Ambientes do CRM',
     icon: 'i-lucide-git-fork',
     color: '#152C61',
-    description: 'Cada fonte de pacientes com o seu ambiente (funis e caixas) e o carimbo de origem em tudo o que nasce.',
+    description:
+      'Qual número de WhatsApp e qual funil ficam em qual ambiente (CEVICO, Oftalmofácil…) e o carimbo de origem em tudo o que nasce.',
     enabled: true,
     route: 'crm_sources',
   },

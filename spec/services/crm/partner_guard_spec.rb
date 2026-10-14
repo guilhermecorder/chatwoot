@@ -62,7 +62,10 @@ RSpec.describe Crm::PartnerGuard do
 
     both_partner_first = create(:contact, account: account, name: 'Parceiro depois CEVICO', phone_number: '+5511977770000')
     Crm::Contact.create!(contact: both_partner_first, pipeline: partners, stage: partners.stages.first, created_at: 10.days.ago)
-    Crm::Contact.create!(contact: both_partner_first, pipeline: cevico, stage: cevico.stages.first, created_at: 1.day.ago)
+    # 🧭 item 341: hoje a cerca do ambiente nem deixaria esse card nascer — passe livre para montar o passado
+    Crm::CardRouter.bypass('carga') do
+      Crm::Contact.create!(contact: both_partner_first, pipeline: cevico, stage: cevico.stages.first, created_at: 1.day.ago)
+    end
 
     expect(described_class.partner_contact?(both_cevico_first)).to be false
     expect(described_class.partner_contact?(both_partner_first)).to be true
@@ -75,10 +78,15 @@ RSpec.describe Crm::PartnerGuard do
     expect(described_class.partner_conversation?(cevico_conv)).to be false
   end
 
-  it 'conversa na caixa dos parceiros é de parceiro mesmo sem card/etiqueta; na caixa da CEVICO só se o paciente for', :aggregate_failures do
+  # 🧭 item 341 (13/10): a CAIXA passou a contar — quem chegou pela caixa dos
+  # parceiros é paciente de parceiro também nas caixas da CEVICO (antes, só a
+  # conversa da caixa 12 era cercada e o paciente virava CEVICO na outra caixa)
+  it 'conversa na caixa dos parceiros é de parceiro mesmo sem card/etiqueta; e o paciente que chegou por ela também', :aggregate_failures do
     stranger = create(:contact, account: account, phone_number: '+5511955550000')
     expect(described_class.partner_conversation?(create(:conversation, account: account, inbox: partner_inbox, contact: stranger))).to be true
-    expect(described_class.partner_conversation?(create(:conversation, account: account, inbox: cevico_inbox, contact: stranger))).to be false
+    expect(described_class.partner_conversation?(create(:conversation, account: account, inbox: cevico_inbox, contact: stranger))).to be true
+    nobody = create(:contact, account: account, phone_number: '+5511955551111')
+    expect(described_class.partner_conversation?(create(:conversation, account: account, inbox: cevico_inbox, contact: nobody))).to be false
     expect(described_class.partner_conversation?(create(:conversation, account: account, inbox: cevico_inbox, contact: by_label))).to be true
   end
 

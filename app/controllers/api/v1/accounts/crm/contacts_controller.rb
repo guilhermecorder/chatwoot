@@ -83,15 +83,17 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   def create
     contact = Current.account.contacts.find(params[:contact_id])
     stage = @pipeline.stages.find(params[:stage_id])
-    @crm_contact = @pipeline.crm_contacts.create!(
-      contact: contact,
-      stage: stage,
-      assignee_id: params[:assignee_id],
-      value: finance_edit? ? params[:value] : nil, # 💰 R2 (#287): valor só com Financeiro
-      origin: params[:origin],
-      procedure_of_interest: params[:procedure_of_interest],
-      notes: params[:notes]
-    )
+    @crm_contact = with_environment_choice do
+      @pipeline.crm_contacts.create!(
+        contact: contact,
+        stage: stage,
+        assignee_id: params[:assignee_id],
+        value: finance_edit? ? params[:value] : nil, # 💰 R2 (#287): valor só com Financeiro
+        origin: params[:origin],
+        procedure_of_interest: params[:procedure_of_interest],
+        notes: params[:notes]
+      )
+    end
     preload_card_data([@crm_contact]) # resposta completa (conversa, etiquetas)
     render json: contact_json(@crm_contact), status: :created
   end
@@ -298,8 +300,11 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   # (sem multiplicar linhas) guardado por 5 minutos por funil.
   def with_conversations_count
     Rails.cache.fetch("cevico:crm:with_conversations:#{@pipeline.id}", expires_in: 5.minutes) do
+      # 🧭 item 341: conversa de caixa de outro ambiente não conta
+      foreign = Crm::Environments.foreign_inbox_ids(Current.account, @pipeline)
+      extra = foreign.any? ? " AND cv.inbox_id NOT IN (#{foreign.map(&:to_i).join(',')})" : ''
       @pipeline.crm_contacts
-               .where('EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id = crm_contacts.contact_id)')
+               .where("EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id = crm_contacts.contact_id#{extra})")
                .count
     end
   end
@@ -414,6 +419,11 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     contact_ids = cards.map(&:contact_id).uniq
     return if contact_ids.empty?
 
+    # 🧭 item 341 (Ambientes do CRM): conversas das caixas de OUTRO ambiente
+    # (ex.: caixa 12 Oftalmofácil no funil da CEVICO) não aparecem no balão
+    # nem na contagem do card
+    @foreign_inbox_ids = @pipeline ? Crm::Environments.foreign_inbox_ids(Current.account, @pipeline) : []
+
     # caixas de entrada PRINCIPAIS por coluna (settings.main_inbox_ids)
     @main_inboxes_by_stage = Crm::Stage.where(id: cards.map(&:stage_id).uniq)
                                        .pluck(:id, :settings).to_h
@@ -423,7 +433,11 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     # objetos (no "Carregar todos" do funil principal, dezenas de milhares).
     # Agora: só a CONTAGEM por contato e o id da conversa mais recente de cada
     # um (DISTINCT ON); os objetos carregados são só os do balão (1 por card).
-    @conv_count_by_contact = Conversation.where(contact_id: contact_ids).group(:contact_id).count
+    # 🏷️ item 344: o TIPO do atendimento (Consulta, Exame, Cirurgia, Lente,
+    # Retorno, Pós-op, Intravítrea) vira etiqueta + filtro no card
+    @kind_by_contact = Crm::AppointmentKind.for_contacts(Current.account, contact_ids)
+
+    @conv_count_by_contact = without_foreign_inboxes(Conversation.where(contact_id: contact_ids)).group(:contact_id).count
     @conv_count_by_contact.default = 0
     @last_conv_by_card = balloon_conversations(cards, contact_ids)
 
@@ -477,11 +491,23 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   # { contact_id => id da conversa mais recente } — uma linha por contato,
   # direto do banco (DISTINCT ON), sem montar objetos de conversa
   def latest_conversation_ids(contact_ids, inbox_ids: nil)
-    rel = Conversation.where(contact_id: contact_ids)
+    rel = without_foreign_inboxes(Conversation.where(contact_id: contact_ids))
     rel = rel.where(inbox_id: inbox_ids) if inbox_ids
     rel.reorder(Arel.sql('conversations.contact_id, conversations.last_activity_at DESC, conversations.id DESC'))
        .pluck(Arel.sql('DISTINCT ON (conversations.contact_id) conversations.contact_id'), 'conversations.id')
        .to_h
+  end
+
+  # 🧭 item 341: tira as conversas das caixas de outro ambiente
+  def without_foreign_inboxes(rel)
+    @foreign_inbox_ids.present? ? rel.where.not(inbox_id: @foreign_inbox_ids) : rel
+  end
+
+  # 🧭 item 341: o card nasce no funil do ambiente do paciente (Crm::CardRouter);
+  # o administrador pode forçar o funil escolhido com ignore_environment=true
+  def with_environment_choice(&)
+    force = Current.account_user&.administrator? && ActiveModel::Type::Boolean.new.cast(params[:ignore_environment])
+    force ? Crm::CardRouter.bypass('admin', &) : yield
   end
 
   def contact_json(c)
@@ -513,7 +539,8 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       last_activity_at: contact.last_activity_at,
       conversations_count: @conv_count_by_contact ? (@conv_count_by_contact[contact.id] || 0) : contact.conversations.count,
       last_conversation_id: last_conversation&.id,
-      last_conversation: last_conv_data
+      last_conversation: last_conv_data,
+      appointment_kind: @kind_by_contact&.[](contact.id)
     }
   end
 

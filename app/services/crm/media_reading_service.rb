@@ -10,9 +10,23 @@
 # O detalhe fica em meta['cevico_media'] e o Atendente lê o texto na conversa
 # como se o paciente tivesse escrito. Sem chave do Gemini: nada quebra, o
 # agente segue pedindo para escrever (Integrações → IA).
+#
+# 🔁 item 340 (13/10): "a IA parou de responder quem manda áudio". O arquivo
+# do WhatsApp sobe para o armazenamento DEPOIS que a mensagem é avisada; com a
+# fila própria da IA (sempre livre) a leitura chegava antes do arquivo e o
+# anexo ficava "failed" PARA SEMPRE ("não insiste") — e o Atendente, com o
+# "peça uma vez só", ficava calado no 2º áudio. Agora:
+#   - falha passageira (arquivo ainda subindo, rede, Gemini 429/5xx) NÃO é
+#     definitiva: o MediaReadingJob tenta de novo em 3 s, 6 s e 12 s, e o
+#     Atendente ainda tenta de novo antes de responder (até MAX_ATTEMPTS);
+#   - meta['cevico_media'] guarda 'attempts' e 'transient' (passageira ×
+#     definitiva) para a equipe ver o que houve;
+#   - o modelo do Gemini é configurável e troca sozinho se o Google aposentar
+#     o modelo (Crm::GeminiModels);
+#   - sem transcrição, o marcador manda a IA SEMPRE responder pedindo para
+#     escrever (pode pedir de novo, com outras palavras) — nunca silêncio.
 class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
-  MODEL = 'gemini-2.5-flash'.freeze
-  GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/#{MODEL}:generateContent".freeze
+  MODEL = Crm::GeminiModels::DEFAULT
   MAX_BYTES = 15.megabytes
   AGENT_KEY = 'media_reading'.freeze
   KINDS = %w[audio image].freeze
@@ -20,6 +34,13 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
   PRICE_IN = { 'audio' => 1.0, 'image' => 0.3 }.freeze
   PRICE_OUT = 2.5
   PROCESSING_TTL = 3.minutes
+  # 🔁 item 340: tentativas por anexo (somando o job e o Atendente) e o
+  # intervalo mínimo entre uma tentativa que falhou e a próxima
+  MAX_ATTEMPTS = 6
+  RETRY_AFTER = 20.seconds
+  # quanto o Atendente espera a leitura dos anexos da mensagem que ele vai responder
+  SETTLE_TIMEOUT = 25
+  SETTLE_STEP = 2
   # quantos anexos por conversa cada chamada do Atendente lê no máximo (latência)
   PENDING_MESSAGES = 8
   PENDING_ATTACHMENTS = 4
@@ -76,15 +97,78 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
     KINDS.include?(attachment.file_type.to_s) && attachment.file.attached?
   end
 
-  def self.read?(attachment)
-    media = attachment.meta&.[]('cevico_media') || {}
-    return true if media['status'] == 'done'
-    return true if media['status'] == 'failed' # não insiste: custaria a cada mensagem
-    return false unless media['status'] == 'processing'
+  # já lido (ou não adianta tentar agora)? retry_now: o job da nova tentativa
+  # (3/6/12 s) e a espera do Atendente não precisam respeitar o RETRY_AFTER
+  def self.read?(attachment, retry_now: false)
+    media = media_of(attachment)
+    case media['status']
+    when 'done' then true
+    # 🔁 item 340: falha não é mais "lido para sempre" — passageira e com
+    # tentativas sobrando volta a ser lida (antes: 'failed' = nunca mais)
+    when 'failed' then !retriable?(attachment, retry_now: retry_now)
+    when 'processing' then processing_fresh?(media)
+    else false
+    end
+  end
 
-    Time.zone.parse(media['at'].to_s).to_i > PROCESSING_TTL.ago.to_i
+  # falhou, mas vale tentar de novo?
+  def self.retriable?(attachment, retry_now: false)
+    media = media_of(attachment)
+    return false unless media['status'] == 'failed'
+    return false if media['transient'] == false || media['attempts'].to_i >= MAX_ATTEMPTS
+
+    retry_now || stamp(media) <= RETRY_AFTER.ago.to_i
+  end
+
+  # outro processo está lendo agora (e não morreu no meio)
+  def self.processing_fresh?(media)
+    media['status'] == 'processing' && stamp(media) > PROCESSING_TTL.ago.to_i
+  end
+
+  # a leitura deste anexo terminou de vez (lida, pulada ou sem mais tentativas)
+  def self.settled?(attachment)
+    media = media_of(attachment)
+    return true if %w[done skipped].include?(media['status'])
+    return false if processing_fresh?(media)
+
+    media['status'] == 'failed' && !retriable?(attachment, retry_now: true)
+  end
+
+  # 🔁 item 340: o Atendente vai responder ESTA mensagem — espera (até
+  # SETTLE_TIMEOUT s, olhando a cada SETTLE_STEP s) a leitura dos áudios/imagens
+  # dela terminar; o que não começou ou falhou de forma passageira ele mesmo
+  # lê na hora. Limitado no tempo e nas tentativas (a trava da conversa dura 30 min).
+  # Devolve os totais lidos AQUI: { 'audio' => n, 'image' => n }.
+  def self.settle!(message, timeout: SETTLE_TIMEOUT, step: SETTLE_STEP) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    done = Hash.new(0)
+    return done if message.blank? || !configured?(message.account)
+
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    loop do
+      open = message.attachments.reload.select { |a| readable?(a) && !settled?(a) }
+      break if open.empty?
+
+      open.each do |a|
+        next if processing_fresh?(media_of(a)) # outro processo está lendo: só espera
+
+        done[a.file_type.to_s] += 1 if new(a).perform(retry_now: true)
+      end
+      break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+      break if message.attachments.reload.select { |a| readable?(a) }.all? { |a| settled?(a) }
+
+      sleep step
+    end
+    done
+  end
+
+  def self.media_of(attachment)
+    attachment.meta&.[]('cevico_media') || {}
+  end
+
+  def self.stamp(media)
+    Time.zone.parse(media['at'].to_s).to_i
   rescue StandardError
-    false
+    0
   end
 
   def self.message_has_media?(message)
@@ -100,7 +184,9 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
       return "[áudio transcrito: \"#{text.truncate(900)}\"]" if media['status'] == 'done' && text.present?
       return '[áudio sem fala compreensível: pergunte o que o paciente precisa]' if media['status'] == 'done'
 
-      '[áudio sem transcrição: peça para o paciente escrever em uma frase, uma vez só]'
+      # 🔁 item 340: NUNCA silêncio — antes dizia "uma vez só" e o 2º áudio ficava sem resposta
+      '[áudio sem transcrição: o sistema não conseguiu ouvir. RESPONDA sempre, com gentileza, pedindo para o paciente ' \
+        'escrever o que precisa; se já pediu antes, peça de novo com outras palavras]'
     when 'image'
       if media['status'] == 'done'
         parts = ["imagem (#{media['tipo'].presence || 'outro'}): #{media['descricao'].to_s.strip.presence || 'sem descrição'}"]
@@ -123,13 +209,42 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
     @account = @message&.account
   end
 
+  # 🔁 item 340: erros que passam sozinhos (arquivo ainda subindo para o
+  # armazenamento, rede, Gemini ocupado) — vale tentar de novo
+  class GeminiError < StandardError
+    attr_reader :code
+
+    def initialize(message, code)
+      super(message)
+      @code = code.to_i
+    end
+
+    def transient?
+      code == 408 || code == 429 || code >= 500
+    end
+  end
+
+  class FormatError < StandardError; end
+
+  TRANSIENT_ERRORS = [
+    ActiveStorage::FileNotFoundError, ActiveStorage::IntegrityError, FormatError,
+    Net::OpenTimeout, Net::ReadTimeout, Timeout::Error, SocketError, EOFError, OpenSSL::SSL::SSLError,
+    Errno::ECONNRESET, Errno::ECONNREFUSED, Errno::ETIMEDOUT, Errno::EHOSTUNREACH
+  ].freeze
+
+  def self.transient_error?(error)
+    return error.transient? if error.is_a?(GeminiError)
+
+    TRANSIENT_ERRORS.any? { |klass| error.is_a?(klass) } || error.class.name.to_s.include?('NoSuchKey')
+  end
+
   # true quando leu agora; false quando pulou (já lido, sem chave, tipo errado) ou falhou
-  def perform # rubocop:disable Metrics/AbcSize
-    return false if @account.blank? || !self.class.readable?(attachment) || self.class.read?(attachment)
+  def perform(retry_now: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    return false if @account.blank? || !self.class.readable?(attachment) || self.class.read?(attachment, retry_now: retry_now)
     return skip!('Configure a chave do Gemini em Integrações → IA.') if api_key.blank?
     return skip!('Arquivo acima de 15 MB.') if attachment.file.byte_size.to_i > MAX_BYTES
+    return false unless claim!(retry_now)
 
-    mark!('processing')
     response = ask_gemini(attachment.file.blob.open(&:read), mime)
     parsed = parse_json(response.dig('candidates', 0, 'content', 'parts', 0, 'text'))
     save!(parsed)
@@ -168,9 +283,9 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
       contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mime_type, data: Base64.strict_encode64(bytes) } }] }],
       generationConfig: { temperature: 0.1, response_mime_type: 'application/json' }
     }
-    response = HTTParty.post(GEMINI_URL, query: { key: api_key }, headers: { 'Content-Type' => 'application/json' },
-                                         body: body.to_json, timeout: 90)
-    raise "Gemini respondeu com erro #{response.code}: #{gemini_error(response)}" unless response.success?
+    # 🔁 item 340: modelo configurável, com troca automática se o Google aposentar
+    response, @model = Crm::GeminiModels.post(account: @account, api_key: api_key, body: body.to_json, timeout: 90)
+    raise GeminiError.new("Gemini respondeu com erro #{response.code}: #{gemini_error(response)}", response.code) unless response.success?
 
     response.parsed_response.is_a?(Hash) ? response.parsed_response : {}
   end
@@ -181,7 +296,7 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
   end
 
   def parse_json(text)
-    raise 'O Gemini não devolveu texto.' if text.blank?
+    raise FormatError, 'O Gemini não devolveu texto.' if text.blank?
 
     clean = text.to_s.gsub(/```(?:json)?/i, '').strip
     [clean, clean[(clean.index('{') || 0)..(clean.rindex('}') || -1)]].each do |candidate|
@@ -190,11 +305,11 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
     rescue JSON::ParserError
       next
     end
-    raise 'O Gemini respondeu fora do formato esperado.'
+    raise FormatError, 'O Gemini respondeu fora do formato esperado.'
   end
 
   def save!(parsed) # rubocop:disable Metrics/AbcSize
-    fields = { 'status' => 'done', 'error' => nil, 'model' => MODEL, 'at' => Time.current.iso8601 }
+    fields = { 'status' => 'done', 'error' => nil, 'transient' => nil, 'model' => model_used, 'at' => Time.current.iso8601 }
     if kind == 'audio'
       text = parsed['texto'].to_s.strip.truncate(4000)
       fields['inaudivel'] = parsed['inaudivel'] == true || text.blank?
@@ -213,14 +328,30 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
     false
   end
 
-  def mark!(status)
-    write!('status' => status, 'error' => nil, 'at' => Time.current.iso8601)
+  def model_used
+    @model || MODEL
   end
 
-  def fail!(error)
-    Rails.logger.warn("[CEVICO mídia] leitura do anexo #{attachment.id} (#{kind}) falhou: #{error.class}: #{error.message}")
+  # 🔁 item 340: marca "lendo" e conta a tentativa, com a linha do anexo
+  # travada — o MediaReadingJob e o Atendente nunca leem o mesmo anexo juntos
+  def claim!(retry_now)
+    claimed = false
+    attachment.with_lock do
+      next if self.class.read?(attachment, retry_now: retry_now)
+
+      attempts = self.class.media_of(attachment)['attempts'].to_i + 1
+      write!('status' => 'processing', 'error' => nil, 'attempts' => attempts, 'at' => Time.current.iso8601)
+      claimed = true
+    end
+    claimed
+  end
+
+  def fail!(error) # rubocop:disable Metrics/AbcSize
+    transient = self.class.transient_error?(error)
+    Rails.logger.warn("[CEVICO mídia] leitura do anexo #{attachment.id} (#{kind}) falhou#{' (passageira)' if transient}: " \
+                      "#{error.class}: #{error.message}")
     write!('status' => 'failed', 'error' => error.message.to_s.strip.truncate(180).presence || 'A leitura falhou.',
-           'at' => Time.current.iso8601)
+           'transient' => transient, 'error_class' => error.class.name.to_s.truncate(60), 'at' => Time.current.iso8601)
     false
   rescue StandardError => e
     Rails.logger.error("[CEVICO mídia] não deu nem para marcar a falha do anexo #{attachment.id}: #{e.message}")
@@ -244,7 +375,7 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
     input = usage['promptTokenCount'].to_i
     output = usage['candidatesTokenCount'].to_i
     cost = ((input * (PRICE_IN[kind] || PRICE_IN['image'])) + (output * PRICE_OUT)) / 1_000_000.0
-    Crm::AiUsage.create!(account: @account, agent_key: AGENT_KEY, model: MODEL,
+    Crm::AiUsage.create!(account: @account, agent_key: AGENT_KEY, model: model_used,
                          input_tokens: input, output_tokens: output, cost_usd: cost.round(6))
   rescue StandardError => e
     Rails.logger.warn("[Crm::AiUsage] falhou ao registrar a leitura de mídia: #{e.message}")

@@ -44,6 +44,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   # TTL maior que o PIOR caso de um job: até 6 chamadas da IA (MAX_TOOL_ROUNDS + 1)
   # × 90 s × 2 tentativas do cliente (Crm::ResponderAgentService#client) = 18 min,
   # mais a leitura de mídia (4 anexos × 90 s = 6 min) → 24 min; 30 min dá folga.
+  # (item 340: a espera pela leitura da mensagem que disparou soma ~25 s + 1 leitura)
   LOCK_KEY = 'cevico:responder:conv:%<id>s'.freeze
   LOCK_TTL = 30.minutes
   # conversa ocupada por outro job: este NÃO sai — volta à fila em 15 s, até 40
@@ -76,7 +77,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     with_conversation_lock(conversation, trigger_message_id, agent_key) do
       # 👂🖼️ item 204: áudio/imagem ainda não lidos (o MediaReadingJob costuma
       # chegar antes; aqui é a garantia) — o Atendente responde ao CONTEÚDO
-      read_pending_media(account, conversation, agent_key)
+      read_pending_media(account, conversation, agent_key, trigger_message_id)
 
       if live_now?(cfg, conversation)
         run_live(account, conversation, cfg, agent_key, trigger_message_id)
@@ -183,8 +184,15 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     end
   end
 
-  def read_pending_media(account, conversation, agent_key)
-    done = Crm::MediaReadingService.read_pending!(conversation)
+  # 🔁 item 340: antes de responder, ESPERA (até 25 s) a leitura dos
+  # áudios/imagens da mensagem que disparou este job — e lê na hora o que não
+  # começou ou falhou de forma passageira. Antes, o áudio ainda subindo ou
+  # recém-falhado virava "[áudio sem transcrição]" e a IA calava. Cabe com
+  # folga na trava da conversa (LOCK_TTL 30 min).
+  def read_pending_media(account, conversation, agent_key, trigger_message_id = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    trigger = trigger_message_id && conversation.messages.find_by(id: trigger_message_id)
+    done = trigger&.incoming? ? Crm::MediaReadingService.settle!(trigger) : {}
+    done = Crm::MediaReadingService.read_pending!(conversation).merge(done) { |_kind, a, b| a + b }
     return if done.blank?
 
     parts = []

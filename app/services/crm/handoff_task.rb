@@ -10,9 +10,16 @@
 # conta (auditoria 10/2026, #443: tarefa urgente nunca fica sem dono).
 # Uma tarefa ABERTA por paciente: chamada nova só complementa a descrição.
 # 🙋 #458: vale para os três atendentes do WhatsApp (não só o pós-operatório).
+# 🔁 item 343 (13/10): paciente de RETORNO (a próxima consulta dele é retorno)
+# ou card do agente com "Equipe dos retornos" → a tarefa nasce SEM dono
+# individual, carimbada para a equipe (as duas veem; quem pegar assume).
+# Fora do pós-operatório, o plano B é o responsável da conferência de
+# CONSULTA (antes caía no de cirurgia para todo mundo).
 class Crm::HandoffTask
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   TASK_TYPE = 'pos_op'.freeze
+  # 🔁 343: nome com que os lembretes recusados abrem a tarefa
+  CONFIRMATION_KEY = 'Confirmação de consulta'.freeze
 
   def self.open!(account:, contact:, conversation:, agent_key:, motivo:, detalhes: nil, urgencia: 'normal') # rubocop:disable Metrics/ParameterLists
     new(account: account, contact: contact, conversation: conversation, agent_key: agent_key).open!(motivo, detalhes, urgencia)
@@ -65,7 +72,8 @@ class Crm::HandoffTask
       due_at: urgent ? TZ.now : TZ.now.end_of_day,
       contact: @contact, phone: @contact&.phone_number,
       creator: @account.administrators.first || @account.users.first,
-      assignee: assignee
+      assignee: assignee,
+      modality: team_task? ? Crm::TaskOwner::RETORNO : nil # 🔁 343: carimbo da equipe dos retornos
     )
   end
 
@@ -90,9 +98,41 @@ class Crm::HandoffTask
   end
 
   def assignee
-    cfg = CrmSetting.find_by(account: @account)&.ai_config&.dig('agents', @agent_key) || {}
-    chosen = @account.users.find_by(id: cfg['task_assignee_id'].to_i) if cfg['task_assignee_id'].to_i.positive?
-    chosen || Crm::TaskOwner.resolve(@account, contact: @contact, task_type: 'cirurgia') || fallback_admin
+    return nil if team_task?
+
+    chosen = @account.users.find_by(id: agent_cfg['task_assignee_id'].to_i) if agent_cfg['task_assignee_id'].to_i.positive?
+    chosen || Crm::TaskOwner.resolve(@account, contact: @contact, task_type: owner_task_type) || fallback_admin
+  end
+
+  # 🔁 343: o pós-operatório (e a pesquisa NPS, que abre em nome dele) segue
+  # com o responsável de cirurgia; os demais são de consulta
+  def owner_task_type
+    @agent_key == 'atendente_pos_op' ? 'cirurgia' : 'consulta'
+  end
+
+  # 🔁 343: o card do agente — a Confirmação de consulta guarda o seu na
+  # configuração da Agenda (agenda_config.appointment_confirmation)
+  def agent_cfg
+    @agent_cfg ||= begin
+      settings = CrmSetting.find_by(account: @account)
+      cfg = if @agent_key == CONFIRMATION_KEY
+              settings&.agenda_config&.dig('appointment_confirmation')
+            else
+              settings&.ai_config&.dig('agents', @agent_key)
+            end
+      cfg.is_a?(Hash) ? cfg : {}
+    end
+  end
+
+  # 🔁 343: tarefa da EQUIPE DOS RETORNOS (sem dono individual)? Só com a
+  # equipe configurada: o card do agente escolheu a equipe, ou o paciente
+  # está em retorno (fora do pós-operatório — lá o caso é cirúrgico)
+  def team_task?
+    return @team_task if defined?(@team_task)
+
+    @team_task = Crm::TaskOwner.retorno_team?(@account) &&
+                 (agent_cfg['task_assignee_id'].to_s == Crm::TaskOwner::TEAM_CHOICE ||
+                  (@agent_key != 'atendente_pos_op' && Crm::TaskOwner.patient_retorno?(@account, @contact)))
   end
 
   # #443: sem ninguém configurado, a tarefa vai para um administrador da conta
@@ -113,7 +153,8 @@ class Crm::HandoffTask
   end
 
   def note!(task, motivo, urgent, created:)
-    who = task.assignee&.name.presence || 'a equipe (sem responsável definido)'
+    who = task.assignee&.name.presence ||
+          (task.modality == Crm::TaskOwner::RETORNO ? 'a equipe dos retornos' : 'a equipe (sem responsável definido)')
     verb = created ? 'abriu a tarefa' : 'complementou a tarefa aberta'
     @conversation.messages.create!(
       account_id: @account.id, inbox_id: @conversation.inbox_id, message_type: :activity, private: true,

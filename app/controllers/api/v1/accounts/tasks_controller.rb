@@ -32,7 +32,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   # contagem (a mesma regra que a tela fazia: cards do quadro com você como
   # responsável, a fazer, atrasados ou vencendo nas próximas 24 h)
   def alert_count
-    scope = visible_tasks.board_cards.where(archived_at: nil, assignee_id: Current.user.id)
+    scope = visible_tasks.board_cards.where(archived_at: nil).where(mine_or_team_sql, uid: Current.user.id, ret: Crm::TaskOwner::RETORNO)
     count = scope.where('tasks.status = :todo OR (tasks.status <> :done AND tasks.due_at IS NOT NULL AND tasks.due_at <= :soon)',
                         todo: Task.statuses[:todo], done: Task.statuses[:done], soon: 24.hours.from_now).count
     render json: { count: count }
@@ -105,6 +105,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   def create # rubocop:disable Metrics/AbcSize
     return render_unit_denied if params[:unit].present? && !cevico_access.unit_allowed?(params[:unit])
 
+    # 🔁 item 343: RETORNO não fica no nome de quem marcou — com a equipe dos
+    # retornos configurada, o Task nasce sem dono (Crm::TaskOwner.apply_retorno_team!)
     new_task = Current.account.tasks.new(
       task_params.merge(
         creator: Current.user,
@@ -233,7 +235,12 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   # consultas dessas unidades (tarefas sem unidade continuam aparecendo)
   def visible_tasks
     scope = Current.account.tasks
-    scope = scope.visible_to(Current.user) unless Current.account_user.administrator?
+    unless Current.account_user.administrator?
+      all = scope
+      scope = scope.visible_to(Current.user)
+      # 🔁 item 343: a equipe dos retornos vê TODOS os cards carimbados de retorno
+      scope = scope.or(all.where(modality: Crm::TaskOwner::RETORNO)) if retorno_member?
+    end
     allowed_units = cevico_access.units
     scope = scope.where(unit: allowed_units + [nil]) if allowed_units.any?
     scope
@@ -334,7 +341,22 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   # clínica toda.
   def can_collaborate?
     Current.account_user.administrator? ||
-      [task.creator_id, task.assignee_id].include?(Current.user.id)
+      [task.creator_id, task.assignee_id].include?(Current.user.id) ||
+      (task.modality == Crm::TaskOwner::RETORNO && retorno_member?) # 🔁 343: quem pegar primeiro assume
+  end
+
+  # 🔁 item 343: quem está na "Equipe dos retornos" (Agenda → Conferência do dia)
+  def retorno_member?
+    return @retorno_member if defined?(@retorno_member)
+
+    @retorno_member = Crm::TaskOwner.retorno_team_member?(Current.account, Current.user)
+  end
+
+  # o número dourado: os meus + (para a equipe dos retornos) os retornos ainda sem dono
+  def mine_or_team_sql
+    return 'tasks.assignee_id = :uid' unless retorno_member?
+
+    'tasks.assignee_id = :uid OR (tasks.assignee_id IS NULL AND tasks.modality = :ret)'
   end
 
   def task_params
@@ -512,6 +534,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
       declined_at: record.declined_at,
       origin: record.origin,
       color: record.color, # item 290: cor escolhida pela equipe (nil = cor do tipo)
+      # 🔁 item 343: retorno que ESTA pessoa (da equipe dos retornos) vê como dela (filtro "Minhas")
+      retorno_team: record.modality == Crm::TaskOwner::RETORNO && retorno_member?,
       # 💰 item 324: particular (os valores vão na versão completa)
       particular: record.particular,
       # item 228: origem do agendamento (nil = nasceu aqui)

@@ -91,11 +91,131 @@ RSpec.describe Crm::MediaReadingService do
 
     expect { expect(described_class.new(audio).perform).to be(false) }.not_to change(Crm::AiUsage, :count)
     audio.reload
-    expect(audio.meta['cevico_media']).to include('status' => 'failed')
+    expect(audio.meta['cevico_media']).to include('status' => 'failed', 'transient' => true, 'attempts' => 1)
     expect(audio.meta['cevico_media']['error']).to include('429')
     expect(audio.meta['transcribed_text']).to be_nil
-    expect(described_class.transcript_label(audio)).to include('peça para o paciente escrever')
-    expect(described_class.read?(audio)).to be(true)
+    # 🔁 item 340: sem transcrição a IA SEMPRE responde (antes: "uma vez só" → silêncio no 2º áudio)
+    expect(described_class.transcript_label(audio)).to include('RESPONDA sempre').and include('pedindo para o paciente escrever')
+    expect(described_class.transcript_label(audio)).not_to include('uma vez só')
+    expect(described_class.read?(audio)).to be(true) # acabou de falhar: não insiste na mesma hora
+  end
+
+  # 🔁 item 340: o arquivo ainda subindo para o armazenamento não vira "falhou para sempre"
+  describe 'item 340: falha passageira, tentativas e troca de modelo' do
+    def fail_open_with(error)
+      allow_any_instance_of(ActiveStorage::Blob).to receive(:open).and_raise(error) # rubocop:disable RSpec/AnyInstance
+    end
+
+    it 'arquivo ainda não está no armazenamento: falha PASSAGEIRA, volta a ser lida depois de 20 s', :aggregate_failures do
+      audio = attach(incoming, :audio)
+      fail_open_with(ActiveStorage::FileNotFoundError)
+
+      expect(described_class.new(audio).perform).to be(false)
+      expect(audio.reload.meta['cevico_media']).to include('status' => 'failed', 'transient' => true, 'attempts' => 1,
+                                                           'error_class' => 'ActiveStorage::FileNotFoundError')
+      expect(described_class.read?(audio)).to be(true)
+      expect(described_class.retriable?(audio, retry_now: true)).to be(true)
+      travel 25.seconds do
+        expect(described_class.read?(audio)).to be(false)
+        expect(described_class.pending_attachments(conversation)).to eq([audio])
+      end
+    end
+
+    it 'o arquivo chegou: a nova tentativa transcreve e conta as tentativas', :aggregate_failures do
+      audio = attach(incoming, :audio)
+      fail_open_with(ActiveStorage::FileNotFoundError)
+      described_class.new(audio).perform
+      RSpec::Mocks.space.proxy_for(ActiveStorage::Blob).reset
+      allow_any_instance_of(ActiveStorage::Blob).to receive(:open).and_call_original # rubocop:disable RSpec/AnyInstance
+      gemini_answers({ 'texto' => 'quero marcar consulta', 'inaudivel' => false })
+
+      expect(described_class.new(audio.reload).perform(retry_now: true)).to be(true)
+      expect(audio.reload.meta['cevico_media']).to include('status' => 'done', 'attempts' => 2, 'transient' => nil)
+      expect(audio.meta['transcribed_text']).to eq('quero marcar consulta')
+    end
+
+    it 'erro definitivo (400 do áudio) e tentativas esgotadas não são lidos de novo', :aggregate_failures do
+      audio = attach(incoming, :audio)
+      response = double('gemini', success?: false, code: 400, # rubocop:disable RSpec/VerifiedDoubles
+                                  parsed_response: { 'error' => { 'message' => 'Request contains an invalid argument.' } })
+      allow(HTTParty).to receive(:post).and_return(response)
+      described_class.new(audio).perform
+      expect(audio.reload.meta['cevico_media']).to include('status' => 'failed', 'transient' => false)
+      expect(HTTParty).to have_received(:post).once # 400 que não é de modelo: não troca de modelo
+      travel(1.hour) { expect(described_class.read?(audio)).to be(true) }
+      expect(described_class.settled?(audio)).to be(true)
+
+      outro = attach(incoming, :audio)
+      esgotado = { 'status' => 'failed', 'transient' => true, 'attempts' => described_class::MAX_ATTEMPTS, 'at' => 1.hour.ago.iso8601 }
+      outro.update!(meta: { 'cevico_media' => esgotado })
+      expect(described_class.read?(outro)).to be(true)
+      expect(described_class.settled?(outro)).to be(true)
+    end
+
+    it 'falha antiga sem contagem (antes do item 340) volta a ser lida' do
+      audio = attach(incoming, :audio)
+      audio.update!(meta: { 'cevico_media' => { 'status' => 'failed', 'error' => 'Not found', 'at' => 1.day.ago.iso8601 } })
+      expect(described_class.read?(audio)).to be(false)
+    end
+
+    it 'modelo aposentado pelo Google (404): tenta o próximo da lista e registra qual respondeu', :aggregate_failures do
+      audio = attach(incoming, :audio)
+      gone = double('gemini', success?: false, code: 404, # rubocop:disable RSpec/VerifiedDoubles
+                              parsed_response: { 'error' => { 'message' => 'models/gemini-2.5-flash is not found for API version v1beta' } })
+      ok = double('gemini', success?: true, code: 200, # rubocop:disable RSpec/VerifiedDoubles
+                            parsed_response: { 'candidates' => [{ 'content' => { 'parts' => [{ 'text' => { 'texto' => 'oi' }.to_json }] } }],
+                                               'usageMetadata' => gemini_usage })
+      urls = []
+      allow(HTTParty).to receive(:post) do |url, _opts|
+        urls << url
+        url.include?('gemini-2.5-flash') ? gone : ok
+      end
+
+      expect(described_class.new(audio).perform).to be(true)
+      expect(urls.map { |u| u[%r{models/([^:]+):}, 1] }).to eq(%w[gemini-2.5-flash gemini-flash-latest])
+      expect(audio.reload.meta['cevico_media']).to include('status' => 'done', 'model' => 'gemini-flash-latest')
+      expect(Crm::AiUsage.where(account: account).last.model).to eq('gemini-flash-latest')
+    end
+
+    it 'modelo configurado em Integrações → IA vai primeiro' do
+      CrmSetting.find_by(account: account).update!(ai_config: { 'gemini_api_key' => 'AIza-teste', 'gemini_media_model' => 'gemini-3.0-flash' })
+      expect(Crm::GeminiModels.chain(account)).to eq(%w[gemini-3.0-flash gemini-2.5-flash gemini-flash-latest gemini-2.0-flash])
+      gemini_answers({ 'texto' => 'oi' })
+      described_class.new(attach(incoming, :audio)).perform
+      expect(HTTParty).to have_received(:post).with(include('gemini-3.0-flash:generateContent'), anything)
+    end
+
+    it 'settle!: lê na hora o que não começou e espera quem está lendo (sem passar do tempo)', :aggregate_failures do
+      message = incoming
+      novo = attach(message, :audio)
+      lendo = attach(message, :image)
+      lendo.update!(meta: { 'cevico_media' => { 'status' => 'processing', 'at' => Time.current.iso8601 } })
+      gemini_answers({ 'texto' => 'quero remarcar', 'inaudivel' => false })
+      sleeps = 0
+      allow(described_class).to receive(:sleep) do
+        sleeps += 1
+        lendo.update!(meta: { 'cevico_media' => { 'status' => 'done', 'tipo' => 'print', 'descricao' => 'print' } }) if sleeps == 2
+      end
+
+      expect(described_class.settle!(message, timeout: 30, step: 2)).to eq('audio' => 1)
+      expect(novo.reload.meta['transcribed_text']).to eq('quero remarcar')
+      expect(sleeps).to eq(2)
+      expect(HTTParty).to have_received(:post).once # a imagem que outro estava lendo não foi lida de novo
+    end
+
+    it 'settle!: o arquivo não chega nunca → para no limite de tempo, e o anexo fica "sem transcrição"', :aggregate_failures do
+      message = incoming
+      audio = attach(message, :audio)
+      fail_open_with(ActiveStorage::FileNotFoundError)
+      clock = 0.0
+      allow(Process).to receive(:clock_gettime).and_call_original
+      allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC) { clock }
+      allow(described_class).to receive(:sleep) { |step| clock += step }
+
+      expect(described_class.settle!(message, timeout: 6, step: 2)).to eq({})
+      expect(audio.reload.meta['cevico_media']['attempts']).to be_between(3, 4)
+      expect(described_class.transcript_label(audio)).to include('áudio sem transcrição')
+    end
   end
 
   it 'sem chave do Gemini: não chama nada e o Atendente segue com o marcador antigo', :aggregate_failures do

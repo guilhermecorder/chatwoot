@@ -9,8 +9,8 @@
 # um texto fictício sem chamar a Meta nem o Gemini. Nunca levanta erro:
 # falha vira status 'failed' com motivo curto em português.
 class Crm::AdVideoTranscriptionService # rubocop:disable Metrics/ClassLength
-  MODEL = 'gemini-2.5-flash'.freeze
-  GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/#{MODEL}:generateContent".freeze
+  # 🤖 item 340: modelo configurável com troca automática (Crm::GeminiModels)
+  MODEL = Crm::GeminiModels::DEFAULT
   MAX_BYTES = 18.megabytes
   AGENT_KEY = 'creatives_video_transcription'.freeze
   PRICE_IN = 1.0
@@ -126,8 +126,7 @@ class Crm::AdVideoTranscriptionService # rubocop:disable Metrics/ClassLength
       contents: [{ parts: [{ text: PROMPT }, video_part] }],
       generationConfig: { temperature: 0.1, response_mime_type: 'application/json' }
     }
-    response = HTTParty.post(GEMINI_URL, query: { key: api_key }, headers: { 'Content-Type' => 'application/json' },
-                                         body: body.to_json, timeout: 240)
+    response, @model = Crm::GeminiModels.post(account: @account, api_key: api_key, body: body.to_json, timeout: 240)
     raise "Gemini respondeu com erro #{response.code}: #{gemini_error(response)}" unless response.success?
 
     response.parsed_response.is_a?(Hash) ? response.parsed_response : {}
@@ -175,7 +174,7 @@ class Crm::AdVideoTranscriptionService # rubocop:disable Metrics/ClassLength
     { 'status' => 'done', 'error' => nil, 'text' => text.truncate(6000),
       'hook' => part.call('gancho', 400), 'body' => part.call('corpo', 3000), 'cta' => part.call('cta', 400),
       'angle' => parsed['angulo'].to_s.strip.downcase.presence, 'language' => parsed['idioma'].to_s.presence || 'pt-BR',
-      'transcribed_at' => Time.current.iso8601, 'model' => MODEL,
+      'transcribed_at' => Time.current.iso8601, 'model' => @model || MODEL,
       # item 287 (opcionais): tempo de cada trecho falado e duração do vídeo
       'segments' => segments_from(parsed['trechos']), 'duration' => parsed['duracao'].to_f.positive? ? parsed['duracao'].to_f.round(1) : nil }
   end
@@ -245,7 +244,7 @@ class Crm::AdVideoTranscriptionService # rubocop:disable Metrics/ClassLength
     input = usage['promptTokenCount'].to_i
     output = usage['candidatesTokenCount'].to_i
     cost = ((input * PRICE_IN) + (output * PRICE_OUT)) / 1_000_000.0
-    Crm::AiUsage.create!(account: @account, agent_key: AGENT_KEY, model: MODEL,
+    Crm::AiUsage.create!(account: @account, agent_key: AGENT_KEY, model: @model || MODEL,
                          input_tokens: input, output_tokens: output, cost_usd: cost.round(6))
   rescue StandardError => e
     Rails.logger.warn("[Crm::AiUsage] falhou ao registrar a transcrição do vídeo: #{e.message}")

@@ -5,6 +5,10 @@
 // família da cor do dia, herói em degradê) + fileira de TRÊS GRÁFICOS da
 // mesma altura embaixo (funil em degraus, área, barras, anéis). Clicar num
 // número abre o PainelLateral com a história. Dinheiro e Médicos só admin.
+// 🧹 item 342 (13/10, "indicador de agendamento descontaminado"): agendaram
+// = SÓ quem chegou no período (os da base aparecem ao lado, nunca somados na
+// taxa), quem chegou agendou por caixa, quando chegaram os que agendaram
+// (safra) e o bloco "Volume do período" com 9 números, cada um com a fórmula.
 import { ref, computed, watch, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
@@ -137,13 +141,36 @@ const ctxNovos = computed(() => {
 });
 const ctxAgendaram = computed(() => {
   const t = entrada.value?.tempo;
-  if (!t) return 'Ninguém que chegou no período agendou ainda.';
-  return `${n(t.mesmo_dia)} no mesmo dia, ${n(t.ate_7)} em até 7 dias; média de ${dias(t.media_dias)} até agendar.`;
+  const base = entrada.value?.agendaram_base?.valor || 0;
+  const daBase = base
+    ? ` + ${n(base)} da base (chegaram antes) também agendaram.`
+    : '';
+  if (!t) return `Ninguém que chegou no período agendou ainda.${daBase}`;
+  return `${n(t.mesmo_dia)} no mesmo dia, ${n(t.ate_7)} em até 7 dias; média de ${dias(t.media_dias)} até agendar.${daBase}`;
 });
+// item 342: o nome do período nas frases ("hoje", "ontem", "no período")
+const NOME_PERIODO = {
+  today: 'hoje',
+  yesterday: 'ontem',
+  last7: 'nos últimos 7 dias',
+  last_week: 'na semana passada',
+  month: 'neste mês',
+  last_month: 'no mês passado',
+  last90: 'nos últimos 90 dias',
+  year: 'neste ano',
+};
+const nomePeriodo = computed(
+  () => NOME_PERIODO[periodo.value.preset] || 'no período'
+);
 const ctxCoortes = computed(() => {
   const c = entrada.value?.coortes;
   if (!c) return '';
   return `Hoje ${c.hoje.agendaram}/${c.hoje.chegaram} · 7 dias ${c.dias7.agendaram}/${c.dias7.chegaram} (${pctTxt(c.dias7.pct)}) · 30 dias ${c.dias30.agendaram}/${c.dias30.chegaram} (${pctTxt(c.dias30.pct)}).`;
+});
+const ctxTaxa = computed(() => {
+  const e = entrada.value;
+  if (!e) return '';
+  return `${n(e.agendaram_novos.valor)} de ${n(e.novos.valor)} que chegaram ${nomePeriodo.value} já agendaram. ${ctxCoortes.value}`;
 });
 const ctxOcupacao = computed(() => {
   const o = agenda.value?.ocupacao;
@@ -211,11 +238,12 @@ const funilEntrada = computed(() => {
     {
       key: 'agendaram',
       label: 'Agendaram',
-      value: e.agendaram.valor,
+      value: e.agendaram_novos.valor,
       color: corDestaque.value,
     },
   ];
 });
+// item 342: pessoas (1ª entrada de cada uma), lead novo × base em linhas separadas
 const areaEntrada = computed(() => {
   const s = series.value;
   if (!s) return [];
@@ -223,12 +251,61 @@ const areaEntrada = computed(() => {
     { key: 'novos', label: 'Novos', color: cor.value, values: s.novos },
     {
       key: 'agendaram',
-      label: 'Agendaram',
+      label: 'Agendaram (novos)',
       color: corDestaque.value,
-      values: s.agendaram,
+      values: s.agendaram_novos || s.agendaram,
+    },
+    {
+      key: 'agendaram_base',
+      label: 'Agendaram (base)',
+      color: corGrad3.value,
+      values: s.agendaram_base || [],
     },
   ];
 });
+// item 342: quando chegaram os que agendaram no período
+const barrasSafra = computed(() =>
+  (entrada.value?.safra?.faixas || []).map((f, i) => ({
+    label: f.label,
+    values: [f.count],
+    sub:
+      f.media_dias !== null && f.media_dias !== undefined
+        ? `${pctTxt(f.pct)} · ${dias(f.media_dias)} até agendar`
+        : pctTxt(f.pct),
+    color: i ? corGrad3.value : corGrad.value,
+  }))
+);
+// média de dias até agendar, em palavras curtas (0 = no mesmo dia)
+const mediaTxt = v => {
+  if (v === null || v === undefined) return '—';
+  return Number(v) === 0 ? 'mesmo dia' : dias(v);
+};
+const porCaixa = computed(() => entrada.value?.por_caixa?.linhas || []);
+const totalPorCaixa = computed(() =>
+  porCaixa.value.reduce(
+    (acc, r) => ({
+      chegaram: acc.chegaram + r.chegaram,
+      agendaram: acc.agendaram + r.agendaram,
+    }),
+    { chegaram: 0, agendaram: 0 }
+  )
+);
+// item 342: VOLUME DO PERÍODO — 9 números, cada um com fórmula e quebras
+const volumes = computed(() => data.value?.volumes || []);
+const RUIM_QUANDO_SOBE = ['reagendamentos', 'cancelamentos', 'faltas'];
+const cmpVolume = v =>
+  cmp(v.valor, v.anterior, {
+    bomQuandoSobe: !RUIM_QUANDO_SOBE.includes(v.key),
+  });
+const ctxVolume = v => {
+  if (v.key === 'agendamentos')
+    return `${n(v.novos)} leads novos · ${n(v.base)} da base`;
+  if (v.key === 'cirurgias_realizadas' && v.sem_coluna)
+    return 'Nenhum funil tem a coluna "Cirurgia Realizada".';
+  if (v.pessoas_distintas !== undefined && v.pessoas_distintas !== v.valor)
+    return `${n(v.valor)} ${v.medida} de ${n(v.pessoas_distintas)} pessoa(s)`;
+  return '';
+};
 // de onde vieram os novos (caixa da 1ª conversa) × quantos desses agendaram
 const barrasOrigem = computed(() => {
   const e = entrada.value;
@@ -423,6 +500,11 @@ const abrir = (key, titulo, valor, comparacao = null) => {
 const fechar = () => {
   painel.value = null;
 };
+const volumeAberto = computed(() => {
+  const k = painel.value?.key || '';
+  if (!k.startsWith('vol:')) return null;
+  return volumes.value.find(v => v.key === k.slice(4)) || null;
+});
 const listaOrigem = computed(() => {
   const k = painel.value?.key;
   const e = entrada.value;
@@ -430,6 +512,7 @@ const listaOrigem = computed(() => {
   if (k === 'novos') return e.origem.novos;
   if (k === 'orcamento') return e.origem.orcamento;
   if (k === 'agendaram') return e.origem.agendaram;
+  if (k === 'agendaram_base') return e.origem.agendaram_base || [];
   return [];
 });
 const listaCanal = computed(() => {
@@ -445,6 +528,8 @@ const listaPessoas = computed(() => {
   if (!data.value) return [];
   if (k === 'novos') return entrada.value.pessoas.novos;
   if (k === 'agendaram') return entrada.value.pessoas.agendaram;
+  if (k === 'agendaram_base') return entrada.value.pessoas.agendaram_base || [];
+  if (volumeAberto.value) return volumeAberto.value.pessoas || [];
   if (k === 'indicadas') return cirurgia.value.pessoas.indicadas;
   if (k === 'fecharam') return cirurgia.value.pessoas.fecharam;
   return [];
@@ -538,19 +623,25 @@ const pessoaSub = p => {
               "
             />
             <CvIndicador
-              rotulo="Agendaram consulta"
-              :valor="n(entrada.agendaram.valor)"
+              rotulo="Agendaram consulta (novos)"
+              :valor="n(entrada.agendaram_novos.valor)"
               :comparacao="
-                cmp(entrada.agendaram.valor, entrada.agendaram.anterior)
+                cmp(
+                  entrada.agendaram_novos.valor,
+                  entrada.agendaram_novos.anterior
+                )
               "
               :contexto="ctxAgendaram"
-              pe="de onde vieram · tempo"
+              :pe="`+ ${n(entrada.agendaram_base.valor)} da base`"
               @abrir="
                 abrir(
                   'agendaram',
-                  'Agendaram consulta',
-                  n(entrada.agendaram.valor),
-                  cmp(entrada.agendaram.valor, entrada.agendaram.anterior)
+                  'Agendaram consulta (leads novos)',
+                  n(entrada.agendaram_novos.valor),
+                  cmp(
+                    entrada.agendaram_novos.valor,
+                    entrada.agendaram_novos.anterior
+                  )
                 )
               "
             />
@@ -563,8 +654,8 @@ const pessoaSub = p => {
                   entrada.taxa_agendamento_anterior
                 )
               "
-              :contexto="ctxCoortes"
-              pe="coortes: hoje · 7 dias · 30 dias"
+              :contexto="ctxTaxa"
+              pe="novos que agendaram ÷ novos"
             />
           </div>
           <div class="cvg-graficos">
@@ -619,6 +710,115 @@ const pessoaSub = p => {
               >
             </div>
           </div>
+          <!-- item 342: quem chegou agendou (por caixa) × quando chegaram os que agendaram -->
+          <div class="cvg-graficos cvg-graficos--2">
+            <div class="cvg-grafico">
+              <span class="cvg-grafico-titulo">
+                <span>Quem chegou {{ nomePeriodo }} agendou?</span>
+                <span
+                  >{{ n(totalPorCaixa.agendaram) }} de
+                  {{ n(totalPorCaixa.chegaram) }}</span
+                >
+              </span>
+              <div class="cvg-grafico-corpo">
+                <div v-if="!porCaixa.length" class="cvg-vazio">
+                  Nenhum contato novo no período.
+                </div>
+                <table v-else class="cvg-visao-tabela">
+                  <thead>
+                    <tr>
+                      <th>Caixa de entrada</th>
+                      <th>Chegaram</th>
+                      <th>Agendaram</th>
+                      <th>Em média</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="r in porCaixa" :key="r.label">
+                      <td>{{ r.label }}</td>
+                      <td>{{ n(r.chegaram) }}</td>
+                      <td>
+                        <b>{{ n(r.agendaram) }}</b>
+                        <span class="cvg-legenda"> · {{ pctTxt(r.pct) }}</span>
+                      </td>
+                      <td>{{ mediaTxt(r.media_dias) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <span class="cvg-grafico-nota">
+                caixa da primeira conversa · agendou = entrou na coluna de
+                agendamento no período{{
+                  entrada.por_caixa?.parcial
+                    ? ' · amostra dos primeiros 5.000'
+                    : ''
+                }}
+              </span>
+            </div>
+            <div class="cvg-grafico">
+              <span class="cvg-grafico-titulo">
+                <span>Quando chegaram os que agendaram</span>
+                <span>{{ n(entrada.safra?.total) }} pessoas</span>
+              </span>
+              <div class="cvg-grafico-corpo">
+                <HBars
+                  :rows="barrasSafra"
+                  :label-width="10"
+                  :highlight-max="false"
+                  empty-text="ninguém agendou no período"
+                />
+              </div>
+              <span
+                v-if="entrada.safra?.outros?.count"
+                class="cvg-grafico-nota cvg-visao-nota-clicavel"
+                role="button"
+                tabindex="0"
+                @click="
+                  abrir(
+                    'agendaram_base',
+                    'Agendaram da base',
+                    n(entrada.agendaram_base.valor),
+                    cmp(
+                      entrada.agendaram_base.valor,
+                      entrada.agendaram_base.anterior
+                    )
+                  )
+                "
+                @keydown.enter="
+                  abrir(
+                    'agendaram_base',
+                    'Agendaram da base',
+                    n(entrada.agendaram_base.valor)
+                  )
+                "
+              >
+                {{ n(entrada.safra.outros.count) }} chegaram antes do período:
+                em média {{ dias(entrada.safra.outros.media_dias) }} entre
+                chegar e agendar · ver quem ›
+              </span>
+            </div>
+          </div>
+        </div>
+      </CvBloco>
+
+      <!-- ══ item 342 · VOLUME DO PERÍODO ══ -->
+      <CvBloco
+        v-if="volumes.length"
+        titulo="Volume do período"
+        subtitulo="Cada acontecimento um número, sem misturar: clique para ver de onde veio e como é contado"
+        icon="i-lucide-list-ordered"
+      >
+        <div class="cvg-fila cvg-visao-volumes">
+          <CvIndicador
+            v-for="v in volumes"
+            :key="v.key"
+            :rotulo="v.label"
+            :valor="n(v.valor)"
+            :comparacao="cmpVolume(v)"
+            :contexto="ctxVolume(v)"
+            :pe="v.medida"
+            @abrir="abrir(`vol:${v.key}`, v.label, n(v.valor), cmpVolume(v))"
+          />
         </div>
       </CvBloco>
 
@@ -1113,6 +1313,101 @@ const pessoaSub = p => {
             </div>
           </div>
         </section>
+        <section v-if="volumeAberto" class="cvg-painel-sec">
+          <h3>Como é contado</h3>
+          <p class="cvg-corpo">{{ volumeAberto.formula }}</p>
+          <div
+            v-for="x in volumeAberto.extra || []"
+            :key="x.label"
+            class="cvg-linha cvg-visao-linha2"
+          >
+            <span>{{ x.label }}</span>
+            <b>{{ n(x.valor) }}</b>
+          </div>
+        </section>
+        <template v-if="volumeAberto">
+          <section
+            v-for="q in volumeAberto.quebras"
+            :key="q.titulo"
+            class="cvg-painel-sec"
+          >
+            <h3>{{ q.titulo }}</h3>
+            <div v-for="r in q.rows" :key="r.label" class="cvg-visao-barra">
+              <div class="cvg-visao-barra-linha">
+                <span>{{ r.label }}</span>
+                <b>
+                  {{ n(r.count) }} ·
+                  {{ pctTxt((r.count / Math.max(totalDe(q.rows), 1)) * 100) }}
+                </b>
+              </div>
+              <div class="cvg-visao-barra-trilho">
+                <i
+                  :style="{
+                    width: `${(r.count / Math.max(totalDe(q.rows), 1)) * 100}%`,
+                  }"
+                />
+              </div>
+            </div>
+          </section>
+        </template>
+        <section
+          v-if="['agendaram', 'agendaram_base'].includes(painel.key)"
+          class="cvg-painel-sec"
+        >
+          <h3>Como é contado</h3>
+          <p class="cvg-corpo">
+            {{
+              painel.key === 'agendaram'
+                ? entrada.agendaram_novos.formula
+                : entrada.agendaram_base.formula
+            }}
+          </p>
+          <div class="cvg-linha cvg-visao-linha2">
+            <span>Leads novos (chegaram {{ nomePeriodo }})</span>
+            <b>{{ n(entrada.agendaram_novos.valor) }}</b>
+          </div>
+          <div class="cvg-linha cvg-visao-linha2">
+            <span>Da base (chegaram antes)</span>
+            <b>{{ n(entrada.agendaram_base.valor) }}</b>
+          </div>
+          <div class="cvg-linha cvg-visao-linha2">
+            <span>Total de pessoas que agendaram</span>
+            <b>{{ n(entrada.agendaram_total.valor) }}</b>
+          </div>
+        </section>
+        <section
+          v-if="painel.key === 'agendaram_base' && entrada.safra"
+          class="cvg-painel-sec"
+        >
+          <h3>Quando tinham chegado</h3>
+          <div
+            v-for="f in entrada.safra.faixas.filter(x => x.key !== 'periodo')"
+            :key="f.key"
+            class="cvg-linha cvg-visao-linha2"
+          >
+            <span>{{ f.label }}</span>
+            <b
+              >{{ n(f.count)
+              }}{{ f.media_dias !== null ? ` · ${dias(f.media_dias)}` : '' }}</b
+            >
+          </div>
+          <template v-if="entrada.safra.semanas.length">
+            <h3 class="mt-4">Semana de chegada</h3>
+            <div
+              v-for="w in entrada.safra.semanas"
+              :key="w.inicio"
+              class="cvg-linha cvg-visao-linha2"
+            >
+              <span>{{ w.label }}</span>
+              <b
+                >{{ n(w.count)
+                }}{{
+                  w.media_dias !== null ? ` · ${dias(w.media_dias)}` : ''
+                }}</b
+              >
+            </div>
+          </template>
+        </section>
         <section
           v-if="painel.key === 'agendaram' && entrada.tempo"
           class="cvg-painel-sec"
@@ -1317,6 +1612,46 @@ const pessoaSub = p => {
 
 <style lang="scss">
 /* 🧭 Visão geral do Meu Painel (item 337) */
+/* item 342: tabela "quem chegou agendou" e a fileira do volume do período */
+.cv-page .cvg-visao-volumes {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+.cvg-visao-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.cvg-visao-tabela th {
+  text-align: right;
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--g-texto-3);
+  padding: 4px;
+  vertical-align: bottom;
+}
+.cvg-visao-tabela td {
+  text-align: right;
+  padding: 6px 4px;
+  border-top: 1px solid var(--g-borda);
+  white-space: nowrap;
+}
+.cvg-visao-tabela th:first-child,
+.cvg-visao-tabela td:first-child {
+  text-align: left;
+  white-space: normal;
+}
+.cvg-visao-tabela td b {
+  font-weight: 600;
+}
+.cvg-visao-nota-clicavel {
+  cursor: pointer;
+}
+.cvg-visao-nota-clicavel:hover {
+  text-decoration: underline;
+}
 .cv-page .cvg-visao {
   display: flex;
   flex-direction: column;

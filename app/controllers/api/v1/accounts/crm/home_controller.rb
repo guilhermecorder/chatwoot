@@ -238,7 +238,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def overview
     since, until_at = resolve_range
     admin = Current.account_user.administrator?
-    key = ['cevico:overview', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i]
+    key = ['cevico:overview:v342', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i]
     payload = Rails.cache.fetch(key, expires_in: heavy_ttl) do
       Crm::OverviewService.new(account: account, since: since, until_at: until_at, lens: lens, admin: admin).call
     end
@@ -401,7 +401,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       closing_rate: pct(agendadas, indicacoes),
       surgeries_done: realizadas_scope.where(attendance: 'attended').or(realizadas_scope.where(status: :done)).count,
       surgery_breakdown: surgery_breakdown_json(since, full_until),
-      booked_breakdown: booked_breakdown_json(booked_scope(account, since, until_at)),
+      booked_breakdown: booked_breakdown_for(since, until_at),
+      booking_people: booking_people_json(since, until_at),
       nps: nps_summary,
       # item 146: comparecimento por unidade também no painel do gestor
       by_unit: unit_breakdown(periodo)
@@ -468,8 +469,10 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       booking_cohorts: booking_cohorts_json,
       # item 267: o que importa em cada consulta marcada — de qual caixa o
       # paciente chegou, unidade, procedimento, robô × equipe, lead novo × base
-      booked_breakdown: booked_breakdown_json(booked_scope(account, since, until_at)),
-      booked_today_breakdown: booked_breakdown_json(booked_scope(account, TZ.now.beginning_of_day, TZ.now.end_of_day)),
+      booked_breakdown: booked_breakdown_for(since, until_at),
+      booked_today_breakdown: booked_breakdown_for(TZ.now.beginning_of_day, TZ.now.end_of_day),
+      # 🧹 item 342: quem ENTROU na coluna (pessoas) com a quebra que soma o mesmo número
+      booking_people: booking_people_json(since, until_at),
       # 🧭 item 328: TUDO o que foi marcado no período em três cortes — o que
       # foi, de onde veio e quem fez (com a lista de pacientes atrás)
       booking_cuts: Crm::BookingCuts.new(account, lens: lens).call(since, until_at),
@@ -1161,11 +1164,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # para a frente (due_at >= criação). Registro retroativo de histórico
   # (consulta que já tinha acontecido) não é agendamento novo.
   # item 217: consulta LANÇADA (já estava marcada fora do sistema) não é agendamento
-  def booked_scope(account, since, until_at)
+  # all: true (item 342) = a mesma régua SEM a lente — só para comparar as fontes
+  def booked_scope(account, since, until_at, all: false)
     # item 233: "Marcadas na Agenda" = consulta nova de verdade — sem exame,
     # teleconsulta ou cancelada. item 328: de QUEM é (casa × Oftalmofácil × tudo)
     # quem decide é a lente da fonte, pelo carimbo
-    lens.tasks(account.tasks).bookings.where(task_type: 'consulta', created_at: since..until_at)
+    base = all ? account.tasks : lens.tasks(account.tasks)
+    base.bookings.where(task_type: 'consulta', created_at: since..until_at)
         .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
         .where(canceled_at: nil)
         .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
@@ -1200,15 +1205,45 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     counts.map { |label, n| { label: label.to_s, count: n } }.sort_by { |h| -h[:count] }
   end
 
-  def booked_breakdown_json(scope) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  # 🧹 item 342: a quebra das consultas marcadas + a fonte contada SEM a lente
+  # (com a lente, "Fonte de pacientes" dava CEVICO 100% por construção)
+  def booked_breakdown_for(since, until_at)
+    booked_breakdown_json(booked_scope(account, since, until_at),
+                          stamp_scope: lens.all? ? nil : booked_scope(account, since, until_at, all: true))
+  end
+
+  # 🧹 item 342 (13/10): "Entrou em Agendamento" conta PESSOAS (mudança de
+  # coluna); a quebra das consultas da Agenda conta CONSULTAS — eram dois
+  # números diferentes no mesmo popup (34 em cima, 45 nas quebras). Esta é a
+  # quebra das PESSOAS, que soma exatamente o número de cima.
+  def booking_people_json(since, until_at)
+    rows = Crm::BookingRate.entries(account, since, until_at, lens: lens).joins(:crm_contact)
+                           .distinct.pluck('crm_contacts.contact_id')
+    novos = Crm::BookingRate.entries(account, since, until_at, lens: lens).joins(:crm_contact)
+                            .where(crm_contacts: { contact_id: leads_scope(since, until_at).select(:id) })
+                            .distinct.pluck('crm_contacts.contact_id')
+    origin = origin_inbox_by_contact(rows)
+    {
+      total: rows.size,
+      new_leads: novos.size,
+      base: rows.size - novos.size,
+      by_origin_inbox: rows_json(rows.group_by { |id| origin[id] || 'sem conversa' }.transform_values(&:size))
+    }
+  end
+
+  def booked_breakdown_json(scope, stamp_scope: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     tasks = scope.includes(:contact).to_a
     return nil if tasks.empty?
+
+    stamp_tasks = stamp_scope ? stamp_scope.to_a : tasks
 
     origin = origin_inbox_by_contact(tasks.filter_map(&:contact_id).uniq)
     cohort = tasks.map { |t| Crm::LeadCohort.of(t.contact, t) }
     new_leads = cohort.count { |c| %w[mesmo_dia semana mes].include?(c) }
     {
       total: tasks.size,
+      # item 342: o total é de CONSULTAS; quantas PESSOAS são (sem repetir)
+      people: tasks.filter_map(&:contact_id).uniq.size + tasks.count { |t| t.contact_id.nil? },
       new_leads: new_leads,
       base: tasks.size - new_leads,
       by_origin_inbox: rows_json(tasks.group_by { |t| t.contact_id ? origin[t.contact_id] || 'sem conversa' : 'sem cadastro' }.transform_values(&:size)),
@@ -1218,7 +1253,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       by_source: { ia: tasks.count { |t| Crm::BookingSource.of(t) == 'ia' }, equipe: tasks.count { |t| Crm::BookingSource.of(t) == 'equipe' } },
       # 🏷️ item 332 (06/10, pedido dele: "descrição maior sobre as fontes"): a FONTE pelo carimbo
       # (CEVICO × Oftalmofácil…) e QUEM FEZ pelo carimbo (paciente, robô, equipe, sincronização)
-      by_stamp: rows_json(tasks.group_by { |t| stamp_source_name(t) }.transform_values(&:size)),
+      # item 342: contada SEM a lente (todas as fontes), para comparar — com a lente era 100% por construção
+      by_stamp: rows_json(stamp_tasks.group_by { |t| stamp_source_name(t) }.transform_values(&:size)),
+      by_stamp_all_sources: stamp_scope.present?,
       by_via: rows_json(tasks.group_by { |t| Crm::BookingCuts::VIAS[stamp_via(t)] }.transform_values(&:size)),
       via_deduced: tasks.count { |t| !Crm::BookingCuts::VIAS.key?(t.cevico_born_via) && t.source != 'oftalmofacil' },
       # 28/09 (prints dele: 44 marcadas, 36 "pela caixa de confirmação"): a maioria é marcada pela

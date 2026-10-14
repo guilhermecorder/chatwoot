@@ -4,7 +4,7 @@
 # Oportunidades (ai_config opportunity_state.alerts), kinds 'agente_remarcou'
 # e 'agente_cancelou'; some sozinho após 24 h. Espelha Crm::Calls::RadarAlert.
 # Direcionado à pessoa que cuida da consulta (task.assignee_id); sem
-# responsável = todos veem.
+# responsável = todos veem. Retorno (item 343) = cada pessoa da equipe dos retornos.
 class Crm::AgentAlert
   # item 217: 'nao_confirmou' = paciente respondeu NÃO ao lembrete da véspera
   # item 251: 'pos_op_atencao' = sintoma de alerta no pós-operatório (tarefa urgente aberta)
@@ -91,17 +91,31 @@ class Crm::AgentAlert
   # (Cevico::SettingMerge) — mesma trava de linha de antes, agora no padrão da
   # casa; a chave continua opportunity_state.alerts (o Meu Painel lê dali)
   def push
-    alert = build
+    base = build
+    news = recipients.map { |user_id, user_name| base.merge('user_id' => user_id, 'user_name' => user_name) }
     Cevico::SettingMerge.merge_key!(@account, :ai_config, 'opportunity_state') do |state|
       alerts = Array(state['alerts']).reject { |a| a['kind'] == @kind && a['task_id'] == @task.id }
-      alerts << alert
+      alerts.concat(news)
       state['alerts'] = alerts.last(MAX_ALERTS)
       state
     end
-    alert
+    news.first
   end
 
   private
+
+  # 🔁 item 343 (13/10): aviso de RETORNO ("disse NÃO", remarcou, tarefa da
+  # equipe) vai para CADA pessoa da equipe dos retornos — o popup e o Radar
+  # filtram por user_id — e não para quem marcou a consulta. "Atender agora"
+  # tira as cópias de todas de uma vez (sai pela conversa). Sem equipe
+  # configurada (ou fora de retorno): o responsável da consulta, como antes.
+  def recipients
+    if Crm::TaskOwner.retorno?(@task)
+      team = @account.users.where(id: Crm::TaskOwner.retorno_team_ids(@account)).order(:id).pluck(:id, :name)
+      return team if team.any?
+    end
+    [[@task.assignee_id, @task.assignee&.name]]
+  end
 
   def build
     contact = @task.contact || @conversation&.contact

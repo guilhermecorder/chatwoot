@@ -14,6 +14,8 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import InboxesAPI from 'dashboard/api/inboxes';
 import ReminderVariants from './ReminderVariants.vue';
+// 💰 item 340: o valor que foi na mensagem, na lista de enviados ("R$ 350,00")
+import { priceLabel } from 'dashboard/helper/cevicoAgenda';
 
 const props = defineProps({
   view: { type: String, default: 'cards' }, // 'cards' | 'list'
@@ -614,6 +616,27 @@ const toggleMaster = async () => {
     useAlert('Não consegui mudar o interruptor.');
   } finally {
     togglingMaster.value = false;
+  }
+};
+
+// 🔁 item 343: quem recebe as tarefas da Confirmação (lembrete recusado pela
+// Meta…) — '' = responsável da conferência de consulta; 'retorno_team' = a
+// Equipe dos retornos. Paciente de retorno vai sempre para a equipe.
+const teamAgents = useMapGetter('agents/getAgents');
+const taskAssignee = computed(() =>
+  String(settings.value?.appointment_confirmation?.task_assignee_id || '')
+);
+const savingAssignee = ref(false);
+const saveTaskAssignee = async value => {
+  savingAssignee.value = true;
+  try {
+    await CrmAPI.saveAppointmentConfirmation({ taskAssigneeId: value || null });
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Responsável pelas tarefas salvo.');
+  } catch {
+    useAlert('Não consegui salvar o responsável.');
+  } finally {
+    savingAssignee.value = false;
   }
 };
 
@@ -1851,6 +1874,14 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                   >{{ e.template ? `(${e.template})` : ''
                   }}{{ e.inbox ? ` · ${e.inbox}` : '' }}</span
                 >
+                <!-- 💰 item 340: o valor que foi na mensagem e de onde saiu -->
+                <span
+                  v-if="e.value"
+                  class="text-[10px] text-n-slate-9"
+                  title="Valor que foi na mensagem e de onde ele saiu"
+                  >· {{ priceLabel(e.value)
+                  }}{{ e.value_source ? ` · ${e.value_source}` : '' }}</span
+                >
                 <span
                   v-if="e.model"
                   class="font-semibold"
@@ -1947,6 +1978,37 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- 🔁 item 343: responsável pelas tarefas da Confirmação -->
+        <div v-if="isAdmin" class="cv-sub p-3 space-y-1.5">
+          <label class="text-xs font-medium text-n-slate-11 block"
+            >Responsável pelas tarefas
+            <span class="text-n-slate-9 font-normal">(Meu Painel)</span></label
+          >
+          <select
+            :value="taskAssignee"
+            :disabled="savingAssignee"
+            class="cv-input w-full text-sm sm:max-w-sm"
+            @change="saveTaskAssignee($event.target.value)"
+          >
+            <option value="">— responsável da conferência de consulta —</option>
+            <option value="retorno_team">
+              Equipe dos retornos (as duas veem)
+            </option>
+            <option
+              v-for="u in teamAgents"
+              :key="`confirm-owner-${u.id}`"
+              :value="String(u.id)"
+            >
+              {{ u.name }}
+            </option>
+          </select>
+          <p class="text-[10px] text-n-slate-9">
+            Quem recebe a tarefa quando um lembrete não chega. Paciente de
+            retorno vai sempre para a Equipe dos retornos (Agenda → Conferência
+            do dia).
+          </p>
         </div>
 
         <!-- salvar -->

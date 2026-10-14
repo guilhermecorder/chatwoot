@@ -532,11 +532,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 # o Roteiro compartilhado chega em params[:script].
                                 # (193) live_days = dias da semana 0..6 em que fica ao vivo; vazio = todos
                                 # (200) reply_delay_seconds = segundos entre a mensagem do paciente e a resposta (3–30; padrão 6)
+                                # 🔁 (343) task_assignee_id = quem recebe as tarefas (id ou 'retorno_team')
                                 atendente_agendamento: agent_fields + [:mode, :no_card, :after_booking_stage_id,
                                                                        :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
+                                                                       :task_assignee_id,
                                                                        { inbox_ids: [], stage_ids: [], live_days: [] }],
                                 # 🗣️ Atendente Pós-agendamento (agente B): suporte a quem já marcou
                                 atendente_pos: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
+                                                               :task_assignee_id,
                                                                { inbox_ids: [], stage_ids: [], live_days: [] }],
                                 # 🩺 Atendente de Pós-operatório (item 251): + quem recebe as tarefas
                                 # (task_assignee_id) e a janela de "cirurgia recente" pela Agenda (dias)
@@ -1333,6 +1336,13 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                        .to_h
                                        .transform_values(&:presence)
     end
+    # 🔁 item 343 (13/10): EQUIPE DOS RETORNOS — retorno não tem dono
+    # individual; as pessoas daqui veem todos e quem pegar primeiro assume.
+    # Decisão de gestão: só o administrador escolhe.
+    if params.key?(:retorno_team_user_ids) && Current.account_user.administrator?
+      ids = Array(params[:retorno_team_user_ids]).map(&:to_i).select(&:positive?).uniq
+      cfg[Crm::TaskOwner::RETORNO_TEAM_KEY] = Current.account.users.where(id: ids).pluck(:id)
+    end
     # 27/09: PAPEL E RESPONSABILIDADES de cada pessoa — o Mentor do Time julga
     # cada um pelo próprio papel (fechamento de cirurgia ≠ linha de frente)
     if params.key?(:team_roles) && Current.account_user.administrator?
@@ -1424,8 +1434,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     # item 253: interruptor geral do agente "Confirmação de consulta" (Agentes de IA)
     if params.key?(:appointment_confirmation) && Current.account_user.administrator?
-      enabled = ActiveModel::Type::Boolean.new.cast(params.dig(:appointment_confirmation, :enabled)) == true
-      cfg[Crm::AppointmentReminderSendJob::MASTER_KEY] = { 'enabled' => enabled, 'updated_at' => Time.current.iso8601 }
+      cfg[Crm::AppointmentReminderSendJob::MASTER_KEY] = appointment_confirmation_cfg(cfg[Crm::AppointmentReminderSendJob::MASTER_KEY])
     end
     cfg = save_agenda_keys!(before, cfg, custom_kpis_patch)
     render json: {
@@ -1436,6 +1445,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_ai_rules: cfg['ai_rules'].to_s,
       attendance_stages: cfg['attendance_stages'] || {},
       attendance_owners: cfg['attendance_owners'] || {},
+      retorno_team_user_ids: Array(cfg[Crm::TaskOwner::RETORNO_TEAM_KEY]), # 🔁 item 343
       team_roles: cfg['team_roles'] || {},
       surgery_locations: cfg['surgery_locations'] || [],
       surgery_windows: cfg['surgery_windows'] || [],
@@ -1481,6 +1491,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # painéis diferentes (ou duas abas) não apagam o trabalho um do outro, e as
   # chaves dos jobs (recorde, aniversários, estado dos lembretes…) nunca são
   # tocadas por quem só arrastou um card. Devolve a coluna gravada.
+  # item 253 + 🔁 343: o interruptor geral da Confirmação de consulta e quem
+  # recebe as tarefas dela (id ou 'retorno_team') — mexe só no que chegou
+  def appointment_confirmation_cfg(current)
+    conf = (current.is_a?(Hash) ? current : {}).dup
+    incoming = params.require(:appointment_confirmation)
+    if incoming.key?(:enabled)
+      conf['enabled'] = ActiveModel::Type::Boolean.new.cast(incoming[:enabled]) == true
+      conf['updated_at'] = Time.current.iso8601
+    end
+    conf['task_assignee_id'] = incoming[:task_assignee_id].to_s.presence if incoming.key?(:task_assignee_id)
+    conf
+  end
+
   def save_agenda_keys!(before, cfg, kpis_patch = nil)
     changed = cfg.reject { |key, value| before.key?(key) && before[key] == value }
     Cevico::SettingMerge.merge!(crm_settings, :agenda_config) do |fresh|
@@ -2288,6 +2311,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_ai_rules: (s.agenda_config || {})['ai_rules'].to_s, # item 307
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
+      retorno_team_user_ids: Array((s.agenda_config || {})[Crm::TaskOwner::RETORNO_TEAM_KEY]), # 🔁 item 343
       team_roles: (s.agenda_config || {})['team_roles'] || {},
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
@@ -2554,6 +2578,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           hours_end: agents.dig(key, 'hours_end').presence,
           # (193) janela ao vivo por dia da semana (0=dom … 6=sáb; vazio = todos os dias)
           live_days: Array(agents.dig(key, 'live_days')).map(&:to_i),
+          # 🔁 (343) quem recebe as tarefas dos atendentes (id ou 'retorno_team') e a
+          # janela de cirurgia recente do pós-op — antes não voltavam para a tela
+          task_assignee_id: agents.dig(key, 'task_assignee_id').presence,
+          recent_surgery_days: agents.dig(key, 'recent_surgery_days'),
           watchers: Array(agents.dig(key, 'watchers')).map do |w|
             {
               stage_id: w['stage_id'].to_i,

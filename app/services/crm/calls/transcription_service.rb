@@ -5,8 +5,8 @@ require 'open3'
 # Nunca levanta erro para fora: qualquer falha vira transcript_status
 # 'failed' com um motivo curto em português.
 class Crm::Calls::TranscriptionService
-  MODEL = 'gemini-2.5-flash'.freeze
-  GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/#{MODEL}:generateContent".freeze
+  # 🤖 item 340: modelo configurável com troca automática (Crm::GeminiModels)
+  MODEL = Crm::GeminiModels::DEFAULT
   MAX_BYTES = 18.megabytes
   AGENT_KEY = 'calls_transcription'.freeze
   # US$ por milhão de tokens (entrada de áudio / saída) — estimativa p/ o painel de uso
@@ -107,8 +107,7 @@ class Crm::Calls::TranscriptionService
       contents: [{ parts: [{ text: PROMPT }, { inline_data: { mime_type: mime, data: Base64.strict_encode64(data) } }] }],
       generationConfig: { temperature: 0.2, response_mime_type: 'application/json' }
     }
-    response = HTTParty.post(GEMINI_URL, query: { key: api_key }, headers: { 'Content-Type' => 'application/json' },
-                                         body: body.to_json, timeout: 180)
+    response, @model = Crm::GeminiModels.post(account: call.account, api_key: api_key, body: body.to_json, timeout: 180)
     raise "Gemini respondeu com erro #{response.code}: #{gemini_error(response)}" unless response.success?
 
     response.parsed_response.is_a?(Hash) ? response.parsed_response : {}
@@ -156,7 +155,7 @@ class Crm::Calls::TranscriptionService
     input = usage['promptTokenCount'].to_i
     output = usage['candidatesTokenCount'].to_i
     cost = ((input * PRICE_IN) + (output * PRICE_OUT)) / 1_000_000.0
-    Crm::AiUsage.create!(account: call.account, agent_key: AGENT_KEY, model: MODEL,
+    Crm::AiUsage.create!(account: call.account, agent_key: AGENT_KEY, model: @model || MODEL,
                          input_tokens: input, output_tokens: output, cost_usd: cost.round(6))
   rescue StandardError => e
     Rails.logger.warn("[Crm::AiUsage] falhou ao registrar a transcrição: #{e.message}")
