@@ -5,7 +5,7 @@
 # Usado pela ação de coluna "Agendar consulta (IA)" e pelo preenchimento do
 # histórico (Crm::AgendaBackfillJob). NÃO fala com o paciente: só escreve na
 # Agenda interna.
-class Crm::AppointmentRecorder
+class Crm::AppointmentRecorder # rubocop:disable Metrics/ClassLength -- item 346 (mobile_key)
   # booking_kind (item 217): nil = agendamento novo; 'registro' = a consulta já
   # estava marcada fora do sistema (confirmação lida na conversa) — entra na
   # Agenda como "Lançada", fora de "Consultas agendadas"
@@ -285,12 +285,32 @@ class Crm::AppointmentRecorder
   # (ambos com DDD) exige igualdade — dois DDDs que só compartilham o final de
   # 8 dígitos NÃO casam. Comprimentos diferentes: o maior tem que terminar no
   # menor (ex.: "+55 11 9..." casa com "11 9...").
+  #
+  # 📱 item 346 (15/10): celular com e sem o 9 depois do DDD é a MESMA linha.
+  # O WhatsApp ainda guarda vários números antigos sem o 9 (ex.: DDD 35) e o
+  # OftalmoFácil/a equipe digitam com o 9 — o mesmo paciente virava dois.
   def self.same_phone_line?(a_digits, b_phone)
     b = b_phone.to_s.gsub(/\D/, '')
     return false if b.length < 8
+
+    key = mobile_key(a_digits)
+    return true if key && key == mobile_key(b)
     return a_digits == b if a_digits.length == b.length
 
     short, long = [a_digits, b].sort_by(&:length)
     long.end_with?(short)
+  end
+
+  # chave do CELULAR brasileiro com DDD: "DDD + 9 + 8 dígitos". Número de 8
+  # dígitos começando com 6–9 (celular antigo, sem o 9) ganha o 9; fixo
+  # (2–5) e número sem DDD não têm chave (nil → as regras de cima decidem).
+  def self.mobile_key(digits) # rubocop:disable Metrics/CyclomaticComplexity
+    d = digits.to_s.gsub(/\D/, '').sub(/\A0+/, '')
+    d = d[2..] if d.start_with?('55') && d.length >= 12
+    return nil unless d.length.between?(10, 11)
+
+    local = d[2..]
+    local = "9#{local}" if local.length == 8 && local[0].to_i >= 6
+    local.length == 9 && local.start_with?('9') ? "#{d[0, 2]}#{local}" : nil
   end
 end

@@ -22,5 +22,9 @@ module CevicoContactData
     has_many :cevico_page_refs, class_name: 'CevicoPageRef', dependent: :delete_all
     has_many :tasks, dependent: :nullify
     has_many :crm_oftalmofacil_surgeries, class_name: 'Crm::OftalmofacilSurgery', dependent: :nullify
+
+    # ⚠️ item 346: paciente novo com o mesmo celular (com/sem 9) ou o mesmo nome
+    # completo de outro → alerta "possível duplicado" para conferir (não junta)
+    after_create_commit { Crm::DuplicateWatchJob.perform_later(id) }
   end
 end

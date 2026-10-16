@@ -288,6 +288,46 @@ RSpec.describe Crm::OftalmofacilSyncService do
   # 🔁 auditoria 10/2026 (#462/#472): a recepção lança a consulta na Agenda E ela
   # chega pelo hub (CATARATA_SP, o fornecedor da própria CEVICO) → nasciam DUAS
   # tasks no mesmo dia, dois lembretes pagos e o "sim" confirmava só uma.
+  # 📱 item 346 (15/10): caso Francislene — WhatsApp sem o 9, OftalmoFácil com o 9
+  describe 'paciente da CEVICO (CATARATA_SP) que já tinha cadastro' do
+    let(:own) { { 'PROV_NAME' => 'CATARATA_SP', 'SCH_PATIENT_PHONE' => '35987017046', 'SCH_PATIENT_CPF' => '11122233344' } }
+
+    it 'acha o cadastro do WhatsApp pelo celular sem o 9, os dados do OftalmoFácil mandam e não ganha etiqueta oftalmofacil',
+       :aggregate_failures do
+      zap = account.contacts.create!(name: 'Fran Borges', phone_number: '+553587017046', email: 'antigo@exemplo.com')
+      zap.update!(label_list: ['cevico'])
+      run_with([row(own.merge('SCH_ITE_TOKEN' => 'tok-fran', 'SCH_PATIENT_NAME' => 'Francislene Pereira Borges',
+                              'SCH_PATIENT_MAIL' => 'francislene@exemplo.com'))])
+
+      expect(Crm::OftalmofacilSurgery.find_by(item_token: 'tok-fran').contact_id).to eq(zap.id)
+      expect(account.contacts.count).to eq(1)
+      zap.reload
+      expect(zap.name).to eq('Francislene Pereira Borges')
+      expect(zap.email).to eq('francislene@exemplo.com')
+      expect(zap.phone_number).to eq('+553587017046') # o número do WhatsApp continua o principal
+      expect(zap.custom_attributes['cpf']).to eq('11122233344')
+      expect(zap.label_list).to eq(['cevico'])
+      expect(Crm::Contact.where(contact_id: zap.id, pipeline_id: cevico.id).count).to eq(1)
+    end
+
+    it 'mesmo telefone com OUTRO primeiro nome (mãe × filho): não troca o nome e deixa alerta para conferir',
+       :aggregate_failures do
+      mae = account.contacts.create!(name: 'Vera Lima', phone_number: '+5535987017046')
+      run_with([row(own.merge('SCH_ITE_TOKEN' => 'tok-filho', 'SCH_PATIENT_NAME' => 'Ricardo Lima'))])
+      mae.reload
+      expect(mae.name).to eq('Vera Lima')
+      expect(Crm::PatientReview.list(mae).map { |e| e['tipo'] }).to eq(['nome_diferente'])
+    end
+
+    it 'cadastro com o nome de DUAS pessoas não é renomeado: fica para conferir', :aggregate_failures do
+      dupla = account.contacts.create!(name: 'Francislene Pereira Borges E Alice Quadros Schimit', phone_number: '+553587017046')
+      run_with([row(own.merge('SCH_ITE_TOKEN' => 'tok-dupla', 'SCH_PATIENT_NAME' => 'Francislene Pereira Borges'))])
+      dupla.reload
+      expect(dupla.name).to eq('Francislene Pereira Borges E Alice Quadros Schimit')
+      expect(Crm::PatientReview.list(dupla).map { |e| e['tipo'] }).to include('duas_pessoas')
+    end
+  end
+
   describe 'consulta já lançada na Agenda pela equipe' do
     let(:tz) { ActiveSupport::TimeZone['America/Sao_Paulo'] }
     let(:admin) { account.users.first }

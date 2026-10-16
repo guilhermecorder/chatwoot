@@ -650,6 +650,14 @@ const goToAgendaForSurgery = () => {
   router.push(frontendURL(`accounts/${accountId.value}/agenda`));
 };
 
+// 👪 item 346: painel da pessoa amarrada (quem agendou / para quem agendou)
+const openLinkedPatient = link => {
+  if (!link?.contact_id) return;
+  router.push(
+    frontendURL(`accounts/${accountId.value}/patient/${link.contact_id}`)
+  );
+};
+
 const openNewNote = () => {
   editingNote.value = null;
   noteForm.value = blankForm();
@@ -1021,6 +1029,64 @@ watch(contactId, () => {
                 >
                   {{ label }}
                 </span>
+              </div>
+              <!-- 👪 item 346: quem agendou para quem — clica e abre o painel da outra pessoa -->
+              <div
+                v-if="
+                  identity.scheduled_by || (identity.scheduled_for || []).length
+                "
+                class="flex items-center gap-1.5 flex-wrap mt-2"
+              >
+                <button
+                  v-if="identity.scheduled_by"
+                  class="cevico-hero-btn"
+                  title="Abrir o painel de quem agendou esta consulta"
+                  @click="openLinkedPatient(identity.scheduled_by)"
+                >
+                  <span class="i-lucide-user-round-check text-[13px]" />
+                  Agendado por {{ identity.scheduled_by.name }}
+                  <span v-if="identity.scheduled_by.phone" class="opacity-75">
+                    · {{ identity.scheduled_by.phone }}
+                  </span>
+                </button>
+                <button
+                  v-for="link in identity.scheduled_for || []"
+                  :key="link.contact_id"
+                  class="cevico-hero-btn"
+                  title="Abrir o painel da pessoa para quem este contato agendou"
+                  @click="openLinkedPatient(link)"
+                >
+                  <span class="i-lucide-users-round text-[13px]" />
+                  Agendou para {{ link.name }}
+                  <span v-if="link.phone" class="opacity-75">
+                    · {{ link.phone }}
+                  </span>
+                </button>
+              </div>
+              <!-- ⚠️ item 346: cadastro para conferir (possível duplicado, nome diferente…) -->
+              <div
+                v-if="(identity.review || []).length"
+                class="mt-2.5 rounded-xl px-3 py-2 w-fit max-w-full text-[12px] bg-amber-500/20 border-[1.5px] border-solid border-amber-500/70"
+              >
+                <div
+                  v-for="item in identity.review"
+                  :key="`${item.tipo}-${item.outro_contact_id}`"
+                  class="flex items-center gap-1.5 flex-wrap"
+                >
+                  <span class="i-lucide-triangle-alert text-[13px]" />
+                  <strong>{{ item.titulo }}</strong>
+                  <span class="opacity-90">{{ item.detalhe }}</span>
+                  <button
+                    v-if="item.outro_contact_id"
+                    class="underline font-semibold"
+                    title="Abrir o outro cadastro para comparar"
+                    @click="
+                      openLinkedPatient({ contact_id: item.outro_contact_id })
+                    "
+                  >
+                    ver o outro
+                  </button>
+                </div>
               </div>
               <!-- anúncio de origem: a PLACA DOURADA do primeiro contato -->
               <div

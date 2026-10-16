@@ -158,4 +158,19 @@ RSpec.describe Crm::AppointmentRecorder do
       expect(described_class.same_patient_name?('', 'Maria da Silva')).to be(false)
     end
   end
+
+  # 📱 item 346: celular com e sem o 9 depois do DDD = a mesma linha (caso Francislene)
+  describe '.same_phone_line? com e sem o 9', :aggregate_failures do
+    it 'casa o celular antigo (sem 9) com o atual, com ou sem +55' do
+      expect(described_class.same_phone_line?('553587017046', '+5535987017046')).to be(true)
+      expect(described_class.same_phone_line?('35987017046', '+553587017046')).to be(true)
+      expect(described_class.same_phone_line?('5535987017046', '3587017046')).to be(true)
+    end
+
+    it 'não casa DDD diferente, número diferente nem telefone fixo com o 9 inventado' do
+      expect(described_class.same_phone_line?('551187017046', '+5535987017046')).to be(false)
+      expect(described_class.same_phone_line?('553587017047', '+5535987017046')).to be(false)
+      expect(described_class.same_phone_line?('551132017046', '+5511932017046')).to be(false)
+    end
+  end
 end

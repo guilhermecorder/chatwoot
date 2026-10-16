@@ -1225,7 +1225,10 @@ const hmOf = t => format(new Date(t.due_at), 'HH:mm');
 const originLocked = computed(() => Boolean(editingTask.value?.source));
 const originMissing = computed(() => !editingTask.value && !form.value.origin);
 const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.');
-const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value));
+// 📱 item 346: paciente NOVO só nasce com telefone (DDD + número) — sem ele
+// não há como achar o cadastro de quem já existe e o paciente duplica
+const phoneMissing = computed(() => !editingTask.value && (form.value.phone || '').replace(/\D/g, '').length < 10);
+const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value && !phoneMissing.value));
 
 const save = async () => {
   if (!canSave.value || isSaving.value) return;
@@ -2827,8 +2830,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <input v-model="form.name" class="cv-input w-full" placeholder="Nome completo" />
               </div>
               <div>
-                <span class="cv-label block mb-1">Telefone</span>
+                <span class="cv-label block mb-1">Telefone {{ editingTask ? '' : '*' }}</span>
                 <input v-model="form.phone" class="cv-input w-full" placeholder="(11) 98888-7777" />
+                <span v-if="phoneMissing && form.phone" class="text-[11px] text-amber-700 mt-1 block">Com DDD: (11) 98888-7777</span>
               </div>
             </div>
             <!-- 🏥 item 300: de quem é o paciente (obrigatório ao criar) -->
@@ -3007,7 +3011,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
           <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask && canEditAgenda ? '' : 'ml-auto'" @click="showModal = false">{{ canEditAgenda ? 'Cancelar' : 'Fechar' }}</button>
-          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : ''" @click="save">
+          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : phoneMissing ? 'Informe o telefone do paciente com DDD' : ''" @click="save">
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
           </button>

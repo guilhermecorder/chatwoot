@@ -588,8 +588,12 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   # etiqueta de ORIGEM no contato: `oftalmofacil` para todos e `of_<parceiro>`
   # para quem veio de um parceiro (pedido dele: "só de ter uma tag com a
   # origem de onde veio, fica bem interessante")
+  #
+  # 📱 item 346 (15/10, pedido dele): paciente da CEVICO (CATARATA_SP) que JÁ
+  # tinha cadastro continua só da CEVICO — sem a etiqueta `oftalmofacil` (o
+  # dado é da própria CEVICO). Só quem nasce pelo hub ganha a de origem.
   def tag_origin(contact, surgery, partner)
-    fast_add_label(contact, ORIGIN_LABEL)
+    fast_add_label(contact, ORIGIN_LABEL) if partner || @match_via == 'created'
     fast_add_label(contact, partner_label(surgery.provider_name)) if partner
   end
 
@@ -677,16 +681,43 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     attrs
   end
 
-  # CPF vira chave de ouro; e-mail/nome só COMPLETAM o que estava vazio
+  # CPF vira chave de ouro; e-mail/nome só COMPLETAM o que estava vazio.
+  # 📱 item 346 (15/10, pedido dele): na CEVICO (CATARATA_SP) os dados do
+  # OftalmoFácil são os mais atuais ("captados da porta da clínica pra dentro")
+  # e MANDAM — nome e e-mail são trocados quando o primeiro nome bate. Nome
+  # diferente no mesmo telefone (mãe que marcou para o filho) e CPF diferente
+  # não mexem em nada: viram alerta de conferência (Crm::PatientReview).
   def enrich_contact(contact, surgery, partner: false) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/AbcSize
     changes = {}
-    if surgery.patient_cpf.present? && contact.custom_attributes&.dig('cpf').blank?
+    cpf = contact.custom_attributes&.dig('cpf')
+    if surgery.patient_cpf.present? && cpf.blank?
       changes[:custom_attributes] = (contact.custom_attributes || {}).merge('cpf' => surgery.patient_cpf)
+    elsif surgery.patient_cpf.present? && cpf.to_s.gsub(/\D/, '') != surgery.patient_cpf.to_s.gsub(/\D/, '')
+      Crm::PatientReview.flag!(contact, 'cpf_diferente', "OftalmoFácil: #{surgery.patient_name} com outro CPF neste cadastro")
     end
-    changes[:email] = surgery.patient_email if contact.email.blank? && email_free?(surgery.patient_email, contact)
-    changes[:name] = surgery.patient_name if contact.name.blank? && surgery.patient_name.present?
+    # cadastro com o nome de DUAS pessoas (Francislene … E Alice …) não é
+    # trocado: as consultas da outra pessoa estão nele — fica para conferir
+    trusted = !partner && @match_via != 'created' && !Crm::PatientReview.two_people?(contact.name) &&
+              Crm::PatientReview.compatible_names?(surgery.patient_name, contact.name)
+    new_email = contact.email.blank? || (trusted && contact.email.to_s.casecmp(surgery.patient_email.to_s).nonzero?)
+    changes[:email] = surgery.patient_email if new_email && email_free?(surgery.patient_email, contact)
+    new_name = contact.name.blank? || (trusted && contact.name != surgery.patient_name)
+    changes[:name] = surgery.patient_name if surgery.patient_name.present? && new_name
     contact.update_columns(changes) if changes.any? # rubocop:disable Rails/SkipsModelValidations
+    review_name!(contact, surgery) unless partner
     remember_partner!(contact, surgery) if partner && contact.additional_attributes&.dig('parceiro').blank?
+  end
+
+  # 📱 item 346: o cadastro achado pelo telefone tem OUTRO primeiro nome (ou o
+  # nome de duas pessoas): não troca nada, deixa para a equipe conferir
+  def review_name!(contact, surgery)
+    return if @match_via == 'created' || surgery.patient_name.blank?
+
+    if Crm::PatientReview.two_people?(contact.name)
+      Crm::PatientReview.flag!(contact, 'duas_pessoas', "#{contact.name} (OftalmoFácil: #{surgery.patient_name})")
+    elsif !Crm::PatientReview.compatible_names?(surgery.patient_name, contact.name)
+      Crm::PatientReview.flag!(contact, 'nome_diferente', "OftalmoFácil: #{surgery.patient_name} · cadastro: #{contact.name}")
+    end
   end
 
   # parceiro: o contato lembra de onde veio (mesmo quando já existia).

@@ -62,7 +62,7 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
 
   # ---------- identidade ----------
 
-  def identity(contact) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+  def identity(contact) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     profile = patient_profile(contact)
     {
       id: contact.id,
@@ -78,6 +78,11 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       money_restricted: !money_visible?,
       origin: contact.additional_attributes&.dig('meta_ads')
                      &.slice('headline', 'ad_name', 'source_url', 'thumbnail_url', 'captured_at'),
+      # 👪 item 346: quem agendou para quem (os dois lados ficam amarrados)
+      scheduled_by: contact.additional_attributes&.dig('agendado_por'),
+      scheduled_for: Array(contact.additional_attributes&.dig('agendou_para')),
+      # ⚠️ item 346: alertas de conferência (possível duplicado, nome diferente…)
+      review: Crm::PatientReview.list(contact),
       cards: patient_cards(contact).map do |card|
         {
           id: card.id,

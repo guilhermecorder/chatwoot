@@ -542,13 +542,20 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
       starts_at = Crm::AgendaSlots::TZ.parse("#{date} #{time}")
       doctor = Crm::AgendaSlots.doctor_at(account, date, time, ag[:unidade]) # item 311: o médico da faixa do horário
+      requester = conversation.contact
+      # 👪 item 346: consulta de OUTRA pessoa → cadastro e card DELA (nunca o de
+      # quem conversa); sem telefone próprio, a consulta leva o de quem agendou
+      other = other_person_booking?(ag, requester)
+      patient = other ? Crm::PatientLink.patient_for!(account: account, requester: requester, name: ag[:nome], phone: ag[:telefone]) : requester
+      phone = other ? (patient.phone_number.presence || requester&.phone_number) : (ag[:telefone].presence || requester&.phone_number)
       outcome = Crm::AppointmentRecorder.record(
         account: account,
-        result: { found: true, starts_at: starts_at, name: ag[:nome], phone: ag[:telefone].presence || conversation.contact&.phone_number,
+        result: { found: true, starts_at: starts_at, name: ag[:nome], phone: phone,
                   # 💰 (#132) sem preço fixo: o valor da consulta vem do pré-configurado (item 324)
                   unit: ag[:unidade], procedure: ag[:procedimento], doctor: doctor,
-                  notes: "Agendado pelo #{agent_name(agent_key)} (WhatsApp)" },
-        contact: conversation.contact, conversation: conversation
+                  notes: ["Agendado pelo #{agent_name(agent_key)} (WhatsApp)",
+                          other && "👪 #{Crm::PatientLink.summary(requester, patient)}"].compact.join("\n") },
+        contact: patient, conversation: conversation, new_only: other && patient.phone_number.blank?
       )
       # a Agenda não gravou (:skipped — conta sem criador, por exemplo): sem
       # consulta na Agenda não existe "Deu certo"
@@ -558,14 +565,16 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       end
 
       # item 200: etiqueta + card na coluna (a do card do agente ou a da tela Agendamentos)
-      effects = Crm::BookingSideEffects.apply(account: account, contact: conversation.contact, conversation: conversation,
+      effects = Crm::BookingSideEffects.apply(account: account, contact: patient, conversation: conversation,
                                               outcome: outcome == :rescheduled ? :rescheduled : :created,
                                               stage_id: cfg['after_booking_stage_id'].presence ||
                                                         agent_cfg(account, 'atendente_agendamento')['after_booking_stage_id'])
       effects_text = Crm::BookingSideEffects.summary(effects)
+      Crm::PatientLink.link!(requester: requester, patient: patient) if other # depois do card nascer (a linha vai nele)
       conversation.messages.create!(
         account_id: account.id, inbox_id: conversation.inbox_id, message_type: :activity, private: true,
-        content: "📅 #{agent_name(agent_key)} agendou: #{ag[:nome]} — #{starts_at.strftime('%d/%m/%Y às %H:%M')} " \
+        content: "📅 #{agent_name(agent_key)} agendou: #{ag[:nome]}#{" (👪 #{Crm::PatientLink.summary(requester, patient)})" if other} — " \
+                 "#{starts_at.strftime('%d/%m/%Y às %H:%M')} " \
                  "(#{Crm::AgendaSlots::UNIT_LABELS[ag[:unidade]] || ag[:unidade]}). " \
                  "[📆 Ver na agenda](/app/accounts/#{account.id}/agenda?date=#{starts_at.strftime('%Y-%m-%d')})" \
                  "#{" #{effects_text}" if effects_text.present?}"
@@ -574,6 +583,17 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     ensure
       lock_manager.unlock(lock_key)
     end
+  end
+
+  # 👪 item 346: a IA marcou "para outra pessoa". Se o nome ditado é o do
+  # próprio contato e o telefone é o dele (ou nenhum), é para ele mesmo.
+  def other_person_booking?(booking, requester)
+    return false unless ActiveModel::Type::Boolean.new.cast(booking[:para_outra_pessoa])
+    return true if requester.blank?
+
+    digits = booking[:telefone].to_s.gsub(/\D/, '')
+    own_phone = digits.length < 8 || Crm::AppointmentRecorder.same_phone_line?(digits, requester.phone_number)
+    !(own_phone && Crm::AppointmentRecorder.same_patient_name?(booking[:nome], requester.name))
   end
 
   # item 200: balões curtos e ESPAÇADOS — 3 s entre um e outro (como quem digita)

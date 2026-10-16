@@ -9410,3 +9410,27 @@ Dois revisores independentes + leitura própria. Tudo abaixo foi CORRIGIDO e cob
 - 345b também: VISÃO GERAL ganhou o 5º cartão "Agendamentos ÷ novos" (rendimento: todos que agendaram no período, novos + base, ÷ contatos novos; ex. 14/10: 17/80 = 21,3%; 7 dias 87/584 = 14,9%) ao lado da "Taxa novo → consulta" (5/80 = 6,3%, a mesma turma). Crm::OverviewService `taxa_geral(_anterior/_formula)`; SCSS `.cvg-fila--5`. Achado da tela: Instagram 455 chegaram × 19 agendaram (4,2%) contra Google 128 × 22 (17,2%) nos 7 dias.
 
 - 345c (14/10 noite, Testar envio depois da :7ed47c5): Site ✅ · cx2 ✅ · cx7 ✅ com clique real; cx1 GOOGLE e cx5 CONFIRMAÇÃO ❌ subcode 2804117 ("ctwa_clid gerado para uma Página diferente da vinculada à WABA") — o teste pegava o clique do CONTATO (anúncio que levou a outra caixa) em conversa desta caixa. Conserto: teste usa o clique carimbado NA CONVERSA desta caixa (sem = ⚪); e o envio real (MetaAdsConversionsService#ctwa_clid) pega o clique da MESMA conversa de anúncio de onde sai a conta do WhatsApp (fallback: o do contato). Specs 73 verdes.
+
+## 346. 👤 PACIENTE ÚNICO — duplicados pelo 9 do celular, "agendado por" e limpeza (15/10; "temos o mesmo contato duplicado… precisamos que tudo o que acontecer sobre o paciente seja unificado")
+- Causa (caso Francislene): o WhatsApp guarda +55 35 8701-7046 (sem o 9) e o OftalmoFácil +55 35 98701-7046. A regra `same_phone_line?` não casava os dois, então a sincronia criava outro contato. Além disso, a consulta da Alice estava na ficha da Francislene, porque o robô gravava consulta de outra pessoa no contato de quem conversava.
+- Robô do WhatsApp agendando para outra pessoa:
+  - Regra fixa no contexto (`OTHER_PERSON_RULE`): pede o nome completo e o telefone com DDD de quem vai passar na consulta. Fica no contexto para valer mesmo com os passos editados na tela.
+  - Campo novo `agendamento.para_outra_pessoa`.
+  - `Crm::PatientLink`: acha ou cria o paciente (sem telefone próprio, a consulta leva o telefone de quem agendou) e amarra os dois (`agendado_por` / `agendou_para`), com uma linha 👪 na observação dos cards e botões no Espaço do Paciente.
+  - Ligação e Instagram continuam como estavam (decisão dele).
+- Etapa 1, trava na origem:
+  - Celular com e sem o 9 = a mesma linha (`AppointmentRecorder.mobile_key`).
+  - Sincronia OF (CATARATA_SP, cadastro achado, 1º nome compatível): nome e e-mail do OF mandam, o CPF completa e o cadastro não ganha a etiqueta oftalmofacil.
+  - Nome diferente, CPF diferente ou duas pessoas no cadastro: não mexe em nada e vira alerta.
+  - `Crm::PatientReview` (alertas em `additional_attributes.cevico_conferir`, mostrados no Espaço do Paciente).
+  - `Crm::DuplicateWatchJob` em todo contato que nasce: mesmo celular com/sem 9, ou mesmo nome com `strong_name?` (3+ palavras, ou 2 palavras com agendamento nos dois).
+  - Telefone obrigatório para paciente novo na Agenda, no CRM e na Nova conversa.
+- Levantamento em produção (só leitura, `script/cevico/levantamento_duplicados.rb`): 27.276 contatos; ALTA 36 grupos/72 · CONFERIR_9 5 · MESMO_CPF 3 · MESMO_NOME 307/759 · DUAS_PESSOAS 46 · cevico+oftalmofacil 98.
+- Etapa 2, limpeza: `rake cevico:paciente_unico ACCOUNT_ID=1 DRY=1` (simula) → `DRY=0` (aplica), BACKUP antes.
+  - Junta os casos ALTA. Fica o cadastro que conversa (número do WhatsApp), com nome, e-mail e CPF do OF, e o card na etapa atual.
+  - Tira a etiqueta oftalmofacil de quem tem cevico.
+  - O resto vira alerta de conferência.
+- Próximas etapas:
+  - Ambiente "Notificações sobre agendamentos", lendo os alertas, com botões Juntar / São pessoas diferentes / Separar.
+  - Busca que puxa o contato em todas as barras, com o nome travado e aviso de "telefone já é de X".
+- Sem migration. WEB+SIDEKIQ. Reversão: imagem :46b3766.

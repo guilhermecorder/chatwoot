@@ -21,6 +21,7 @@ import {
   ALL_INBOXES_GRADIENT,
 } from 'dashboard/helper/cevicoInboxColors.js';
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
+import { normalizePhone } from 'dashboard/helper/cevicoNovaConversa';
 import { PERIOD_PRESETS, periodRangeFor } from 'dashboard/helper/cevicoPeriod';
 
 const store = useStore();
@@ -1126,8 +1127,11 @@ const addContactToStage = async (contact) => {
   }
 };
 
+// 📱 item 346: paciente novo só nasce com telefone (DDD + número)
 const canCreateContact = computed(
-  () => newContact.value.name.trim() && (newContact.value.phone_number.trim() || newContact.value.email.trim())
+  () =>
+    newContact.value.name.trim() &&
+    newContact.value.phone_number.replace(/\D/g, '').length >= 10
 );
 
 const createAndAddContact = async () => {
@@ -1135,7 +1139,8 @@ const createAndAddContact = async () => {
   isCreatingContact.value = true;
   try {
     const payload = { name: newContact.value.name.trim() };
-    if (newContact.value.phone_number.trim()) payload.phone_number = newContact.value.phone_number.trim();
+    // "(11) 9…" → +5511…
+    payload.phone_number = normalizePhone(newContact.value.phone_number);
     if (newContact.value.email.trim()) payload.email = newContact.value.email.trim();
 
     const { data } = await ContactAPI.create(payload);
@@ -2045,7 +2050,7 @@ const createAndAddContact = async () => {
             />
           </div>
           <div>
-            <label class="cv-label block mb-1">Telefone</label>
+            <label class="cv-label block mb-1">Telefone *</label>
             <input
               v-model="newContact.phone_number"
               class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
@@ -2054,7 +2059,10 @@ const createAndAddContact = async () => {
           </div>
           <div>
             <label class="cv-label block mb-1">
-              Email <span class="opacity-70 normal-case tracking-normal">(opcional se tiver telefone)</span>
+              Email
+              <span class="opacity-70 normal-case tracking-normal">
+                (opcional)
+              </span>
             </label>
             <input
               v-model="newContact.email"

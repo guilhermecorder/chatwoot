@@ -198,7 +198,12 @@ const canCreate = computed(() => {
   const n = newContact.value.name.trim();
   const p = normalizePhone(newContact.value.phone);
   const e = newContact.value.email.trim();
-  return n.length >= 2 && (p.length >= 10 || e.includes('@'));
+  // 📱 item 346: paciente novo só nasce com telefone (DDD + número); e-mail é opcional
+  return (
+    n.length >= 2 &&
+    p.replace(/\D/g, '').length >= 12 &&
+    (!e || e.includes('@'))
+  );
 });
 
 const createContact = async () => {
@@ -616,7 +621,7 @@ const goStep = n => {
                 <div>
                   <p class="font-semibold leading-tight">Cadastro rápido</p>
                   <p class="text-xs text-n-slate-11">
-                    Nome e pelo menos um jeito de falar: telefone ou e-mail.
+                    Nome e telefone com DDD (e-mail é opcional).
                   </p>
                 </div>
               </div>

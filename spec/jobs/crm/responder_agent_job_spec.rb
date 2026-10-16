@@ -267,6 +267,51 @@ RSpec.describe Crm::ResponderAgentJob do
       end
     end
 
+    # 👪 item 346: "quero marcar para o meu filho" — cadastro e consulta DELE, amarrados a quem agendou
+    describe 'consulta para OUTRA pessoa' do
+      def book_for(nome:, telefone:, outra: true)
+        settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))
+        stub_ai(ai_reply.merge(agendar: true, agendamento: { nome: nome, telefone: telefone, dia: '2026-09-28', hora: '08:30',
+                                                             unidade: 'paulista', procedimento: 'refrativa', para_outra_pessoa: outra }))
+        allow(Crm::AgendaSlots).to receive_messages(slot_available?: true, doctor_at: nil)
+        run
+      end
+
+      it 'com telefone próprio: a consulta é do paciente novo e os dois ficam amarrados', :aggregate_failures do
+        travel_to(now) do
+          book_for(nome: 'Ricardo Lima', telefone: '11977776666')
+          task = account.tasks.find_by!(title: 'Consulta: Ricardo Lima')
+          ricardo = task.contact
+          expect(ricardo).not_to eq(contact)
+          expect(ricardo.phone_number).to eq('+5511977776666')
+          expect(task.phone).to eq('+5511977776666')
+          expect(task.description).to include('agendado por Maria Silva')
+          expect(ricardo.additional_attributes.dig('agendado_por', 'contact_id')).to eq(contact.id)
+          expect(contact.reload.additional_attributes['agendou_para'].first['contact_id']).to eq(ricardo.id)
+          expect(account.tasks.where(contact_id: contact.id)).to be_empty
+          note = conversation.messages.where(message_type: :activity).where('content LIKE ?', '📅%').last
+          expect(note.content).to include('👪 agendado por Maria Silva')
+        end
+      end
+
+      it 'sem telefone próprio: cadastro só com o nome, consulta com o telefone de quem agendou', :aggregate_failures do
+        travel_to(now) do
+          book_for(nome: 'Joãozinho Silva', telefone: '11999990000')
+          task = account.tasks.find_by!(title: 'Consulta: Joãozinho Silva')
+          expect(task.contact).not_to eq(contact)
+          expect(task.contact.phone_number).to be_blank
+          expect(task.phone).to eq('+5511999990000')
+        end
+      end
+
+      it 'marcou "outra pessoa" mas o nome e o telefone são do próprio contato: é para ele mesmo' do
+        travel_to(now) do
+          book_for(nome: 'Maria Silva', telefone: '11999990000')
+          expect(account.tasks.find_by!(title: 'Consulta: Maria Silva').contact).to eq(contact)
+        end
+      end
+    end
+
     it 'ao vivo, remarcação feita pela ferramenta não tenta reservar de novo' do
       travel_to(now) do
         settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => { 'mode' => 'live' } }))

@@ -37,9 +37,15 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
           dia: { type: 'string', description: 'YYYY-MM-DD' },
           hora: { type: 'string', description: 'HH:MM' },
           unidade: { type: 'string', enum: %w[tatuape paulista] },
-          procedimento: { type: 'string' }
+          procedimento: { type: 'string' },
+          # 👪 item 346: consulta de OUTRA pessoa → cadastro e card próprios dela
+          para_outra_pessoa: {
+            type: 'boolean',
+            description: 'true quando a consulta é de OUTRA pessoa (mãe, filho, esposa, amigo): aí nome e telefone são os DO ' \
+                         'PACIENTE, ditados por quem conversa. false quando é para quem está conversando.'
+          }
         },
-        required: %w[nome telefone dia hora unidade procedimento],
+        required: %w[nome telefone dia hora unidade procedimento para_outra_pessoa],
         additionalProperties: false,
         description: 'Dados da consulta (obrigatório quando agendar=true; strings vazias quando agendar=false)'
       },
@@ -60,6 +66,14 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # 🎙️ 195: o simulador por texto do Agente de Ligação também (é sempre sombra).
   # 🩺 item 251: o Atendente de Pós-operatório também (retorno pela Agenda + abrir_tarefa)
   RESPONDER_TOOLS_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op voice].freeze
+
+  # 👪 item 346 (pedido dele 15/10): vale SEMPRE, mesmo com os passos do
+  # atendente personalizados na tela — por isso fica no contexto e não no roteiro
+  OTHER_PERSON_RULE = '- CONSULTA PARA OUTRA PESSOA (mãe, filho, esposa, amigo): antes de agendar, peça o NOME COMPLETO e o ' \
+                      'TELEFONE COM DDD de quem vai passar na consulta ("Pra deixar reservado, me passa o nome completo e o ' \
+                      'telefone com DDD de quem vai passar na consulta?"). No agendamento vão o nome e o telefone DO PACIENTE, ' \
+                      'com para_outra_pessoa=true; nunca o nome de quem conversa. Se o paciente não tiver telefone próprio ' \
+                      '(criança, idoso), deixe o telefone deste WhatsApp: os avisos da consulta chegam por aqui.'.freeze
   # voltas de tool use por resposta: a IA pede → o sistema executa → a IA lê.
   # Passou do teto, a última chamada vai com tool_choice none (tem que responder).
   MAX_TOOL_ROUNDS = 5
@@ -188,7 +202,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   end
 
   # contexto vivo: agora, contato, coluna, vagas reais, consulta futura
-  def context_block
+  def context_block # rubocop:disable Metrics/CyclomaticComplexity
     now = Crm::AgendaSlots::TZ.now
     contact = @conversation.contact
     phone = contact&.phone_number.presence
@@ -198,6 +212,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       - Paciente (cadastro): #{contact&.name.presence || 'sem nome'} · telefone deste WhatsApp: #{phone || 'desconhecido (peça o número antes de agendar)'}
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
+      #{OTHER_PERSON_RULE unless voice?}
       #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{pos_op_context if pos_op?}
       HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):#{slots_note}
       #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3, modality: slots_modality)}
