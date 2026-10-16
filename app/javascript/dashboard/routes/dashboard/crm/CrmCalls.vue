@@ -11,6 +11,7 @@
 // Dados: GET crm/calls/overview (+ GET crm/calls com filtros). Ao vivo:
 // o store cevicoCalls sobe `liveTick` a cada evento cevico_call.* do cable.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
@@ -39,6 +40,18 @@ import {
   STATUS_LABELS,
   END_REASON_LABELS,
 } from 'dashboard/helper/cevicoCallsFormat';
+
+// 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
+// (clicar abre o Espaço do Paciente, onde se faz tudo no contato da pessoa)
+const patientSuggestOn = ref(false);
+const patientSuggestRef = ref(null);
+const onPatientSuggestKey = e => {
+  if (e.key === 'Escape') {
+    patientSuggestOn.value = false;
+    return;
+  }
+  patientSuggestRef.value?.onKey(e);
+};
 
 const router = useRouter();
 const store = useStore();
@@ -1210,12 +1223,24 @@ onBeforeUnmount(() => {
           >
             🤖 IA
           </button>
-          <input
-            v-model="filters.q"
-            type="search"
-            placeholder="Buscar paciente ou telefone…"
-            class="cv-input text-xs !w-auto min-w-[13rem]"
-          />
+          <div class="relative min-w-[13rem]">
+            <input
+              v-model="filters.q"
+              type="search"
+              placeholder="Buscar paciente ou telefone…"
+              class="cv-input text-xs w-full"
+              autocomplete="off"
+              @focus="patientSuggestOn = true"
+              @blur="patientSuggestOn = false"
+              @keydown="onPatientSuggestKey"
+            />
+            <PatientSuggest
+              ref="patientSuggestRef"
+              :query="filters.q"
+              :active="patientSuggestOn"
+              class="w-[26rem] max-w-[90vw]"
+            />
+          </div>
           <button
             v-if="hasFilters"
             class="cv-btn cv-btn-ghost cv-btn-sm"

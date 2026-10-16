@@ -1,6 +1,8 @@
 import CrmAPI from 'dashboard/api/crm';
 
 const state = {
+  // 🔔 item 346: contador do menu "Notificações" (alertas para conferir)
+  appointmentAlertsCount: 0,
   pipelines: [],
   contacts: [],
   contactsMeta: { total: 0, shown: 0, scope: 'recent' },
@@ -34,6 +36,7 @@ const getters = {
   getN8nWorkflows: s => s.settings.n8n_workflows || [],
   // avisos ativos do Radar de Oportunidades (badge no "Meu Painel")
   getRadarAlertCount: s => s.settings.ai?.opportunity_alerts_count || 0,
+  getAppointmentAlertsCount: s => s.appointmentAlertsCount || 0,
 };
 
 // nº da última carga do board pedida (ver fetchContacts)
@@ -43,6 +46,14 @@ let contactsRequestSeq = 0;
 let loudRequestSeq = 0;
 
 const actions = {
+  async fetchAppointmentAlertsCount({ commit }) {
+    try {
+      const { data } = await CrmAPI.getAppointmentAlertsCount();
+      commit('setAppointmentAlertsCount', data?.count || 0);
+    } catch {
+      // sem acesso ao nó agenda.notificacoes: o contador só não aparece
+    }
+  },
   async fetchPipelines({ commit }) {
     commit('setUIFlag', { isFetchingPipelines: true });
     try {
@@ -522,6 +533,9 @@ const actions = {
 };
 
 const mutations = {
+  setAppointmentAlertsCount(s, count) {
+    s.appointmentAlertsCount = count;
+  },
   setUIFlag(s, flags) {
     s.uiFlags = { ...s.uiFlags, ...flags };
   },

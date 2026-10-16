@@ -4,6 +4,7 @@ import CrmCampaigns from './CrmCampaigns.vue';
 import CrmJourney from './CrmJourney.vue';
 import CrmCalls from './CrmCalls.vue';
 import CrmAppointments from './CrmAppointments.vue';
+import AppointmentAlerts from './AppointmentAlerts.vue';
 import OftalmofacilHub from './OftalmofacilHub.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
@@ -38,6 +39,13 @@ export default {
       name: 'crm_appointments',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmAppointments,
+    },
+    // 🔔 item 346: Notificações sobre agendamentos (divergências para conferir)
+    {
+      path: frontendURL('accounts/:accountId/crm/notificacoes'),
+      name: 'crm_appointment_alerts',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: AppointmentAlerts,
     },
     // 🏥 item 229: ambiente Oftalmofácil (espelho do hub) dentro do sistema
     {

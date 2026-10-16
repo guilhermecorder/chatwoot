@@ -19,9 +19,13 @@ module Crm::PatientReview
     'duas_pessoas' => 'Duas pessoas no mesmo cadastro'
   }.freeze
 
+  # quem a equipe já disse que são PESSOAS DIFERENTES (não alerta de novo)
+  NOT_SAME_KEY = 'cevico_nao_duplicado'.freeze
+
   # grava (ou atualiza) um alerta; o mesmo tipo + mesmo outro contato não repete
-  def flag!(contact, type, detail, other_id: nil) # rubocop:disable Metrics/CyclomaticComplexity
+  def flag!(contact, type, detail, other_id: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return if contact.blank? || TYPES.exclude?(type)
+    return if other_id && Array(contact.additional_attributes&.dig(NOT_SAME_KEY)).include?(other_id)
 
     entry = { 'tipo' => type, 'titulo' => TYPES[type], 'detalhe' => detail.to_s.truncate(240),
               'outro_contact_id' => other_id, 'at' => Time.current.iso8601 }
@@ -35,6 +39,27 @@ module Crm::PatientReview
 
   def list(contact)
     Array(contact&.additional_attributes&.dig(KEY))
+  end
+
+  # conferido: tira o alerta (o mesmo tipo + o mesmo outro contato)
+  def clear!(contact, type, other_id: nil)
+    return if contact.blank?
+
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      list = Array(attrs[KEY]).reject { |e| e['tipo'] == type && (other_id.nil? || e['outro_contact_id'] == other_id) }
+      list.empty? ? attrs.except(KEY) : attrs.merge(KEY => list)
+    end
+  end
+
+  # "são pessoas diferentes": some dos dois e não volta a alertar
+  def not_same!(one, other)
+    [[one, other], [other, one]].each do |contact, peer|
+      Cevico::AttributeMerge.merge!(contact) do |attrs|
+        list = Array(attrs[KEY]).reject { |e| e['outro_contact_id'] == peer.id }
+        attrs = list.empty? ? attrs.except(KEY) : attrs.merge(KEY => list)
+        attrs.merge(NOT_SAME_KEY => (Array(attrs[NOT_SAME_KEY]) | [peer.id]).last(50))
+      end
+    end
   end
 
   # o primeiro nome bate? ("Fran" × "Francislene" bate; nome vazio/"Paciente" também)

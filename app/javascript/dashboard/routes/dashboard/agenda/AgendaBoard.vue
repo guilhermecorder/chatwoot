@@ -41,6 +41,7 @@ import {
   priceLabel,
 } from 'dashboard/helper/cevicoAgenda';
 import AgendaSettings from './AgendaSettings.vue';
+import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
@@ -1069,6 +1070,8 @@ const emptyForm = (day, prefill = {}) => {
     booking_kind: prefill.booking_kind || 'agendamento',
     // 🏥 item 300: CEVICO × Oftalmofácil — obrigatório ao criar (nasce em branco de propósito)
     origin: prefill.origin || '',
+    // 🔎 item 346: paciente escolhido na busca (nome travado, consulta no cadastro dele)
+    contact_id: prefill.contact_id || null,
     // 💰 item 324: consulta particular + valores lançados à mão neste card
     particular: false,
     charges: [],
@@ -1179,6 +1182,7 @@ const openEdit = task => {
     description: task.description ?? '',
     booking_kind: task.booking_kind || 'agendamento',
     origin: task.origin || '',
+    contact_id: task.contact_id || null,
     particular: !!task.particular,
     charges: (task.charges || []).map(c => ({ ...c })),
   };
@@ -1227,7 +1231,45 @@ const originMissing = computed(() => !editingTask.value && !form.value.origin);
 const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.');
 // 📱 item 346: paciente NOVO só nasce com telefone (DDD + número) — sem ele
 // não há como achar o cadastro de quem já existe e o paciente duplica
-const phoneMissing = computed(() => !editingTask.value && (form.value.phone || '').replace(/\D/g, '').length < 10);
+const phoneMissing = computed(() => !editingTask.value && !form.value.contact_id && (form.value.phone || '').replace(/\D/g, '').length < 10);
+
+// 🔎 item 346 (16/10): o NOME puxa o paciente do cadastro. Escolheu → o nome
+// trava (pedido dele: "tem que travar o nome, não pode editar"), telefone e
+// origem vêm junto e a consulta nasce no cadastro dele. Telefone digitado que
+// já é de alguém → "este telefone já é de X — usar?" (família pode dividir
+// número: só avisa, não bloqueia).
+const nameFocused = ref(false);
+const patientSuggest = ref(null);
+const phoneOwner = ref(null);
+const pickPatient = p => {
+  form.value.contact_id = p.id;
+  form.value.name = p.name || form.value.name;
+  if (p.phone_number) form.value.phone = p.phone_number;
+  if (!form.value.origin && p.origin) form.value.origin = p.origin;
+  nameFocused.value = false;
+  phoneOwner.value = null;
+};
+const unpickPatient = () => {
+  form.value.contact_id = null;
+  form.value.name = '';
+  form.value.phone = '';
+};
+const onNameKey = e => {
+  if (e.key === 'Escape') { nameFocused.value = false; return; }
+  patientSuggest.value?.onKey(e);
+};
+let phoneOwnerTimer = null;
+watch(() => [form.value.phone, form.value.contact_id, showModal.value], ([phone, contactId, open]) => {
+  clearTimeout(phoneOwnerTimer);
+  phoneOwner.value = null;
+  if (!open || contactId || (phone || '').replace(/\D/g, '').length < 10) return;
+  phoneOwnerTimer = setTimeout(async () => {
+    try {
+      const { data } = await CrmAPI.patientPhoneOwner(phone);
+      if (!form.value.contact_id && data?.payload) phoneOwner.value = data.payload;
+    } catch { phoneOwner.value = null; }
+  }, 400);
+});
 const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value && !phoneMissing.value));
 
 const save = async () => {
@@ -1273,6 +1315,8 @@ const save = async () => {
         .map(c => ({ label: String(c.label || '').trim(), amount: String(c.amount).trim() })),
     };
     if (form.value.origin && !originLocked.value) payload.origin = form.value.origin;
+    // 🔎 item 346: paciente escolhido na busca → a consulta fica no cadastro dele
+    if (form.value.contact_id) payload.contact_id = form.value.contact_id;
     // o ✅ digitado no nome sai do nome e vira o confirmado de verdade
     if (editingTask.value && handConfirmed(editingTask.value) && !editingTask.value.confirmed_at) payload.confirmed = true;
     const noun = kindFor(fk).noun;
@@ -2825,14 +2869,27 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <section class="cv-ag-sec">
             <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>Paciente</h3><p>quem vem</p></div></header>
             <div class="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-3">
-              <div>
+              <div class="relative">
                 <span class="cv-label block mb-1">Nome do paciente *</span>
-                <input v-model="form.name" class="cv-input w-full" placeholder="Nome completo" />
+                <!-- 🔎 item 346: paciente do cadastro → nome travado -->
+                <div v-if="form.contact_id" class="cv-input w-full flex items-center gap-2 !bg-n-alpha-1" title="Paciente do cadastro: o nome não se edita aqui">
+                  <span class="i-lucide-lock text-xs text-n-slate-10" />
+                  <span class="flex-1 min-w-0 truncate font-semibold">{{ form.name }}</span>
+                  <button type="button" class="text-[11px] font-semibold text-n-blue-11 hover:underline" @click="unpickPatient">trocar</button>
+                </div>
+                <template v-else>
+                  <input v-model="form.name" class="cv-input w-full" placeholder="Digite para buscar no cadastro…" autocomplete="off" @focus="nameFocused = true" @blur="nameFocused = false" @keydown="onNameKey" />
+                  <PatientSuggest ref="patientSuggest" :query="form.name" :active="nameFocused" action="pick" title="Já está no cadastro? Escolha a pessoa" @pick="pickPatient" />
+                </template>
               </div>
               <div>
-                <span class="cv-label block mb-1">Telefone {{ editingTask ? '' : '*' }}</span>
+                <span class="cv-label block mb-1">Telefone {{ editingTask || form.contact_id ? '' : '*' }}</span>
                 <input v-model="form.phone" class="cv-input w-full" placeholder="(11) 98888-7777" />
                 <span v-if="phoneMissing && form.phone" class="text-[11px] text-amber-700 mt-1 block">Com DDD: (11) 98888-7777</span>
+                <span v-if="phoneOwner" class="text-[11px] text-amber-800 mt-1 flex items-center gap-1 flex-wrap">
+                  <span class="i-lucide-triangle-alert text-xs" /> Este telefone já é de <strong>{{ phoneOwner.name }}</strong>
+                  <button type="button" class="font-semibold text-n-blue-11 hover:underline" @click="pickPatient(phoneOwner)">usar este paciente</button>
+                </span>
               </div>
             </div>
             <!-- 🏥 item 300: de quem é o paciente (obrigatório ao criar) -->

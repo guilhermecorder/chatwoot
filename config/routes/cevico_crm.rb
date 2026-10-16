@@ -312,7 +312,23 @@ namespace :crm do
   # Central do Paciente: espaço do paciente + anotações do médico
   resources :patients, only: [:show], controller: 'patients' do
     member { post :update_profile }
+    # 🔎 item 346: a busca que puxa o paciente (todas as barras de pesquisa)
+    collection do
+      get :search
+      get :phone_owner
+    end
     resources :clinical_notes, only: [:index, :create, :update, :destroy], controller: 'clinical_notes'
+  end
+  # 🔔 item 346: Notificações sobre agendamentos (divergências para conferir)
+  resources :appointment_alerts, only: [:index], controller: 'appointment_alerts' do
+    collection do
+      get :count
+      post :merge
+      post :not_same
+      post :move_task
+      post :rename
+      post :reviewed
+    end
   end
   # 📝 notas dos pacientes (item 211): recados rápidos sobre um paciente,
   # de Tarefas / Meu Painel (a mesma Note do contato)

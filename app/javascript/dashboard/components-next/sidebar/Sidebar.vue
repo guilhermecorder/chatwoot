@@ -457,6 +457,7 @@ const DEFAULT_MENU_ORDER = [
   'Tasks',
   'Agenda',
   'Cevico Appointments',
+  'Cevico Appointment Alerts',
   'Cevico Oftalmofacil',
   'Cevico Pages',
   'Academy',
@@ -472,6 +473,7 @@ const AGENT_MENU_ORDER = [
   'Cevico Calls',
   'Agenda',
   'Cevico Appointments',
+  'Cevico Appointment Alerts',
   'Cevico Oftalmofacil',
   'Goals',
   'Builder',
@@ -604,6 +606,7 @@ const MENU_LAYOUT = [
       'Cevico Calls',
       'Agenda',
       'Cevico Appointments',
+      'Cevico Appointment Alerts',
       'Cevico Oftalmofacil',
       'Canned',
     ],
@@ -732,6 +735,7 @@ const TILE_COLORS = {
   Inbox: '#007aff',
   Agenda: '#ff3b30',
   'Cevico Appointments': '#0a84ff',
+  'Cevico Appointment Alerts': '#ff9f0a', // 🔔 item 346: âmbar = conferir
   'Cevico Oftalmofacil': '#64d2ff',
   Tasks: '#ff9500',
   Canned: '#5ac8fa',
@@ -965,10 +969,13 @@ onMounted(() => {
   // badge em Tarefas: só a CONTAGEM (Rodada 7 — antes baixava a lista
   // inteira de tarefas e agendamentos a cada abertura do sistema)
   store.dispatch('tasks/fetchAlertCount').catch(() => {});
+  // 🔔 item 346: quantos alertas de agendamento esperam conferência
+  store.dispatch('crm/fetchAppointmentAlertsCount').catch(() => {});
   // badge do Radar de Oportunidades no "Meu Painel" — atualiza a cada 5 min
   radarBadgeTimer = setInterval(
     () => {
       store.dispatch('crm/fetchSettings').catch(() => {});
+      store.dispatch('crm/fetchAppointmentAlertsCount').catch(() => {});
     },
     5 * 60 * 1000
   );
@@ -1444,6 +1451,15 @@ const menuItems = computed(() => {
       label: 'Agendamentos',
       icon: 'i-lucide-calendar-check',
       to: accountScopedRoute('crm_appointments'),
+    },
+    // 🔔 item 346: Notificações sobre agendamentos — cadastros e consultas
+    // com dados que não batem (o número = quantos esperam conferência)
+    {
+      name: 'Cevico Appointment Alerts',
+      label: 'Notificações',
+      icon: 'i-lucide-bell-ring',
+      to: accountScopedRoute('crm_appointment_alerts'),
+      getterKeys: { count: 'crm/getAppointmentAlertsCount' },
     },
     // 🏥 ambiente Oftalmofácil (item 229): o hub de parceiros dentro do sistema
     {

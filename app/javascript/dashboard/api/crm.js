@@ -1174,6 +1174,31 @@ class CrmAPI extends ApiClient {
   }
 
   // ── Central do Paciente ───────────────────────────────────────────
+  // 🔎 item 346: busca que puxa o paciente (nome sem acento, telefone com/sem 9)
+  searchPatients(q, { signal, limit } = {}) {
+    return axios.get(`${this.url}/patients/search`, {
+      params: { q, limit },
+      signal,
+    });
+  }
+
+  // 🔔 item 346: Notificações sobre agendamentos (divergências para conferir)
+  getAppointmentAlerts() {
+    return axios.get(`${this.url}/appointment_alerts`);
+  }
+
+  getAppointmentAlertsCount() {
+    return axios.get(`${this.url}/appointment_alerts/count`);
+  }
+
+  appointmentAlertAction(action, data) {
+    return axios.post(`${this.url}/appointment_alerts/${action}`, data);
+  }
+
+  patientPhoneOwner(phone) {
+    return axios.get(`${this.url}/patients/phone_owner`, { params: { phone } });
+  }
+
   getPatient(contactId) {
     return axios.get(`${this.url}/patients/${contactId}`);
   }

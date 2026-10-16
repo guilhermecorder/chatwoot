@@ -77,4 +77,16 @@ RSpec.describe Crm::PatientCleanup do
     expect(Crm::PatientReview.list(ana1.reload)).to be_empty
     expect(Crm::PatientReview.list(sam1.reload).map { |e| e['detalhe'] }).to include(start_with('Mesmo nome completo'))
   end
+
+  it 'cadastro que fica com +1 na frente do número brasileiro passa a usar o +55 do grupo', :aggregate_failures do
+    mais_um = account.contacts.create!(name: 'Rodrigo Mamede', phone_number: '+11964516277')
+    certo = account.contacts.create!(name: 'Rodrigo dos Santos Mamede', phone_number: '+5511964516277')
+    create(:conversation, account: account, inbox: inbox, contact: mais_um)
+
+    plan = run(dry: true)[:merges].find { |m| m[:base_id] == mais_um.id }
+    expect(plan[:phone]).to eq('+5511964516277')
+    run(dry: false)
+    expect(Contact.exists?(certo.id)).to be(false)
+    expect(mais_um.reload.phone_number).to eq('+5511964516277')
+  end
 end

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
+import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useI18n } from 'vue-i18n';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
@@ -23,6 +24,18 @@ import {
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 import { normalizePhone } from 'dashboard/helper/cevicoNovaConversa';
 import { PERIOD_PRESETS, periodRangeFor } from 'dashboard/helper/cevicoPeriod';
+
+// 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
+// (clicar abre o Espaço do Paciente, onde se faz tudo no contato da pessoa)
+const patientSuggestOn = ref(false);
+const patientSuggestRef = ref(null);
+const onPatientSuggestKey = e => {
+  if (e.key === 'Escape') {
+    patientSuggestOn.value = false;
+    return;
+  }
+  patientSuggestRef.value?.onKey(e);
+};
 
 const store = useStore();
 const { t } = useI18n();
@@ -1355,6 +1368,15 @@ const createAndAddContact = async () => {
             v-model="filters.search"
             class="cv-input cv-crm-search w-full"
             :placeholder="$t('CRM.FILTER.SEARCH_PLACEHOLDER')"
+            autocomplete="off"
+            @focus="patientSuggestOn = true"
+            @blur="patientSuggestOn = false"
+            @keydown="onPatientSuggestKey"
+          />
+          <PatientSuggest
+            ref="patientSuggestRef"
+            :query="filters.search"
+            :active="patientSuggestOn"
           />
         </div>
 

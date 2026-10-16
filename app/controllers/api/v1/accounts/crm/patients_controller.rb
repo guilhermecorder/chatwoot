@@ -9,6 +9,18 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
   # (fechamento, valor do card) só admin ou quem tem o Financeiro
   include Crm::ClinicalAccessGate
 
+  # 🔎 item 346: GET /crm/patients/search?q= — pacientes para as barras de
+  # pesquisa e os formulários (nome sem acento, telefone com/sem 9)
+  def search
+    render json: { payload: Crm::PatientSearch.new(account: Current.account, query: params[:q], limit: params[:limit] || 8).call }
+  end
+
+  # GET /crm/patients/phone_owner?phone= — "este telefone já é de X, usar?"
+  def phone_owner
+    contact = Crm::PatientSearch.phone_owner(Current.account, params[:phone])
+    render json: { payload: contact && { id: contact.id, name: contact.name, phone_number: contact.phone_number } }
+  end
+
   def show
     contact = Current.account.contacts.find(params[:id])
     render json: {

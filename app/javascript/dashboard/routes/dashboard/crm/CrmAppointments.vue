@@ -12,6 +12,7 @@
 // Dados: GET crm/appointments/feed (tasks do tipo 'consulta', a mesma Agenda).
 // Atualiza sozinho a cada 60 s enquanto a tela está aberta.
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
@@ -37,6 +38,18 @@ import {
   kindVars,
   hexToRgbSpaced,
 } from 'dashboard/helper/cevicoAgenda';
+
+// 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
+// (clicar abre o Espaço do Paciente, onde se faz tudo no contato da pessoa)
+const patientSuggestOn = ref(false);
+const patientSuggestRef = ref(null);
+const onPatientSuggestKey = e => {
+  if (e.key === 'Escape') {
+    patientSuggestOn.value = false;
+    return;
+  }
+  patientSuggestRef.value?.onKey(e);
+};
 
 const router = useRouter();
 const store = useStore();
@@ -1761,12 +1774,24 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
                 <span class="i-lucide-layout-grid text-sm" /> Cards
               </button>
             </div>
-            <input
-              v-model="q"
-              type="search"
-              placeholder="Buscar por nome ou telefone…"
-              class="cv-input !h-8 text-xs w-full sm:!w-auto sm:min-w-[14rem] sm:ml-auto"
-            />
+            <div class="relative w-full sm:w-auto sm:min-w-[14rem] sm:ml-auto">
+              <input
+                v-model="q"
+                type="search"
+                placeholder="Buscar por nome ou telefone…"
+                class="cv-input !h-8 text-xs w-full"
+                autocomplete="off"
+                @focus="patientSuggestOn = true"
+                @blur="patientSuggestOn = false"
+                @keydown="onPatientSuggestKey"
+              />
+              <PatientSuggest
+                ref="patientSuggestRef"
+                :query="q"
+                :active="patientSuggestOn"
+                class="sm:!left-auto sm:w-[26rem]"
+              />
+            </div>
             <button
               v-if="hasFilters"
               class="cv-btn cv-btn-ghost cv-btn-sm"

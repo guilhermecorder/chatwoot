@@ -73,8 +73,22 @@ class Crm::PatientCleanup
   def plan_for(group)
     base = pick_base(group)
     source = of_source(group)
-    { base_id: base.id, phone: base.phone_number, merge_ids: (group - [base]).map(&:id),
-      names: group.map(&:name), final_name: source&.name.presence || base.name }
+    { base_id: base.id, phone: final_phone(base, group), merge_ids: (group - [base]).map(&:id),
+      names: group.map(&:name), final_name: final_name(base, group, source) }
+  end
+
+  # 📱 16/10 (simulação em produção): 6 cadastros de uma importação antiga
+  # estavam com +1 na frente do número brasileiro (+11964516277). O número do
+  # WhatsApp continua o principal, mas número fora do +55 perde para o +55 do grupo.
+  def final_phone(base, group)
+    return base.phone_number if base.phone_number.to_s.start_with?('+55')
+
+    group.map(&:phone_number).find { |phone| phone.to_s.start_with?('+55') } || base.phone_number
+  end
+
+  def final_name(base, group, source)
+    names = [source&.name, base.name] + group.map(&:name)
+    names.find { |name| !Crm::AppointmentRecorder.placeholder_name?(name) } || base.name
   end
 
   # fica o cadastro que conversa (WhatsApp); empate → o que NÃO veio do hub → o mais antigo
@@ -96,11 +110,13 @@ class Crm::PatientCleanup
     contact.custom_attributes.to_h['cpf'].to_s.gsub(/\D/, '').presence
   end
 
-  def merge_group!(group) # rubocop:disable Metrics/AbcSize
+  def merge_group!(group) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     base = account.contacts.find(pick_base(group).id)
     source = of_source(group)
     data = source && { name: source.name, email: source.email, cpf: cpf(source) }
+    phone = final_phone(base, group)
     (group.map(&:id) - [base.id]).each { |id| merge_pair!(base, id) }
+    base.reload.update_columns(phone_number: phone) if phone != base.phone_number # rubocop:disable Rails/SkipsModelValidations
     apply_of_data!(base.reload, data) if data
     @report[:merged] += 1
   rescue StandardError => e

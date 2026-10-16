@@ -84,6 +84,11 @@
   levels: [view, edit]
   default: edit
   children:
+    - key: notificacoes
+      label: Notificações sobre agendamentos
+      hint: "ver = os alertas de cadastro e consulta para conferir (atendente vê os seus); editar = juntar, separar, mover consulta"
+      levels: [view, edit]
+      default: inherit
     - key: exames
       label: Agenda de exames
       hint: a janela própria dos exames

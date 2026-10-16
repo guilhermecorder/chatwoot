@@ -9434,3 +9434,14 @@ Dois revisores independentes + leitura própria. Tudo abaixo foi CORRIGIDO e cob
   - Ambiente "Notificações sobre agendamentos", lendo os alertas, com botões Juntar / São pessoas diferentes / Separar.
   - Busca que puxa o contato em todas as barras, com o nome travado e aviso de "telefone já é de X".
 - Sem migration. WEB+SIDEKIQ. Reversão: imagem :46b3766.
+- 346b (16/10, depois da :99ac5ec + limpeza DRY=0 aplicada em produção: 31 juntados, oftalmofacil saiu de 96, 6 números com +1 corrigidos para +55). Pedido dele: "antes de subirmos, quero que vc tenha concluído todas as coisas que te solicitei ontem".
+  - **Busca que puxa o paciente:** `Crm::PatientSearch` + `GET crm/patients/search|phone_owner`. Busca por nome sem acento (todas as palavras) e por telefone com ou sem 9. Mostra etapa, próxima/última consulta, CEVICO × Oftalmofácil e alerta de conferência. Componente `PatientSuggest.vue`.
+  - Onde a busca entrou:
+    - Agenda: o nome puxa o paciente, o nome trava ("trocar") e telefone e origem vêm junto. A consulta grava `contact_id`. Aviso "este telefone já é de X — usar este paciente".
+    - Barras do CRM, Agendamentos, Chamadas e Hub OF (o clique abre o Espaço do Paciente).
+  - **Notificações sobre agendamentos** (menu Atendimento, contador âmbar; nó de acesso `agenda.notificacoes`): `Crm::AppointmentAlerts` + `Crm::AppointmentAlertActions` + `crm/appointment_alerts`.
+    - O que entra: cadastros com alerta (possível duplicado / nome diferente / CPF diferente / duas pessoas), consulta no cadastro de outra pessoa e consulta sem cadastro.
+    - Botões: Juntar (fica este; os dados do OF mandam), São pessoas diferentes (não volta a alertar), Mover a consulta (para alguém do cadastro ou paciente novo; quem estava com ela vira "agendou para"), Corrigir o nome, Conferido.
+    - Admin vê tudo; o atendente vê o que é dele (responsável pelo card ou pela consulta).
+  - Limpeza: número fora do +55 perde para o +55 do grupo; nome vazio cai no nome do grupo.
+  - Sem migration (os conferidos das consultas ficam em `agenda_config.agendamentos_conferidos`).

@@ -5,6 +5,7 @@
 // Pacientes. Tabelas de verdade, calendário da semana, ficha por item e um
 // tutorial de primeiro uso com balões (pedido dele, 24/09 noite).
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useMapGetter } from 'dashboard/composables/store.js';
 import { frontendURL } from 'dashboard/helper/URLHelper';
@@ -17,6 +18,18 @@ import HBars from 'dashboard/components-next/cevico/HBars.vue';
 import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
 import AgendaTimeColumn from 'dashboard/components-next/cevico/agenda/AgendaTimeColumn.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+
+// 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
+// (clicar abre o Espaço do Paciente, onde se faz tudo no contato da pessoa)
+const patientSuggestOn = ref(false);
+const patientSuggestRef = ref(null);
+const onPatientSuggestKey = e => {
+  if (e.key === 'Escape') {
+    patientSuggestOn.value = false;
+    return;
+  }
+  patientSuggestRef.value?.onKey(e);
+};
 
 const route = useRoute();
 const router = useRouter();
@@ -926,7 +939,10 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
               <button v-if="filters.side || filters.status || filters.agenda || filters.partner || filters.clinic || filters.type || filters.q || filters.unmatched" class="cv-chip cv-slate ml-auto" @click="filters = blankFilters()"><span class="i-lucide-x text-xs" /> limpar</button>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
-              <input v-model="filters.q" class="cv-input w-full" placeholder="🔎 nome, telefone ou CPF" />
+              <div class="relative">
+                <input v-model="filters.q" class="cv-input w-full" placeholder="🔎 nome, telefone ou CPF" autocomplete="off" @focus="patientSuggestOn = true" @blur="patientSuggestOn = false" @keydown="onPatientSuggestKey" />
+                <PatientSuggest ref="patientSuggestRef" :query="filters.q" :active="patientSuggestOn" class="w-[26rem] max-w-[90vw]" />
+              </div>
               <select v-model="filters.partner" class="cv-input w-full"><option value="">Todos os parceiros</option><option v-for="p in partnerOptions" :key="p" :value="p">{{ p }}</option></select>
               <select v-model="filters.clinic" class="cv-input w-full"><option value="">Todas as clínicas</option><option v-for="c in clinicOptions" :key="c" :value="c">{{ c }}</option></select>
               <select v-model="filters.type" class="cv-input w-full"><option value="">Todos os tipos</option><option v-for="t in typeOptions" :key="t" :value="t">{{ t }}</option></select>

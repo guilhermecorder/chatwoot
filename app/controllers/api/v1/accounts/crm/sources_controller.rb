@@ -114,18 +114,21 @@ class Api::V1::Accounts::Crm::SourcesController < Api::V1::Accounts::BaseControl
   def sync_legacy_card!(source) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return unless source.legacy_partner? && (params.key?(:pipeline_ids) || params.key?(:inbox_ids))
 
-    setting = CrmSetting.find_or_create_by!(account_id: Current.account.id)
-    agenda = (setting.agenda_config || {}).deep_dup
-    of = agenda['oftalmofacil'] || {}
-    of['partner_inbox_ids'] = Array(source.config['inbox_ids']).map(&:to_i) if params.key?(:inbox_ids)
-    if params.key?(:pipeline_ids)
-      ids = Array(source.config['pipeline_ids']).map(&:to_i)
-      # o funil do hub continua o mesmo se ficou marcado
-      keep = ids.include?(of['partner_pipeline_id'].to_i) ? of['partner_pipeline_id'].to_i : ids.first
-      keep ? of['partner_pipeline_id'] = keep : of.delete('partner_pipeline_id')
+    # gravação com trava (Cevico::SettingMerge): a sincronização do OftalmoFácil
+    # grava o cursor nesta mesma chave a cada 15 min — sem a trava, salvar esta
+    # tela no mesmo instante podia apagar o que a sincronização acabou de gravar
+    Cevico::SettingMerge.merge!(Current.account, :agenda_config) do |agenda|
+      of = agenda['oftalmofacil'] || {}
+      of['partner_inbox_ids'] = Array(source.config['inbox_ids']).map(&:to_i) if params.key?(:inbox_ids)
+      if params.key?(:pipeline_ids)
+        ids = Array(source.config['pipeline_ids']).map(&:to_i)
+        # o funil do hub continua o mesmo se ficou marcado
+        keep = ids.include?(of['partner_pipeline_id'].to_i) ? of['partner_pipeline_id'].to_i : ids.first
+        keep ? of['partner_pipeline_id'] = keep : of.delete('partner_pipeline_id')
+      end
+      agenda['oftalmofacil'] = of
+      agenda
     end
-    agenda['oftalmofacil'] = of
-    setting.update!(agenda_config: agenda)
   end
 
   def unique_key(name)
