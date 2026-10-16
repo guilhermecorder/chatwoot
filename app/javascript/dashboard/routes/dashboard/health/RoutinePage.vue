@@ -16,7 +16,7 @@ import {
   ROUTINE_CATS, routineCat, LIFE_AREAS, WEEKDAYS,
   ROUTINE_PRESET_WEEKDAY, ROUTINE_PRESET_WEEKEND, ROUTINE_PRESETS,
   timeToMin, dayMinutesByCat, customToProgram, programWeeks,
-  resolvePrograms, mainProgramOf, weekOf, cycleForWeek,
+  resolvePrograms, mainProgramOf, weekOf, cycleForWeek, withStage, weekAnchor,
 } from './warrior';
 import { ROYAL, LARANJA, LARANJA_VIVO, GRAD_ROYAL, GRAD_NOITE, GRAD_LARANJA } from './palette';
 
@@ -238,12 +238,13 @@ const goDay = d => {
 const allPrograms = computed(() => [
   ...(config.value?.programs || []).filter(p => p.start_date),
   ...programRecords.value.filter(r => r.data?.status === 'active').map(customToProgram),
-]);
+].map(p => withStage(p, profile.value)));
 const programSpans = computed(() =>
   allPrograms.value.map(p => {
     const weeks = programWeeks(p) || 12;
     const start = new Date(`${p.start_date}T00:00:00`);
-    const end = new Date(start);
+    // rodada 44: etapa escolhida empurra o fim (âncora das semanas)
+    const end = new Date(`${weekAnchor(p)}T00:00:00`);
     end.setDate(end.getDate() + weeks * 7 - 1);
     return { name: p.name, custom: !!p.custom, start, end, weeks };
   })

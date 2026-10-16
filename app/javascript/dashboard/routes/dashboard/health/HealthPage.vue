@@ -20,7 +20,7 @@ import SeqPicker from './SeqPicker.vue';
 import RadarChart from './HubRadar.vue';
 import {
   METHOD_LABELS, METHOD_HINTS, SET_LABELS,
-  activeProgram, weekOf, cycleForWeek, suggestedSessionKey,
+  activeProgram, weekOf, weekAnchor, cycleForWeek, suggestedSessionKey, stageCelebration,
   resolvePrograms, mainProgramOf, goalOf, goalProgress, programWeeks,
   workoutCelebration, bodyCelebration, MEASURE_DEFS,
   CARDIO_TYPES, cardioType, CARDIO_DURATIONS, CARDIO_INTENSITIES,
@@ -276,7 +276,12 @@ const saveWizard = async data => {
   try {
     let rec;
     if (wizard.value?.record) {
-      const { data: updated } = await CrmAPI.updateHealthRecord(wizard.value.record.id, data, data.start_date);
+      // rodada 44: o assistente edita a Etapa 1 — as próximas etapas ficam
+      const { data: updated } = await CrmAPI.updateHealthRecord(
+        wizard.value.record.id,
+        { stages: wizard.value.record.data?.stages || [], ...data },
+        data.start_date
+      );
       rec = updated;
       personalPrograms.value = personalPrograms.value.map(r => (r.id === rec.id ? rec : r));
       useAlert('✏️ Treino atualizado.');
@@ -484,10 +489,19 @@ const saveExerciseEditor = async () => {
   const personal = program.value?.custom ? personalPrograms.value.find(r => r.id === program.value.record_id) : null;
   if (personal) {
     try {
-      const sessions = (personal.data.sessions || []).map(sx =>
-        sx.key === ed.sessionKey ? { ...sx, exercises: cleanRows } : sx
-      );
-      const { data: updated } = await CrmAPI.updateHealthRecord(personal.id, { ...personal.data, sessions });
+      const editSessions = list =>
+        (list || []).map(sx => (sx.key === ed.sessionKey ? { ...sx, exercises: cleanRows } : sx));
+      // rodada 44: etapa 2+ mora em data.stages
+      const cyc = (program.value.cycles || []).find(c => c.id === ed.cycleId);
+      const next = cyc?.stage_id
+        ? {
+            ...personal.data,
+            stages: (personal.data.stages || []).map(st =>
+              st.id === cyc.stage_id ? { ...st, sessions: editSessions(st.sessions) } : st
+            ),
+          }
+        : { ...personal.data, sessions: editSessions(personal.data.sessions) };
+      const { data: updated } = await CrmAPI.updateHealthRecord(personal.id, next);
       personalPrograms.value = personalPrograms.value.map(r => (r.id === updated.id ? updated : r));
       exEditor.value = null;
       useAlert('✏️ Treino atualizado.');
@@ -671,9 +685,11 @@ const stopRest = () => {
 watch(session, v => { if (!v) stopRest(); });
 onUnmounted(clearRestTick);
 
-const startProgramSession = sessionDef => {
+// opts.cycle = treino de OUTRA etapa · opts.extra = treino extra (rodada 44)
+const startProgramSession = (sessionDef, opts = {}) => {
   const prog = program.value;
-  const cycle = programCycle.value;
+  const cycle = opts.cycle || programCycle.value;
+  extraPickOpen.value = false;
   const lastRecord = lastSessionRecord(workouts.value, prog.id, sessionDef.key);
   const exercises = (sessionDef.exercises || []).map(p => {
     const eq = equipmentOf(p);
@@ -712,11 +728,116 @@ const startProgramSession = sessionDef => {
     session_key: sessionDef.key,
     week: programWeek.value,
     plan_name: `Treino ${sessionDef.key} — ${cycle?.name || prog.name}`,
+    extra: !!opts.extra,
     date: todayISO,
     exercises,
     notes: '',
   };
 };
+
+// ═══ ETAPAS (rodada 44): "concluí as 8 semanas, quero ir pra próxima" ═══
+// A etapa sai da data de início — mas a vida não segue o calendário. A
+// pessoa pode dizer em que etapa está (chip) ou concluir a atual: a ficha
+// guarda stages[programa] = { cycle_id, started_at } e a contagem das
+// semanas recomeça do início dessa etapa (withStage no warrior.js). No
+// programa pessoal, concluir a ÚLTIMA etapa cria a próxima copiando a
+// atual — é só ajustar os exercícios (✎) pra periodizar.
+const isDoneRec = w => (w.data?.exercises || []).some(e => e.sets?.length);
+const stageList = computed(() => {
+  const p = program.value;
+  const cycles = p?.cycles || [];
+  const curIdx = cycles.findIndex(c => c.id === programCycle.value?.id);
+  return cycles.map((c, i) => ({
+    cycle: c,
+    num: i + 1,
+    state: i < curIdx ? 'done' : i === curIdx ? 'now' : 'next',
+    done: workouts.value.filter(
+      w => w.data?.program_id === p.id && w.data?.cycle_id === c.id && !w.data?.extra && isDoneRec(w)
+    ).length,
+  }));
+});
+const nextCycle = computed(() => {
+  const i = stageList.value.findIndex(s => s.state === 'now');
+  return i >= 0 ? stageList.value[i + 1]?.cycle || null : null;
+});
+const stageLen = computed(() => {
+  const c = programCycle.value;
+  return c ? (Number(c.week_end) || 1) - (Number(c.week_start) || 1) + 1 : 0;
+});
+const stageWeek = computed(() => {
+  const c = programCycle.value;
+  if (!c || !programWeek.value) return null;
+  return Math.max(1, Math.min(programWeek.value, c.week_end) - c.week_start + 1);
+});
+const stageAtEnd = computed(() => !!programWeek.value && programWeek.value >= (programCycle.value?.week_end || Infinity));
+const canConclude = computed(() => !!nextCycle.value || !!program.value?.custom);
+const stagePick = ref(null); // { cycle, date } — confirmação inline do chip
+const savingStage = ref(false);
+const pickStage = cycle => {
+  stagePick.value = stagePick.value?.cycle?.id === cycle.id ? null : { cycle, date: todayISO };
+};
+const setStage = async (cycleId, startedAt) => {
+  const stages = {
+    ...(profile.value?.stages || {}),
+    [program.value.id]: { cycle_id: cycleId, started_at: startedAt || todayISO },
+  };
+  return saveProfile({ stages });
+};
+const confirmStagePick = async () => {
+  const pk = stagePick.value;
+  if (!pk) return;
+  savingStage.value = true;
+  if (await setStage(pk.cycle.id, pk.date)) {
+    useAlert(`${pk.cycle.name}: semanas contando a partir de ${fmtDay(pk.date)}.`);
+    stagePick.value = null;
+  }
+  savingStage.value = false;
+};
+// programa pessoal: nova etapa = cópia da atual (mesmas sessões e semanas)
+const addCustomStage = async () => {
+  const rec = personalPrograms.value.find(r => r.id === program.value?.record_id);
+  const cur = programCycle.value;
+  if (!rec || !cur) return null;
+  const stages = rec.data?.stages || [];
+  const stage = {
+    id: Math.random().toString(36).slice(2, 8),
+    name: `Etapa ${(program.value.cycles || []).length + 1}`,
+    focus: '',
+    weeks: stageLen.value || 8,
+    sessions: JSON.parse(JSON.stringify(cur.sessions || [])),
+  };
+  const { data: updated } = await CrmAPI.updateHealthRecord(rec.id, { ...rec.data, stages: [...stages, stage] });
+  personalPrograms.value = personalPrograms.value.map(r => (r.id === updated.id ? updated : r));
+  return { id: `${program.value.id}_s${stage.id}`, name: stage.name, created: true };
+};
+const concludeStage = async () => {
+  const p = program.value;
+  const cur = programCycle.value;
+  if (!p || !cur || savingStage.value) return;
+  savingStage.value = true;
+  try {
+    const next = nextCycle.value || (p.custom ? await addCustomStage() : null);
+    if (!next) return;
+    const cele = stageCelebration({ program: p, cycle: cur, workouts: workouts.value, next });
+    if (!(await setStage(next.id, todayISO))) return;
+    stagePick.value = null;
+    if (cele) {
+      markCelebrated(cele.key);
+      celebration.value = cele;
+    }
+    if (next.created) useAlert(`${next.name} criada com o treino da etapa anterior — ajuste os exercícios no ✎ pra periodizar.`);
+  } catch {
+    useAlert('Não consegui concluir a etapa.');
+  } finally {
+    savingStage.value = false;
+  }
+};
+
+// ═══ TREINO EXTRA (rodada 44): fora da sequência ═══
+// Qualquer treino de qualquer etapa; vira um registro À PARTE (extra:
+// true) — não substitui o treino da semana, não muda o "próximo" e não
+// conta pra fechar a semana. As cargas viram referência normalmente.
+const extraPickOpen = ref(false);
 
 // ═══ PLANILHA DAS SEMANAS (pedido 25/08): abas A | B | C | Bônus ═══
 // A = ciclo 1 (sem 1–8) · B = ciclo 2 (9–16) · C = ciclo 3 (17–24) ·
@@ -765,7 +886,8 @@ const gridRecordFor = (sessionKey, week) =>
       w.data?.program_id === gridTab.value?.programId &&
       w.data?.cycle_id === gridTab.value?.cycle?.id &&
       w.data?.session_key === sessionKey &&
-      Number(w.data?.week) === Number(week)
+      Number(w.data?.week) === Number(week) &&
+      !w.data?.extra
   ) || null;
 
 const cellText = (sessionKey, week, exName) => {
@@ -794,8 +916,8 @@ const parseCellSets = text =>
 const WEEKDAY_OFFSET = { Segunda: 0, Terça: 1, Quarta: 2, Quinta: 3, Sexta: 4, Sábado: 5 };
 // data planejada da célula: início do programa + semanas + dia da sessão
 const plannedDate = (prog, week, weekday) => {
-  if (!prog?.start_date) return todayISO;
-  const d = new Date(`${prog.start_date}T00:00:00`);
+  if (!weekAnchor(prog)) return todayISO;
+  const d = new Date(`${weekAnchor(prog)}T00:00:00`);
   d.setDate(d.getDate() + (week - 1) * 7 + (WEEKDAY_OFFSET[weekday] || 0));
   return toISO(d);
 };
@@ -1166,6 +1288,7 @@ const saveSession = async () => {
       data.cycle_id = session.value.cycle_id;
       data.session_key = session.value.session_key;
       data.week = session.value.week;
+      if (session.value.extra) data.extra = true;
       data.summary = sessionSummary(exercises.map(e => ({ ...e, verdict: e.verdict })));
     } else {
       data.plan_id = session.value.plan_id;
@@ -1173,9 +1296,10 @@ const saveSession = async () => {
     // 1 registro por treino/semana: se a planilha (ou um treino anterior)
     // já criou o registro desta sessão nesta semana, atualiza em vez de duplicar
     const existing =
-      isProgram && Number.isFinite(Number(session.value.week))
+      isProgram && !session.value.extra && Number.isFinite(Number(session.value.week))
         ? workouts.value.find(
             w =>
+              !w.data?.extra &&
               w.data?.program_id === session.value.program_id &&
               w.data?.session_key === session.value.session_key &&
               Number(w.data?.week) === Number(session.value.week)
@@ -1193,8 +1317,11 @@ const saveSession = async () => {
       workouts.value = sortRecs([rec, ...workouts.value]);
     }
     const savedDate = session.value.date || todayISO;
+    const wasExtra = !!session.value.extra;
     session.value = null;
-    if (isProgram) {
+    if (isProgram && wasExtra) {
+      useAlert('Treino extra registrado — a sequência da semana segue igual.');
+    } else if (isProgram) {
       const done = exercises.filter(e => !e.skipped).length;
       useAlert(`💪 ${summaryPhrase(data.summary, done)}`);
       // rodada 25: fechou o último treino planejado da semana → celebra
@@ -2556,6 +2683,56 @@ onMounted(async () => {
               {{ programCycle?.name }} — {{ programCycle?.focus }}
               <template v-if="program.note"> · {{ program.note }}</template>
             </p>
+            <!-- rodada 44: ETAPAS — em qual estou + concluir e ir pra próxima -->
+            <div v-if="stageList.length" class="hub-stage mb-4">
+              <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <p class="hub-stage-title"><span class="i-lucide-milestone" />Etapas</p>
+                <p v-if="stageWeek" class="text-[11px] text-n-slate-10">
+                  semana <b class="text-n-slate-12">{{ stageWeek }}</b> de {{ stageLen }} da etapa
+                </p>
+              </div>
+              <div class="hub-stage-row">
+                <button
+                  v-for="st in stageList"
+                  :key="st.cycle.id"
+                  class="hub-stage-chip"
+                  :class="[`is-${st.state}`, { 'is-pick': stagePick?.cycle?.id === st.cycle.id }]"
+                  :title="st.state === 'now' ? 'Etapa atual' : 'Estou nesta etapa'"
+                  @click="st.state !== 'now' && pickStage(st.cycle)"
+                >
+                  <span class="hub-stage-ico" :class="st.state === 'done' ? 'i-lucide-check' : st.state === 'now' ? 'i-lucide-play' : 'i-lucide-circle-dashed'" />
+                  <span class="hub-stage-txt">
+                    <b>{{ st.cycle.name }}</b>
+                    <small>sem {{ st.cycle.week_start }}–{{ st.cycle.week_end }} · {{ st.done }} {{ st.done === 1 ? 'treino' : 'treinos' }}</small>
+                  </span>
+                </button>
+              </div>
+              <div v-if="stagePick" class="hub-stage-confirm">
+                <p class="text-xs text-n-slate-12 flex-1" style="min-width: 12rem">
+                  Ir pra <b>{{ stagePick.cycle.name }}</b>? As semanas passam a contar a partir de:
+                </p>
+                <input
+                  v-model="stagePick.date"
+                  type="date"
+                  class="h-10 rounded-lg border border-n-weak bg-n-solid-1 px-2 text-xs text-n-slate-12"
+                  style="width: 9.5rem; margin-bottom: 0"
+                />
+                <div class="flex gap-2">
+                  <button class="hub-stage-btn is-main" :disabled="savingStage" @click="confirmStagePick">
+                    <span class="i-lucide-check" />Estou nesta etapa
+                  </button>
+                  <button class="hub-stage-btn" @click="stagePick = null">Cancelar</button>
+                </div>
+              </div>
+              <div v-else-if="canConclude" class="flex items-center gap-2 flex-wrap mt-3">
+                <button class="hub-stage-btn is-main" :class="{ 'is-hot': stageAtEnd }" :disabled="savingStage" @click="concludeStage">
+                  <span class="i-lucide-flag" />
+                  Concluir {{ programCycle?.name }} e {{ nextCycle ? `ir pra ${nextCycle.name}` : 'montar a próxima etapa' }}
+                </button>
+                <span v-if="stageAtEnd" class="text-[11px] font-bold" :style="{ color: LARANJA_VIVO }">última semana da etapa</span>
+              </div>
+              <p v-else class="text-[11px] text-n-slate-10 mt-2">Última etapa do programa.</p>
+            </div>
             <!-- rodada 25: objetivo do programa pessoal = parâmetro de sucesso -->
             <div v-if="program.custom && goalNow" class="rounded-xl p-3 mb-3 flex items-center gap-3 flex-wrap" :style="{ background: 'rgba(65,105,225,0.08)', border: '1px solid rgba(65,105,225,0.25)' }">
               <span class="text-2xl">{{ goalNow.icon }}</span>
@@ -2622,6 +2799,35 @@ onMounted(async () => {
                 >
                   ✎ editar exercícios
                 </button>
+              </div>
+            </div>
+            <!-- rodada 44: TREINO EXTRA — fora da sequência, registro à parte -->
+            <div class="hub-xtrain mt-4">
+              <button class="hub-xtrain-btn" :class="{ 'is-on': extraPickOpen }" @click="extraPickOpen = !extraPickOpen">
+                <span class="hub-xtrain-ico i-lucide-plus" />
+                <span class="flex-1 min-w-0 text-left">
+                  <b>Treino extra</b>
+                  <small>fora da sequência · não substitui o da semana nem muda o próximo</small>
+                </span>
+                <span :class="extraPickOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="hub-xtrain-chev" />
+              </button>
+              <div v-if="extraPickOpen" class="hub-xtrain-body">
+                <div v-for="st in stageList" :key="st.cycle.id">
+                  <p class="hub-xtrain-stage">
+                    {{ st.cycle.name }}<span v-if="st.state === 'now'" :style="{ color: LARANJA_VIVO }"> · atual</span>
+                  </p>
+                  <div class="flex gap-2 flex-wrap">
+                    <button
+                      v-for="sx in st.cycle.sessions || []"
+                      :key="sx.key"
+                      class="hub-xtrain-pick"
+                      @click="startProgramSession(sx, { cycle: st.cycle, extra: true })"
+                    >
+                      <b>{{ sx.key }}</b>
+                      <span>{{ sx.label || `Treino ${sx.key}` }}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2699,13 +2905,28 @@ onMounted(async () => {
           <div v-if="session" class="hub-block p-5 mb-8">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
               <span class="text-sm font-bold" :style="{ color: ROYAL }">{{ session.plan_name }}</span>
-              <button
-                class="h-8 px-3 rounded-lg text-xs text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
-                @click="session = null"
-              >
-                Cancelar
-              </button>
+              <div class="flex gap-2">
+                <button
+                  v-if="session.mode === 'program'"
+                  class="hub-xtoggle"
+                  :class="{ 'is-on': session.extra }"
+                  title="Treino extra: registro à parte, fora da sequência"
+                  @click="session.extra = !session.extra"
+                >
+                  <span :class="session.extra ? 'i-lucide-check' : 'i-lucide-plus'" />
+                  {{ session.extra ? 'Treino extra' : 'Marcar como extra' }}
+                </button>
+                <button
+                  class="h-8 px-3 rounded-lg text-xs text-n-slate-11 border border-n-weak hover:bg-n-alpha-1"
+                  @click="session = null"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
+            <p v-if="session.extra" class="text-[11px] text-n-slate-10 mb-2">
+              Registro à parte: não substitui o Treino {{ session.session_key }} desta semana, não muda o próximo e não conta pra fechar a semana.
+            </p>
 
             <!-- Data em destaque: registro retroativo muda a semana junto -->
             <div class="flex items-center gap-2 flex-wrap mb-3 hub-crystal rounded-xl px-4 py-3">
@@ -3193,7 +3414,7 @@ onMounted(async () => {
                   <span class="hub-row-date"><b>{{ dayOf(w.record_date) }}</b><small>{{ monOf(w.record_date) }}</small></span>
                   <div class="flex-1 min-w-0">
                     <p class="text-xs font-bold text-n-slate-12 truncate">
-                      {{ w.data?.plan_name || 'Treino' }}<span v-if="w.data?.week" class="font-normal text-n-slate-10"> · semana {{ w.data.week }}</span>
+                      {{ w.data?.plan_name || 'Treino' }}<span v-if="w.data?.week" class="font-normal text-n-slate-10"> · semana {{ w.data.week }}</span><span v-if="w.data?.extra" class="hub-xtag">extra</span>
                     </p>
                     <p class="text-[11px] text-n-slate-10 truncate">{{ (w.data?.exercises || []).filter(e => !e.skipped).map(e => e.name).join(' · ') || '—' }}</p>
                   </div>
@@ -4887,6 +5108,232 @@ onMounted(async () => {
 }
 .hub-extra-chip:hover {
   background: rgba(65, 105, 225, 0.16);
+}
+/* rodada 44: ETAPAS (concluir e ir pra próxima) + TREINO EXTRA */
+.hub-stage {
+  padding: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(120, 130, 160, 0.22);
+  background: rgba(65, 105, 225, 0.05);
+}
+.hub-stage-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ff8a00;
+}
+.hub-stage-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+}
+.hub-stage-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 3.25rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(120, 130, 160, 0.3);
+  text-align: left;
+  transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.hub-stage-chip:active {
+  transform: scale(0.97);
+}
+.hub-stage-chip:hover:not(.is-now) {
+  border-color: rgba(65, 105, 225, 0.6);
+}
+.hub-stage-chip.is-now {
+  border-color: transparent;
+  color: #fff;
+  background: linear-gradient(135deg, #ff9a1f, #ff6a00);
+  box-shadow: 0 6px 18px rgba(255, 106, 0, 0.28);
+  cursor: default;
+}
+.hub-stage-chip.is-done {
+  opacity: 0.85;
+}
+.hub-stage-chip.is-pick {
+  border-color: #4169e1;
+  box-shadow: 0 0 0 2px rgba(65, 105, 225, 0.35);
+}
+.hub-stage-ico {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+.hub-stage-chip .hub-stage-ico {
+  color: #4169e1;
+}
+.hub-stage-chip.is-done .hub-stage-ico {
+  color: #22a06b;
+}
+.hub-stage-chip.is-now .hub-stage-ico {
+  color: #fff;
+}
+.hub-stage-txt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+.hub-stage-txt b {
+  font-size: 12px;
+}
+.hub-stage-txt small {
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+.hub-stage-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(65, 105, 225, 0.35);
+  background: rgba(65, 105, 225, 0.08);
+}
+.hub-stage-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0 0.9rem;
+  border-radius: 0.75rem;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(120, 130, 160, 0.35);
+}
+.hub-stage-btn > span {
+  flex: none;
+}
+.hub-stage-btn.is-main {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #2b4fb8, #4169e1);
+}
+.hub-stage-btn.is-hot {
+  background: linear-gradient(135deg, #ff9a1f, #ff6a00);
+  animation: hub-stage-pulse 2.2s ease-in-out infinite;
+}
+.hub-stage-btn:disabled {
+  opacity: 0.6;
+}
+@keyframes hub-stage-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 106, 0, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(255, 106, 0, 0); }
+}
+.hub-xtrain {
+  border-radius: 1rem;
+  border: 1px dashed rgba(255, 138, 0, 0.55);
+}
+.hub-xtrain-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.6rem 0.85rem;
+}
+.hub-xtrain-btn b {
+  display: block;
+  font-size: 13px;
+  color: #ff8a00;
+}
+.hub-xtrain-btn small {
+  display: block;
+  font-size: 11px;
+  opacity: 0.75;
+}
+.hub-xtrain-ico {
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  color: #ff8a00;
+}
+.hub-xtrain-chev {
+  flex: none;
+  width: 1.1rem;
+  height: 1.1rem;
+  opacity: 0.6;
+}
+.hub-xtrain-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0 0.85rem 0.85rem;
+}
+.hub-xtrain-stage {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+  opacity: 0.85;
+}
+.hub-xtrain-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.8rem 0.35rem 0.35rem;
+  border-radius: 0.8rem;
+  font-size: 12px;
+  border: 1px solid rgba(65, 105, 225, 0.3);
+  background: rgba(65, 105, 225, 0.08);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.hub-xtrain-pick:active {
+  transform: scale(0.96);
+}
+.hub-xtrain-pick:hover {
+  background: rgba(65, 105, 225, 0.16);
+}
+.hub-xtrain-pick b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.6rem;
+  color: #fff;
+  font-weight: 900;
+  background: linear-gradient(135deg, #1b2a5e, #2b4fb8);
+}
+.hub-xtoggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2rem;
+  padding: 0 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ff8a00;
+  border: 1px dashed rgba(255, 138, 0, 0.6);
+}
+.hub-xtoggle > span {
+  flex: none;
+}
+.hub-xtoggle.is-on {
+  color: #fff;
+  border-style: solid;
+  border-color: transparent;
+  background: linear-gradient(135deg, #ff9a1f, #ff6a00);
+}
+.hub-xtag {
+  margin-left: 0.35rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: #ff8a00;
 }
 /* boxe guiado (rodada 20): relógio redondo + botões de bloco */
 .hub-box-clock {

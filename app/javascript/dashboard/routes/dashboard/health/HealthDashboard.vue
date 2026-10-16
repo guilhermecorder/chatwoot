@@ -27,6 +27,7 @@ import { applyChartTheme, watchChartTheme } from './chartTheme';
 import { exerciseVerdict,
   resolvePrograms,
   mainProgramOf,
+  weekAnchor,
 } from './warrior';
 
 ChartJS.register(Tooltip, Legend, CategoryScale, LinearScale, PointElement, LineElement, Filler);
@@ -115,7 +116,10 @@ const progRecords = computed(() =>
   workouts.value.filter(w => w.data?.program_id && recVolume(w) > 0)
 );
 const mainRecords = computed(() =>
-  progRecords.value.filter(w => w.data?.program_id === mainProgram.value?.id && Number(w.data?.week) >= 1)
+  // treino extra (rodada 44) fica fora da conta semana a semana
+  progRecords.value.filter(
+    w => w.data?.program_id === mainProgram.value?.id && Number(w.data?.week) >= 1 && !w.data?.extra
+  )
 );
 
 const totalWeeks = computed(() => {
@@ -123,10 +127,9 @@ const totalWeeks = computed(() => {
   return cycles.length ? Math.max(...cycles.map(c => c.week_end || 0)) : 24;
 });
 const currentWeek = computed(() => {
-  if (!mainProgram.value?.start_date) return null;
-  const diff = Math.floor(
-    (new Date(`${todayISO}T00:00:00`) - new Date(`${mainProgram.value.start_date}T00:00:00`)) / 86400000
-  );
+  const anchor = weekAnchor(mainProgram.value);
+  if (!anchor) return null;
+  const diff = Math.floor((new Date(`${todayISO}T00:00:00`) - new Date(`${anchor}T00:00:00`)) / 86400000);
   return diff < 0 ? 1 : Math.min(Math.floor(diff / 7) + 1, totalWeeks.value);
 });
 
@@ -596,8 +599,8 @@ const round1d = v => Math.round(v * 10) / 10;
 const sinceWeek1 = computed(() => {
   const prog = mainProgram.value;
   const upto = Math.min(currentWeek.value || 0, totalWeeks.value);
-  if (!prog?.start_date || !upto) return null;
-  const start = new Date(`${prog.start_date}T00:00:00`);
+  if (!weekAnchor(prog) || !upto) return null;
+  const start = new Date(`${weekAnchor(prog)}T00:00:00`);
   const weekEnd = w => {
     const d = new Date(start);
     d.setDate(d.getDate() + w * 7 - 1);

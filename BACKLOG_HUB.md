@@ -23,6 +23,54 @@ IMPLANTADA por ele 30/09 ("está bacana").
 36780806557) VERDE em 6 min (cache) → **etiqueta `de28b94`** (sem
 migration). Falta ele colar no EasyPanel (web + sidekiq) e Implantar.
 
+## RODADA 44 — 16/10 🔧 ETAPAS (CONCLUIR E IR PRA PRÓXIMA) + TREINO EXTRA (working tree, NÃO subida)
+Ele (16/10): "concluí as primeiras 8 semanas, mas no treino não tem as
+próximas 8 pra gente periodizar — preciso concluir e já passar pro
+segundo treino; no treino precisamos poder SELECIONAR A ETAPA em que
+estamos, ou registrar um TREINO EXTRA". (No Warrior as etapas se chamam
+Treino 1 / Treino 2 / Treino 3 = c1/c2/c3, sem 1–8/9–16/17–24.)
+- Causa: a etapa saía SÓ da data de início (weekOf/cycleForWeek); se a
+  vida não segue o calendário, não tinha como andar. E um 2º "Treino A"
+  na mesma semana SOBRESCREVIA o 1º (1 registro por treino/semana).
+- **Etapas** (bloco "Etapas" no Treinar, logo abaixo da linha da semana):
+  chips de cada etapa (feita ✓ / atual laranja / próximas) com semanas e
+  nº de treinos; tocar numa etapa → confirmação inline com DATA de início
+  ("Estou nesta etapa"); botão "Concluir Treino 1 e ir pra Treino 2"
+  (fica laranja pulsando na última semana) → celebração "Treino 1: etapa
+  concluída!" (treinos da etapa, exercícios mais fortes x de y, extras,
+  maiores ganhos) e a etapa seguinte começa hoje.
+  · Guardado na FICHA (kind profile, por pessoa): `stages[program_id] =
+    { cycle_id, started_at }`. `withStage` (warrior.js, aplicado no
+    resolvePrograms) calcula `week_anchor` = início da etapa − semanas
+    anteriores; `weekAnchor(p)` substitui start_date em TODA conta de
+    semana (weekOf, HealthHome, HealthDashboard, RoutinePage, plannedDate
+    da planilha). start_date original intacto (linha de base do corpo).
+  · Programa PESSOAL: `data.stages = [{id,name,focus,weeks,sessions}]`
+    (backend aceita — sanitize_custom_program + sanitize_custom_sessions);
+    customToProgram vira Etapa 1 (sessions) + etapas em sequência. Concluir
+    a ÚLTIMA etapa cria a próxima COPIANDO a atual → ajustar no ✎ pra
+    periodizar (editor de exercícios sabe editar etapa 2+; o assistente
+    edita a Etapa 1 e preserva as demais).
+- **Treino extra**: faixa tracejada laranja abaixo dos cartões A/B/C →
+  abre todas as etapas com chips A/B/C; ou o botão "Marcar como extra" no
+  topo de qualquer sessão. Grava `data.extra = true` como registro À
+  PARTE: não substitui o da semana, não muda o "próximo"
+  (suggestedSessionKey), não fecha semana (workoutCelebration), fica fora
+  da planilha (gridRecordFor) e das contas semana a semana do Dashboard
+  (mainRecords); as cargas valem como referência (lastSetsForTag) e na
+  Progressão de carga. Histórico mostra a etiqueta "extra".
+- Sem migration (profile/workout são JSON livre; só o sanitizer do
+  programa pessoal mudou).
+- TESTADO local: Warrior → Treino 1 com início 23/08 → "semana 8 de 8",
+  concluir → celebração (19 treinos, 13 de 14 mais fortes) → Treino 2
+  semana 9, Meu Painel em "Semana 9 de 24 · Treino 2"; extra do Treino 1 A
+  salvo (registro 305, extra: true), próximo seguiu Treino C; celular
+  escuro sem rolagem lateral; motor do pessoal conferido em node
+  (Etapa 2 = sem 9–14, âncora certa, extra não mexe no próximo).
+  Local ficou com Warrior ATIVO e na etapa Treino 2 (era Rotina Bônus).
+- NA VPS, depois de implantar: Treinar → Etapas → "Concluir Treino 1 e
+  ir pra Treino 2" (ou tocar no Treino 2 e escolher a data).
+
 ## RODADA 43 — 30/09 ✅ TIMER DE DESCANSO NA SESSÃO + ÍMÃ DEIXA CHEGAR NO CONCLUIR (subida — ver SUBIDA 30/09)
 Ele (30/09, depois de implantar a 048d6ec: "está bacana"): "manda brasa,
 especialmente o timer de descanso — pequeno e ali no ambiente mesmo";

@@ -30,6 +30,7 @@ import { applyChartTheme, watchChartTheme } from './chartTheme';
 import {
   activeProgram,
   weekOf,
+  weekAnchor,
   cycleForWeek,
   suggestedSessionKey,
   exerciseVerdict,
@@ -512,9 +513,9 @@ const weightAt = iso => {
 const cycleStartISO = computed(() => {
   const prog = program.value;
   const cy = programCycle.value;
-  if (!prog?.start_date || !cy) return null;
+  if (!weekAnchor(prog) || !cy) return null;
   const absWeek = (cycleNumber.value - 1) * cycleLen.value + (cy.week_start || 1);
-  return shiftISO(prog.start_date, (absWeek - 1) * 7);
+  return shiftISO(weekAnchor(prog), (absWeek - 1) * 7);
 });
 // métricas de um conjunto de exercícios (sessionKey null = GERAL, A+B+C)
 const strengthFor = sessionKey => {
@@ -568,7 +569,7 @@ const strength = computed(() => strengthFor(null));
 const strengthChartFor = exercises => {
   const cy = programCycle.value;
   const prog = program.value;
-  if (!cy || !prog?.start_date) return null;
+  if (!cy || !weekAnchor(prog)) return null;
   const wStart = cy.week_start || 1;
   const wEnd = Math.min(weekInCycle.value, cy.week_end || cycleLen.value);
   const labels = [];
@@ -588,7 +589,7 @@ const strengthChartFor = exercises => {
     if (!any) continue;
     labels.push(`S${w}`);
     total.push(Math.round(sum));
-    const peso = weightAt(shiftISO(prog.start_date, absWeek * 7 - 1));
+    const peso = weightAt(shiftISO(weekAnchor(prog), absWeek * 7 - 1));
     rel.push(peso ? Math.round((sum / peso) * 100) / 100 : null);
   }
   if (labels.length < 2) return null;

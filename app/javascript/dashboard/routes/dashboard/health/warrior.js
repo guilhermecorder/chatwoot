@@ -29,10 +29,17 @@ const num = v => Number(String(v ?? '').replace(',', '.')) || 0;
 export const activeProgram = programs =>
   (programs || []).find(p => p.active) || (programs || [])[0] || null;
 
-// semana corrente do programa (1..N) a partir do start_date; null = sem data
+// rodada 44: a contagem das semanas parte da ÂNCORA — o start_date, ou,
+// quando a pessoa escolheu a etapa em que está ("Concluir etapa" / chip
+// de etapa), a data recalculada a partir do começo dessa etapa. O
+// start_date original fica intacto (linha de base do corpo/objetivo).
+export const weekAnchor = program => program?.week_anchor || program?.start_date || null;
+
+// semana corrente do programa (1..N) a partir da âncora; null = sem data
 export const weekOf = (program, todayISO) => {
-  if (!program?.start_date) return null;
-  const start = new Date(`${program.start_date}T00:00:00`);
+  const anchor = weekAnchor(program);
+  if (!anchor) return null;
+  const start = new Date(`${anchor}T00:00:00`);
   const today = new Date(`${todayISO}T00:00:00`);
   const diff = Math.floor((today - start) / 86400000);
   if (Number.isNaN(diff) || diff < 0) return 1;
@@ -53,7 +60,8 @@ export const cycleForWeek = (program, week) => {
 export const suggestedSessionKey = (workouts, program, cycle) => {
   const keys = (cycle?.sessions || []).map(s => s.key);
   if (!keys.length) return null;
-  const last = (workouts || []).find(w => w.data?.program_id === program?.id);
+  // treino EXTRA (rodada 44) não mexe na sequência A→B→C
+  const last = (workouts || []).find(w => w.data?.program_id === program?.id && !w.data?.extra);
   if (!last?.data?.session_key) return keys[0];
   const idx = keys.indexOf(last.data.session_key);
   return keys[(idx + 1) % keys.length];
@@ -527,12 +535,48 @@ export const programWeeks = program => {
   return cycles.length ? Math.max(...cycles.map(c => c.week_end || 0)) : 0;
 };
 
-// registro kind=program → formato de programa (1 ciclo com N semanas)
+// registro kind=program → formato de programa. Etapa 1 = as sessões do
+// assistente; rodada 44: `stages` = as PRÓXIMAS etapas (periodização),
+// cada uma com o seu nº de semanas, em sequência (1–8, 9–16, …)
+const mapSessions = list =>
+  (list || []).map(s => ({
+    key: s.key,
+    label: s.label || '',
+    weekday: s.weekday || '',
+    exercises: s.exercises || [],
+  }));
 export const customToProgram = rec => {
   const d = rec?.data || {};
   const id = customProgramId(rec);
   const goal = goalOf(d.goal);
   const weeks = Number(d.weeks) || 12;
+  const stages = Array.isArray(d.stages) ? d.stages : [];
+  const focus = `${goal.icon} ${goal.label}`;
+  const cycles = [
+    {
+      id: `${id}_c1`,
+      name: stages.length ? 'Etapa 1' : d.name || 'Meu treino',
+      focus,
+      week_start: 1,
+      week_end: weeks,
+      order: 1,
+      sessions: mapSessions(d.sessions),
+    },
+  ];
+  stages.forEach((st, i) => {
+    const prev = cycles[cycles.length - 1];
+    const w = Math.max(1, Number(st.weeks) || 8);
+    cycles.push({
+      id: `${id}_s${st.id}`,
+      stage_id: st.id,
+      name: st.name || `Etapa ${i + 2}`,
+      focus: st.focus || focus,
+      week_start: prev.week_end + 1,
+      week_end: prev.week_end + w,
+      order: i + 2,
+      sessions: mapSessions(st.sessions),
+    });
+  });
   return {
     id,
     record_id: rec.id,
@@ -544,22 +588,22 @@ export const customToProgram = rec => {
     goal: goal.key,
     status: d.status || 'active',
     weekdays: d.weekdays || [],
-    cycles: [
-      {
-        id: `${id}_c1`,
-        name: d.name || 'Meu treino',
-        focus: `${goal.icon} ${goal.label}`,
-        week_start: 1,
-        week_end: weeks,
-        order: 1,
-        sessions: (d.sessions || []).map(s => ({
-          key: s.key,
-          label: s.label || '',
-          weekday: s.weekday || '',
-          exercises: s.exercises || [],
-        })),
-      },
-    ],
+    cycles,
+  };
+};
+
+// ETAPA ESCOLHIDA (rodada 44): ficha da pessoa guarda
+// stages[programa] = { cycle_id, started_at } → a âncora das semanas vira
+// "começo da etapa − semanas anteriores". Ciclo sumiu? ignora.
+export const withStage = (program, profile) => {
+  const st = profile?.stages?.[program?.id];
+  if (!program || !st?.cycle_id || !st?.started_at) return program;
+  const cycle = (program.cycles || []).find(c => c.id === st.cycle_id);
+  if (!cycle) return program;
+  return {
+    ...program,
+    stage: st,
+    week_anchor: shiftISO(st.started_at, -((Number(cycle.week_start) || 1) - 1) * 7),
   };
 };
 
@@ -570,9 +614,9 @@ export const resolvePrograms = (config, profile, programRecords) => {
     const rec =
       recs.find(r => Number(r.id) === Number(profile.active_program_id) && r.data?.status !== 'archived') ||
       recs.find(r => r.data?.status === 'active');
-    return rec ? [customToProgram(rec)] : [];
+    return rec ? [withStage(customToProgram(rec), profile)] : [];
   }
-  return config?.programs || [];
+  return (config?.programs || []).map(p => withStage(p, profile));
 };
 export const mainProgramOf = programs =>
   (programs || []).find(p => p.id === 'warrior24') ||
@@ -769,7 +813,8 @@ export const workoutCelebration = ({ program, workouts, dateISO, sessionsPerWeek
   const monday = mondayOf(dateISO);
   const sunday = shiftISO(monday, 6);
   const inWeek = w => w.record_date >= monday && w.record_date <= sunday;
-  const week = (workouts || []).filter(w => inWeek(w) && w.data?.program_id === program.id);
+  const counted = (workouts || []).filter(w => !w.data?.extra);
+  const week = counted.filter(w => inWeek(w) && w.data?.program_id === program.id);
   const goal = Math.max(1, Number(sessionsPerWeek) || 1);
   if (week.length < goal) return null;
 
@@ -778,7 +823,7 @@ export const workoutCelebration = ({ program, workouts, dateISO, sessionsPerWeek
   let cursor = monday;
   for (let i = 0; i < 104; i += 1) {
     const end = shiftISO(cursor, 6);
-    const n = (workouts || []).filter(
+    const n = counted.filter(
       w => w.record_date >= cursor && w.record_date <= end && w.data?.program_id === program.id
     ).length;
     if (n < goal) break;
@@ -852,6 +897,54 @@ export const workoutCelebration = ({ program, workouts, dateISO, sessionsPerWeek
     ico: 'i-lucide-trophy',
     title: weekNo ? `Semana ${weekNo} fechada!` : 'Semana fechada!',
     subtitle: WEEK_PRAISES[(weekNo || 0) % WEEK_PRAISES.length],
+    items,
+  };
+};
+
+// ETAPA CONCLUÍDA (rodada 44): treinos da etapa, extras e quantos
+// exercícios terminaram mais fortes do que começaram (melhor série, 1RM est.)
+export const stageCelebration = ({ program, cycle, workouts, next }) => {
+  if (!program || !cycle) return null;
+  const recs = (workouts || [])
+    .filter(
+      w =>
+        w.data?.program_id === program.id &&
+        w.data?.cycle_id === cycle.id &&
+        (w.data?.exercises || []).some(e => e.sets?.length)
+    )
+    .sort((a, b) => (a.record_date > b.record_date ? 1 : -1));
+  const regular = recs.filter(w => !w.data?.extra);
+  const extras = recs.length - regular.length;
+  const best = ex => Math.max(0, ...(ex.sets || []).map(st => e1rmOf(num(st.load), num(st.reps))));
+  const first = {};
+  const last = {};
+  recs.forEach(w =>
+    (w.data.exercises || []).forEach(e => {
+      if (!e.sets?.length || !e.name) return;
+      const v = best(e);
+      if (!v) return;
+      if (!(e.name in first)) first[e.name] = v;
+      last[e.name] = v;
+    })
+  );
+  const names = Object.keys(first);
+  const up = names.filter(n => last[n] > first[n] * 1.005);
+  const gains = up
+    .map(n => ({ name: n, pct: ((last[n] - first[n]) / first[n]) * 100 }))
+    .sort((a, b) => b.pct - a.pct);
+  const weeks = (Number(cycle.week_end) || 0) - (Number(cycle.week_start) || 1) + 1;
+  const items = [
+    { ico: 'i-lucide-dumbbell', label: 'Treinos da etapa', big: regular.length, pct: Math.min(1, regular.length / Math.max(1, weeks * (cycle.sessions || []).length || 1)), sub: `${weeks} semanas` },
+    { ico: 'i-lucide-trending-up', label: 'Exercícios mais fortes', big: up.length, suffix: names.length ? ` de ${names.length}` : '', pct: names.length ? up.length / names.length : 0 },
+  ];
+  if (extras) items.push({ ico: 'i-lucide-plus', label: 'Treinos extras', big: extras, pct: 0.6 });
+  gains.slice(0, extras ? 1 : 2).forEach(g => items.push({ ico: 'i-lucide-zap', label: g.name, value: `+${fmt1(g.pct)}%`, pct: Math.min(1, g.pct / 15), small: true }));
+  return {
+    kind: 'stage',
+    key: `stage_${program.id}_${cycle.id}`,
+    ico: 'i-lucide-flag',
+    title: `${cycle.name}: etapa concluída!`,
+    subtitle: next ? `Agora começa: ${next.name}. Bom jogo!` : 'Bloco fechado e guardado no histórico.',
     items,
   };
 };

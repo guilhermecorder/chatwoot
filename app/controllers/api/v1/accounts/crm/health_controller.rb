@@ -343,17 +343,34 @@ class Api::V1::Accounts::Crm::HealthController < Api::V1::Accounts::BaseControll
       'result' => data['result'].to_s.first(300),
       'note' => data['note'].to_s.first(500),
       'weekdays' => Array(data['weekdays']).map { |d| d.to_s.first(20) }.reject(&:blank?).first(7),
-      'sessions' => Array(data['sessions']).first(7).filter_map do |s|
-        next nil unless s.is_a?(Hash)
+      'sessions' => sanitize_custom_sessions(data['sessions']),
+      # rodada 44: próximas ETAPAS do programa (periodização) — cada uma
+      # com nome, nº de semanas e as próprias sessões A/B/C
+      'stages' => Array(data['stages']).first(12).filter_map do |st|
+        next nil unless st.is_a?(Hash)
 
         {
-          'key' => s['key'].to_s.first(3),
-          'label' => s['label'].to_s.strip.first(60),
-          'weekday' => s['weekday'].to_s.first(20),
-          'exercises' => Array(s['exercises']).first(20).filter_map { |e| sanitize_prescription(e) }
+          'id' => st['id'].to_s.gsub(/[^a-z0-9]/i, '').first(12).presence || SecureRandom.hex(3),
+          'name' => st['name'].to_s.strip.first(60),
+          'focus' => st['focus'].to_s.strip.first(80),
+          'weeks' => st['weeks'].to_i.clamp(1, 52),
+          'sessions' => sanitize_custom_sessions(st['sessions'])
         }
       end
     }
+  end
+
+  def sanitize_custom_sessions(list)
+    Array(list).first(7).filter_map do |s|
+      next nil unless s.is_a?(Hash)
+
+      {
+        'key' => s['key'].to_s.first(3),
+        'label' => s['label'].to_s.strip.first(60),
+        'weekday' => s['weekday'].to_s.first(20),
+        'exercises' => Array(s['exercises']).first(20).filter_map { |e| sanitize_prescription(e) }
+      }
+    end
   end
 
   def sanitize_plan(plan)
