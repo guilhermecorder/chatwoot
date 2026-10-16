@@ -23,7 +23,13 @@ IMPLANTADA por ele 30/09 ("está bacana").
 36780806557) VERDE em 6 min (cache) → **etiqueta `de28b94`** (sem
 migration). Falta ele colar no EasyPanel (web + sidekiq) e Implantar.
 
-## RODADA 44 — 16/10 🔧 ETAPAS (CONCLUIR E IR PRA PRÓXIMA) + TREINO EXTRA (working tree, NÃO subida)
+## SUBIDA 16/10 — RODADA 44: "pode subir" → commit 74b4d8b353 na
+feat/hub-saude → push (--no-verify) → docker-build por workflow_dispatch
+(run 38948258737) VERDE em ~26 min → **etiqueta `74b4d8b`** (sem
+migration). Falta ele colar no EasyPanel (web + sidekiq) e Implantar;
+depois: Treinar → Etapas → "Concluir Treino 1 e ir pra Treino 2".
+
+## RODADA 44 — 16/10 ✅ ETAPAS (CONCLUIR E IR PRA PRÓXIMA) + TREINO EXTRA (subida — ver SUBIDA 16/10)
 Ele (16/10): "concluí as primeiras 8 semanas, mas no treino não tem as
 próximas 8 pra gente periodizar — preciso concluir e já passar pro
 segundo treino; no treino precisamos poder SELECIONAR A ETAPA em que
