@@ -958,6 +958,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/test_google_ads`);
   }
 
+  // 🔎 16/10: Search Console (mesma conta de serviço do GA4)
+  testSearchConsole() {
+    return axios.post(`${this.url}/settings/test_search_console`);
+  }
+
   // ── Google Sheets (planilha de cirurgias) ─────────────────────────
   updateSheets(data) {
     return axios.post(`${this.url}/settings/update_sheets`, data);
@@ -1338,6 +1343,11 @@ class CrmAPI extends ApiClient {
 
   getPageAiSuggestions(params = {}) {
     return axios.post(`${this.url}/pages_report/ai_suggestions`, params);
+  }
+
+  // 🔎 16/10: pede ao Google uma foto nova do Search Console (roda no Sidekiq)
+  refreshSearchConsole() {
+    return axios.post(`${this.url}/pages_report/search_console_refresh`);
   }
 
   // 🚪 Porta de entrada (hub) na raiz do domínio dedicado

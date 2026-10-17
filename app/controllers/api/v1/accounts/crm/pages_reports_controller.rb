@@ -9,6 +9,10 @@
 # comparação com o período anterior, a série para os gráficos em linha, os
 # DIAGNÓSTICOS automáticos por página e a COLEÇÃO DE INSIGHTS (o que a equipe
 # decidiu fazer, com antes × depois). A conta mora em Cevico::TrafficReport.
+#
+# 16/10: o bloco "No Google" (Search Console) — impressões, cliques, CTR,
+# posição e termos por página, dos últimos 28 dias, lidos da foto diária
+# (Cevico::SearchConsoleReport); a tela nunca chama o Google.
 class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
@@ -26,6 +30,7 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
       previous: { since: previous.since_date, until: previous.until_date, totals: previous.totals },
       series: report.series,
       insights: insights,
+      search_console: search_console,
       collection: log.list,
       pages: pages_json
     }
@@ -39,6 +44,17 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
     return render json: { error: 'Escreva o insight antes de guardar.' }, status: :unprocessable_entity if blank
 
     render json: { collection: log.save!(attrs, user: Current.user) }
+  end
+
+  # POST /crm/pages_report/search_console_refresh — pede uma foto nova ao
+  # Google agora (roda no Sidekiq; a tela recarrega em seguida)
+  def search_console_refresh
+    unless Cevico::SearchConsole.new(Current.account).configured?
+      return render json: { error: 'Conecte o Search Console em Integrações → Google primeiro.' }, status: :unprocessable_entity
+    end
+
+    Crm::SearchConsoleSyncJob.perform_later(Current.account.id)
+    render json: { queued: true }
   end
 
   # POST /crm/pages_report/remove_insight
@@ -61,19 +77,32 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
   private
 
   def report
-    @report ||= Cevico::TrafficReport.new(Current.account, since_date, until_date)
+    @report ||= Cevico::TrafficReport.new(Current.account, since_date, until_date, page_ids: page_ids)
+  end
+
+  # 16/10: Análise de Páginas filtra por categoria/palavra-chave mandando os
+  # ids das páginas (page_ids[]=1&page_ids[]=2); sem o parâmetro = todas
+  def page_ids
+    return @page_ids if defined?(@page_ids)
+
+    @page_ids = params.key?(:page_ids) ? Array(params[:page_ids]).map(&:to_i).reject(&:zero?) : nil
   end
 
   # o período ANTERIOR de mesmo tamanho (para "subiu / caiu")
   def previous
     @previous ||= begin
       days = (until_date - since_date).to_i + 1
-      Cevico::TrafficReport.new(Current.account, since_date - days, since_date - 1)
+      Cevico::TrafficReport.new(Current.account, since_date - days, since_date - 1, page_ids: page_ids)
     end
   end
 
   def insights
-    @insights ||= Cevico::PageInsights.new(rows: report.rows_with_idle, totals: report.totals).call
+    @insights ||= Cevico::PageInsights.new(rows: report.rows_with_idle, totals: report.totals,
+                                           search_console: search_console).call
+  end
+
+  def search_console
+    @search_console ||= Cevico::SearchConsoleReport.new(Current.account).call
   end
 
   def log

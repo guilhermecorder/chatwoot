@@ -239,6 +239,14 @@ crm_whatsapp_pricing_sync_job:
   class: 'Crm::WhatsappPricingSyncJob'
   queue: low
 
+# 🔎 Search Console (16/10): 08:10 UTC (05:10 SP) — foto dos últimos 28 dias
+# do Google (impressões, cliques, CTR, posição e termos por página) para a aba
+# Otimizar dos Resultados de tráfego; só contas com a conta de serviço do Google
+crm_search_console_sync_job:
+  cron: '10 8 * * *'
+  class: 'Crm::SearchConsoleSyncJob'
+  queue: low
+
 # 🚦 Saúde do WhatsApp (16/10): de hora em hora — anota quando a nota da Meta
 # de cada número muda + varredura da suspeita de bloqueio (mensagens só em
 # "enviado" há 48h+ de quem já recebia)

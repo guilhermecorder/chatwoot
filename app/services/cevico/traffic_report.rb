@@ -23,10 +23,13 @@ class Cevico::TrafficReport # rubocop:disable Metrics/ClassLength
 
   attr_reader :since_date, :until_date
 
-  def initialize(account, since_date, until_date)
+  # page_ids: só estas páginas (Análise de Páginas, 16/10 — filtro por
+  # categoria/palavra-chave); nil = todas, inclusive a porta de entrada (hub)
+  def initialize(account, since_date, until_date, page_ids: nil)
     @account = account
     @since_date = since_date
     @until_date = until_date
+    @page_ids = page_ids&.map(&:to_i)
   end
 
   def totals
@@ -39,6 +42,7 @@ class Cevico::TrafficReport # rubocop:disable Metrics/ClassLength
   # quantos chegaram na caixa (paciente manteve o código na mensagem)
   def protocol
     refs = @account.cevico_page_refs.where(created_at: since_date.beginning_of_day..until_date.end_of_day)
+    refs = refs.where(cevico_page_id: @page_ids) if @page_ids
     { minted: refs.count, matched: refs.where.not(contact_id: nil).count }
   end
 
@@ -57,7 +61,9 @@ class Cevico::TrafficReport # rubocop:disable Metrics/ClassLength
   # no período (linha zerada) — é a lista que os diagnósticos leem
   def rows_with_idle
     seen = rows.pluck(:page_id).to_set
-    idle = pages_by_id.values.select { |page| page.status == 'published' && seen.exclude?(page.id) }
+    idle = pages_by_id.values.select do |page|
+      page.status == 'published' && seen.exclude?(page.id) && (@page_ids.nil? || @page_ids.include?(page.id))
+    end
     rows + idle.map { |page| page_row(page.id, blank_row).merge(idle: true) }
   end
 
@@ -138,15 +144,19 @@ class Cevico::TrafficReport # rubocop:disable Metrics/ClassLength
   # ── tráfego (visitas e cliques) ───────────────────────────────────────
   # [data, página, origem, visitas, cliques]
   def daily_traffic
-    @daily_traffic ||= @account.cevico_page_traffic.where(date: since_date..until_date)
-                               .group(:date, :cevico_page_id, :source)
-                               .pluck(:date, :cevico_page_id, :source, Arel.sql('SUM(views)'), Arel.sql('SUM(cta_clicks)'))
+    @daily_traffic ||= traffic_scope.group(:date, :cevico_page_id, :source)
+                                    .pluck(:date, :cevico_page_id, :source, Arel.sql('SUM(views)'), Arel.sql('SUM(cta_clicks)'))
   end
 
   def campaign_traffic
-    @account.cevico_page_traffic.where(date: since_date..until_date).where.not(campaign: '')
-            .group(:cevico_page_id, :campaign)
-            .pluck(:cevico_page_id, :campaign, Arel.sql('SUM(views)'), Arel.sql('SUM(cta_clicks)'))
+    traffic_scope.where.not(campaign: '')
+                 .group(:cevico_page_id, :campaign)
+                 .pluck(:cevico_page_id, :campaign, Arel.sql('SUM(views)'), Arel.sql('SUM(cta_clicks)'))
+  end
+
+  def traffic_scope
+    scope = @account.cevico_page_traffic.where(date: since_date..until_date)
+    @page_ids ? scope.where(cevico_page_id: @page_ids) : scope
   end
 
   def add_traffic(by_page) # rubocop:disable Metrics/AbcSize
@@ -170,15 +180,22 @@ class Cevico::TrafficReport # rubocop:disable Metrics/ClassLength
   # ── leads carimbados (Protocolo → page_ads) e a jornada deles ─────────
   # [contato, página, origem, campanha, quando chegou] — página nula = lead do HUB
   def attributed_leads
-    @attributed_leads ||= @account.contacts
-                                  .where("additional_attributes -> 'page_ads' IS NOT NULL")
-                                  .where("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz >= ?", since_date.beginning_of_day)
-                                  .where("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz <= ?", until_date.end_of_day)
-                                  .pluck(:id,
-                                         Arel.sql("(additional_attributes -> 'page_ads' ->> 'page_id')::bigint"),
-                                         Arel.sql("additional_attributes -> 'page_ads' ->> 'source'"),
-                                         Arel.sql("additional_attributes -> 'page_ads' ->> 'campaign'"),
-                                         Arel.sql("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz"))
+    @attributed_leads ||= begin
+      list = all_attributed_leads
+      @page_ids ? list.select { |lead| @page_ids.include?(lead[1]) } : list
+    end
+  end
+
+  def all_attributed_leads
+    @account.contacts
+            .where("additional_attributes -> 'page_ads' IS NOT NULL")
+            .where("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz >= ?", since_date.beginning_of_day)
+            .where("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz <= ?", until_date.end_of_day)
+            .pluck(:id,
+                   Arel.sql("(additional_attributes -> 'page_ads' ->> 'page_id')::bigint"),
+                   Arel.sql("additional_attributes -> 'page_ads' ->> 'source'"),
+                   Arel.sql("additional_attributes -> 'page_ads' ->> 'campaign'"),
+                   Arel.sql("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz"))
   end
 
   def add_leads(by_page)

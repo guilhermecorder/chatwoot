@@ -8,11 +8,14 @@
 //   RESULTADOS  o funil com a taxa de cada etapa (visita → clique → lead →
 //               agendou → cirurgia), a evolução em gráfico de área, as
 //               origens e cada página com as suas taxas;
-//   OTIMIZAR    os diagnósticos automáticos (onde o funil vaza e o que
-//               fazer), as sugestões da IA por página e a COLEÇÃO de insights
-//               que a equipe decidiu guardar — com antes × depois.
+//   OTIMIZAR    o que o GOOGLE mostra (Search Console, 16/10: termos,
+//               aparições, cliques, CTR e posição por página, ao lado do que o
+//               sistema mediu dessas visitas), os diagnósticos automáticos
+//               (onde o funil vaza e o que fazer), as sugestões da IA por
+//               página e a COLEÇÃO de insights — com antes × depois.
 // A conta mora no servidor (Cevico::TrafficReport / PageInsights / InsightLog).
 import { ref, computed, onMounted, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
@@ -27,7 +30,10 @@ import CrmAPI from 'dashboard/api/crm';
 const isLoading = ref(true);
 const data = ref(null);
 const period = ref({ preset: 'month', from: '', to: '' });
-const tab = ref('resultados');
+// ?aba=otimizar abre direto na aba Otimizar (atalho da Análise de Páginas)
+const tab = ref(
+  useRoute().query.aba === 'otimizar' ? 'otimizar' : 'resultados'
+);
 const sourceFilter = ref(''); // '' = todas as origens
 const chartMode = ref('volume');
 const sourcesView = ref('cards');
@@ -41,6 +47,7 @@ const pal = useCevicoPalette({
     { id: 'evolucao', label: 'Evolução', icon: 'i-lucide-activity' },
     { id: 'origens', label: 'Origens', icon: 'i-lucide-git-fork' },
     { id: 'paginas', label: 'Páginas', icon: 'i-lucide-layout-template' },
+    { id: 'google', label: 'No Google', icon: 'i-lucide-search' },
     { id: 'diagnosticos', label: 'Diagnósticos', icon: 'i-lucide-lightbulb' },
     { id: 'ia', label: 'Sugestões da IA', icon: 'i-lucide-sparkles' },
     { id: 'colecao', label: 'Coleção de insights', icon: 'i-lucide-bookmark' },
@@ -367,6 +374,116 @@ const openOptimize = pageId => {
   insightPage.value = pageId || '';
   insightFilter.value = 'todos';
   tab.value = 'otimizar';
+};
+
+// ── no Google (Search Console, 16/10) ───────────────────────────────────
+// A foto é diária e fixa (últimos 28 dias que o Google já fechou), por isso
+// este bloco NÃO segue a régua de período — o texto da tela diz isso.
+const gsc = computed(() => data.value?.search_console || null);
+const gscTotals = computed(() => gsc.value?.totals?.current || null);
+const gscPrev = computed(() => gsc.value?.totals?.previous || null);
+const gscView = ref('list');
+const gscChart = ref('clicks');
+const gscOpen = ref(null);
+const gscTermBand = ref('todos');
+const gscShowOthers = ref(false);
+const isRefreshing = ref(false);
+const fmtPos = v =>
+  v === null || v === undefined
+    ? '—'
+    : String(Math.round(v * 10) / 10).replace('.', ',');
+const fmtCtr = v =>
+  `${String(Math.round((v || 0) * 10) / 10).replace('.', ',')}%`;
+const dateTimeBR = iso => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+};
+// variação de contagem: "▲ 32% vs 28 dias antes (146)"
+const gscDelta = (cur, prev) => {
+  if (prev === null || prev === undefined) return 'sem os 28 dias anteriores';
+  if (!prev) return cur ? 'antes: 0' : 'igual aos 28 dias antes';
+  const diff = Math.round(((cur - prev) / prev) * 100);
+  let arrow = '=';
+  if (diff > 0) arrow = '▲';
+  if (diff < 0) arrow = '▼';
+  return `${arrow} ${Math.abs(diff)}% vs 28 dias antes (${fmtNum(prev)})`;
+};
+// posição: número MENOR é melhor (1 = primeiro resultado)
+const posMove = (cur, prev) => {
+  if (!cur || !prev) return null;
+  const diff = Math.round((prev - cur) * 10) / 10;
+  if (Math.abs(diff) < 0.1) return { text: '=', tone: '' };
+  return diff > 0
+    ? { text: `▲ ${fmtPos(diff)}`, tone: 'text-green-600' }
+    : { text: `▼ ${fmtPos(-diff)}`, tone: 'text-red-600' };
+};
+const posDeltaText = (cur, prev) => {
+  const m = posMove(cur, prev);
+  if (!m) return 'sem os 28 dias anteriores';
+  if (m.text === '=') return `igual aos 28 dias antes (${fmtPos(prev)})`;
+  return `${m.text.startsWith('▲') ? 'subiu' : 'caiu'} ${m.text.slice(2)} · antes ${fmtPos(prev)}`;
+};
+const gscPages = computed(() =>
+  (gsc.value?.pages || []).filter(p => p.page_id)
+);
+const gscOthers = computed(() =>
+  (gsc.value?.pages || []).filter(p => !p.page_id)
+);
+const TERM_BANDS = [
+  ['todos', 'Todos', () => true],
+  ['topo', 'Posição 1 a 7', t => t.position && t.position < 8],
+  ['quase', 'Quase no topo (8 a 20)', t => t.position >= 8 && t.position <= 20],
+  ['longe', 'Depois da 20ª', t => t.position > 20],
+];
+const termBandCount = key => {
+  const test = TERM_BANDS.find(b => b[0] === key)[2];
+  return (gsc.value?.terms || []).filter(test).length;
+};
+const gscTerms = computed(() => {
+  const test = TERM_BANDS.find(b => b[0] === gscTermBand.value)[2];
+  return (gsc.value?.terms || []).filter(test);
+});
+const termLanding = term => {
+  const page = term.page_ids?.length ? pageById(term.page_ids[0]) : null;
+  if (page) return `${page.emoji || '📄'} ${page.title}`;
+  return (term.urls?.[0] || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+};
+const openGscInsights = pageId => {
+  insightPage.value = pageId;
+  insightFilter.value = 'seo';
+};
+const gscInsightsOf = pageId =>
+  insights.value.filter(i => i.page_id === pageId && i.rule.startsWith('gsc'));
+const gscChartSeries = computed(() => {
+  const daily = gsc.value?.daily || [];
+  const clicks = gscChart.value === 'clicks';
+  return [
+    {
+      key: gscChart.value,
+      label: clicks ? 'Cliques no Google' : 'Aparições na busca',
+      color: clicks ? '#16A34A' : '#2563EB',
+      values: daily.map(d => (clicks ? d[1] : d[2])),
+    },
+  ];
+});
+const gscChartLabels = computed(() =>
+  (gsc.value?.daily || []).map(d => `${d[0].slice(8, 10)}/${d[0].slice(5, 7)}`)
+);
+const refreshGsc = async () => {
+  if (isRefreshing.value) return;
+  isRefreshing.value = true;
+  try {
+    await CrmAPI.refreshSearchConsole();
+    useAlert('Pedi a foto nova ao Google. Em 1 minuto ela aparece aqui.');
+    setTimeout(load, 45000);
+  } catch (error) {
+    useAlert(
+      error?.response?.data?.error || 'Não consegui pedir ao Google agora.'
+    );
+  } finally {
+    isRefreshing.value = false;
+  }
 };
 
 // ── coleção de insights ─────────────────────────────────────────────────
@@ -1238,8 +1355,8 @@ const keepAi = sug =>
                 {{ fmtNum(d.booked) }} agendaram ·
                 {{ fmtNum(d.conversions) }} cirurgias
                 <template v-if="d.revenue">
-                  · {{ fmtMoney(d.revenue) }}</template
-                >
+                  · {{ fmtMoney(d.revenue) }}
+                </template>
                 <template v-if="readingOf(page, d)">
                   <br />{{ readingOf(page, d) }}
                 </template>
@@ -1263,6 +1380,627 @@ const keepAi = sug =>
 
       <!-- ════════════════ ABA OTIMIZAR ════════════════ -->
       <template v-else>
+        <!-- ══ 0 · NO GOOGLE (Search Console, 16/10) ══ -->
+        <div
+          v-if="gsc"
+          class="cv-block p-6 sm:p-8 mb-8"
+          :style="blockVars('google')"
+        >
+          <div class="flex items-center gap-3 mb-1 flex-wrap">
+            <span class="cv-icon">
+              <span class="i-lucide-search text-base" />
+            </span>
+            <h2
+              class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12"
+            >
+              No Google
+            </h2>
+            <span v-if="gsc.demo" class="cv-chip cv-amber">
+              <span class="i-lucide-flask-conical text-xs" /> dados de exemplo
+            </span>
+            <button
+              v-if="gsc.configured"
+              class="cv-btn cv-btn-sm cv-btn-ghost sm:ml-auto"
+              :disabled="isRefreshing"
+              title="Pede ao Google uma foto nova agora (ela já se atualiza sozinha toda manhã)"
+              @click="refreshGsc"
+            >
+              <span
+                :class="
+                  isRefreshing
+                    ? 'i-lucide-loader-circle animate-spin'
+                    : 'i-lucide-refresh-cw'
+                "
+                class="text-xs"
+              />
+              Atualizar agora
+            </button>
+          </div>
+
+          <!-- ainda sem foto: ligar ou esperar a primeira -->
+          <template v-if="!gsc.ready">
+            <p class="text-xs text-n-slate-10 mb-5 leading-relaxed">
+              termos buscados, quantas vezes cada página apareceu no Google,
+              quantos clicaram e em que posição ela ficou — direto do Search
+              Console
+            </p>
+            <div class="cv-sub p-5 text-sm text-n-slate-11 leading-relaxed">
+              <template v-if="!gsc.configured">
+                <p class="font-bold text-n-slate-12 mb-1">
+                  O Search Console ainda não está ligado.
+                </p>
+                <p>
+                  Em <b>Integrações → Google</b>, cole a conta de serviço do
+                  Google e adicione o e-mail dela como usuário da propriedade
+                  <b>{{ gsc.site }}</b> no Search Console. O passo a passo está
+                  lá. Depois disso, os números chegam sozinhos toda manhã.
+                </p>
+              </template>
+              <template v-else>
+                <p class="font-bold text-n-slate-12 mb-1">
+                  A primeira foto do Google ainda não chegou.
+                </p>
+                <p>
+                  Toque em <b>Atualizar agora</b> ou espere a rodada de amanhã
+                  cedo.
+                </p>
+              </template>
+              <p
+                v-if="gsc.error"
+                class="cv-strip cv-red mt-3 text-xs text-n-slate-12"
+              >
+                <span
+                  class="i-lucide-alert-triangle text-xs align-middle mr-1"
+                />
+                {{ gsc.error }}
+              </p>
+            </div>
+          </template>
+
+          <template v-else>
+            <p class="text-xs text-n-slate-10 mb-5 leading-relaxed">
+              os 28 dias que o Google já fechou ({{
+                dateBR(gsc.window.since)
+              }}
+              a {{ dateBR(gsc.window.until) }}), comparados aos 28 anteriores ·
+              o Google fecha os números com 2–3 dias de atraso, por isso este
+              bloco não segue a régua de período · foto de
+              {{ dateTimeBR(gsc.fetched_at) }}, atualiza sozinha toda manhã
+            </p>
+            <p
+              v-if="gsc.error"
+              class="cv-strip cv-amber mb-5 text-xs text-n-slate-12"
+            >
+              <span class="i-lucide-alert-triangle text-xs align-middle mr-1" />
+              A última tentativa falhou ({{ dateTimeBR(gsc.error_at) }}):
+              {{ gsc.error }} — os números abaixo são da última foto boa.
+            </p>
+
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <DashKpi
+                compact
+                glass
+                label="Aparições na busca"
+                :value="fmtNum(gscTotals.impressions)"
+                :sub="`vezes que alguma página apareceu · ${gscDelta(gscTotals.impressions, gscPrev?.impressions)}`"
+                :grad="blockFamily('google')[0]"
+              />
+              <DashKpi
+                compact
+                glass
+                label="Cliques no Google"
+                :value="fmtNum(gscTotals.clicks)"
+                :sub="gscDelta(gscTotals.clicks, gscPrev?.clicks)"
+                :grad="blockFamily('google')[1]"
+              />
+              <DashKpi
+                compact
+                glass
+                label="Clicam quando veem (CTR)"
+                :value="fmtCtr(gscTotals.ctr)"
+                :sub="`cliques ÷ aparições · antes: ${gscPrev ? fmtCtr(gscPrev.ctr) : '—'}`"
+                :grad="blockFamily('google')[2]"
+              />
+              <DashKpi
+                compact
+                glass
+                label="Posição média"
+                :value="fmtPos(gscTotals.position)"
+                :sub="`1 = primeiro resultado · ${posDeltaText(gscTotals.position, gscPrev?.position)}`"
+                :grad="blockFamily('google')[3] || blockFamily('google')[0]"
+              />
+            </div>
+            <p class="text-[11px] text-n-slate-9 mt-3 leading-relaxed">
+              Domínio inteiro ({{ gsc.site }}): inclui o site cevico.com.br e as
+              páginas da clinica.cevico.com.br.
+            </p>
+
+            <!-- evolução por dia -->
+            <div class="flex items-center gap-3 mt-7 mb-3 flex-wrap">
+              <p class="text-sm font-bold text-n-slate-12">
+                Dia a dia (56 dias)
+              </p>
+              <div
+                class="cv-seg cv-seg-sm inline-flex items-center gap-0.5 sm:ml-auto"
+              >
+                <button
+                  class="cv-seg-item text-xs font-medium whitespace-nowrap"
+                  :class="gscChart === 'clicks' ? 'cv-seg-on' : ''"
+                  @click="gscChart = 'clicks'"
+                >
+                  Cliques
+                </button>
+                <button
+                  class="cv-seg-item text-xs font-medium whitespace-nowrap"
+                  :class="gscChart === 'impressions' ? 'cv-seg-on' : ''"
+                  @click="gscChart = 'impressions'"
+                >
+                  Aparições
+                </button>
+              </div>
+            </div>
+            <AreaChart
+              v-if="gscChartLabels.length > 1"
+              :series="gscChartSeries"
+              :labels="gscChartLabels"
+              :height="170"
+              :legend="false"
+            />
+
+            <!-- por página -->
+            <div class="flex items-center gap-3 mt-8 mb-1 flex-wrap">
+              <p class="text-sm font-bold text-n-slate-12">Por página</p>
+              <div class="flex items-center gap-1 ml-auto">
+                <button
+                  class="cv-btn cv-btn-sm"
+                  :class="gscView === 'list' ? '' : 'cv-btn-ghost'"
+                  @click="gscView = 'list'"
+                >
+                  <span class="i-lucide-list text-xs" /> Lista
+                </button>
+                <button
+                  class="cv-btn cv-btn-sm"
+                  :class="gscView === 'cards' ? '' : 'cv-btn-ghost'"
+                  @click="gscView = 'cards'"
+                >
+                  <span class="i-lucide-layout-grid text-xs" /> Cards
+                </button>
+              </div>
+            </div>
+            <p class="text-xs text-n-slate-10 mb-4 leading-relaxed">
+              à esquerda o que o Google conta; à direita o que o sistema viu das
+              visitas que vieram do Google orgânico nos mesmos 28 dias · toque
+              na página para ver os termos buscados
+            </p>
+            <p
+              v-if="!gscPages.length"
+              class="text-sm text-n-slate-10 py-6 text-center"
+            >
+              Nenhuma página do sistema apareceu no Google ainda. Página nova
+              leva de alguns dias a algumas semanas para entrar na busca.
+            </p>
+
+            <!-- LISTA -->
+            <div v-else-if="gscView === 'list'" class="space-y-3">
+              <div
+                v-for="p in gscPages"
+                :key="p.url"
+                class="cv-sub overflow-hidden"
+              >
+                <div class="flex items-center gap-3 p-4 flex-wrap">
+                  <button
+                    class="flex items-center gap-3 min-w-0 w-full sm:w-auto sm:flex-1 text-left"
+                    @click="gscOpen = gscOpen === p.url ? null : p.url"
+                  >
+                    <span class="text-2xl flex-shrink-0">{{
+                      p.emoji || '📄'
+                    }}</span>
+                    <span class="min-w-0">
+                      <span
+                        class="block text-sm font-bold text-n-slate-12 leading-snug"
+                      >
+                        {{ p.title }}
+                      </span>
+                      <span class="block text-[11px] text-n-slate-10 break-all">
+                        /{{ p.slug }} · {{ p.terms.length }} termo(s)
+                        <span
+                          :class="
+                            gscOpen === p.url
+                              ? 'i-lucide-chevron-up'
+                              : 'i-lucide-chevron-down'
+                          "
+                          class="text-xs align-middle"
+                        />
+                      </span>
+                    </span>
+                  </button>
+                  <div
+                    class="flex items-center gap-5 flex-shrink-0 text-right flex-wrap"
+                  >
+                    <div>
+                      <p
+                        class="text-base font-bold text-n-slate-12 tabular-nums"
+                      >
+                        {{ fmtNum(p.impressions) }}
+                      </p>
+                      <p class="text-[10px] text-n-slate-10">aparições</p>
+                    </div>
+                    <div>
+                      <p
+                        class="text-base font-bold tabular-nums"
+                        :style="{ color: STEP_COLORS.cta }"
+                      >
+                        {{ fmtNum(p.clicks) }}
+                      </p>
+                      <p class="text-[10px] text-n-slate-10">
+                        cliques · {{ fmtCtr(p.ctr) }}
+                      </p>
+                    </div>
+                    <div>
+                      <p
+                        class="text-base font-bold text-n-slate-12 tabular-nums"
+                      >
+                        {{ fmtPos(p.position) }}
+                        <span
+                          v-if="posMove(p.position, p.previous?.position)"
+                          class="text-[11px] font-semibold"
+                          :class="
+                            posMove(p.position, p.previous?.position).tone
+                          "
+                        >
+                          {{ posMove(p.position, p.previous?.position).text }}
+                        </span>
+                      </p>
+                      <p class="text-[10px] text-n-slate-10">posição</p>
+                    </div>
+                    <span class="hidden md:block w-px h-8 bg-n-weak" />
+                    <div class="hidden sm:block">
+                      <p
+                        class="text-base font-bold tabular-nums"
+                        :style="{ color: STEP_COLORS.views }"
+                      >
+                        {{ fmtNum(p.site.organic.views) }}
+                      </p>
+                      <p class="text-[10px] text-n-slate-10">
+                        visitas do Google
+                      </p>
+                    </div>
+                    <div>
+                      <p
+                        class="text-base font-bold tabular-nums"
+                        :style="{ color: STEP_COLORS.leads }"
+                      >
+                        {{ fmtNum(p.site.organic.leads) }}
+                      </p>
+                      <p class="text-[10px] text-n-slate-10">leads</p>
+                    </div>
+                    <div class="hidden md:block">
+                      <p
+                        class="text-base font-bold tabular-nums"
+                        :style="{ color: STEP_COLORS.conversions }"
+                      >
+                        {{ fmtNum(p.site.organic.conversions) }}
+                      </p>
+                      <p class="text-[10px] text-n-slate-10">cirurgias</p>
+                    </div>
+                  </div>
+                  <button
+                    v-if="gscInsightsOf(p.page_id).length"
+                    class="cv-chip cv-amber flex-shrink-0"
+                    title="Ver o que melhorar no Google para esta página"
+                    @click="openGscInsights(p.page_id)"
+                  >
+                    <span class="i-lucide-lightbulb text-xs" />
+                    {{ gscInsightsOf(p.page_id).length }}
+                  </button>
+                </div>
+
+                <!-- termos buscados da página -->
+                <div
+                  v-if="gscOpen === p.url"
+                  class="border-t border-n-weak px-4 py-4"
+                >
+                  <p class="text-[11px] text-n-slate-10 mb-3">
+                    Do Google orgânico, o sistema viu:
+                    {{ fmtNum(p.site.organic.views) }} visita(s) →
+                    {{ fmtNum(p.site.organic.cta) }} clique(s) no WhatsApp →
+                    {{ fmtNum(p.site.organic.leads) }} lead(s) →
+                    {{ fmtNum(p.site.organic.booked) }} agendaram →
+                    {{ fmtNum(p.site.organic.conversions) }} cirurgia(s).
+                    Visitas de todas as origens nesses 28 dias:
+                    {{ fmtNum(p.site.all.views) }}.
+                  </p>
+                  <p v-if="!p.terms.length" class="text-xs text-n-slate-10">
+                    O Google ainda não mostrou termos desta página (ele esconde
+                    os termos muito raros).
+                  </p>
+                  <div v-else class="overflow-x-auto">
+                    <table class="w-full text-xs min-w-[460px]">
+                      <thead>
+                        <tr
+                          class="text-[10px] uppercase tracking-wide text-n-slate-10 text-left"
+                        >
+                          <th class="py-1.5 pr-3 font-semibold">
+                            Termo buscado
+                          </th>
+                          <th class="py-1.5 px-2 font-semibold text-right">
+                            Aparições
+                          </th>
+                          <th class="py-1.5 px-2 font-semibold text-right">
+                            Cliques
+                          </th>
+                          <th class="py-1.5 px-2 font-semibold text-right">
+                            CTR
+                          </th>
+                          <th class="py-1.5 pl-2 font-semibold text-right">
+                            Posição
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="t in p.terms"
+                          :key="t.query"
+                          class="border-t border-n-weak"
+                        >
+                          <td class="py-1.5 pr-3 text-n-slate-12">
+                            {{ t.query }}
+                          </td>
+                          <td class="py-1.5 px-2 text-right tabular-nums">
+                            {{ fmtNum(t.impressions) }}
+                          </td>
+                          <td class="py-1.5 px-2 text-right tabular-nums">
+                            {{ fmtNum(t.clicks) }}
+                          </td>
+                          <td class="py-1.5 px-2 text-right tabular-nums">
+                            {{ fmtCtr(t.ctr) }}
+                          </td>
+                          <td
+                            class="py-1.5 pl-2 text-right tabular-nums whitespace-nowrap"
+                          >
+                            {{ fmtPos(t.position) }}
+                            <span
+                              v-if="posMove(t.position, t.previous_position)"
+                              class="font-semibold ml-0.5"
+                              :class="
+                                posMove(t.position, t.previous_position).tone
+                              "
+                            >
+                              {{
+                                posMove(t.position, t.previous_position).text
+                              }}
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CARDS -->
+            <div
+              v-else
+              class="grid gap-4 grid-cols-[repeat(auto-fit,minmax(260px,1fr))]"
+            >
+              <div
+                v-for="p in gscPages"
+                :key="p.url"
+                class="cv-sub p-5 flex flex-col"
+              >
+                <p class="text-sm font-bold text-n-slate-12 leading-snug mb-1">
+                  {{ p.emoji || '📄' }} {{ p.title }}
+                </p>
+                <p class="text-[11px] text-n-slate-10 mb-4 break-all">
+                  /{{ p.slug }}
+                </p>
+                <div class="grid grid-cols-2 gap-3 mb-4">
+                  <div>
+                    <p class="text-2xl font-bold text-n-slate-12 tabular-nums">
+                      {{ fmtPos(p.position) }}
+                    </p>
+                    <p class="text-[10px] text-n-slate-10">
+                      posição
+                      <span
+                        v-if="posMove(p.position, p.previous?.position)"
+                        class="font-semibold"
+                        :class="posMove(p.position, p.previous?.position).tone"
+                      >
+                        {{ posMove(p.position, p.previous?.position).text }}
+                      </span>
+                    </p>
+                  </div>
+                  <div>
+                    <p
+                      class="text-2xl font-bold tabular-nums"
+                      :style="{ color: STEP_COLORS.cta }"
+                    >
+                      {{ fmtNum(p.clicks) }}
+                    </p>
+                    <p class="text-[10px] text-n-slate-10">
+                      cliques de {{ fmtNum(p.impressions) }} aparições ({{
+                        fmtCtr(p.ctr)
+                      }})
+                    </p>
+                  </div>
+                </div>
+                <p class="text-[11px] text-n-slate-11 mb-3">
+                  No sistema: {{ fmtNum(p.site.organic.views) }} visita(s) do
+                  Google → {{ fmtNum(p.site.organic.leads) }} lead(s) →
+                  {{ fmtNum(p.site.organic.conversions) }} cirurgia(s)
+                </p>
+                <p
+                  v-if="p.terms.length"
+                  class="text-[11px] text-n-slate-10 flex-1"
+                >
+                  <b class="text-n-slate-12">Mais buscado:</b>
+                  {{
+                    p.terms
+                      .slice(0, 3)
+                      .map(t => t.query)
+                      .join(' · ')
+                  }}
+                </p>
+                <button
+                  v-if="gscInsightsOf(p.page_id).length"
+                  class="cv-chip cv-amber mt-3 self-start"
+                  @click="openGscInsights(p.page_id)"
+                >
+                  <span class="i-lucide-lightbulb text-xs" />
+                  {{ gscInsightsOf(p.page_id).length }} ponto(s) a melhorar no
+                  Google
+                </button>
+              </div>
+            </div>
+
+            <!-- o resto do domínio (site do WordPress, raiz do hub) -->
+            <div v-if="gscOthers.length" class="mt-4">
+              <button
+                class="text-xs text-n-slate-11 hover:text-n-slate-12"
+                @click="gscShowOthers = !gscShowOthers"
+              >
+                <span
+                  :class="
+                    gscShowOthers
+                      ? 'i-lucide-chevron-up'
+                      : 'i-lucide-chevron-down'
+                  "
+                  class="text-xs align-middle"
+                />
+                Outros endereços do domínio ({{ gscOthers.length }}) — site
+                cevico.com.br e raiz
+              </button>
+              <div v-if="gscShowOthers" class="cv-sub mt-2 overflow-x-auto">
+                <table class="w-full text-xs min-w-[460px]">
+                  <tbody>
+                    <tr
+                      v-for="o in gscOthers"
+                      :key="o.url"
+                      class="border-t border-n-weak first:border-t-0"
+                    >
+                      <td class="py-2 px-4 text-n-slate-12 break-all">
+                        {{ o.title }}
+                      </td>
+                      <td class="py-2 px-2 text-right tabular-nums">
+                        {{ fmtNum(o.impressions) }} aparições
+                      </td>
+                      <td class="py-2 px-2 text-right tabular-nums">
+                        {{ fmtNum(o.clicks) }} cliques
+                      </td>
+                      <td
+                        class="py-2 px-4 text-right tabular-nums whitespace-nowrap"
+                      >
+                        posição {{ fmtPos(o.position) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- termos do domínio -->
+            <div class="flex items-center gap-3 mt-8 mb-1 flex-wrap">
+              <p class="text-sm font-bold text-n-slate-12">Termos buscados</p>
+            </div>
+            <p class="text-xs text-n-slate-10 mb-3 leading-relaxed">
+              o que as pessoas digitaram no Google antes de ver uma página do
+              domínio · da 8ª à 20ª posição é onde um reforço de conteúdo mais
+              rende
+            </p>
+            <div class="flex items-center gap-1.5 flex-wrap mb-3">
+              <button
+                v-for="[key, label] in TERM_BANDS"
+                :key="key"
+                class="cv-chip"
+                :class="gscTermBand === key ? 'cv-chip-on' : ''"
+                @click="gscTermBand = key"
+              >
+                {{ label }} <b>{{ termBandCount(key) }}</b>
+              </button>
+            </div>
+            <p
+              v-if="!gscTerms.length"
+              class="text-sm text-n-slate-10 py-4 text-center"
+            >
+              Nenhum termo nesta faixa.
+            </p>
+            <div v-else class="cv-sub overflow-x-auto">
+              <table class="w-full text-xs min-w-[340px] sm:min-w-[560px]">
+                <thead>
+                  <tr
+                    class="text-[10px] uppercase tracking-wide text-n-slate-10 text-left"
+                  >
+                    <th class="py-2 px-4 font-semibold">Termo</th>
+                    <th class="py-2 px-2 font-semibold hidden sm:table-cell">
+                      Cai em
+                    </th>
+                    <th class="py-2 px-2 font-semibold text-right">
+                      Aparições
+                    </th>
+                    <th class="py-2 px-2 font-semibold text-right">Cliques</th>
+                    <th
+                      class="py-2 px-2 font-semibold text-right hidden sm:table-cell"
+                    >
+                      CTR
+                    </th>
+                    <th class="py-2 px-4 font-semibold text-right">Posição</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="t in gscTerms"
+                    :key="t.query"
+                    class="border-t border-n-weak"
+                  >
+                    <td class="py-2 px-4 text-n-slate-12 font-medium">
+                      {{ t.query }}
+                    </td>
+                    <td
+                      class="py-2 px-2 text-n-slate-10 max-w-[220px] truncate hidden sm:table-cell"
+                    >
+                      {{ termLanding(t) }}
+                      <span v-if="t.urls.length > 1" class="text-n-slate-9">
+                        +{{ t.urls.length - 1 }}
+                      </span>
+                    </td>
+                    <td class="py-2 px-2 text-right tabular-nums">
+                      {{ fmtNum(t.impressions) }}
+                    </td>
+                    <td class="py-2 px-2 text-right tabular-nums">
+                      {{ fmtNum(t.clicks) }}
+                    </td>
+                    <td
+                      class="py-2 px-2 text-right tabular-nums hidden sm:table-cell"
+                    >
+                      {{ fmtCtr(t.ctr) }}
+                    </td>
+                    <td
+                      class="py-2 px-4 text-right tabular-nums whitespace-nowrap"
+                    >
+                      {{ fmtPos(t.position) }}
+                      <span
+                        v-if="posMove(t.position, t.previous_position)"
+                        class="font-semibold ml-0.5"
+                        :class="posMove(t.position, t.previous_position).tone"
+                      >
+                        {{ posMove(t.position, t.previous_position).text }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="text-[11px] text-n-slate-9 mt-3 leading-relaxed">
+              Os diagnósticos do Google (título que não convence, página quase
+              no topo, termo sem página própria) aparecem logo abaixo, no filtro
+              <b>Google (SEO)</b>. O Google conta o clique; o sistema conta a
+              visita que abriu a página — a diferença é quem fechou antes de
+              carregar.
+            </p>
+          </template>
+        </div>
+
         <!-- ══ 1 · DIAGNÓSTICOS ══ -->
         <div
           class="cv-block p-6 sm:p-8 mb-8"
@@ -1370,6 +2108,7 @@ const keepAi = sug =>
                   <span class="i-lucide-bookmark-plus text-xs" /> Guardar
                 </button>
                 <button
+                  v-if="i.page_id"
                   class="cv-btn cv-btn-sm cv-btn-ghost"
                   title="Copia o que fazer e abre o ambiente de montagem da página"
                   @click="openBuilder(i.page_id, i.suggestion)"
@@ -1378,6 +2117,7 @@ const keepAi = sug =>
                   montagem
                 </button>
                 <button
+                  v-if="i.page_id"
                   class="cv-btn cv-btn-sm cv-btn-ghost"
                   @click="openPublic(i.page_id)"
                 >

@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
 
 // inline: renderiza como PÁGINA em vez de modal flutuante
 // only: mostra só uma seção ('n8n' | 'meta' | 'google' | 'ai') — usado
@@ -163,11 +164,14 @@ const testSheets = async () => {
 // ga4_property_id + service_account_json (item 155): a LEITURA (cliques,
 // custo, palavras-chave, investimento automático) usa a GA4 Data API —
 // esses 2 campos só existiam na tela antiga e o aviso apontava pra cá
-const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '', ga4_property_id: '', service_account_json: '' });
+const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '', ga4_property_id: '', service_account_json: '', search_console_site: '' });
 const isGoogleSaving = ref(false);
 const isGoogleTesting = ref(false);
 const googleTestResult = ref(null);
 const showGoogleRequirements = ref(false);
+// 🔎 16/10: Search Console (mesma conta de serviço; teste à parte)
+const isGscTesting = ref(false);
+const gscTestResult = ref(null);
 
 onMounted(async () => {
   await store.dispatch('crm/fetchSettings');
@@ -208,6 +212,7 @@ onMounted(async () => {
     customer_id: g.customer_id || '',
     ga4_property_id: g.ga4_property_id || '',
     service_account_json: '', // write-only, nunca volta do servidor
+    search_console_site: g.search_console_site || 'sc-domain:cevico.com.br',
   };
 
   sheets.value = { sheet_url: settings.value.sheets?.sheet_url || '' };
@@ -364,6 +369,7 @@ const saveGoogle = async () => {
     payload.customer_id = google.value.customer_id.trim();
     payload.ga4_property_id = google.value.ga4_property_id.trim();
     if (google.value.service_account_json.trim()) payload.service_account_json = google.value.service_account_json.trim();
+    payload.search_console_site = google.value.search_console_site.trim();
     await store.dispatch('crm/updateGoogleAds', payload);
     google.value.api_secret = '';
     google.value.developer_token = '';
@@ -388,6 +394,30 @@ const testGoogle = async () => {
     googleTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
   } finally {
     isGoogleTesting.value = false;
+  }
+};
+
+const testSearchConsole = async () => {
+  isGscTesting.value = true;
+  gscTestResult.value = null;
+  try {
+    const { data } = await CrmAPI.testSearchConsole();
+    gscTestResult.value = data.success
+      ? { success: true, message: `${data.message} A primeira foto dos 28 dias já foi pedida — em 1 minuto aparece em Resultados de tráfego → Otimizar.` }
+      : { success: false, message: data.error || 'O Google não respondeu.' };
+  } catch {
+    gscTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
+  } finally {
+    isGscTesting.value = false;
+  }
+};
+
+const copyGscEmail = async () => {
+  try {
+    await copyTextToClipboard(googleStatus.value.service_account_email || '');
+    useAlert('E-mail copiado.');
+  } catch {
+    useAlert('Copie o e-mail à mão.');
   }
 };
 
@@ -900,6 +930,62 @@ const fetchWorkflows = async () => {
                   :placeholder="googleStatus.service_account_set ? 'Cole para substituir' : 'Cole o conteúdo do arquivo .json inteiro'"
                 />
               </div>
+            </div>
+          </div>
+
+          <!-- 🔎 SEARCH CONSOLE (16/10): termos, aparições, cliques e posição das
+               páginas no Google → Resultados de tráfego → Otimizar. Usa a MESMA
+               conta de serviço do bloco acima; o e-mail dela entra como usuário
+               da propriedade no Search Console. -->
+          <div class="mt-3 rounded-xl border border-n-weak bg-n-alpha-1 p-3 space-y-3">
+            <p class="text-xs font-medium text-n-slate-12">
+              🔎 Search Console (posição no Google)
+              <span v-if="googleStatus.search_console_fetched_at && !googleStatus.search_console_error" class="text-green-600 font-normal">· conectado ✓</span>
+              <span v-else-if="googleStatus.search_console_error" class="text-red-600 font-normal">· {{ googleStatus.search_console_error }}</span>
+              <span v-else class="text-amber-600 font-normal">· falta ligar — é o que mostra termos buscados, cliques e posição de cada página</span>
+            </p>
+            <div class="text-[11px] text-n-slate-10 leading-relaxed space-y-0.5">
+              <p><b>1.</b> Precisa do JSON da conta de serviço colado acima (se já colou para o GA4, é o mesmo).</p>
+              <p><b>2.</b> console.cloud.google.com → no mesmo projeto → APIs e serviços → Biblioteca → ative <b>"Google Search Console API"</b>.</p>
+              <p><b>3.</b> search.google.com/search-console → propriedade <b>cevico.com.br</b> → Configurações → <b>Usuários e permissões</b> → Adicionar usuário → cole o e-mail abaixo → permissão <b>Restrito</b> (só leitura).</p>
+              <p><b>4.</b> Salvar e <b>Testar Search Console</b>. Daí em diante a foto chega sozinha toda manhã.</p>
+            </div>
+            <div v-if="googleStatus.service_account_email" class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] text-n-slate-11">E-mail da conta de serviço:</span>
+              <code class="text-[11px] px-2 py-1 rounded bg-n-solid-2 border border-n-weak text-n-slate-12 break-all">{{ googleStatus.service_account_email }}</code>
+              <button class="text-[11px] text-n-brand hover:underline" @click="copyGscEmail">copiar</button>
+            </div>
+            <div class="grid grid-cols-2 gap-3 items-end">
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Propriedade do Search Console</label>
+                <input
+                  v-model="google.search_console_site"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                  placeholder="sc-domain:cevico.com.br"
+                />
+              </div>
+              <button
+                class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+                :disabled="isGscTesting || !googleStatus.service_account_set"
+                :title="googleStatus.service_account_set ? 'Faz uma pergunta pequena ao Google (salve antes se mudou algo)' : 'Cole e salve o JSON da conta de serviço primeiro'"
+                @click="testSearchConsole"
+              >
+                <span :class="isGscTesting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-search'" class="text-sm" />
+                {{ isGscTesting ? 'Testando...' : 'Testar Search Console' }}
+              </button>
+            </div>
+            <div
+              v-if="gscTestResult"
+              class="flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs"
+              :class="gscTestResult.success
+                ? 'bg-green-500/10 text-green-700 border border-green-500/20'
+                : 'bg-red-500/10 text-red-700 border border-red-500/20'"
+            >
+              <span
+                class="text-sm flex-shrink-0 mt-0.5"
+                :class="gscTestResult.success ? 'i-lucide-check-circle' : 'i-lucide-alert-circle'"
+              />
+              {{ gscTestResult.message }}
             </div>
           </div>
 

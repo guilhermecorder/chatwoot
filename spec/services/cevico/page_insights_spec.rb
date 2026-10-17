@@ -92,4 +92,57 @@ RSpec.describe Cevico::PageInsights do
     expect(list.find { |i| i[:rule] == 'campea' }).to include(page_id: 1, level: 'oportunidade')
     expect(list.first[:level]).to eq('alerta')
   end
+
+  # 🔎 16/10: Search Console (o que acontece ANTES da visita)
+  describe 'Search Console' do
+    def gsc_page(page_id, impressions, clicks, position, terms = [])
+      { page_id: page_id, url: "https://clinica.cevico.com.br/p#{page_id}", impressions: impressions, clicks: clicks,
+        ctr: (clicks * 100.0 / impressions).round(2), position: position, terms: terms }
+    end
+
+    def term(query, clicks, impressions, position, page_ids: [], urls: ['https://www.cevico.com.br/x/']) # rubocop:disable Metrics/ParameterLists
+      { query: query, clicks: clicks, impressions: impressions, position: position, page_ids: page_ids, urls: urls }
+    end
+
+    def gsc(pages, terms = [])
+      { ready: true, pages: pages, terms: terms, totals: { 'current' => { 'clicks' => 50, 'impressions' => 2000 } } }
+    end
+
+    def gsc_rules(rows, search_console)
+      described_class.new(rows: rows, totals: totals_of(rows), search_console: search_console).call
+    end
+
+    let(:pages) { [row(page_id: 1), row(page_id: 2, title: 'PRK', slug: 'prk', seo: { title: 'PRK', description: 'a' * 100, keywords: [] })] }
+
+    it 'aparece muito e ninguém clica (só na 1ª página do Google), com o termo mais buscado na evidência' do
+      low = gsc_page(1, 2400, 14, 6.4, [{ query: 'cirurgia de catarata', impressions: 900, position: 6.0 }])
+      list = gsc_rules(pages, gsc([low, gsc_page(2, 1200, 60, 4.0)]))
+      found = list.find { |i| i[:rule] == 'gsc_ctr_baixo' }
+
+      expect(found).to include(page_id: 1, level: 'seo')
+      expect(found[:evidence]).to include('2400 aparições', '"cirurgia de catarata" (900)')
+      expect(found[:gain]).to start_with('+')
+      expect(list.pluck(:rule)).not_to include('gsc_quase_topo')
+    end
+
+    it 'posição 8 a 20 com volume vira "quase na 1ª página"; abaixo do volume mínimo, silêncio' do
+      near = gsc_page(2, 420, 5, 12.3, [{ query: 'prk ou lasik', impressions: 160, position: 11.4 }])
+
+      expect(gsc_rules(pages, gsc([near])).find { |i| i[:rule] == 'gsc_quase_topo' }).to include(page_id: 2)
+      expect(gsc_rules(pages, gsc([gsc_page(2, 12, 0, 12.0)])).pluck(:rule)).not_to include('gsc_quase_topo')
+    end
+
+    it 'termo com clique sem página dona sugere página nova; marca e termo de página existente, não' do
+      terms = [term('ceratocone tratamento', 8, 240, 10.1), term('cevico', 96, 500, 1.2),
+               term('catarata recuperação', 9, 270, 5.2, page_ids: [1]), term('miopia grau', 1, 50, 9.0)]
+      found = gsc_rules(pages, gsc([], terms)).select { |i| i[:rule] == 'gsc_termo_sem_pagina' }
+
+      expect(found.size).to eq(1)
+      expect(found.first).to include(page_id: nil, title: '"ceratocone tratamento" traz clique e não tem página própria')
+    end
+
+    it 'sem foto do Search Console, nenhum diagnóstico do Google' do
+      expect(gsc_rules(pages, { ready: false }).pluck(:rule).grep(/gsc/)).to be_empty
+    end
+  end
 end

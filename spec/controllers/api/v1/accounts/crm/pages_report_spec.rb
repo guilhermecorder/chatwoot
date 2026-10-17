@@ -64,6 +64,24 @@ RSpec.describe 'CEVICO Resultados de tráfego', type: :request do
     expect(body['pages'].first['builder_url']).to include('?edit=')
   end
 
+  # 16/10: Análise de Páginas filtra por categoria/palavra-chave mandando os ids
+  it 'filtra por páginas (page_ids) no período e no anterior; sem foto do Google, search_console não pronto', :aggregate_failures do
+    other = CevicoPage.create!(account: account, title: 'Refrativa', slug: 'refrativa-teste', status: 'published', category: 'captacao')
+    traffic(today, 'direto', 30, 3)
+    traffic(today - 8, 'direto', 10, 1)
+    CevicoPageTraffic.create!(account: account, cevico_page: other, date: today, source: 'meta_ads', views: 70, cta_clicks: 7)
+    lead('direto')
+
+    all = report
+    expect(all['totals']).to include('views' => 100, 'leads' => 1)
+
+    only = report(preset: 'last7', page_ids: [other.id])
+    expect(only['totals']).to include('views' => 70, 'cta' => 7, 'leads' => 0)
+    expect(only['previous']['totals']).to include('views' => 0)
+    expect(only['rows'].pluck('page_id')).to eq([other.id])
+    expect(only['search_console']).to include('ready' => false, 'site' => 'sc-domain:cevico.com.br')
+  end
+
   it 'períodos longos viram série por semana' do
     traffic(today, 'direto', 5, 1)
     expect(report(preset: 'last90')['series']['granularity']).to eq('week')

@@ -143,6 +143,7 @@ namespace :crm do
     post :copywriter_content
     post :update_google_ads
     post :test_google_ads
+    post :test_search_console
     post :update_sheets
     post :test_sheets
     # OftalmoFácil: conexão nativa (endereço + chave)
@@ -242,6 +243,8 @@ namespace :crm do
     post :save_insight
     post :remove_insight
     post :ai_suggestions
+    # 16/10: foto nova do Search Console agora (botão "Atualizar agora")
+    post :search_console_refresh
   end
   # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
   resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do

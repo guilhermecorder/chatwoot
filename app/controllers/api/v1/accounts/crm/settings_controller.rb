@@ -12,7 +12,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   REPORT_PALETTE_SCOPES = %w[report:crm report:campanhas report:funil report:medicos report:agentes
                              report:agenda report:meta report:google report:whatsapp report:etiquetas
                              report:criativos crm:chamadas crm:jornada crm:paginas crm:formularios crm:tarefas
-                             crm:agendamentos crm:oftalmofacil].freeze
+                             crm:agendamentos crm:oftalmofacil report:paginas].freeze
 
   # integração/config sensível = admin (ou área concedida). A leitura (show)
   # continua aberta à equipe, mas desde a Rodada 2 da auditoria (12/10) o JSON
@@ -36,7 +36,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
-    update_google_ads test_google_ads update_sheets test_sheets
+    update_google_ads test_google_ads test_search_console update_sheets test_sheets
     update_oftalmofacil test_oftalmofacil sync_oftalmofacil
     update_calls enable_calls_at_meta calls_meta_status
     update_voice test_voice sync_voice voice_whatsapp_accounts voice_voices voice_state
@@ -468,6 +468,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def apply_google_cost_config(cfg)
     cfg['ga4_property_id'] = params[:ga4_property_id].to_s.gsub(/\D/, '') if params.key?(:ga4_property_id)
     cfg['service_account_json'] = params[:service_account_json] if params[:service_account_json].present?
+    # 🔎 16/10: propriedade do Search Console (mesma conta de serviço)
+    cfg['search_console_site'] = params[:search_console_site].to_s.strip if params.key?(:search_console_site)
   end
 
   # ── IA (análise de conversas — Anthropic) ──────────────────────────────────
@@ -775,6 +777,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # gasto dos últimos 7 dias pela API de dados do GA4
     cost_service = Crm::GoogleAdCostService.new(account: Current.account, since_date: 7.days.ago.to_date)
     result[:cost_test] = cost_service.call if cost_service.configured?
+    render json: result
+  end
+
+  # 🔎 16/10: testa o Search Console (1 pergunta pequena, nada gravado) e,
+  # se respondeu, já pede a primeira foto dos 28 dias
+  def test_search_console
+    result = Cevico::SearchConsole.new(Current.account).test
+    Crm::SearchConsoleSyncJob.perform_later(Current.account.id) if result[:success]
     render json: result
   end
 
@@ -2790,7 +2800,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
   end
 
-  def google_ads_json(s)
+  def google_ads_json(s) # rubocop:disable Metrics/AbcSize
     cfg = s.google_ads_config || {}
     {
       measurement_id: cfg['measurement_id'],
@@ -2802,7 +2812,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       insights_configured: cfg['developer_token'].present? && cfg['customer_id'].present?,
       ga4_property_id: cfg['ga4_property_id'],
       service_account_set: cfg['service_account_json'].present?,
-      cost_configured: cfg['ga4_property_id'].present? && cfg['service_account_json'].present?
+      cost_configured: cfg['ga4_property_id'].present? && cfg['service_account_json'].present?,
+      # 🔎 Search Console: o e-mail da conta de serviço é o que se adiciona lá
+      service_account_email: Cevico::GoogleServiceAccount.email(cfg['service_account_json']),
+      search_console_site: cfg['search_console_site'].presence || Cevico::SearchConsole::DEFAULT_SITE,
+      search_console_fetched_at: (cfg.dig('search_console_cache', 'fetched_at') unless cfg.dig('search_console_cache', 'demo')),
+      search_console_error: cfg.dig('search_console_cache', 'error')
     }
   end
 

@@ -14,12 +14,16 @@
 #   origem_destaque      uma origem converte bem mais do que a média da página
 #   sem_visita           publicada e sem visita no período
 #   seo_*                título / descrição / palavras-chave / sem Google orgânico
+#   gsc_*                do Search Console (16/10): aparece muito e ninguém clica
+#                        (título/descrição), quase na 1ª página (posição 8–20 →
+#                        reforçar conteúdo e links), termo que traz clique e não
+#                        tem página própria (sugerir página nova)
 #   campea               a página que mais converte (modelo para as outras)
 #
 # A régua de comparação é a MÉDIA DAS PRÓPRIAS PÁGINAS no período — nunca um
 # número de mercado inventado. E só fala quando há volume mínimo (abaixo disso
 # é ruído): MIN_VIEWS visitas, MIN_CLICKS cliques, MIN_LEADS leads.
-class Cevico::PageInsights
+class Cevico::PageInsights # rubocop:disable Metrics/ClassLength
   MIN_VIEWS = 30
   MIN_CLICKS = 8
   MIN_LEADS = 5
@@ -28,15 +32,26 @@ class Cevico::PageInsights
   LEVELS = { 'alerta' => 300, 'atencao' => 200, 'oportunidade' => 100, 'seo' => 50 }.freeze
   TITLE_MAX = 60
   DESCRIPTION_RANGE = (70..160)
+  # Search Console: volume mínimo (abaixo disso o Google ainda está "testando" a página)
+  MIN_IMPRESSIONS = 100
+  MIN_IMPRESSIONS_NEAR = 30
+  MIN_TERM_CLICKS = 3
+  NEAR_TOP = (8.0..20.0)
+  # palavras que não dizem o assunto da busca (ficam fora da conta de "tem página própria?")
+  STOPWORDS = %w[a o e de da do das dos em no na nos nas um uma para pra por com sem que qual quais quanto
+                 quanta como onde quando se ou ao aos sp sao paulo the].to_set.freeze
+  BRAND = /cevico/i
 
-  def initialize(rows:, totals:)
+  def initialize(rows:, totals:, search_console: nil)
     @rows = rows
     @totals = totals
+    @gsc = search_console&.dig(:ready) ? search_console : nil
   end
 
   def call
     list = @rows.flat_map { |row| page_insights(row) }
     list << champion
+    list.concat(search_console_insights) if @gsc
     list.compact.sort_by { |insight| -insight[:weight] }
   end
 
@@ -201,6 +216,116 @@ class Cevico::PageInsights
           "As #{row[:views]} visitas do período vieram de anúncio, link direto ou funil — nenhuma da busca gratuita.",
           'Revise título, descrição e palavras-chave e publique conteúdo que responda à dúvida do paciente; ' \
           'o resultado da busca gratuita leva semanas.')
+  end
+
+  # ── Search Console (o que acontece ANTES da visita) ───────────────────
+  def search_console_insights
+    gsc_pages = @gsc[:pages].select { |p| p[:page_id] && rows_by_id[p[:page_id]] }
+    gsc_pages.flat_map { |p| [gsc_ctr_rule(p), gsc_near_top_rule(p)] } + gsc_orphan_terms
+  end
+
+  def rows_by_id
+    @rows_by_id ||= @rows.select { |row| row[:page_id] }.index_by { |row| row[:page_id] }
+  end
+
+  # régua do CTR: as próprias páginas que já estão na 1ª página do Google
+  # (posição ≤ 10); com menos de 2 delas, o domínio inteiro
+  def avg_ctr # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    @avg_ctr ||= begin
+      top = @gsc[:pages].select { |p| p[:page_id] && p[:position].to_f.between?(0.1, 10) && p[:impressions] >= MIN_IMPRESSIONS }
+      clicks, impressions = if top.size >= 2
+                              [top.sum { |p| p[:clicks] }, top.sum { |p| p[:impressions] }]
+                            else
+                              [@gsc.dig(:totals, 'current', 'clicks').to_i, @gsc.dig(:totals, 'current', 'impressions').to_i]
+                            end
+      rate(clicks, impressions)
+    end
+  end
+
+  def gsc_ctr_rule(gsc_page) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    row = rows_by_id[gsc_page[:page_id]]
+    ctr = gsc_page[:ctr].to_f
+    position = gsc_page[:position].to_f
+    # só na 1ª página (posição ≤ 10): mais para baixo o CTR é baixo mesmo — quem cuida é o gsc_quase_topo
+    return unless gsc_page[:impressions] >= MIN_IMPRESSIONS && position <= 10 && avg_ctr.positive? && ctr < avg_ctr * BELOW
+
+    top = gsc_page[:terms].first(3).map { |t| "\"#{t[:query]}\" (#{t[:impressions]})" }.join(', ')
+    title = row.dig(:seo, :title).presence || row[:title]
+    gain = ((avg_ctr - ctr) / 100.0 * gsc_page[:impressions]).round
+    build(row, 'gsc_ctr_baixo', 'seo', 'Aparece muito no Google e pouca gente clica',
+          "#{gsc_page[:impressions]} aparições na busca e #{gsc_page[:clicks]} clique(s) (CTR #{pct(ctr)}, posição média " \
+          "#{num(position)}). A média das suas páginas é #{pct(avg_ctr)}. Buscas que mais mostram a página: #{top.presence || '—'}.",
+          "O título e a descrição são o \"anúncio\" gratuito no Google. Hoje o título é \"#{title}\". Reescreva " \
+          'começando pelo termo mais buscado, diga o que a pessoa encontra (resposta, tempo, segurança) e ' \
+          'termine a descrição com um convite. Depois de publicar, o Google leva de 1 a 3 semanas para mostrar o novo texto.',
+          gain: gain.positive? ? "+#{gain} visita(s) do Google em 28 dias se chegasse na média" : nil, bonus: gain)
+  end
+
+  def gsc_near_top_rule(gsc_page) # rubocop:disable Metrics/AbcSize
+    row = rows_by_id[gsc_page[:page_id]]
+    position = gsc_page[:position].to_f
+    return unless NEAR_TOP.cover?(position) && gsc_page[:impressions] >= MIN_IMPRESSIONS_NEAR
+
+    near = gsc_page[:terms].select { |t| NEAR_TOP.cover?(t[:position].to_f) }.first(3)
+                           .map { |t| "\"#{t[:query]}\" (posição #{num(t[:position])})" }.join(', ')
+    build(row, 'gsc_quase_topo', 'seo', "Quase na 1ª página do Google (posição #{num(position)})",
+          "Posição média #{num(position)} com #{gsc_page[:impressions]} aparições em 28 dias — da 8ª à 20ª posição quase " \
+          "ninguém clica; subindo algumas casas, os cliques multiplicam. Buscas perto do topo: #{near.presence || '—'}.",
+          'Reforce o conteúdo para essas buscas: um subtítulo que repete o termo e responde direto, uma pergunta ' \
+          'no FAQ, um parágrafo com o que só a CEVICO mostra (exame, equipe, estrutura). E ponha links para esta ' \
+          'página nas páginas irmãs ("Leia também") e no site cevico.com.br, com o termo no texto do link.',
+          bonus: gsc_page[:impressions] / 10)
+  end
+
+  # termo que já traz clique e nenhuma página do sistema é "dona" do assunto
+  def gsc_orphan_terms
+    @gsc[:terms].filter_map do |term|
+      next if term[:clicks] < MIN_TERM_CLICKS || term[:query].match?(BRAND)
+      next if term_owner(term[:query], Array(term[:page_ids]))
+
+      landing = term[:urls].first.to_s.sub(%r{\Ahttps?://}, '')
+      build({ page_id: nil, title: 'Página nova', slug: '', emoji: '➕' }, "gsc_termo_sem_pagina:#{term[:query]}", 'seo',
+            "\"#{term[:query]}\" traz clique e não tem página própria",
+            "#{term[:clicks]} clique(s) e #{term[:impressions]} aparições em 28 dias (posição #{num(term[:position])}). " \
+            "Nenhuma página do sistema é sobre esse assunto; hoje a busca cai em #{landing.presence || 'outro endereço do domínio'}.",
+            'Vale uma página que responda exatamente a essa busca, com o termo no título, e o botão levando para a ' \
+            'página de venda. Antes, confira se ela não disputaria a mesma busca com a /refrativa ou com outra ' \
+            'página — nesse caso, vira uma seção da página que já existe.',
+            bonus: term[:clicks])
+    end
+  end
+
+  # a página "dona" de um termo: 2/3 das palavras do termo estão no endereço,
+  # no título ou nas palavras-chave dela. Se a busca JÁ cai numa página do
+  # sistema, basta metade (ex.: "catarata recuperação" na página de catarata
+  # é reforço de conteúdo dela, não página nova)
+  def term_owner(query, landing_ids = [])
+    words = words_of(query)
+    return true if words.empty?
+
+    @rows.find do |row|
+      next unless row[:page_id] && row[:status] == 'published'
+
+      share = landing_ids.include?(row[:page_id]) ? 0.5 : 2 / 3.0
+      text = page_words(row)
+      words.count { |w| text.include?(w) } >= (words.size * share).ceil
+    end
+  end
+
+  def page_words(row)
+    @page_words ||= {}
+    @page_words[row[:page_id]] ||= words_of([row[:slug].to_s.tr('-', ' '), row[:title], row.dig(:seo, :title),
+                                             Array(row.dig(:seo, :keywords)).join(' ')].join(' ')).to_set
+  end
+
+  def words_of(text)
+    I18n.transliterate(text.to_s.downcase).split(/[^a-z0-9]+/)
+        .reject { |w| w.size < 3 || STOPWORDS.include?(w) }
+        .map { |w| w.length > 4 ? w.delete_suffix('s') : w }
+  end
+
+  def num(value)
+    value.to_f.round(1).to_s.delete_suffix('.0').tr('.', ',')
   end
 
   # ── a página campeã (oportunidade) ────────────────────────────────────
