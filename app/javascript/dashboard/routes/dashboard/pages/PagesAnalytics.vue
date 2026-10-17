@@ -870,7 +870,7 @@ const loosePages = computed(() => {
 
 <template>
   <div
-    class="cv-page cv-overlay cvg-page cvg-pa w-full min-w-0"
+    class="cv-page cv-overlay cvg-page cvg-pa h-full w-full min-w-0 overflow-y-auto"
     :style="cvVars"
   >
     <CvCabecalho

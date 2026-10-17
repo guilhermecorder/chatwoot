@@ -612,8 +612,12 @@ const keepAi = sug =>
 </script>
 
 <template>
-  <!-- w-full + min-w-0: a página nunca estica além da tela (no celular quem rola para o lado é a régua, não a página) -->
-  <div class="cv-page cv-overlay w-full min-w-0" :style="cvVars">
+  <!-- w-full + min-w-0: a página nunca estica além da tela (no celular quem rola para o lado é a régua, não a página);
+       h-full + overflow-y-auto: a própria tela rola até o fim (o layout prende a altura) -->
+  <div
+    class="cv-page cv-overlay h-full w-full min-w-0 overflow-y-auto"
+    :style="cvVars"
+  >
     <CevicoHero
       :pal="pal"
       title="Resultados de tráfego"
