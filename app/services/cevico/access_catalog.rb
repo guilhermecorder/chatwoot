@@ -176,6 +176,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/ads_reports' => { node: 'relatorios.anuncios', view: %w[show backfill] },
     'crm/google_dashboards' => { node: 'relatorios.google', view: %w[show] },
     'crm/whatsapp_spends' => { node: 'relatorios.gasto_whatsapp', view: %w[show rates] },
+    'crm/whatsapp_healths' => { node: 'relatorios.whatsapp_saude', view: %w[show] },
     'crm/acquisition_costs' => { node: 'financeiro.cac', view: %w[show] },
     # ── Automações ──
     'crm/automations' => { node: 'automacoes.robos', view: %w[index] },

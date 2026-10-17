@@ -925,6 +925,11 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
                                        .map { |l| l.to_s.strip.downcase }.reject(&:blank?)
   end
 
+  def signal_stop_labels(account)
+    @signal_stop_labels_cache ||= {}
+    @signal_stop_labels_cache[account.id] ||= Crm::StopSignals.robot_stop_labels(account)
+  end
+
   def paused_for_patient?(conversation)
     conversation.contact&.additional_attributes&.[]('cevico_followup_paused').present?
   end
@@ -935,6 +940,8 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     return false if labels.empty?
     return true if labels.intersect?(STOP_LABELS_FIXED)
     return true if labels.any? { |l| STOP_LABEL_PREFIXES.any? { |p| l.start_with?(p) } }
+    # 🚦 Saúde do WhatsApp (16/10): sinais de quem não quer receber com a chavinha "robôs param" ligada
+    return true if labels.intersect?(signal_stop_labels(account))
 
     labels.intersect?(stop_labels(account))
   end

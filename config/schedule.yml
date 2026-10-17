@@ -239,6 +239,14 @@ crm_whatsapp_pricing_sync_job:
   class: 'Crm::WhatsappPricingSyncJob'
   queue: low
 
+# 🚦 Saúde do WhatsApp (16/10): de hora em hora — anota quando a nota da Meta
+# de cada número muda + varredura da suspeita de bloqueio (mensagens só em
+# "enviado" há 48h+ de quem já recebia)
+crm_whatsapp_health_job:
+  cron: '25 * * * *'
+  class: 'Crm::WhatsappHealthJob'
+  queue: low
+
 # 🚨 Vigia dos robôs (auditoria 10/2026, achado #217): a cada 10 min confere o
 # sinal de vida dos robôs CEVICO (lembretes, NPS, jornada, resgate, OftalmoFácil,
 # Colheitadeira, follow-up, discador) e avisa o administrador (Radar + tarefa 🔴

@@ -230,8 +230,8 @@
       default: inherit
     - key: whatsapp_saude
       label: Saúde do WhatsApp
-      hint: qualidade e limites de cada número
-      levels: [view]
+      hint: qualidade dos números e modelos + quem não quer mais receber
+      levels: [view, edit]
       default: inherit
     - key: gasto_whatsapp
       label: Gasto do WhatsApp

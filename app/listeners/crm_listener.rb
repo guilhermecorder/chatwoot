@@ -168,10 +168,13 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   RECHECK_THROTTLE = 10.minutes
 
   # 🛑 "PARE / SAIR / não quero mais": opt-out automático (conformidade 20/09)
+  # 🚦 16/10: mensagem inteira = nao_perturbe (certo); no meio da frase =
+  # suspeita_nao_quer; quem escreve deixa de ser suspeita de bloqueio
   def handle_opt_out(message, contact)
-    return unless message.incoming? && Crm::OptOut.opt_out_message?(message.content)
+    return unless message.incoming?
 
-    Crm::OptOut.apply!(contact, conversation: message.conversation)
+    Crm::StopSignals.on_incoming(message, contact)
+    Crm::OptOut.handle_incoming!(message, contact)
   end
 
   # ── ÂNCORAS DE AGENDAMENTO (item 200, 22/09) ──

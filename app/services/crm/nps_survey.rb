@@ -431,7 +431,7 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
       Crm::PartnerGuard.block!("pesquisa NPS (cirurgia #{task.id})", contact: contact)
       return 'paciente de parceiro (cerca)'
     end
-    return 'pediu para não receber mensagens' if contact.label_list.any? { |l| QUIET_LABELS.include?(l) || l.start_with?('perda_') }
+    return 'pediu para não receber mensagens' if quiet_contact?(contact)
 
     survey = (contact.additional_attributes || {})[MARK_KEY] || {}
     return ALREADY_SENT if Array(survey['task_ids']).include?(task.id)
@@ -488,9 +488,15 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
   end
 
   # o paciente já escreveu algo depois da pesquisa (a conversa seguiu) ou pediu silêncio?
+  # nao_perturbe / perda_* + sinais de quem não quer receber com a chavinha ligada (16/10)
+  def quiet_contact?(contact)
+    quiet = QUIET_LABELS + Crm::StopSignals.robot_stop_labels(contact.account)
+    contact.label_list.any? { |l| quiet.include?(l) || l.start_with?('perda_') }
+  end
+
   def reminder_blocked?(contact, since)
     return true if contact.phone_number.blank?
-    return true if contact.label_list.any? { |l| QUIET_LABELS.include?(l) || l.start_with?('perda_') }
+    return true if quiet_contact?(contact)
     return true if Crm::PartnerGuard.partner_contact?(contact)
 
     Message.joins(:conversation).where(conversations: { contact_id: contact.id })

@@ -52,6 +52,7 @@ class Whatsapp::Providers::BaseService
     message.external_error = error_message
     message.status = :failed
     message.save!
+    Crm::StopSignals.on_status_change(message) # 🚦 recusa 131050 = parou o marketing
   end
 
   # WhatsApp coexistence / username migration: a contact may become addressable only by a Business-Scoped

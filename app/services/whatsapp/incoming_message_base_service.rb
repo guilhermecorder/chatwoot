@@ -104,6 +104,9 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
     # mensagem para a tela Gasto do WhatsApp (merge, nunca substitui o resto)
     store_billing(message, status[:pricing]) if status[:pricing].present?
     message.save!
+    # 🚦 Saúde do WhatsApp (16/10): 131050 = parou o marketing (certo);
+    # entregue de novo = sai da suspeita de bloqueio
+    Crm::StopSignals.on_status_change(message)
   end
 
   # Rodada 4 da auditoria (#229): gravado pelo Cevico::AttributeMerge (trava da

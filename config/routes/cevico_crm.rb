@@ -359,6 +359,13 @@ namespace :crm do
     post :rates
     post :sync
   end
+  # 🚦 Saúde do WhatsApp (16/10): números, modelos, quem não quer receber, silêncio
+  resource :whatsapp_health, only: [:show], controller: 'whatsapp_healths' do
+    post :settings
+    post :unmark
+    post :confirm
+    post :scan
+  end
   # 🖐️ item 320: envio manual do lembrete de confirmação (o lembrete inteiro ou um paciente)
   post 'appointment_reminders/run', to: 'appointment_reminders#run'
   # 🏷️ Fontes de pacientes (item 322, só admin): cadastro + retrato do carimbo + carimbar o passado

@@ -368,7 +368,8 @@ class Crm::HarvestService
   # quem pediu para não ser contatado, virou perda, ou já foi colhido há pouco
   # (+ extra: quem já tem destino na colheita deste mês — Rodada 6)
   def blocked_contact_ids(extra)
-    optout_tags = ActsAsTaggableOn::Tag.where('name = ? OR name LIKE ?', 'nao_perturbe', 'perda\\_%').ids
+    # 🚦 + sinais de quem não quer receber com a chavinha "robôs param" ligada (16/10)
+    optout_tags = ActsAsTaggableOn::Tag.where('name IN (?) OR name LIKE ?', ['nao_perturbe', *Crm::StopSignals.robot_stop_labels(account)], 'perda\\_%').ids
     recent_harvest_tags = ActsAsTaggableOn::Tag.where('name LIKE ?', 'colheita\\_%').ids
 
     ids = Crm::PartnerGuard.excluded_contact_ids(account) + extra.map(&:to_i) # 🚧 item 231 (cerca dos parceiros)

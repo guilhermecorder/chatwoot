@@ -409,7 +409,11 @@ class Message < ApplicationRecord
 
     conversation.open! if conversation.snoozed?
 
-    reopen_resolved_conversation if conversation.resolved?
+    return unless conversation.resolved?
+
+    reopen_resolved_conversation
+    # 🔁 item 348: conversa única por caixa — o paciente reabriu = pausas da IA zeradas
+    Crm::ReopenReset.after_patient_reopen!(conversation)
   end
 
   def mark_pending_conversation_as_open_for_human_response

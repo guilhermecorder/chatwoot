@@ -46,8 +46,9 @@ class Crm::Journey::Settings
     value.positive? ? value : DEFAULT_DAILY_CAP
   end
 
+  # 🚦 + sinais de quem não quer receber com a chavinha "robôs param" ligada (16/10)
   def quiet_labels
-    QUIET_LABELS_FIXED + Array(raw['quiet_labels']).map(&:to_s)
+    @quiet_labels ||= QUIET_LABELS_FIXED + Array(raw['quiet_labels']).map(&:to_s) + Crm::StopSignals.robot_stop_labels(account)
   end
 
   def quiet?(labels)

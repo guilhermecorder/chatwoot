@@ -1541,6 +1541,33 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/whatsapp_spend/sync`, { days });
   }
 
+  // ── 🚦 Saúde do WhatsApp (16/10): números, modelos, quem não quer receber ──
+  getWhatsappHealth() {
+    return axios.get(`${this.url}/whatsapp_health`);
+  }
+
+  saveWhatsappHealthSettings(payload) {
+    return axios.post(`${this.url}/whatsapp_health/settings`, payload);
+  }
+
+  unmarkWhatsappSignal(contactId, key) {
+    return axios.post(`${this.url}/whatsapp_health/unmark`, {
+      contact_id: contactId,
+      key,
+    });
+  }
+
+  confirmWhatsappSignal(contactId, key) {
+    return axios.post(`${this.url}/whatsapp_health/confirm`, {
+      contact_id: contactId,
+      key,
+    });
+  }
+
+  scanWhatsappHealth() {
+    return axios.post(`${this.url}/whatsapp_health/scan`);
+  }
+
   // ── 🏷️ Fontes de pacientes (item 322; só admin) ───
   getSources() {
     return axios.get(`${this.url}/sources`);

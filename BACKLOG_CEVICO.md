@@ -9445,3 +9445,33 @@ Dois revisores independentes + leitura própria. Tudo abaixo foi CORRIGIDO e cob
     - Admin vê tudo; o atendente vê o que é dele (responsável pelo card ou pela consulta).
   - Limpeza: número fora do +55 perde para o +55 do grupo; nome vazio cai no nome do grupo.
   - Sem migration (os conferidos das consultas ficam em `agenda_config.agendamentos_conferidos`).
+
+## 347. 🚦 SAÚDE DO WHATSAPP — quem não quer mais receber (CERTO × SUSPEITA) + nota dos números e modelos (16/10; "eu quero sim ter mais visualmente os indicadores e encontrar formas de 'taguear pessoas', que demonstram sinais de que não querem mais receber as mensagens… bem desenvolvida e com precisão")
+- A Meta NÃO informa quem bloqueou. O sistema separa o que é CERTO do que é SUSPEITA, e a etiqueta diz qual é:
+  - `nao_perturbe` (certo, já existia): o paciente escreveu pedindo para parar.
+  - `certo_sem_marketing` (certo, novo): a Meta devolveu o erro 131050 (a pessoa desligou o marketing desta empresa). Sai sozinha se um marketing voltar a ser entregue.
+  - `suspeita_bloqueio` (novo): `Crm::BlockSuspicionScan`, de hora em hora, por número. Vale quando as últimas 2 mensagens nossas ficaram só em "enviado" há 48h+; ela já recebia antes por esse número; não escreveu depois; e o número estava entregando para os outros na mesma época (se a caixa caiu, ninguém é marcado). Sai sozinha quando volta a entregar ou a pessoa escreve. 2 e 48h são editáveis na tela.
+  - `suspeita_nao_quer` (novo): frase no meio da conversa ("vou bloquear", "isso é spam", "me tira da lista").
+- Detector de frases refeito (`Crm::OptOut.classify`): CERTO só quando a mensagem INTEIRA é o pedido. Teste na cópia real até 21/09: o detector antigo marcaria 32 pessoas e 26 eram erro ("Cancelar" a consulta, "Parar de usar óculos"); o novo marca 6, todas pedidos reais.
+- O MOTIVO de cada marcação fica no contato (`additional_attributes.cevico_stop_signals`): texto, erro da Meta, mensagens presas e a última mensagem nossa que chegou (quem mandou, modelo, caixa). Quem tira à mão fica no histórico, e a varredura não remarca pelo mesmo sinal.
+- Robôs (`agenda_config.stop_signals.robos`, chavinhas na tela): `certo_sem_marketing` ligado; as duas suspeitas desligadas. Ligado = fora de follow-up, campanhas, jornada, NPS, Colheitadeira e agente de ligação (`Crm::OptOut.quiet_titles` + `Crm::StopSignals.robot_stop_labels`). Confirmação e lembrete da consulta continuam sempre.
+- Tela Relatórios → Saúde do WhatsApp em 4 blocos:
+  - Seus números: nota, linha do tempo da nota (`agenda_config.wa_health_log`, só quando muda), limite, entregues/lidas, só "enviado" há 48h+, erros da Meta por dia.
+  - Modelos: situação + nota de cada modelo (busca a Meta com `quality_score`, guarda 30 min) + envios e entrega.
+  - Quem não quer mais receber: Certo | Suspeita, Lista | Cards, por quê, botões "é pedido de parar" e "não é isso".
+  - O que veio antes do silêncio: por quem mandou e por modelo.
+- Nó de acesso `relatorios.whatsapp_saude` passa a ter ver + editar.
+- Cópia real até 21/09: 109 suspeitas de bloqueio em 60 dias (caixa 1: 54, caixa 2: 55); casos com 13 e 17 mensagens seguidas sem chegar.
+- Pós-deploy: `rake cevico:sinais_parar:motivos_antigos ACCOUNT_ID=1 DRY=1` → `DRY=0`. Só grava o motivo das marcações antigas de nao_perturbe e aponta "revisar" onde o detector novo não marcaria. Não tira etiqueta.
+- Sem migration. WEB+SIDEKIQ (job novo `crm_whatsapp_health_job`, de hora em hora no minuto 25). Reversão: imagem anterior (:90cfd38).
+- Fase 2 (não feita): receber na hora os avisos da Meta por conta (nota do número / modelo pausado). Hoje o sistema os descarta porque chegam sem telefone. Precisa ler `entry.id` = WABA e marcar os campos no app da Meta.
+
+## 348. 🔁 UMA CONVERSA POR PACIENTE EM CADA CAIXA — "resolver" não abre conversa nova (16/10; "quando as meninas 'resolvem a conversa', é como se uma nova conversa fosse iniciada… quanto mais unificadas as conversas fiquem, melhor")
+- Causa: o ajuste nativo da caixa "Roteamento de Conversa" está em "Criar novas conversas" (`inboxes.lock_to_single_conversation = false`). Paciente que escreve depois do "resolver" ganha conversa nova (`Whatsapp::IncomingMessageBaseService#set_conversation`). Os robôs (modelos, lembretes, confirmação, ligação) JÁ reaproveitam a última conversa, mesmo resolvida (`Crm::SendTemplateService#existing_conversation`, `Crm::Calls::ConversationFinder`).
+- Solução: ligar "Reabrir a mesma conversa" em cada caixa (tela, sem deploy). ANTES disso, o ajuste de código abaixo precisa estar no ar.
+- Efeito colateral corrigido (`Crm::ReopenReset`, chamado em `Message#reopen_conversation`): a pausa do Atendente IA (`cevico_atendente_wa` / `cevico_atendente_ia`) mora na CONVERSA. Antes ela sumia com a conversa nova; com a conversa única ficaria para sempre. Agora, quando o PACIENTE reabre uma conversa resolvida, as pausas zeram e a equipe vê uma nota "🔁". Reabrir pela tela não zera.
+- Ficam como estão de propósito: etiquetas (att_encerrado já sobe ao contato e vale para todas as conversas, então o follow-up se comporta igual a antes); leitura do follow-up (`cevico_conversa_leitura`, refeita a cada nova fala da clínica); cadência (zera quando o paciente responde).
+- Conversa reaberta continua com a MESMA atendente de antes (a atribuição automática só age em conversa sem dono).
+- Conversas antigas já divididas NÃO são juntadas (ficam como histórico resolvido). Daqui em diante tudo cai na mais recente.
+- Spec `spec/services/crm/reopen_reset_spec.rb` (5). Teste local ponta a ponta na conta 3 (caixa 3): mensagem caiu na mesma conversa, reabriu, pausa zerada, nota criada. Desfeito depois.
+- Sem migration. Vai junto com o 347. Reversão: voltar a caixa para "Criar novas conversas" (na hora, sem deploy).
