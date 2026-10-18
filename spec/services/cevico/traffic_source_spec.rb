@@ -3,6 +3,14 @@ require 'rails_helper'
 # Item 313: códigos de clique e identidade do navegador que amarram a
 # conversão ao anúncio
 RSpec.describe Cevico::TrafficSource do
+  it 'keeps the Google Ads campaign ID (utm_id) in the click snapshot, digits only' do
+    snap = described_class.snapshot({ 'utm_source' => 'google', 'utm_medium' => 'cpc', 'utm_campaign' => 'refrativa-gd',
+                                      'utm_id' => '21987654321' }, page: nil)
+    expect(snap).to include('campaign' => 'refrativa-gd', 'utm_id' => '21987654321')
+
+    expect(described_class.snapshot({ 'utm_id' => '{campaignid}' }, page: nil)).not_to have_key('utm_id')
+  end
+
   it 'treats gbraid/wbraid (iPhone) as Google Ads, like gclid' do
     expect(described_class.classify({ 'gbraid' => 'abc' })[:source]).to eq('google_ads')
     expect(described_class.classify({ 'wbraid' => 'abc' })[:source]).to eq('google_ads')

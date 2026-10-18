@@ -38,6 +38,8 @@ const sourceFilter = ref(''); // '' = todas as origens
 const chartMode = ref('volume');
 const sourcesView = ref('cards');
 const pagesView = ref('list');
+// celular: a tabela de campanhas tem 9 colunas — abre em cards
+const campaignsView = ref(window.innerWidth < 640 ? 'cards' : 'list');
 const expandedId = ref(null);
 
 const pal = useCevicoPalette({
@@ -46,6 +48,11 @@ const pal = useCevicoPalette({
     { id: 'funil', label: 'O funil', icon: 'i-lucide-filter' },
     { id: 'evolucao', label: 'Evolução', icon: 'i-lucide-activity' },
     { id: 'origens', label: 'Origens', icon: 'i-lucide-git-fork' },
+    {
+      id: 'campanhas',
+      label: 'Campanhas',
+      icon: 'i-lucide-badge-dollar-sign',
+    },
     { id: 'paginas', label: 'Páginas', icon: 'i-lucide-layout-template' },
     { id: 'google', label: 'No Google', icon: 'i-lucide-search' },
     { id: 'diagnosticos', label: 'Diagnósticos', icon: 'i-lucide-lightbulb' },
@@ -105,6 +112,10 @@ const rate = (part, total) =>
   total ? Math.round((part / total) * 1000) / 10 : null;
 const fmtRate = r => (r === null ? '—' : `${String(r).replace('.', ',')}%`);
 const pct = (part, total) => fmtRate(rate(part, total));
+// retorno: quantos reais de receita cada R$ 1 gasto trouxe (2,5x)
+const fmtTimes = v =>
+  v === null || v === undefined ? '—' : `${String(v).replace('.', ',')}x`;
+const fmtMoneyOr = v => (v === null || v === undefined ? '—' : fmtMoney(v));
 const dateBR = iso => {
   if (!iso) return '';
   const [y, m, d] = String(iso).slice(0, 10).split('-');
@@ -113,6 +124,26 @@ const dateBR = iso => {
 
 // ── recorte: todas as origens ou uma só ────────────────────────────────
 const sources = computed(() => data.value?.sources || {});
+
+// ── campanhas: custo do Google × resultado (18/10) ──────────────────────
+const roi = computed(() => data.value?.campaigns || null);
+const campaignRows = computed(() => roi.value?.campaigns || []);
+const untrackedSpend = computed(() => roi.value?.untracked || []);
+const roiTotals = computed(() => roi.value?.totals || {});
+const SUFFIX_EXAMPLE =
+  'utm_source=google&utm_medium=cpc&utm_campaign=refrativa-search&utm_id={campaignid}&utm_content={creative}&utm_term={keyword}';
+const copySuffix = async () => {
+  try {
+    await copyTextToClipboard(SUFFIX_EXAMPLE);
+    useAlert(
+      'Sufixo copiado — cole em Configurações da campanha → Opções de URL.'
+    );
+  } catch {
+    useAlert('Não consegui copiar. Selecione o texto e copie.');
+  }
+};
+const MATCH_LABELS = { id: 'ligada pelo ID', nome: 'ligada pelo nome' };
+const matchLabel = c => MATCH_LABELS[c.matched_by] || 'sem custo ligado';
 const rows = computed(() => data.value?.rows || []);
 const sourceLabel = src => sources.value[src] || src;
 const bucketOf = page =>
@@ -612,6 +643,8 @@ const keepAi = sug =>
 </script>
 
 <template>
+  <!-- tela só em português (CEVICO): textos direto no template, sem i18n -->
+  <!-- eslint-disable vue/no-bare-strings-in-template -->
   <!-- w-full + min-w-0: a página nunca estica além da tela (no celular quem rola para o lado é a régua, não a página);
        h-full + overflow-y-auto: a própria tela rola até o fim (o layout prende a altura) -->
   <div
@@ -1050,6 +1083,276 @@ const keepAi = sug =>
           </div>
         </div>
 
+        <!-- ══ 3b · CAMPANHAS: CUSTO × RESULTADO (18/10) ══ -->
+        <div class="cv-block p-6 sm:p-8 mb-8" :style="blockVars('campanhas')">
+          <div class="flex items-center gap-3 mb-1 flex-wrap">
+            <span class="cv-icon">
+              <span class="i-lucide-badge-dollar-sign text-base" />
+            </span>
+            <h2
+              class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12"
+            >
+              Campanhas: custo × resultado
+            </h2>
+            <div class="flex items-center gap-1 ml-auto">
+              <button
+                class="cv-btn cv-btn-sm"
+                :class="campaignsView === 'list' ? '' : 'cv-btn-ghost'"
+                @click="campaignsView = 'list'"
+              >
+                <span class="i-lucide-list text-xs" /> Lista
+              </button>
+              <button
+                class="cv-btn cv-btn-sm"
+                :class="campaignsView === 'cards' ? '' : 'cv-btn-ghost'"
+                @click="campaignsView = 'cards'"
+              >
+                <span class="i-lucide-layout-grid text-xs" /> Cards
+              </button>
+            </div>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-5">
+            quanto cada campanha do Google gastou e quantos pacientes trouxe,
+            somando todas as páginas para onde ela manda · o custo vem do Google
+            pelo ID da campanha (utm_id) ou pelo nome
+          </p>
+
+          <p
+            v-if="roi && !roi.configured"
+            class="cv-sub p-4 text-xs text-n-slate-11 mb-4"
+          >
+            <span class="i-lucide-plug text-xs align-middle mr-1" />
+            Para ver o custo, conecte o Google em Integrações → Google (conta de
+            serviço + propriedade do GA4). Os resultados abaixo já aparecem.
+          </p>
+          <p
+            v-else-if="roi && roi.error"
+            class="cv-sub p-4 text-xs text-n-slate-11 mb-4"
+          >
+            <span class="i-lucide-triangle-alert text-xs align-middle mr-1" />
+            O Google não devolveu o custo agora: {{ roi.error }}
+          </p>
+
+          <!-- resumo do período -->
+          <div
+            v-if="roi && roi.configured && !roi.error"
+            class="grid gap-3 grid-cols-2 lg:grid-cols-4 mb-5"
+          >
+            <div class="cv-sub p-4">
+              <p class="text-[10px] text-n-slate-10">
+                gasto ligado a pacientes
+              </p>
+              <p class="text-xl font-extrabold text-n-slate-12 tabular-nums">
+                {{ fmtMoney(roiTotals.cost) }}
+              </p>
+            </div>
+            <div class="cv-sub p-4">
+              <p class="text-[10px] text-n-slate-10">
+                receita dessas campanhas
+              </p>
+              <p
+                class="text-xl font-extrabold tabular-nums"
+                :style="{ color: STEP_COLORS.conversions }"
+              >
+                {{ fmtMoney(roiTotals.revenue) }}
+              </p>
+            </div>
+            <div class="cv-sub p-4">
+              <p class="text-[10px] text-n-slate-10">cada R$ 1 virou</p>
+              <p class="text-xl font-extrabold text-n-slate-12 tabular-nums">
+                {{ fmtTimes(roiTotals.roas) }}
+              </p>
+            </div>
+            <div class="cv-sub p-4">
+              <p class="text-[10px] text-n-slate-10">
+                gasto ainda sem rastreio
+              </p>
+              <p
+                class="text-xl font-extrabold tabular-nums"
+                :class="
+                  roiTotals.untracked_cost
+                    ? 'text-n-amber-11'
+                    : 'text-n-slate-12'
+                "
+              >
+                {{ fmtMoney(roiTotals.untracked_cost) }}
+              </p>
+            </div>
+          </div>
+
+          <div v-if="!campaignRows.length" class="py-4">
+            <p class="text-sm text-n-slate-11 mb-3">
+              Nenhuma campanha nomeada chegou às páginas neste período. Cole
+              este sufixo em cada campanha do Google (Configurações → Opções de
+              URL da campanha → Sufixo do URL final), trocando o nome:
+            </p>
+            <div class="cv-sub p-3 flex items-center gap-3 min-w-0">
+              <code
+                class="text-[11px] text-n-slate-12 break-all flex-1 min-w-0"
+                >{{ SUFFIX_EXAMPLE }}</code
+              >
+              <button
+                class="cv-btn cv-btn-sm flex-shrink-0"
+                @click="copySuffix"
+              >
+                <span class="i-lucide-copy text-xs" /> Copiar
+              </button>
+            </div>
+          </div>
+
+          <!-- LISTA -->
+          <div v-else-if="campaignsView === 'list'" class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr
+                  class="text-left text-[10px] uppercase tracking-wide text-n-slate-10"
+                >
+                  <th class="py-2 pr-3">Campanha</th>
+                  <th class="py-2 px-2 text-right">Gasto</th>
+                  <th class="py-2 px-2 text-right">Leads</th>
+                  <th class="py-2 px-2 text-right">Custo por lead</th>
+                  <th class="py-2 px-2 text-right">Agendaram</th>
+                  <th class="py-2 px-2 text-right">Custo por agendamento</th>
+                  <th class="py-2 px-2 text-right">Cirurgias</th>
+                  <th class="py-2 px-2 text-right">Receita</th>
+                  <th class="py-2 pl-2 text-right">Cada R$ 1 virou</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="c in campaignRows"
+                  :key="c.name"
+                  class="border-t border-n-weak align-top"
+                >
+                  <td class="py-2.5 pr-3 min-w-[180px]">
+                    <p class="font-semibold text-n-slate-12">{{ c.name }}</p>
+                    <p class="text-[10px] text-n-slate-10 leading-snug">
+                      {{ c.google_name ? `${c.google_name} · ` : ''
+                      }}{{ matchLabel(c) }}<br />{{ c.pages.join(' · ') }}
+                    </p>
+                  </td>
+                  <td
+                    class="py-2.5 px-2 text-right tabular-nums whitespace-nowrap"
+                  >
+                    {{ fmtMoneyOr(c.cost) }}
+                  </td>
+                  <td class="py-2.5 px-2 text-right tabular-nums">
+                    {{ fmtNum(c.leads) }}
+                  </td>
+                  <td
+                    class="py-2.5 px-2 text-right tabular-nums whitespace-nowrap"
+                  >
+                    {{ fmtMoneyOr(c.cpl) }}
+                  </td>
+                  <td class="py-2.5 px-2 text-right tabular-nums">
+                    {{ fmtNum(c.booked) }}
+                  </td>
+                  <td
+                    class="py-2.5 px-2 text-right tabular-nums whitespace-nowrap"
+                  >
+                    {{ fmtMoneyOr(c.cost_per_booked) }}
+                  </td>
+                  <td class="py-2.5 px-2 text-right tabular-nums">
+                    {{ fmtNum(c.conversions) }}
+                  </td>
+                  <td
+                    class="py-2.5 px-2 text-right tabular-nums whitespace-nowrap"
+                  >
+                    {{ fmtMoney(c.revenue) }}
+                  </td>
+                  <td
+                    class="py-2.5 pl-2 text-right tabular-nums font-bold"
+                    :style="{
+                      color:
+                        c.roas !== null && c.roas >= 1
+                          ? STEP_COLORS.cta
+                          : undefined,
+                    }"
+                  >
+                    {{ fmtTimes(c.roas) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- CARDS -->
+          <div
+            v-else
+            class="grid gap-4 grid-cols-[repeat(auto-fit,minmax(250px,1fr))]"
+          >
+            <div v-for="c in campaignRows" :key="c.name" class="cv-sub p-5">
+              <p class="text-sm font-bold text-n-slate-12 leading-snug">
+                {{ c.name }}
+              </p>
+              <p class="text-[10px] text-n-slate-10 mb-3">
+                {{ c.google_name ? `${c.google_name} · ` : ''
+                }}{{ matchLabel(c) }}
+              </p>
+              <p
+                class="text-3xl font-extrabold tracking-tight text-n-slate-12 whitespace-nowrap"
+              >
+                {{ fmtTimes(c.roas) }}
+                <span class="text-xs font-medium text-n-slate-10">
+                  cada R$ 1 gasto
+                </span>
+              </p>
+              <div class="grid grid-cols-3 gap-2 mt-4 text-center">
+                <div>
+                  <p class="text-base font-bold text-n-slate-12">
+                    {{ fmtMoneyOr(c.cost) }}
+                  </p>
+                  <p class="text-[10px] text-n-slate-10 leading-tight">gasto</p>
+                </div>
+                <div>
+                  <p
+                    class="text-base font-bold"
+                    :style="{ color: STEP_COLORS.leads }"
+                  >
+                    {{ fmtMoneyOr(c.cpl) }}
+                  </p>
+                  <p class="text-[10px] text-n-slate-10 leading-tight">
+                    por lead
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-base font-bold"
+                    :style="{ color: STEP_COLORS.booked }"
+                  >
+                    {{ fmtMoneyOr(c.cost_per_booked) }}
+                  </p>
+                  <p class="text-[10px] text-n-slate-10 leading-tight">
+                    por agendamento
+                  </p>
+                </div>
+              </div>
+              <p class="text-[11px] text-n-slate-10 mt-3">
+                {{ fmtNum(c.leads) }} leads · {{ fmtNum(c.booked) }} agendaram ·
+                {{ fmtNum(c.conversions) }} cirurgias · {{ fmtMoney(c.revenue)
+                }}<br />{{ c.pages.join(' · ') }}
+              </p>
+            </div>
+          </div>
+
+          <!-- gasto do Google que ainda não chega às páginas com nome -->
+          <div v-if="untrackedSpend.length" class="mt-5">
+            <p class="text-[11px] font-semibold text-n-slate-12 mb-2">
+              Gasto sem rastreio — campanhas do Google que ainda não mandam
+              utm_campaign / utm_id
+            </p>
+            <div class="flex gap-2 flex-wrap mb-2">
+              <span v-for="u in untrackedSpend" :key="u.id" class="cv-chip">
+                {{ u.name || `campanha ${u.id}` }}: {{ fmtMoney(u.cost) }}
+              </span>
+            </div>
+            <button class="cv-btn cv-btn-sm cv-btn-ghost" @click="copySuffix">
+              <span class="i-lucide-copy text-xs" /> Copiar o sufixo para colar
+              nessas campanhas
+            </button>
+          </div>
+        </div>
+
         <!-- ══ 4 · PÁGINAS ══ -->
         <div class="cv-block p-6 sm:p-8 mb-8" :style="blockVars('paginas')">
           <div class="flex items-center gap-3 mb-1 flex-wrap">
@@ -1251,8 +1554,9 @@ const keepAi = sug =>
                     </span>
                   </div>
                   <p v-else class="text-[11px] text-n-slate-9">
-                    Sem campanhas nomeadas ainda — use utm_campaign nos anúncios
-                    para ver a quebra aqui.
+                    Sem campanhas nomeadas ainda — use utm_campaign e
+                    utm_id={campaignid} no sufixo do anúncio (bloco Campanhas,
+                    acima, tem o texto pronto para copiar).
                   </p>
                 </div>
                 <div v-if="page.page_id" class="flex gap-2 flex-wrap">

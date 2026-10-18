@@ -57,12 +57,17 @@ module Cevico::TrafficSource
     'direto'
   end
 
+  # só dígitos (o {campaignid} do Google é numérico); outra coisa não junta com o custo
+  def campaign_id(value)
+    value.to_s[/\A\d{4,20}\z/]
+  end
+
   def paid?(prm)
     PAID_MEDIUMS.include?(prm['utm_medium'])
   end
 
   def normalize(params)
-    keys = %w[utm_source utm_medium utm_campaign utm_content utm_term gclid gbraid wbraid fbclid de ref_host]
+    keys = %w[utm_source utm_medium utm_campaign utm_id utm_content utm_term gclid gbraid wbraid fbclid de ref_host]
     raw = keys.index_with { |k| params[k].presence || params[k.to_sym].presence }
     normalized = raw.transform_values { |v| v.to_s.strip.downcase.presence }.compact
     # campanha preserva o nome como veio (é rótulo de relatório, não chave)
@@ -90,6 +95,9 @@ module Cevico::TrafficSource
       'title' => page&.title || 'Porta de entrada (hub)',
       'source' => source_key(prm, nil), 'campaign' => prm['utm_campaign'].to_s[0, 80],
       'utm_source' => prm['utm_source'], 'utm_medium' => prm['utm_medium'],
+      # ID da campanha no Google Ads (sufixo do URL final: utm_id={campaignid}) — é a
+      # chave que junta o lead ao custo da campanha no ROI por campanha (18/10)
+      'utm_id' => campaign_id(prm['utm_id']),
       'utm_content' => prm['utm_content'], 'utm_term' => prm['utm_term']
     }.merge(click_ids(params, cookies, ga4_id)).compact
   end

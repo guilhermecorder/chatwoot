@@ -2,8 +2,8 @@
 # por página e por origem (Google Ads, Google orgânico/SEO, Meta, funil,
 # direto) — visitas, cliques no WhatsApp, leads que chegaram na caixa com
 # Protocolo, quantos agendaram consulta e quantos fecharam cirurgia (com
-# receita). O lado "quanto custou" continua no relatório de Anúncios;
-# aqui a pergunta é "qual PÁGINA e qual ORIGEM trazem paciente de verdade".
+# receita). Desde 18/10 o bloco CAMPANHAS junta o custo de cada campanha do
+# Google (via GA4) ao resultado dela: custo por lead, por agendamento e retorno.
 #
 # Item 329 (05/10): o painel ganhou as taxas de conversão etapa a etapa, a
 # comparação com o período anterior, a série para os gráficos em linha, os
@@ -29,6 +29,7 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
       totals: report.totals,
       previous: { since: previous.since_date, until: previous.until_date, totals: previous.totals },
       series: report.series,
+      campaigns: campaign_roi,
       insights: insights,
       search_console: search_console,
       collection: log.list,
@@ -86,6 +87,12 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
     return @page_ids if defined?(@page_ids)
 
     @page_ids = params.key?(:page_ids) ? Array(params[:page_ids]).map(&:to_i).reject(&:zero?) : nil
+  end
+
+  # 18/10: custo do Google × resultado por campanha (utm_campaign / utm_id)
+  def campaign_roi
+    costs = Crm::GoogleCampaignCostService.new(account: Current.account, since_date: since_date, until_date: until_date).call
+    Cevico::CampaignRoi.new(account: Current.account, report: report, costs: costs).call
   end
 
   # o período ANTERIOR de mesmo tamanho (para "subiu / caiu")

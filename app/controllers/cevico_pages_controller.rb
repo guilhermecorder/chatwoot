@@ -220,7 +220,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   private
 
   WHATSAPP_URL = %r{\A(https?://(wa\.me|api\.whatsapp\.com)|whatsapp:)}i
-  TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_content utm_term gclid gbraid wbraid fbclid ref_host].freeze
+  TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_id utm_content utm_term gclid gbraid wbraid fbclid ref_host].freeze
 
   # destino WhatsApp → gera o Protocolo e o anexa ao texto pré-preenchido;
   # qualquer falha = redireciona pro cta_url original (clique nunca quebra)

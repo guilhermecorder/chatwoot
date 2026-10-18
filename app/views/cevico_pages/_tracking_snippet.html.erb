@@ -14,7 +14,8 @@
 <script nonce="<%= content_security_policy_nonce %>">
 (function () {
   var KEY = 'cevico_trk';
-  var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'gbraid', 'wbraid', 'fbclid', 'ref_host'];
+  // utm_id = ID da campanha no Google Ads ({campaignid}) — liga o lead ao custo da campanha (ROI)
+  var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_id', 'utm_content', 'utm_term', 'gclid', 'gbraid', 'wbraid', 'fbclid', 'ref_host'];
   // código de clique (Google/Meta) é comprido: cortado em 150 ele não serve mais
   var CLICK_IDS = ['gclid', 'gbraid', 'wbraid', 'fbclid'];
   var qs = new URLSearchParams(location.search);
