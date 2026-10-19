@@ -382,6 +382,25 @@ namespace :crm do
   end
   # 💰 Financeiro & CAC (item 318): CAC de anúncios × total, canais, campanhas
   resource :acquisition_cost, only: [:show], controller: 'acquisition_costs'
+  # 📄 Agente de Páginas (item 353): placar, pódio, linha do tempo e fila de recomendações das páginas
+  resource :page_agent, only: [:show], controller: 'page_agent' do
+    get :timeline
+    get :steps
+    post :decide
+    post :manual
+    post :run
+  end
+  # 🎯 Agente de Campanhas (item 352): leitura Meta+Google, nossa média, recomendações, parâmetros, ficha de subida
+  resource :campaign_agent, only: [:show], controller: 'campaign_agent' do
+    post :params, action: :update_params
+    post :decide
+    post :apply
+    post :manual
+    post :run
+    post :brief, action: :plan_brief
+    post :launch
+    post :remove_brief
+  end
   resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
   # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
   get 'appointments/feed', to: 'appointments#feed'

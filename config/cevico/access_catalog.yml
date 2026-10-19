@@ -307,6 +307,11 @@
       hint: "ver = visitas, cliques e conversão por página; editar = guardar insights e pedir sugestões da IA"
       levels: [view, edit]
       default: inherit
+    - key: campanhas
+      label: Agente de Campanhas (Meta + Google)
+      hint: "ver = resultados, nossa média e recomendações; editar = aprova e aplica recomendações, muda parâmetros e sobe campanha"
+      levels: [view, edit]
+      default: inherit
 
 - key: financeiro
   label: Financeiro

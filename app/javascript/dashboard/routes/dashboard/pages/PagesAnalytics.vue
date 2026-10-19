@@ -34,6 +34,10 @@ import CvVitrine from 'dashboard/components-next/cevico/guia/CvVitrine.vue';
 import CvBloco from 'dashboard/components-next/cevico/guia/CvBloco.vue';
 import CvIndicador from 'dashboard/components-next/cevico/guia/CvIndicador.vue';
 import CvPainelLateral from 'dashboard/components-next/cevico/guia/CvPainelLateral.vue';
+// 📄 item 353: a tecnologia dos criativos nas páginas + a história estilo Apple
+import ScoreRadar from 'dashboard/components-next/cevico/creatives/ScoreRadar.vue';
+import VerdictBars from 'dashboard/components-next/cevico/creatives/VerdictBars.vue';
+import PagesStory from './PagesStory.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -45,6 +49,10 @@ const pal = useCevicoPalette({
     { id: 'secundarios', label: 'Secundários', icon: 'i-lucide-route' },
     { id: 'terciarios', label: 'Terciários', icon: 'i-lucide-layers' },
     { id: 'paginas', label: 'Página por página', icon: 'i-lucide-files' },
+    { id: 'placar', label: 'Placar por página', icon: 'i-lucide-target' },
+    { id: 'podio', label: 'Pódio', icon: 'i-lucide-medal' },
+    { id: 'linha', label: 'Linha do tempo', icon: 'i-lucide-chart-line' },
+    { id: 'recomendacoes', label: 'Recomendações', icon: 'i-lucide-lightbulb' },
     { id: 'funis', label: 'Funis', icon: 'i-lucide-git-branch' },
   ],
 });
@@ -188,6 +196,21 @@ const periodParams = () => ({
     ? { from: periodo.value.from, to: periodo.value.to }
     : {}),
 });
+// 📄 item 353: o agente lê o mesmo recorte (definido antes do loadReport, que o chama)
+const agent = ref(null);
+let agentSeq = 0;
+const loadAgent = async () => {
+  agentSeq += 1;
+  const seq = agentSeq;
+  try {
+    const params = periodParams();
+    if (filtering.value) params.page_ids = [...filteredIds.value];
+    const { data } = await CrmAPI.getPageAgent(params);
+    if (seq === agentSeq) agent.value = data;
+  } catch {
+    // a análise segue sem o agente (os números do período não dependem dele)
+  }
+};
 let reportSeq = 0;
 const loadReport = async () => {
   // filtro que não casa com nenhuma página: nada a perguntar
@@ -204,6 +227,7 @@ const loadReport = async () => {
     const { data } = await CrmAPI.getPagesReport(params);
     // filtro trocado no meio do caminho: só a última pergunta vale
     if (seq === reportSeq) report.value = data;
+    loadAgent(); // item 353: placar, pódio e fila, no mesmo recorte
   } catch {
     useAlert('Não consegui carregar os números do período.');
   } finally {
@@ -866,9 +890,367 @@ const loosePages = computed(() => {
     p => p.status === 'published' && !inFunnel.has(p.id)
   );
 });
+// ════════════════════════════════════════════════════════════════════════
+// 📄 item 353 — AGENTE DE PÁGINAS: placar contra a média e o recorde da casa,
+// pódio (título / corpo / convite), linha do tempo com marcas e a fila de
+// recomendações (aprovar → fazer à mão → aprender). Mesmo recorte da régua.
+// ════════════════════════════════════════════════════════════════════════
+const canEditAgent = computed(() => Boolean(agent.value?.can_edit));
+const averages = computed(() => agent.value?.averages || {});
+const frac = v =>
+  v === null || v === undefined
+    ? '—'
+    : `${(Number(v) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+
+// ── placar por página ──
+const scorecards = computed(() => agent.value?.scorecards || {});
+const scoreList = computed(() =>
+  Object.entries(scorecards.value)
+    .map(([id, c]) => ({ ...c, id: Number(id) }))
+    .sort((a, b) => b.views - a.views || b.leads - a.leads)
+);
+const placarPageId = ref(null);
+const placar = computed(
+  () =>
+    scoreList.value.find(c => c.id === placarPageId.value) ||
+    scoreList.value[0] ||
+    null
+);
+const placarIndicators = computed(() =>
+  (placar.value?.indicators || []).filter(i => i.value !== null)
+);
+
+// ── pódio ──
+const podium = computed(() => agent.value?.podium || {});
+const PODIUM_PARTS = [
+  {
+    key: 'titulo',
+    label: 'Título que mais atrai',
+    hint: 'pelo clique por aparição no Google; sem o Google, pelo lead por visita',
+    icon: 'i-lucide-anchor',
+  },
+  {
+    key: 'corpo',
+    label: 'Corpo que mais segura',
+    hint: 'leram até o fim da página',
+    icon: 'i-lucide-scroll-text',
+  },
+  {
+    key: 'convite',
+    label: 'Convite que mais converte',
+    hint: 'clique no WhatsApp por visita',
+    icon: 'i-lucide-message-circle',
+  },
+];
+const MEDALS = ['🥇', '🥈', '🥉'];
+const podiumAll = ref({});
+const togglePodium = key => {
+  podiumAll.value = { ...podiumAll.value, [key]: !podiumAll.value[key] };
+};
+
+// ── linha do tempo ──
+const timelinePageId = ref(null);
+const timelineDays = ref(90);
+const timeline = ref(null);
+const isTimelineLoading = ref(false);
+const timelinePage = computed(
+  () =>
+    scoreList.value.find(c => c.id === timelinePageId.value) ||
+    placar.value ||
+    null
+);
+const loadTimeline = async () => {
+  const id = timelinePage.value?.id;
+  if (!id) return;
+  isTimelineLoading.value = true;
+  try {
+    const { data } = await CrmAPI.getPageTimeline(id, timelineDays.value);
+    timeline.value = data;
+  } catch {
+    timeline.value = null;
+  } finally {
+    isTimelineLoading.value = false;
+  }
+};
+watch([() => timelinePage.value?.id, timelineDays], loadTimeline);
+const timelineSeries = computed(() => {
+  const t = timeline.value;
+  if (!t) return [];
+  return [
+    { key: 'views', label: 'Visitas', color: cor.value, values: t.views },
+    {
+      key: 'cta',
+      label: 'Cliques no WhatsApp',
+      color: corDeep.value,
+      values: t.cta,
+    },
+    { key: 'leads', label: 'Leads', color: '#059669', values: t.leads },
+  ];
+});
+
+// ── fila de recomendações ──
+const QUEUE_TABS = [
+  ['suggested', 'Esperando ok'],
+  ['approved', 'Aprovadas'],
+  ['applied', 'Feitas / aprendendo'],
+  ['dismissed', 'Descartadas'],
+];
+const queueFilter = ref('suggested');
+const allActions = computed(() => [
+  ...(agent.value?.actions?.open || []),
+  ...(agent.value?.actions?.history || []),
+]);
+const queueOf = status =>
+  allActions.value.filter(a =>
+    status === 'dismissed'
+      ? ['dismissed', 'expired'].includes(a.status)
+      : a.status === status
+  );
+const queue = computed(() => queueOf(queueFilter.value));
+const SEV = {
+  alerta: { label: 'alerta', cls: 'cvg-problema' },
+  atencao: { label: 'atenção', cls: 'cvg-atencao' },
+  oportunidade: { label: 'oportunidade', cls: 'cvg-bom' },
+  seo: { label: 'SEO', cls: 'cvg-texto-3' },
+  info: { label: 'aviso', cls: 'cvg-texto-3' },
+};
+const KIND = {
+  page: 'página',
+  content: 'conteúdo',
+  seo: 'SEO',
+  quality: 'qualidade do lead',
+  traffic: 'tráfego',
+  watch: 'observar',
+};
+const OUTCOME = {
+  better: { label: 'melhorou', cls: 'cvg-bom' },
+  worse: { label: 'piorou', cls: 'cvg-problema' },
+  same: { label: 'ficou igual', cls: 'cvg-atencao' },
+  saved: { label: 'economizou', cls: 'cvg-bom' },
+  early: { label: 'ainda cedo', cls: 'cvg-texto-3' },
+};
+const busy = ref(false);
+const steps = ref(null); // { action, steps }
+const applyActions = payload => {
+  if (!agent.value) return;
+  agent.value = {
+    ...agent.value,
+    actions: payload.actions || agent.value.actions,
+  };
+};
+const decideAction = async (a, decision) => {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const { data } = await CrmAPI.decidePageAction(a.id, decision);
+    applyActions(data);
+    if (decision === 'approve') queueFilter.value = 'approved';
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui decidir agora.');
+  } finally {
+    busy.value = false;
+  }
+};
+const openSteps = async a => {
+  try {
+    const { data } = await CrmAPI.getPageActionSteps(a.id);
+    steps.value = { action: a, steps: data.steps || [] };
+  } catch {
+    useAlert('Não consegui montar o passo a passo.');
+  }
+};
+const markDone = async a => {
+  if (busy.value) return;
+  busy.value = true;
+  try {
+    const { data } = await CrmAPI.manualPageAction(a.id);
+    applyActions(data);
+    steps.value = null;
+    queueFilter.value = 'applied';
+    useAlert('Marcada como feita. O antes × depois começa a contar.');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui marcar.');
+  } finally {
+    busy.value = false;
+  }
+};
+const isRunning = ref(false);
+const runAgent = async () => {
+  if (isRunning.value) return;
+  isRunning.value = true;
+  try {
+    await CrmAPI.runPageAgent();
+    useAlert('Pedi a leitura. Em 1 minuto as recomendações aparecem aqui.');
+    setTimeout(loadAgent, 40000);
+  } catch {
+    useAlert('Não consegui pedir a leitura agora.');
+  } finally {
+    isRunning.value = false;
+  }
+};
+const learningLeft = a => {
+  if (!a.applied_at) return null;
+  const end = new Date(a.applied_at);
+  end.setDate(end.getDate() + 8);
+  const left = Math.ceil((end - new Date()) / 86400000);
+  return left > 0 ? left : 0;
+};
+const beforeAfter = a => {
+  const b = a.metrics_before || {};
+  const af = a.metrics_after || {};
+  if (!a.learned_at) return '';
+  return `visita → lead ${frac(b.lead_rate)} → ${frac(af.lead_rate)} · clique ${frac(b.click_rate)} → ${frac(af.click_rate)} · visitas ${n(b.views)} → ${n(af.views)}`;
+};
+const builderOf = a => scorecards.value[a.ref_id]?.builder_url || null;
+const scoreboard = computed(() => agent.value?.scoreboard || []);
+const agentState = computed(() => agent.value?.state || {});
+const timeBR = iso =>
+  iso
+    ? new Date(iso).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '';
+
+// ── a história (estilo Apple): uma ideia por seção ──
+const LEAK_TEXT = {
+  cta: 'As pessoas chegam, mas poucas tocam no WhatsApp: o convite não está claro ou está longe demais do começo.',
+  arrival:
+    'As pessoas clicam e desistem no WhatsApp, ou apagam o Protocolo: a mensagem pronta precisa ser curta e natural.',
+  booking:
+    'O lead chega e não marca: a promessa da página e o atendimento não estão falando a mesma língua.',
+};
+const story = computed(() => {
+  if (!report.value) return [];
+  const t = T.value;
+  const avg = averages.value;
+  const out = [];
+  const leadRate = rate(t.leads, t.views);
+  const resultChips = [];
+  if (leadRate !== null && avg.result) {
+    const r = leadRate / (avg.result * 100);
+    if (r >= 1.1)
+      resultChips.push({ text: 'acima da média das páginas', tone: 'bom' });
+    else if (r <= 0.9)
+      resultChips.push({
+        text: 'abaixo da média das páginas',
+        tone: 'atencao',
+      });
+    else resultChips.push({ text: 'na média das páginas', tone: '' });
+  }
+  out.push({
+    key: 'resultado',
+    kicker: periodoTxt.value,
+    title: t.leads
+      ? `${n(t.leads)} ${t.leads === 1 ? 'paciente chegou' : 'pacientes chegaram'} pelas páginas.`
+      : 'Nenhum paciente chegou pelas páginas neste período.',
+    number: pctTxt(leadRate),
+    sub: 'das visitas viraram lead',
+    text: `${n(t.views)} visitas · ${n(t.cta)} cliques no WhatsApp · ${n(t.leads)} leads · ${n(t.booked)} agendaram · ${n(t.conversions)} cirurgias.${avg.result ? ` A média das páginas em 90 dias é ${frac(avg.result)}.` : ''}`,
+    tone: 'dia',
+    chips: resultChips,
+    cta: { label: 'Ver os números', key: 'primarios' },
+  });
+  const champ = scoreList.value
+    .filter(c => c.views >= 30 && c.leads >= 1)
+    .sort((a, b) => b.leads / b.views - a.leads / a.views)[0];
+  if (champ)
+    out.push({
+      key: 'campea',
+      kicker: 'A campeã do período',
+      title: `${champ.emoji || '📄'} ${champ.title}`,
+      number: pctTxt(rate(champ.leads, champ.views)),
+      sub: `das visitas viraram lead · ${n(champ.views)} visitas, ${n(champ.leads)} leads`,
+      text: champ.reading || '',
+      tone: 'bom',
+      chips: (champ.indicators || [])
+        .filter(i => i.is_record)
+        .map(i => ({
+          text: `recorde da casa em ${i.label.toLowerCase()}`,
+          tone: 'bom',
+        })),
+      cta: { label: 'Ver o placar dela', key: 'placar' },
+    });
+  const stepsList = [
+    {
+      key: 'cta',
+      label: 'visita → clique no WhatsApp',
+      value: rate(t.cta, t.views),
+      avg: avg.cta,
+    },
+    {
+      key: 'arrival',
+      label: 'clique → chegada na caixa',
+      value: rate(t.leads, t.cta),
+      avg: avg.arrival,
+    },
+    {
+      key: 'booking',
+      label: 'lead → consulta marcada',
+      value: rate(t.booked, t.leads),
+      avg: avg.booking,
+    },
+  ].filter(x => x.value !== null && x.avg);
+  const leak = stepsList
+    .map(x => ({ ...x, gap: (x.avg * 100 - x.value) / (x.avg * 100) }))
+    .sort((a, b) => b.gap - a.gap)[0];
+  if (leak && leak.gap > 0.1)
+    out.push({
+      key: 'vazamento',
+      kicker: 'Onde o funil vaza',
+      title: `O degrau mais fraco é ${leak.label}.`,
+      number: pctTxt(leak.value),
+      sub: `contra ${frac(leak.avg)} da média das páginas em 90 dias`,
+      text: LEAK_TEXT[leak.key],
+      tone: 'atencao',
+      cta: { label: 'Ver o caminho', key: 'secundarios' },
+    });
+  const open = queueOf('suggested');
+  if (open.length)
+    out.push({
+      key: 'agente',
+      kicker: 'O agente recomenda',
+      title: `${open.length} ${open.length === 1 ? 'ponto a melhorar espera' : 'pontos a melhorar esperam'} o seu ok.`,
+      items: open.slice(0, 3).map(a => ({
+        title: a.title,
+        sub: `${a.ref_name ? `${a.ref_name} · ` : ''}${a.suggestion}`,
+      })),
+      tone: 'neutro',
+      cta: { label: 'Decidir agora', key: 'recomendacoes' },
+    });
+  return out;
+});
+const storyIndex = computed(() => {
+  const keys = new Set(story.value.map(x => x.key));
+  return [
+    { key: 'resultado', label: 'Resultado' },
+    { key: 'campea', label: 'Campeã' },
+    { key: 'vazamento', label: 'Vazamento' },
+    { key: 'agente', label: 'Agente' },
+    { key: 'primarios', label: 'Números' },
+    { key: 'placar', label: 'Placar' },
+    { key: 'podio', label: 'Pódio' },
+    { key: 'linha', label: 'Linha do tempo' },
+    { key: 'recomendacoes', label: 'Recomendações' },
+  ].filter(
+    i =>
+      keys.has(i.key) ||
+      !['resultado', 'campea', 'vazamento', 'agente'].includes(i.key)
+  );
+});
+const goTo = key => {
+  const el =
+    document.getElementById(`cvs-${key}`) ||
+    document.getElementById(`bloco-${key}`);
+  el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 </script>
 
 <template>
+  <!-- tela só em português (CEVICO): textos direto no template, sem i18n -->
+  <!-- eslint-disable vue/no-bare-strings-in-template -->
   <div
     class="cv-page cv-overlay cvg-page cvg-pa h-full w-full min-w-0 overflow-y-auto"
     :style="cvVars"
@@ -945,9 +1327,18 @@ const loosePages = computed(() => {
         Nenhuma página em {{ filterLabel }}.
       </p>
 
+      <!-- ══ 0 · A HISTÓRIA (item 353): a gramática Apple a serviço da análise ══ -->
+      <PagesStory
+        v-if="report"
+        :sections="story"
+        :index="storyIndex"
+        @go="goTo"
+      />
+
       <template v-if="report">
         <!-- ══ 1 · PRIMÁRIOS — o resultado ══ -->
         <CvBloco
+          id="bloco-primarios"
           titulo="Primários · o que as páginas trouxeram"
           :subtitulo="`O resultado que decide: paciente na caixa, consulta e cirurgia · ${filterLabel} · ${periodoTxt}`"
           tom="dia"
@@ -1122,6 +1513,7 @@ const loosePages = computed(() => {
 
         <!-- ══ 2 · SECUNDÁRIOS — o caminho ══ -->
         <CvBloco
+          id="bloco-secundarios"
           titulo="Secundários · o caminho até o lead"
           subtitulo="O que explica o resultado: quanta gente abriu, quanto leu, quanto tocou no WhatsApp e quanto chegou na caixa"
           tom="apoio"
@@ -1558,6 +1950,423 @@ const loosePages = computed(() => {
           </div>
         </CvBloco>
       </template>
+
+      <!-- ══ 4b · PLACAR POR PÁGINA (item 353): esta página × média × recorde da casa ══ -->
+      <CvBloco
+        v-if="agent && scoreList.length"
+        id="bloco-placar"
+        titulo="Placar por página"
+        subtitulo="Cada taxa da página com três números: ela, a média das páginas no período e o recorde da casa em 90 dias. A teia tem o recorde na borda."
+        icon="i-lucide-target"
+        tom="dia"
+      >
+        <div class="cvg-pa-recorte-linha mb-3">
+          <span class="cvg-rotulo">Página</span>
+          <button
+            v-for="c in scoreList"
+            :key="c.id"
+            type="button"
+            class="cvg-chip cvg-chip--marcavel"
+            :class="placar && placar.id === c.id ? 'cvg-on' : ''"
+            @click="placarPageId = c.id"
+          >
+            {{ c.emoji || '📄' }} {{ c.title }}
+          </button>
+        </div>
+        <template v-if="placar">
+          <p v-if="placar.reading" class="cvg-subtitulo mb-4">
+            {{ placar.reading }}
+          </p>
+          <ScoreRadar
+            v-if="placar.radar?.axes?.length >= 3"
+            :radar="placar.radar"
+            :color="cor"
+          />
+          <p v-else class="cvg-vazio">
+            Esta página ainda não tem volume para a teia (30 visitas, 8 cliques,
+            5 leads).
+          </p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+            <VerdictBars
+              v-for="i in placarIndicators"
+              :key="i.key"
+              :indicator="i"
+            />
+          </div>
+          <div class="flex items-center gap-2 flex-wrap mt-4">
+            <a
+              v-if="placar.public_url"
+              class="cvg-btn"
+              :href="placar.public_url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span class="i-lucide-external-link text-sm" /> Ver a página
+            </a>
+            <a
+              v-if="placar.builder_url"
+              class="cvg-btn cvg-btn--principal"
+              :href="placar.builder_url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span class="i-lucide-wand-2 text-sm" /> Abrir a montagem
+            </a>
+            <button
+              type="button"
+              class="cvg-btn"
+              @click="
+                timelinePageId = placar.id;
+                goTo('linha');
+              "
+            >
+              <span class="i-lucide-chart-line text-sm" /> Linha do tempo
+            </button>
+          </div>
+        </template>
+      </CvBloco>
+
+      <!-- ══ 4c · PÓDIO (item 353): título / corpo / convite ══ -->
+      <CvBloco
+        v-if="agent"
+        id="bloco-podio"
+        titulo="Pódio"
+        subtitulo="A página lida como gancho, corpo e convite — quem atrai mais no Google, quem segura a leitura e quem converte o clique. Só entra quem tem volume."
+        icon="i-lucide-medal"
+        tom="apoio"
+      >
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div v-for="part in PODIUM_PARTS" :key="part.key" class="min-w-0">
+            <p class="cvg-rotulo mb-1">
+              <span :class="part.icon" class="text-xs" /> {{ part.label }}
+            </p>
+            <p class="cvg-legenda mb-2">{{ part.hint }}</p>
+            <div v-if="podium[part.key]?.length" class="space-y-2">
+              <div
+                v-for="it in podiumAll[part.key]
+                  ? podium[part.key]
+                  : podium[part.key].slice(0, 3)"
+                :key="it.page_id"
+                class="pa-podio-item"
+                :class="it.rank === 1 ? 'pa-podio-item--campea' : ''"
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">{{
+                    MEDALS[it.rank - 1] || `${it.rank}º`
+                  }}</span>
+                  <span class="cvg-texto-2 text-xs truncate">
+                    {{ it.emoji || '📄' }} {{ it.title }}
+                  </span>
+                  <b class="ml-auto tabular-nums">{{ it.value_text }}</b>
+                </div>
+                <p class="pa-podio-text">"{{ it.text }}"</p>
+                <p class="cvg-legenda">
+                  {{ it.metric
+                  }}<template v-if="it.extra"> · {{ it.extra }}</template>
+                </p>
+              </div>
+              <button
+                v-if="podium[part.key].length > 3"
+                type="button"
+                class="cvg-btn"
+                @click="togglePodium(part.key)"
+              >
+                {{
+                  podiumAll[part.key]
+                    ? 'Só o pódio'
+                    : `Ver todas (${podium[part.key].length})`
+                }}
+              </button>
+            </div>
+            <p v-else class="cvg-vazio">sem página com volume neste período</p>
+          </div>
+        </div>
+      </CvBloco>
+
+      <!-- ══ 4d · LINHA DO TEMPO (item 353): a página dia a dia, com as marcas do que mudou ══ -->
+      <CvBloco
+        v-if="agent && scoreList.length"
+        id="bloco-linha"
+        titulo="Linha do tempo"
+        subtitulo="Visitas, cliques no WhatsApp e leads por dia. As marcas são o que mudou: insights aplicados e a última alteração da página — o antes × depois no próprio gráfico."
+        icon="i-lucide-chart-line"
+      >
+        <div class="cvg-pa-recorte-linha mb-2">
+          <span class="cvg-rotulo">Página</span>
+          <button
+            v-for="c in scoreList"
+            :key="c.id"
+            type="button"
+            class="cvg-chip cvg-chip--marcavel"
+            :class="timelinePage && timelinePage.id === c.id ? 'cvg-on' : ''"
+            @click="timelinePageId = c.id"
+          >
+            {{ c.emoji || '📄' }} {{ c.title }}
+          </button>
+        </div>
+        <div class="cvg-pa-recorte-linha mb-3">
+          <span class="cvg-rotulo">Dias</span>
+          <button
+            v-for="d in [30, 90, 180]"
+            :key="d"
+            type="button"
+            class="cvg-chip cvg-chip--marcavel"
+            :class="timelineDays === d ? 'cvg-on' : ''"
+            @click="timelineDays = d"
+          >
+            {{ d }}
+          </button>
+        </div>
+        <template v-if="timeline">
+          <AreaChart
+            :series="timelineSeries"
+            :labels="timeline.labels"
+            :height="220"
+            :format="n"
+          />
+          <div v-if="timeline.marks?.length" class="flex flex-wrap gap-2 mt-3">
+            <span
+              v-for="(m, mi) in timeline.marks"
+              :key="mi"
+              class="cvg-chip"
+              :title="m.date"
+            >
+              <span
+                :class="
+                  m.kind === 'edit' ? 'i-lucide-pencil' : 'i-lucide-lightbulb'
+                "
+                class="text-xs"
+              />
+              {{ dateBR(m.date) }} · {{ m.title }}
+            </span>
+          </div>
+          <p v-else class="cvg-legenda mt-2">
+            Nenhuma mudança registrada nesta janela. Quando um insight da
+            coleção for marcado como aplicado, ele aparece aqui.
+          </p>
+        </template>
+        <p v-else-if="isTimelineLoading" class="cvg-vazio">carregando…</p>
+      </CvBloco>
+
+      <!-- ══ 4e · RECOMENDAÇÕES DO AGENTE (item 353): aprovar → fazer → aprender ══ -->
+      <CvBloco
+        v-if="agent"
+        id="bloco-recomendacoes"
+        titulo="Recomendações do agente"
+        subtitulo="Todo dia o agente lê os últimos 7 dias contra a média das próprias páginas e deixa aqui o que vale mudar. Nada muda na página sem o seu ok; 7 dias depois de feito ele compara o antes × depois e aprende."
+        icon="i-lucide-lightbulb"
+        tom="apoio"
+      >
+        <template #acoes>
+          <span class="cvg-legenda">
+            última leitura:
+            {{
+              agentState.last_run_at
+                ? timeBR(agentState.last_run_at)
+                : 'ainda não leu'
+            }}
+          </span>
+          <button
+            v-if="canEditAgent"
+            type="button"
+            class="cvg-btn"
+            :disabled="isRunning"
+            @click="runAgent"
+          >
+            <span
+              class="i-lucide-refresh-cw text-sm"
+              :class="isRunning ? 'animate-spin' : ''"
+            />
+            Ler agora
+          </button>
+        </template>
+        <div class="cvg-pa-recorte-linha mb-3">
+          <button
+            v-for="t in QUEUE_TABS"
+            :key="t[0]"
+            type="button"
+            class="cvg-chip cvg-chip--marcavel"
+            :class="queueFilter === t[0] ? 'cvg-on' : ''"
+            @click="queueFilter = t[0]"
+          >
+            {{ t[1] }}
+            <b v-if="queueOf(t[0]).length">{{ queueOf(t[0]).length }}</b>
+          </button>
+        </div>
+        <div v-if="queue.length" class="space-y-2">
+          <div v-for="a in queue" :key="a.id" class="pa-rec">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              <span class="cvg-chip" :class="SEV[a.severity]?.cls">{{
+                SEV[a.severity]?.label || a.severity
+              }}</span>
+              <span class="cvg-chip">{{ KIND[a.kind] || a.kind }}</span>
+              <span class="cvg-legenda ml-auto">{{
+                dateBR(a.suggested_on)
+              }}</span>
+            </div>
+            <p class="font-bold cvg-texto-1">{{ a.title }}</p>
+            <p v-if="a.ref_name" class="cvg-legenda mb-1">{{ a.ref_name }}</p>
+            <p class="text-xs cvg-texto-2 leading-relaxed">{{ a.evidence }}</p>
+            <p class="text-xs cvg-texto-1 leading-relaxed mt-1">
+              <b>O que fazer:</b> {{ a.suggestion }}
+            </p>
+            <p v-if="a.expected" class="cvg-legenda mt-1">
+              <span class="i-lucide-trending-up text-xs align-middle" />
+              esperado: {{ a.expected }}
+            </p>
+            <div v-if="a.status === 'applied'" class="mt-2 text-xs">
+              <span class="cvg-legenda">feita {{ timeBR(a.applied_at) }}</span>
+              <template v-if="a.learned_at">
+                <span class="cvg-chip ml-2" :class="OUTCOME[a.outcome]?.cls">{{
+                  OUTCOME[a.outcome]?.label
+                }}</span>
+                <p class="cvg-texto-2 mt-1">{{ beforeAfter(a) }}</p>
+              </template>
+              <span v-else class="cvg-chip ml-2">
+                aprendendo · faltam {{ learningLeft(a) }} dia(s)
+              </span>
+            </div>
+            <div
+              v-if="canEditAgent"
+              class="flex items-center gap-2 flex-wrap mt-3"
+            >
+              <template v-if="a.status === 'suggested'">
+                <button
+                  type="button"
+                  class="cvg-btn cvg-btn--principal"
+                  :disabled="busy"
+                  @click="decideAction(a, 'approve')"
+                >
+                  <span class="i-lucide-check text-sm" /> Aprovar
+                </button>
+                <button
+                  type="button"
+                  class="cvg-btn"
+                  :disabled="busy"
+                  @click="openSteps(a)"
+                >
+                  Ver passo a passo
+                </button>
+                <button
+                  type="button"
+                  class="cvg-btn"
+                  :disabled="busy"
+                  @click="decideAction(a, 'dismiss')"
+                >
+                  Descartar
+                </button>
+              </template>
+              <template v-else-if="a.status === 'approved'">
+                <button
+                  type="button"
+                  class="cvg-btn cvg-btn--principal"
+                  :disabled="busy"
+                  @click="openSteps(a)"
+                >
+                  <span class="i-lucide-list-checks text-sm" /> Passo a passo
+                </button>
+                <a
+                  v-if="builderOf(a)"
+                  class="cvg-btn"
+                  :href="builderOf(a)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span class="i-lucide-wand-2 text-sm" /> Abrir a montagem
+                </a>
+                <button
+                  type="button"
+                  class="cvg-btn"
+                  :disabled="busy"
+                  @click="markDone(a)"
+                >
+                  Fiz à mão
+                </button>
+                <button
+                  type="button"
+                  class="cvg-btn"
+                  :disabled="busy"
+                  @click="decideAction(a, 'dismiss')"
+                >
+                  Descartar
+                </button>
+              </template>
+              <template v-else-if="['dismissed', 'expired'].includes(a.status)">
+                <button
+                  type="button"
+                  class="cvg-btn"
+                  :disabled="busy"
+                  @click="decideAction(a, 'reopen')"
+                >
+                  Voltar para a fila
+                </button>
+              </template>
+            </div>
+          </div>
+        </div>
+        <p v-else class="cvg-vazio">
+          {{
+            queueFilter === 'suggested'
+              ? 'nada esperando ok — ou o agente ainda não leu (botão "Ler agora")'
+              : 'nada aqui'
+          }}
+        </p>
+        <div v-if="scoreboard.length" class="mt-4">
+          <p class="cvg-rotulo mb-1">O que o agente aprendeu</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div
+              v-for="r in scoreboard"
+              :key="r.rule"
+              class="pa-rec text-xs flex items-center gap-2 flex-wrap"
+            >
+              <b>{{ r.label }}</b>
+              <span v-if="r.observing" class="cvg-chip cvg-atencao">
+                em observação
+              </span>
+              <span class="ml-auto cvg-texto-2">
+                melhorou <b>{{ r.better }}</b> · piorou <b>{{ r.worse }}</b> ·
+                igual <b>{{ r.same }}</b> · cedo <b>{{ r.early }}</b>
+              </span>
+            </div>
+          </div>
+        </div>
+      </CvBloco>
+
+      <!-- passo a passo de uma recomendação -->
+      <div v-if="steps" class="pa-veu" @click.self="steps = null">
+        <div class="pa-pop">
+          <p class="font-bold cvg-texto-1 mb-1">{{ steps.action.title }}</p>
+          <p class="cvg-legenda mb-3">
+            Faça e marque aqui; o antes × depois começa a contar.
+          </p>
+          <ol class="text-sm cvg-texto-2 space-y-1.5 list-decimal pl-4">
+            <li v-for="(st, si) in steps.steps" :key="si">{{ st }}</li>
+          </ol>
+          <div class="flex items-center gap-2 flex-wrap mt-4">
+            <a
+              v-if="builderOf(steps.action)"
+              class="cvg-btn"
+              :href="builderOf(steps.action)"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <span class="i-lucide-wand-2 text-sm" /> Abrir a montagem
+            </a>
+            <button
+              v-if="canEditAgent"
+              type="button"
+              class="cvg-btn cvg-btn--principal"
+              :disabled="busy"
+              @click="markDone(steps.action)"
+            >
+              <span class="i-lucide-check text-sm" /> Fiz à mão
+            </button>
+            <button type="button" class="cvg-btn" @click="steps = null">
+              Depois
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- ══ 5 · FUNIS (o "link build") ══ -->
       <CvBloco
@@ -2253,5 +3062,63 @@ const loosePages = computed(() => {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
+}
+/* ── item 353: pódio, recomendações e o véu do passo a passo ── */
+.cvg-pa .pa-podio-item {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgb(var(--cv-rgb) / 0.16);
+}
+.dark .cvg-pa .pa-podio-item {
+  background: rgba(255, 255, 255, 0.05);
+}
+.cvg-pa .pa-podio-item--campea {
+  border-color: rgba(212, 160, 23, 0.6);
+  box-shadow: 0 0 0 2px rgba(212, 160, 23, 0.22);
+}
+.cvg-pa .pa-podio-text {
+  margin: 4px 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.cvg-pa .pa-rec {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgb(var(--cv-rgb) / 0.16);
+}
+.dark .cvg-pa .pa-rec {
+  background: rgba(255, 255, 255, 0.05);
+}
+.cvg-pa .pa-veu {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.35);
+}
+@media (min-width: 640px) {
+  .cvg-pa .pa-veu {
+    align-items: center;
+  }
+}
+.cvg-pa .pa-pop {
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 20px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgb(var(--cv-rgb) / 0.3);
+  box-shadow: 0 20px 50px -18px rgba(0, 0, 0, 0.5);
+}
+.dark .cvg-pa .pa-pop {
+  background: rgba(23, 25, 28, 0.96);
 }
 </style>

@@ -200,6 +200,8 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/content_items' => { node: 'marketing.paginas', view: %w[index] },
     'crm/pages_dashboards' => { node: 'marketing.resultados', view: %w[show] },
     'crm/pages_reports' => { node: 'marketing.resultados', view: %w[show] },
+    'crm/campaign_agent' => { node: 'marketing.campanhas', view: %w[show] }, # 🎯 item 352
+    'crm/page_agent' => { node: 'marketing.resultados', view: %w[show timeline steps] }, # 📄 item 353
     # ── Financeiro / estratégia ──
     'crm/finance' => { node: 'financeiro.lancamentos', view: %w[show profitability compare entries] },
     'crm/stock' => { node: 'financeiro.estoque', view: %w[show items orders], skip: %w[lookup create_order] },

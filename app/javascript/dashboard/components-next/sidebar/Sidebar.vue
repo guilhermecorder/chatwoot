@@ -1309,6 +1309,13 @@ const menuItems = computed(() => {
             label: 'Financeiro & CAC',
             route: 'acquisition_cost_reports',
           },
+          {
+            // 🎯 item 352: Agente de Campanhas — nó marketing.campanhas
+            name: 'Campaign Agent',
+            icon: 'i-lucide-target',
+            label: 'Campanhas (agente)',
+            route: 'campaign_agent_reports',
+          },
         ]
           .filter(r => show(r.name))
           .map(r => ({

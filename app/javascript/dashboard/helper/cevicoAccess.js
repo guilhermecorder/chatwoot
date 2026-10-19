@@ -69,6 +69,7 @@ export const ROUTE_NODES = {
   whatsapp_health_reports: 'relatorios.whatsapp_saude',
   whatsapp_spend_reports: 'relatorios.gasto_whatsapp',
   acquisition_cost_reports: 'financeiro.cac',
+  campaign_agent_reports: 'marketing.campanhas',
   paineis_settings_index: 'configuracoes.paineis',
   precos_settings_index: 'configuracoes.precos',
   dominio_settings_index: 'configuracoes.dominio',
@@ -119,6 +120,7 @@ export const MENU_NODES = {
   'WhatsApp Health': 'relatorios.whatsapp_saude',
   'WhatsApp Spend': 'relatorios.gasto_whatsapp',
   'Acquisition Cost': 'financeiro.cac',
+  'Campaign Agent': 'marketing.campanhas',
   // relatórios do core do Chatwoot (a API deles só aceita admin)
   'Label Dashboard': 'relatorios.core',
   'Report Overview': 'relatorios.core',

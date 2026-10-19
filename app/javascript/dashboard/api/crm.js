@@ -1610,6 +1610,71 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/acquisition_cost`, { params });
   }
 
+  // ── 📄 Agente de Páginas (item 353): placar, pódio, linha do tempo e fila ──
+  getPageAgent(params = {}) {
+    return axios.get(`${this.url}/page_agent`, { params });
+  }
+
+  getPageTimeline(pageId, days = 90) {
+    return axios.get(`${this.url}/page_agent/timeline`, {
+      params: { page_id: pageId, days },
+    });
+  }
+
+  getPageActionSteps(id) {
+    return axios.get(`${this.url}/page_agent/steps`, { params: { id } });
+  }
+
+  decidePageAction(id, decision) {
+    return axios.post(`${this.url}/page_agent/decide`, { id, decision });
+  }
+
+  manualPageAction(id) {
+    return axios.post(`${this.url}/page_agent/manual`, { id });
+  }
+
+  runPageAgent() {
+    return axios.post(`${this.url}/page_agent/run`);
+  }
+
+  // ── 🎯 Agente de Campanhas (item 352): Meta + Google, nossa média,
+  // recomendações (aprovar → aplicar → aprender), parâmetros e ficha de subida
+  getCampaignAgent(params = {}) {
+    return axios.get(`${this.url}/campaign_agent`, { params });
+  }
+
+  saveCampaignAgentParams(payload) {
+    return axios.post(`${this.url}/campaign_agent/params`, { params: payload });
+  }
+
+  decideCampaignAction(id, decision) {
+    return axios.post(`${this.url}/campaign_agent/decide`, { id, decision });
+  }
+
+  applyCampaignAction(id) {
+    return axios.post(`${this.url}/campaign_agent/apply`, { id });
+  }
+
+  manualCampaignAction(id) {
+    return axios.post(`${this.url}/campaign_agent/manual`, { id });
+  }
+
+  runCampaignAgent() {
+    return axios.post(`${this.url}/campaign_agent/run`);
+  }
+
+  saveCampaignBrief(brief) {
+    return axios.post(`${this.url}/campaign_agent/brief`, { brief });
+  }
+
+  launchCampaignBrief(id) {
+    return axios.post(`${this.url}/campaign_agent/launch`, { id });
+  }
+
+  removeCampaignBrief(id) {
+    return axios.post(`${this.url}/campaign_agent/remove_brief`, { id });
+  }
+
   // ── Ferramentas da Academia (time lê; admin escreve) ────────────────
   getTeamTools() {
     return axios.get(`${this.url}/team_tools`);

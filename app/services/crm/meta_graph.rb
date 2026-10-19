@@ -75,6 +75,25 @@ class Crm::MetaGraph
     [nil, e.message]
   end
 
+  # 🎯 item 352: ESCREVER na Meta (pausar, mudar verba, criar campanha/conjunto/
+  # anúncio pausados). POST /{id} com os campos, ou POST /act_X/{edge} para criar.
+  # Devolve [resposta, nil] ou [nil, texto do erro]. Só é chamado com a chavinha
+  # "executar pela API" ligada (Cevico::CampaignAgent::Executor).
+  def post_object(path, fields)
+    return Crm::MetaSimulator.new(account: @account).post_object(path, fields) if simulate?
+
+    response = HTTParty.post("#{BASE_URI}/#{api_version}/#{path}", body: fields.merge(access_token: access_token), timeout: 30)
+    return [response.parsed_response, nil] if response.success? && response.parsed_response.is_a?(Hash)
+
+    [nil, extract_error(response)]
+  rescue StandardError => e
+    [nil, e.message]
+  end
+
+  def create_object(edge, fields)
+    post_object("act_#{ad_account_id}/#{edge}", fields)
+  end
+
   # acesso da página, quando o acesso configurado enxerga a página
   def page_token(page_id)
     return nil if page_id.blank?

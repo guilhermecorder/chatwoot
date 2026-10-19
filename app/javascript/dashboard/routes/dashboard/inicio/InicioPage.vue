@@ -2501,6 +2501,8 @@ const deleteKpi = async def => {
 const BLOCK_LABELS = {
   whatsapp: 'Status do WhatsApp',
   briefing: 'Briefing do gestor',
+  campanhas: 'Agente de Campanhas',
+  paginas: 'Agente de Páginas',
   radar: 'Radar de Oportunidades',
   tarefas: 'Tarefas esperando você',
   mentor: 'Feedback da semana',
@@ -2517,6 +2519,8 @@ const BLOCK_LABELS = {
 const BLOCK_ICONS = {
   whatsapp: 'i-lucide-phone',
   briefing: 'i-lucide-gauge',
+  campanhas: 'i-lucide-target',
+  paginas: 'i-lucide-file-text',
   radar: 'i-lucide-radar',
   tarefas: 'i-lucide-list-checks',
   mentor: 'i-lucide-graduation-cap',
@@ -2534,6 +2538,8 @@ const TASKS_FIRST_PANELS = ['agendamento', 'conducao', 'cirurgia'];
 const TOP_BLOCKS_DEFAULT = [
   'whatsapp',
   'briefing',
+  'campanhas',
+  'paginas',
   'radar',
   'tarefas',
   'mentor',
@@ -4998,6 +5004,81 @@ const managerBriefText = computed(() => {
   return sentences.slice(0, 4).join('').trim();
 });
 const managerFindings = computed(() => managerBrief.value?.findings || []);
+// ── 🎯 Agente de Campanhas (item 352): a leitura do dia + o que espera ok ──
+// (null para quem não vê o ambiente Campanhas)
+const campaignAgent = computed(() => data.value?.campaign_agent || null);
+const campaignSummary = computed(() => campaignAgent.value?.summary?.all || {});
+const campaignMoney = v =>
+  v === null || v === undefined
+    ? '—'
+    : `R$ ${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
+// a estrela-guia contra a nossa média: acima = pior (custo), abaixo = melhor
+const campaignVerdict = computed(() => {
+  const s = campaignSummary.value;
+  if (!s.goal_cost || !s.baseline_goal_cost) return null;
+  const ratio = s.goal_cost / s.baseline_goal_cost;
+  if (ratio <= 0.9) return { tone: 'cv-green', text: 'abaixo da nossa média' };
+  if (ratio >= 1.1) return { tone: 'cv-red', text: 'acima da nossa média' };
+  return { tone: 'cv-amber', text: 'na nossa média' };
+});
+const campaignLastRunTime = computed(() => {
+  const iso = campaignAgent.value?.last_run_at;
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+});
+const openCampaignAgent = () =>
+  router.push({
+    name: 'campaign_agent_reports',
+    params: { accountId: accountId.value },
+  });
+// linha dos últimos 14 dias (polyline simples, sem lib): [n, n, …] → "x,y x,y"
+const sparkPath = (values, w = 140, h = 28) => {
+  const list = (values || []).map(v => Number(v) || 0);
+  if (list.length < 2) return '';
+  const max = Math.max(...list, 1);
+  const step = w / (list.length - 1);
+  return list
+    .map(
+      (v, i) =>
+        `${(i * step).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`
+    )
+    .join(' ');
+};
+const campaignSeries = computed(() => campaignAgent.value?.series || null);
+// ── 📄 Agente de Páginas (item 353): a leitura do dia das páginas ──
+const pageAgent = computed(() => data.value?.page_agent || null);
+const pageSummary = computed(() => pageAgent.value?.summary || {});
+const pagePct = v =>
+  v === null || v === undefined
+    ? '—'
+    : `${(Number(v) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+// lead por visita da janela contra a média das próprias páginas (90 dias)
+const pageVerdict = computed(() => {
+  const s = pageSummary.value;
+  if (!s.lead_rate || !s.avg_lead_rate) return null;
+  const ratio = s.lead_rate / s.avg_lead_rate;
+  if (ratio >= 1.1)
+    return { tone: 'cv-green', text: 'acima da média das páginas' };
+  if (ratio <= 0.9)
+    return { tone: 'cv-red', text: 'abaixo da média das páginas' };
+  return { tone: 'cv-amber', text: 'na média das páginas' };
+});
+const pageLastRunTime = computed(() => {
+  const iso = pageAgent.value?.last_run_at;
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+});
+const openPageAgent = () =>
+  router.push({
+    name: 'cevico_pages_analytics',
+    params: { accountId: accountId.value },
+  });
 // chip do desvio: "Taxa de comparecimento −38%"
 const managerFindingLabel = f =>
   `${f.label || f.indicator} ${Number(f.deviation_pct) < 0 ? '−' : '+'}${Math.abs(Math.round(f.deviation_pct || 0))}%`;
@@ -5892,6 +5973,298 @@ onUnmounted(() => {
                           · {{ managerLastRunTime }}
                         </template>
                       </p>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else-if="blockId === 'campanhas'">
+                  <!-- 🎯 Agente de Campanhas (item 352): a leitura de hoje (estrela-guia
+                       vs nossa média) + as recomendações esperando ok. Só para quem vê
+                       o ambiente Campanhas; some quando o agente ainda não leu. -->
+                  <div v-if="campaignAgent" class="cv-block mb-6">
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-target text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Agente de Campanhas
+                        </h2>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          últimos {{ campaignSummary.window_days || 7 }} dias vs
+                          nossa média de
+                          {{ campaignSummary.baseline_days || 30 }} dias
+                        </span>
+                      </div>
+
+                      <div
+                        class="flex flex-wrap items-end gap-x-5 gap-y-2 mb-2"
+                      >
+                        <div>
+                          <p class="text-[10px] text-n-slate-9 uppercase">
+                            {{ campaignAgent.goal_label }}
+                          </p>
+                          <p class="text-xl font-bold text-n-slate-12">
+                            {{ campaignMoney(campaignSummary.goal_cost) }}
+                            <span
+                              v-if="campaignVerdict"
+                              class="cv-chip ml-1 align-middle"
+                              :class="campaignVerdict.tone"
+                            >
+                              {{ campaignVerdict.text }}
+                              ({{
+                                campaignMoney(
+                                  campaignSummary.baseline_goal_cost
+                                )
+                              }})
+                            </span>
+                          </p>
+                        </div>
+                        <div class="text-xs text-n-slate-11">
+                          gasto
+                          <b>{{ campaignMoney(campaignSummary.spend) }}</b> ·
+                          leads <b>{{ campaignSummary.leads ?? '—' }}</b> ·
+                          agendamentos
+                          <b>{{ campaignSummary.booked ?? '—' }}</b> · cirurgias
+                          <b>{{ campaignSummary.surgeries ?? '—' }}</b>
+                        </div>
+                      </div>
+
+                      <p
+                        v-if="campaignAgent.brief"
+                        class="text-sm text-n-slate-11 leading-relaxed mb-2"
+                      >
+                        {{ campaignAgent.brief }}
+                      </p>
+
+                      <!-- 14 dias: gasto (linha cheia) e leads (linha tracejada) -->
+                      <div
+                        v-if="campaignSeries?.spend?.length"
+                        class="flex items-center gap-3 mb-2"
+                      >
+                        <svg
+                          viewBox="0 0 140 28"
+                          class="w-36 h-7 flex-shrink-0"
+                          aria-hidden="true"
+                        >
+                          <polyline
+                            :points="sparkPath(campaignSeries.spend)"
+                            fill="none"
+                            stroke="var(--cv)"
+                            stroke-width="2"
+                            stroke-linejoin="round"
+                          />
+                          <polyline
+                            :points="sparkPath(campaignSeries.leads)"
+                            fill="none"
+                            stroke="var(--cv-deep)"
+                            stroke-width="1.5"
+                            stroke-dasharray="3 2"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                        <span class="text-[10px] text-n-slate-9">
+                          14 dias · gasto (cheia) e leads (tracejada)
+                        </span>
+                      </div>
+
+                      <div
+                        v-if="campaignAgent.top?.length"
+                        class="space-y-1 mb-2"
+                      >
+                        <button
+                          v-for="a in campaignAgent.top"
+                          :key="a.id"
+                          class="cv-sub w-full text-left px-3 py-1.5 text-xs flex items-center gap-2"
+                          @click="openCampaignAgent"
+                        >
+                          <span
+                            class="cv-chip"
+                            :class="
+                              a.severity === 'alerta'
+                                ? 'cv-red'
+                                : a.severity === 'oportunidade'
+                                  ? 'cv-green'
+                                  : 'cv-amber'
+                            "
+                          >
+                            {{ a.channel === 'meta' ? 'Meta' : 'Google' }}
+                          </span>
+                          <span class="font-medium text-n-slate-12 truncate">
+                            {{ a.title }}
+                          </span>
+                          <span
+                            class="text-n-slate-9 truncate hidden sm:inline"
+                          >
+                            · {{ a.ref_name }}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          @click="openCampaignAgent"
+                        >
+                          <span class="i-lucide-target text-xs" />
+                          {{
+                            campaignAgent.open
+                              ? `${campaignAgent.open} esperando seu ok`
+                              : 'Abrir Campanhas'
+                          }}
+                        </button>
+                        <span
+                          v-if="campaignAgent.approved"
+                          class="text-[11px] text-n-slate-9"
+                        >
+                          {{ campaignAgent.approved }} aprovada(s) para aplicar
+                        </span>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          leitura de hoje<template v-if="campaignLastRunTime">
+                            · {{ campaignLastRunTime }}
+                          </template>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else-if="blockId === 'paginas'">
+                  <!-- 📄 Agente de Páginas (item 353): a leitura de hoje das páginas
+                       (lead por visita vs a média das próprias páginas), a campeã e os
+                       pontos a melhorar esperando ok. Só para quem vê Resultados de tráfego. -->
+                  <div v-if="pageAgent" class="cv-block mb-6">
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-file-text text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Agente de Páginas
+                        </h2>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          últimos {{ pageSummary.window_days || 7 }} dias vs a
+                          média das páginas em
+                          {{ pageSummary.baseline_days || 90 }} dias
+                        </span>
+                      </div>
+
+                      <div
+                        class="flex flex-wrap items-end gap-x-5 gap-y-2 mb-2"
+                      >
+                        <div>
+                          <p class="text-[10px] text-n-slate-9 uppercase">
+                            visita → lead
+                          </p>
+                          <p class="text-xl font-bold text-n-slate-12">
+                            {{ pagePct(pageSummary.lead_rate) }}
+                            <span
+                              v-if="pageVerdict"
+                              class="cv-chip ml-1 align-middle"
+                              :class="pageVerdict.tone"
+                            >
+                              {{ pageVerdict.text }}
+                              ({{ pagePct(pageSummary.avg_lead_rate) }})
+                            </span>
+                          </p>
+                        </div>
+                        <div class="text-xs text-n-slate-11">
+                          visitas <b>{{ pageSummary.views ?? '—' }}</b> ·
+                          cliques no WhatsApp
+                          <b>{{ pageSummary.cta ?? '—' }}</b> · leads
+                          <b>{{ pageSummary.leads ?? '—' }}</b> · agendaram
+                          <b>{{ pageSummary.booked ?? '—' }}</b>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="pageAgent.series?.views?.length"
+                        class="flex items-center gap-3 mb-2"
+                      >
+                        <svg
+                          viewBox="0 0 140 28"
+                          class="w-36 h-7 flex-shrink-0"
+                          aria-hidden="true"
+                        >
+                          <polyline
+                            :points="sparkPath(pageAgent.series.views)"
+                            fill="none"
+                            stroke="var(--cv)"
+                            stroke-width="2"
+                            stroke-linejoin="round"
+                          />
+                          <polyline
+                            :points="sparkPath(pageAgent.series.leads)"
+                            fill="none"
+                            stroke="var(--cv-deep)"
+                            stroke-width="1.5"
+                            stroke-dasharray="3 2"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                        <span class="text-[10px] text-n-slate-9">
+                          14 dias · visitas (cheia) e leads (tracejada)
+                        </span>
+                      </div>
+
+                      <p
+                        v-if="pageAgent.champion"
+                        class="text-xs text-n-slate-11 mb-2"
+                      >
+                        🏆 campeã da semana:
+                        <b>
+                          {{ pageAgent.champion.emoji }}
+                          {{ pageAgent.champion.title }}
+                        </b>
+                        · {{ pagePct(pageAgent.champion.lead_rate) }} das
+                        visitas viraram lead
+                      </p>
+
+                      <div v-if="pageAgent.top?.length" class="space-y-1 mb-2">
+                        <button
+                          v-for="a in pageAgent.top"
+                          :key="a.id"
+                          class="cv-sub w-full text-left px-3 py-1.5 text-xs flex items-center gap-2"
+                          @click="openPageAgent"
+                        >
+                          <span
+                            class="cv-chip"
+                            :class="
+                              a.severity === 'alerta'
+                                ? 'cv-red'
+                                : a.severity === 'oportunidade'
+                                  ? 'cv-green'
+                                  : 'cv-amber'
+                            "
+                          >
+                            {{ a.severity === 'seo' ? 'SEO' : a.severity }}
+                          </span>
+                          <span class="font-medium text-n-slate-12 truncate">
+                            {{ a.title }}
+                          </span>
+                          <span
+                            class="text-n-slate-9 truncate hidden sm:inline"
+                          >
+                            · {{ a.ref_name }}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button class="cv-btn cv-btn-sm" @click="openPageAgent">
+                          <span class="i-lucide-file-text text-xs" />
+                          {{
+                            pageAgent.open
+                              ? `${pageAgent.open} esperando seu ok`
+                              : 'Abrir Análise de Páginas'
+                          }}
+                        </button>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          leitura de hoje<template v-if="pageLastRunTime">
+                            · {{ pageLastRunTime }}
+                          </template>
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </template>

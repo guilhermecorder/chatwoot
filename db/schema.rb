@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_13_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_10_19_010000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -689,6 +689,58 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_13_010000) do
     t.index ["campaign_id"], name: "index_cevico_calls_on_campaign_id"
     t.index ["contact_id"], name: "index_cevico_calls_on_contact_id"
     t.index ["user_id"], name: "index_cevico_calls_on_user_id"
+  end
+
+  create_table "cevico_campaign_actions", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "channel", null: false
+    t.string "level", null: false
+    t.string "ref_id", null: false
+    t.string "ref_name"
+    t.string "campaign_id"
+    t.string "campaign_name"
+    t.string "rule", null: false
+    t.string "kind", null: false
+    t.string "severity", default: "atencao", null: false
+    t.string "status", default: "suggested", null: false
+    t.string "key", null: false
+    t.string "title", null: false
+    t.text "evidence"
+    t.text "suggestion"
+    t.string "expected"
+    t.jsonb "payload", default: {}, null: false
+    t.jsonb "metrics_before", default: {}, null: false
+    t.jsonb "metrics_after", default: {}, null: false
+    t.string "outcome"
+    t.date "suggested_on", null: false
+    t.datetime "decided_at"
+    t.bigint "decided_by_id"
+    t.datetime "applied_at"
+    t.string "applied_mode"
+    t.datetime "learned_at"
+    t.text "error"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "channel", "ref_id"], name: "idx_on_account_id_channel_ref_id_a77366bd7c"
+    t.index ["account_id", "key", "suggested_on"], name: "idx_on_account_id_key_suggested_on_041bac315a"
+    t.index ["account_id", "status"], name: "index_cevico_campaign_actions_on_account_id_and_status"
+    t.index ["account_id"], name: "index_cevico_campaign_actions_on_account_id"
+  end
+
+  create_table "cevico_campaign_days", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "channel", default: "google", null: false
+    t.string "campaign_id", null: false
+    t.string "campaign_name"
+    t.date "date", null: false
+    t.decimal "spend", precision: 12, scale: 2, default: "0.0", null: false
+    t.integer "clicks", default: 0, null: false
+    t.integer "impressions", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "channel", "campaign_id", "date"], name: "index_campaign_days_unique_day", unique: true
+    t.index ["account_id", "date"], name: "index_cevico_campaign_days_on_account_id_and_date"
+    t.index ["account_id"], name: "index_cevico_campaign_days_on_account_id"
   end
 
   create_table "cevico_content_items", force: :cascade do |t|
@@ -2438,6 +2490,8 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_13_010000) do
   add_foreign_key "cevico_calls", "conversations", on_delete: :nullify
   add_foreign_key "cevico_calls", "inboxes", on_delete: :cascade
   add_foreign_key "cevico_calls", "users", on_delete: :nullify
+  add_foreign_key "cevico_campaign_actions", "accounts", on_delete: :cascade
+  add_foreign_key "cevico_campaign_days", "accounts", on_delete: :cascade
   add_foreign_key "cevico_content_items", "accounts"
   add_foreign_key "cevico_finance_entries", "accounts"
   add_foreign_key "cevico_goal_plans", "accounts"

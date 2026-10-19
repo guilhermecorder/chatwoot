@@ -74,6 +74,10 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       birthdays: Crm::Birthdays.new(account).payload(Current.user, admin: Current.account_user.administrator?),
       # 📊 Gestor Autônomo (item 128): briefing do dia + desvios (gestão)
       manager_brief: manager_brief_json,
+      # 🎯 Agente de Campanhas (item 352): resumo da leitura do dia + recomendações esperando ok (gestão)
+      campaign_agent: campaign_agent_json,
+      # 📄 Agente de Páginas (item 353): a leitura do dia das páginas + pontos a melhorar esperando ok
+      page_agent: page_agent_json,
       # metas do painel + fator do período + recordes (cards vivos)
       goals: goals_json
     }.merge(panel_key == 'agendamento' ? heavy['panel_data'] : {}) # compat: campos antigos no topo
@@ -104,6 +108,50 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       findings: Array(state['findings']).first(3),
       tasks_opened: state['tasks_opened']
     }
+  end
+
+  # 🎯 item 352: o resumo do Agente de Campanhas no Meu Painel — quem pode VER
+  # o ambiente (admin ou concessão marketing.campanhas) recebe o bloco
+  def campaign_agent_json # rubocop:disable Metrics/AbcSize
+    return nil unless can_see_campaign_agent?
+
+    state = Cevico::CampaignAgent::Daily.state(account)
+    return nil if state.blank? || state['last_run_at'].blank?
+
+    # só os anúncios (Meta/Google): as páginas têm o bloco delas (item 353)
+    scope = Crm::CampaignAction.ads.where(account_id: account.id)
+    open = scope.where(status: 'suggested').recent.limit(3)
+    state.slice('last_run_at', 'summary', 'brief', 'new', 'learned', 'series').merge(
+      'open' => scope.where(status: 'suggested').count,
+      'approved' => scope.where(status: 'approved').count,
+      'top' => open.map { |a| a.as_json.slice(:id, :title, :severity, :ref_name, :channel, :kind) },
+      'goal_label' => Cevico::CampaignAgent::Params.goal_label(Cevico::CampaignAgent::Params.for(account))
+    )
+  end
+
+  # 📄 item 353: quem vê Resultados de tráfego (admin ou concessão marketing.resultados) recebe o bloco
+  def page_agent_json # rubocop:disable Metrics/AbcSize
+    return nil unless can_see_node?('marketing.resultados')
+
+    state = Cevico::PageAgent::Daily.state(account)
+    return nil if state.blank? || state['last_run_at'].blank?
+
+    scope = Crm::CampaignAction.where(account_id: account.id, channel: 'pages')
+    state.slice('last_run_at', 'summary', 'series', 'champion', 'new', 'learned').merge(
+      'open' => scope.where(status: 'suggested').count,
+      'approved' => scope.where(status: 'approved').count,
+      'top' => scope.where(status: 'suggested').recent.limit(3).map { |a| a.as_json.slice(:id, :title, :severity, :ref_name, :kind) }
+    )
+  end
+
+  def can_see_campaign_agent?
+    can_see_node?('marketing.campanhas')
+  end
+
+  def can_see_node?(node)
+    return true if Current.account_user.administrator?
+
+    Cevico::Access.for(account, Current.user, account_user: Current.account_user).can?(node, :view)
   end
 
   def robot_problems_json

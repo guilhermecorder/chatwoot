@@ -28,6 +28,7 @@ import CrmDashboardReport from './CrmDashboardReport.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
 import WhatsappSpend from './WhatsappSpend.vue';
 import AcquisitionCost from './AcquisitionCost.vue';
+import CampaignAgent from './CampaignAgent.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
 import DoctorsDashboard from './DoctorsDashboard.vue';
 import AgentsDashboard from './AgentsDashboard.vue';
@@ -206,6 +207,15 @@ export default {
             permissions: ['administrator', 'agent'],
           },
           component: AcquisitionCost,
+        },
+        {
+          // 🎯 item 352: Agente de Campanhas — nó marketing.campanhas
+          path: 'campaign_agent',
+          name: 'campaign_agent_reports',
+          meta: {
+            permissions: ['administrator', 'agent'],
+          },
+          component: CampaignAgent,
         },
         {
           path: 'traffic_funnel',

@@ -51,7 +51,24 @@ class Crm::MetaSimulator # rubocop:disable Metrics/ClassLength
   def fetch_objects(ids, _fields)
     wanted = Array(ids).map(&:to_s)
     ads = ALL_ADS.select { |ad| wanted.include?(ad[:id]) }.to_h { |ad| [ad[:id], ad_object(ad)] }
-    ads.merge(video_objects(wanted))
+    ads.merge(video_objects(wanted)).merge(adset_objects(wanted))
+  end
+
+  # 🎯 item 352: conjuntos fictícios (id = "1" + id do anúncio) com verba diária,
+  # para o Agente de Campanhas sugerir ±20 % no teste local
+  def adset_objects(wanted)
+    wanted.grep(/\A1\d{4}\z/).to_h do |id|
+      ad = ALL_ADS.find { |a| a[:id] == id[1..] }
+      [id, { 'id' => id, 'name' => "Conjunto #{ad ? ad[:name].split(' · ')[1] : id}", 'status' => 'ACTIVE',
+             'daily_budget' => (1500 + ((id.to_i % 5) * 500)).to_s, 'campaign_id' => ad ? campaign_id(ad) : nil }]
+    end
+  end
+
+  # 🎯 item 352: escrita simulada — devolve o que a Meta devolveria (id novo ou success)
+  def post_object(path, fields)
+    return [{ 'id' => "sim#{(path.hash.abs % 100_000) + fields.to_s.size}" }, nil] if path.to_s.include?('/')
+
+    [{ 'success' => true }, nil]
   end
 
   # item 287: duração (s) fictícia do vídeo de cada anúncio — 20, 28, 36 ou 44 s
