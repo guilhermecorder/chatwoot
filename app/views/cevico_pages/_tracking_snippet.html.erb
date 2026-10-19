@@ -90,7 +90,10 @@
           // Pixel/GA4 (item 117): o Protocolo vira eventID do Lead —
           // a mesma chave que a CAPI usará na rodada 2 (sem duplicar)
           if (window.cevicoLead) { try { window.cevicoLead(data && data.token ? data.token : null); } catch (err) { /* segue o clique */ } }
-          location.href = dest;
+          // 19/10: abrir o WhatsApp na mesma hora cortava o aviso do Pixel (zero
+          // Contact na Meta). Um instante para ele sair; o servidor manda o mesmo
+          // Contact com o Protocolo (Cevico::PageContactEventJob), sem duplicar
+          setTimeout(function () { location.href = dest; }, window.fbq ? 300 : 0);
         });
       return;
     }

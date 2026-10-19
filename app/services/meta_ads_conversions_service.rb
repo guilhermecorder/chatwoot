@@ -10,12 +10,15 @@
 class MetaAdsConversionsService
   GRAPH_API_URL = 'https://graph.facebook.com/v19.0'.freeze
 
-  def initialize(account:, event_name:, contact: nil, custom_data: {}, event_id: nil)
+  # web: evento que aconteceu NO SITE (ex.: clique no botão do WhatsApp da página),
+  # com a identidade do navegador — { ip:, user_agent:, url:, fbp:, fbc: }
+  def initialize(account:, event_name:, contact: nil, custom_data: {}, event_id: nil, web: nil) # rubocop:disable Metrics/ParameterLists
     @account     = account
     @event_name  = event_name
     @contact     = contact
     @custom_data = custom_data
     @event_id    = event_id || SecureRandom.hex(16)
+    @web         = web.presence&.to_h&.symbolize_keys
   end
 
   def call
@@ -97,9 +100,10 @@ class MetaAdsConversionsService
       event_name:       sent_event_name,
       event_time:       Time.current.to_i,
       event_id:         @event_id,
-      action_source:    messaging? ? 'business_messaging' : 'system_generated',
+      action_source:    action_source,
       user_data:        build_user_data,
     }
+    data[:event_source_url] = @web[:url] if @web && @web[:url].present?
     # ctwa_clid = clique no anúncio click-to-WhatsApp: com ele a Meta
     # atribui a conversão DIRETO ao anúncio que trouxe o contato
     data[:messaging_channel] = 'whatsapp' if messaging?
@@ -113,7 +117,14 @@ class MetaAdsConversionsService
   def messaging?
     return @messaging if defined?(@messaging)
 
-    @messaging = ctwa_clid.present? && waba_id.present?
+    @messaging = @web.nil? && ctwa_clid.present? && waba_id.present?
+  end
+
+  def action_source
+    return 'website' if @web
+    return 'business_messaging' if messaging?
+
+    'system_generated'
   end
 
   # no caminho de mensagem a Meta só aceita a lista dela (Lead → LeadSubmitted…)
@@ -122,7 +133,7 @@ class MetaAdsConversionsService
   end
 
   def build_user_data
-    return {} unless @contact
+    return web_identity unless @contact
 
     ud = {}
     ud[:em] = [hash_value(@contact.email)]    if @contact.email.present?
@@ -132,7 +143,18 @@ class MetaAdsConversionsService
     ud[:fn] = [hash_value(name_parts&.first&.downcase)] if name_parts&.first.present?
     ud[:ln] = [hash_value(name_parts&.last&.downcase)]  if name_parts&.last.present?
 
-    ud.merge(ad_identity)
+    ud.merge(ad_identity).merge(web_identity)
+  end
+
+  # evento do site: a Meta casa o evento com quem clicou pelo navegador
+  # (IP + navegador + cookies _fbp/_fbc) — os mesmos do Pixel na página
+  def web_identity
+    return {} unless @web
+
+    {
+      client_ip_address: @web[:ip], client_user_agent: @web[:user_agent],
+      fbp: @web[:fbp], fbc: @web[:fbc]
+    }.compact_blank
   end
 
   # o que amarra o evento ao ANÚNCIO: no anúncio de WhatsApp, o código do

@@ -154,6 +154,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     ref = CevicoPageRef.mint!(page: page, source_data: click_snapshot(params, page).merge('variant' => variant))
     return render json: { token: nil } if ref.nil?
 
+    send_contact_event(ref)
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
   end
 
@@ -214,6 +215,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
                               source_data: click_snapshot(params, nil))
     return render json: { token: nil } if ref.nil?
 
+    send_contact_event(ref)
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
   end
 
@@ -239,6 +241,16 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   rescue StandardError => e
     Rails.logger.error "[CevicoPages#cta] protocolo falhou: #{e.message}"
     nil
+  end
+
+  # clique no WhatsApp → "Contact" na Meta pelo servidor (o do Pixel se perde
+  # quando o celular abre o WhatsApp). O Protocolo é o event_id: sem duplicar.
+  # Nunca atrapalha o clique: falha aqui só vai para o log.
+  def send_contact_event(ref)
+    Cevico::PageContactEventJob.perform_later(ref.id, { ip: request.remote_ip, user_agent: request.user_agent.to_s[0, 400],
+                                                        url: request.referer.to_s[0, 500] }.compact_blank)
+  rescue StandardError => e
+    Rails.logger.error "[CevicoPages#ref] Contact não enfileirado: #{e.message}"
   end
 
   # origem do clique para o Protocolo. Item 313: os cookies do navegador
