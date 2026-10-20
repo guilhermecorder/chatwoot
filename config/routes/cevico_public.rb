@@ -18,6 +18,14 @@ post 'forms/:slug', to: 'cevico_forms#submit'
 get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
 post 'forms/:slug/:token', to: 'cevico_forms#submit'
 post 'forms/:slug/:token/track', to: 'cevico_forms#track'
+# 🗺️ item 355: mapa do site só no domínio das páginas; robots.txt em todo host
+# (no do sistema, o mesmo de sempre — ver CevicoSeoController)
+get 'sitemap.xml', to: 'cevico_seo#sitemap', format: false, as: :cevico_sitemap,
+                   constraints: ->(req) { Cevico::PublicSite.official_host?(req.host) }
+get 'robots.txt', to: 'cevico_seo#robots', format: false, as: :cevico_robots
+# 📚 números por guia para a Biblioteca de guias (chave = endereço da biblioteca)
+get 'biblioteca/numeros.json', to: 'cevico_seo#library_numbers', format: false, as: :cevico_library_numbers,
+                               constraints: ->(req) { Cevico::PublicSite.official_host?(req.host) }
 # Páginas públicas CEVICO (nutrição/procedimentos — preparadas p/ SEO)
 # /cta e /next = redirecionadores que CONTAM o clique (funil + conversão)
 get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
