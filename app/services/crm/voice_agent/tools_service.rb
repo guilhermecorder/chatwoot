@@ -14,7 +14,8 @@
 class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
   TZ = Crm::AgendaSlots::TZ
   MAX_SLOTS = 6
-  RESULTS = { created: 'marcada', rescheduled: 'remarcada', already: 'ja_existia', skipped: 'nao_foi_possivel' }.freeze
+  RESULTS = { created: 'marcada', rescheduled: 'remarcada', already: 'ja_existia', skipped: 'nao_foi_possivel',
+              dia_fechado: 'dia_fechado' }.freeze
   # o que a IA ouve quando o paciente é de clínica parceira (só registrar_resultado passa)
   PARTNER_REFUSAL = 'Paciente de clínica parceira: você não atende esta pessoa. Diga apenas que a equipe da clínica vai ' \
                     'falar com ela pelo WhatsApp e encerre a ligação.'.freeze
@@ -296,7 +297,8 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
   def result_message(resultado)
     { 'marcada' => 'Consulta marcada. Confirme em voz alta e ofereça a confirmação pelo WhatsApp.',
       'remarcada' => 'A consulta anterior do paciente foi movida para este horário.',
-      'ja_existia' => 'O paciente já tinha exatamente esta consulta marcada.' }[resultado] ||
+      'ja_existia' => 'O paciente já tinha exatamente esta consulta marcada.',
+      'dia_fechado' => 'Esse dia está FECHADO na agenda da clínica. Ofereça outros dois horários da lista.' }[resultado] ||
       'Não foi possível marcar. Diga que a equipe vai confirmar pelo WhatsApp.'
   end
 

@@ -204,6 +204,28 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     slots
   end
 
+  # 🔒 20/10 (ele: "quando alguém fechar o dia na agenda, o agente não agende"):
+  # o dia está FECHADO para este atendimento? Cadeado do dia inteiro (string),
+  # de uma unidade ou de um médico (hash, item 267), ou médico com a agenda
+  # fechada (item 76). Unidade/médico desconhecidos só caem no cadeado do dia
+  # inteiro. É a régua ÚNICA do Crm::AppointmentRecorder — vale para todo robô
+  # que grava consulta (Secretário, Instagram, WhatsApp, ligação), mesmo quando
+  # o horário não passou pela lista de vagas.
+  def closed_on?(account, date, unit: nil, doctor: nil)
+    cfg = agenda_config(account)
+    return true if doctor.present? && Array(cfg['closed_doctors']).map(&:to_s).include?(doctor.to_s)
+
+    Array(cfg['blocked_days']).any? { |b| block_closes?(b, date.to_date.to_s, unit, doctor) }
+  end
+
+  # um item de blocked_days fecha este dia/unidade/médico? (string = dia inteiro)
+  def block_closes?(block, day, unit, doctor)
+    return block == day if block.is_a?(String)
+    return false unless block.is_a?(Hash) && block['date'] == day
+
+    (block['unit'].blank? || block['unit'] == unit.to_s) && (block['doctor'].blank? || block['doctor'] == doctor.to_s)
+  end
+
   # item 267: a janela deste médico/unidade está fechada neste dia?
   def window_blocked?(ctx, day, win)
     Array(ctx[:blocked_parts]).any? do |b|

@@ -23,6 +23,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     end
 
     @cevico_tracking = Cevico::PublicSite.tracking_config_for(@page.account)
+    request.env['cevico.gzip'] = true # 🗜️ 20/10: resposta comprimida (Rack::Deflater em config/application.rb)
 
     # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela);
     # item 306: quem volta à página vê a MESMA variação

@@ -37,6 +37,12 @@ module Chatwoot
   class Application < Rails::Application
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 7.0
+
+    # 🗜️ 20/10 (páginas rápidas): a página pública das Páginas (HTML anexado
+    # ou montado) sai comprimida em gzip quando o navegador aceita — ~100 KB
+    # de HTML viram ~25 KB. Só onde o CevicoPagesController marca
+    # request.env['cevico.gzip']; API, app e cable não mudam.
+    config.middleware.use Rack::Deflater, if: ->(env, _status, _headers, _body) { env['cevico.gzip'] }
     config.rails_i18n.enabled_modules = [:pluralization]
 
     config.eager_load_paths << Rails.root.join('lib')

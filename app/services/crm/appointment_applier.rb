@@ -48,7 +48,8 @@ class Crm::AppointmentApplier
         account: account, result: result, contact: contact,
         conversation: conversation, default_unit: default_unit
       )
-      return outcome if outcome == :already # nada mudou — sem nota repetida
+      # :already = nada mudou (sem nota repetida); :dia_fechado (20/10) = nada gravado, equipe decide
+      return not_written(outcome, result, contact, conversation, name) if %i[already dia_fechado].include?(outcome)
 
       unit = result[:unit].presence || default_unit
       local_time = result[:starts_at].in_time_zone('America/Sao_Paulo')
@@ -84,6 +85,28 @@ class Crm::AppointmentApplier
                    "📅 Consulta de #{name} — #{local_time.strftime('%d/%m/%Y às %H:%M')} — LANÇADA na Agenda a partir da " \
                    'confirmação (já estava marcada fora do sistema; não conta como agendamento novo).')
       :registered
+    end
+
+    def not_written(outcome, result, contact, conversation, name)
+      outcome == :dia_fechado ? apply_closed_day(result, contact, conversation, name) : outcome
+    end
+
+    # 🔒 20/10 ("quando alguém fechar o dia na agenda, o agente não agende"):
+    # a conversa combinou um dia que a equipe FECHOU (cadeado da Agenda). O
+    # Secretário não grava: abre tarefa para a equipe oferecer outro dia e
+    # deixa a nota na conversa, para ninguém achar que a consulta existe.
+    def apply_closed_day(result, contact, conversation, name)
+      account = conversation.account
+      when_str = result[:starts_at].in_time_zone('America/Sao_Paulo').strftime('%d/%m/%Y às %H:%M')
+      create_revision_task(account, result, contact, name,
+                           title: "⚠️ Dia fechado na Agenda: #{name}",
+                           description: "A conversa combinou #{when_str}, mas esse dia está FECHADO na Agenda (cadeado). " \
+                                        "Nada foi gravado — confira com o paciente outro dia.\n#{revision_notes(result, conversation)}")
+      private_note(account, conversation,
+                   "📅 #{name} combinou #{when_str}, mas esse dia está FECHADO na Agenda — não gravei. " \
+                   'Criei uma tarefa para a equipe oferecer outro dia.')
+      Crm::AppointmentRecorder.log_activity(account, result, contact, conversation, :dia_fechado)
+      :dia_fechado
     end
 
     def apply_cancel(account, result, contact, conversation, name)
@@ -140,7 +163,7 @@ class Crm::AppointmentApplier
     def create_revision_task(account, result, contact, name, title:, description:)
       open_tasks = account.tasks.where(status: %i[todo doing])
       return false if open_tasks.where(contact_id: contact.id)
-                                .where("title LIKE '⚠️ Confirmar consulta%' OR title LIKE '⚠️ Pediu cancelar%'")
+                                .where("title LIKE '⚠️ Confirmar consulta%' OR title LIKE '⚠️ Pediu cancelar%' OR title LIKE '⚠️ Dia fechado%'")
                                 .exists?
       return false if open_tasks.where(contact_id: nil).exists?(title: title)
 

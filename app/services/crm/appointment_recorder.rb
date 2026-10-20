@@ -45,6 +45,17 @@ class Crm::AppointmentRecorder # rubocop:disable Metrics/ClassLength -- item 346
     creator = account.administrators.first || account.users.first
     return :skipped unless creator
 
+    # 🔒 20/10: dia FECHADO na Agenda (cadeado do dia, da unidade ou do médico)
+    # não recebe consulta nova nem remarcação pela IA. Os robôs conferem a vaga
+    # antes, mas este é o caminho ÚNICO de gravação — a trava mora aqui, para
+    # todos de uma vez. Passam: o "registro" (consulta que já estava marcada
+    # fora do sistema, item 217) e datas passadas (histórico/backfill).
+    if booking_kind.blank? && result[:starts_at] > Time.current &&
+       Crm::AgendaSlots.closed_on?(account, result[:starts_at].in_time_zone(Crm::AgendaSlots::TZ).to_date,
+                                   unit: unit, doctor: result[:doctor])
+      return :dia_fechado
+    end
+
     notes = [
       # 💰 auditoria 10/2026 (#132): o valor falado na conversa fica só como
       # registro — NÃO vale como valor da consulta (lembrete e confirmação usam
