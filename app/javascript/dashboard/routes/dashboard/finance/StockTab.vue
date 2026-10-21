@@ -4,9 +4,12 @@
 // (lentes, insumos, medicamentos) com alerta de estoque mínimo e os
 // PEDIDOS — encomendas que nascem da indicação de cirurgia sem estoque,
 // vinculadas ao card do paciente. Receber um pedido soma no estoque.
+import { parseMoneyBR } from 'dashboard/helper/cevicoMoney';
 import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -35,6 +38,10 @@ const STATUS_META = {
 const isLoading = ref(true);
 const data = ref(null);
 
+// 🔐 rodada 334: quem só VÊ o estoque não cria item/pedido nem muda status
+const { canEdit } = useCevicoAccess();
+const canEditStock = computed(() => canEdit('financeiro.estoque'));
+
 const load = async () => {
   isLoading.value = true;
   try {
@@ -55,13 +62,9 @@ const fmtMoney = (v, cents = false) =>
   })}`;
 const fmtDate = iso => new Date(iso).toLocaleDateString('pt-BR');
 
-// aceita "1.234,56" e "1234.56"
-const parseAmount = raw => {
-  let s = String(raw || '').replace(/[R$\s]/g, '');
-  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
-};
+// aceita "1.234,56", "1234,56", "5.000" e "1234.56" — Rodada 6: mesma
+// regra do servidor (cevicoMoney); antes "5.000" virava 5 e saía R$ 5,00
+const parseAmount = raw => parseMoneyBR(raw) ?? 0;
 
 const summary = computed(() => data.value?.summary || {});
 const kpiCards = computed(() => [
@@ -250,7 +253,9 @@ const openPatient = order => {
           <span class="i-lucide-package text-white text-sm" />
         </span>
         <h2 class="text-sm font-bold text-n-slate-12">Itens em estoque</h2>
+        <CevicoViewOnlyPill v-if="!canEditStock" />
         <button
+          v-if="canEditStock"
           class="ml-auto h-8 px-3 rounded-lg text-xs font-bold text-white"
           style="background: linear-gradient(135deg, #065F46, #10B981)"
           @click="showItemForm ? cancelItem() : startNewItem()"
@@ -403,6 +408,7 @@ const openPatient = order => {
             <span v-else class="text-xs text-n-slate-9">—</span>
           </div>
           <button
+            v-if="canEditStock"
             class="w-7 h-7 rounded-lg hover:bg-n-alpha-2 flex items-center justify-center text-n-slate-10 flex-shrink-0"
             title="Editar"
             @click="startEditItem(item)"
@@ -410,6 +416,7 @@ const openPatient = order => {
             <span class="i-lucide-pencil text-xs" />
           </button>
           <button
+            v-if="canEditStock"
             class="w-7 h-7 rounded-lg hover:bg-red-500/10 flex items-center justify-center text-n-slate-10 hover:text-red-500 flex-shrink-0"
             title="Excluir"
             @click="removeItem(item)"
@@ -429,6 +436,7 @@ const openPatient = order => {
         <h2 class="text-sm font-bold text-n-slate-12">Pedidos</h2>
         <span class="text-[11px] text-n-slate-9">encomendas para repor ou atender uma indicação</span>
         <button
+          v-if="canEditStock"
           class="ml-auto h-8 px-3 rounded-lg text-xs font-bold text-white"
           style="background: #0F5FA6"
           @click="showOrderForm = !showOrderForm"
@@ -527,7 +535,7 @@ const openPatient = order => {
           >
             👤 {{ order.contact_name }}
           </button>
-          <template v-if="order.status === 'pendente'">
+          <template v-if="canEditStock && order.status === 'pendente'">
             <button
               class="h-7 px-2.5 rounded-lg text-[10px] font-bold text-white flex-shrink-0 disabled:opacity-50"
               style="background: #0F5FA6"
@@ -537,7 +545,7 @@ const openPatient = order => {
               Encomendei
             </button>
           </template>
-          <template v-if="order.status === 'pendente' || order.status === 'encomendado'">
+          <template v-if="canEditStock && (order.status === 'pendente' || order.status === 'encomendado')">
             <button
               class="h-7 px-2.5 rounded-lg text-[10px] font-bold text-white flex-shrink-0 disabled:opacity-50"
               style="background: #059669"
@@ -556,7 +564,7 @@ const openPatient = order => {
             </button>
           </template>
           <button
-            v-else
+            v-else-if="canEditStock"
             class="w-7 h-7 rounded-lg hover:bg-red-500/10 flex items-center justify-center text-n-slate-10 hover:text-red-500 flex-shrink-0"
             title="Excluir"
             @click="removeOrder(order)"

@@ -1,0 +1,190 @@
+require 'rails_helper'
+
+# 🗣️ rodada 188: a COLUNA do card decide se o Atendente de Agendamento lê a mensagem
+RSpec.describe CrmListener do
+  # o ao vivo é trancado por variável de ambiente; aqui destravamos para testar
+  before do
+    stub_const('Crm::ResponderAgentJob::LIVE_ENABLED', true)
+    CrmSetting.create!(account: account, ai_config: { 'agents' => { 'atendente_agendamento' => agent_cfg } })
+  end
+
+  include ActiveJob::TestHelper
+
+  # os matchers have_enqueued_job só funcionam com o adapter :test (o ambiente
+  # de teste do fork usa outro por padrão)
+  around do |example|
+    old = ActiveJob::Base.queue_adapter
+    ActiveJob::Base.queue_adapter = :test
+    example.run
+    ActiveJob::Base.queue_adapter = old
+  end
+
+  let(:listener) { described_class.instance }
+  let(:account) { create(:account) }
+  let(:inbox) { create(:inbox, account: account) }
+  let(:other_inbox) { create(:inbox, account: account) }
+  let(:contact) { create(:contact, account: account) }
+  let(:conversation) { create(:conversation, account: account, inbox: inbox, contact: contact) }
+  let(:pipeline) { Crm::Pipeline.create!(account: account, name: 'CEVICO') }
+  let!(:stage_new) { pipeline.stages.create!(name: 'Novos Contatos', position: 0) }
+  let!(:stage_booked) { pipeline.stages.create!(name: 'Agendamento de Consulta', position: 1) }
+  let(:agent_cfg) { { 'enabled' => true, 'mode' => 'shadow', 'inbox_ids' => [inbox.id], 'stage_ids' => [stage_new.id], 'no_card' => true } }
+
+  def fire(message)
+    listener.message_created(Events::Base.new('message.created', Time.zone.now, message: message))
+  end
+
+  def incoming(conv = conversation, content: 'oi')
+    create(:message, account: account, inbox: conv.inbox, conversation: conv, message_type: :incoming, content: content)
+  end
+
+  # 👂🖼️ item 204: áudio/imagem do paciente → leitura na hora, em qualquer caixa atendida
+  it 'mensagem com áudio → dispara o MediaReadingJob na hora (além do job do agente)', :aggregate_failures do
+    Crm::Contact.where(contact_id: contact.id).delete_all
+    message = incoming(content: nil)
+    message.attachments.create!(account_id: account.id, file_type: :audio,
+                                file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.ogg'), 'audio/ogg'))
+    fire(message)
+    expect(Crm::MediaReadingJob).to have_been_enqueued.with(message.id)
+    expect(Crm::ResponderAgentJob).to have_been_enqueued.with(conversation.id, message.id, 'atendente_agendamento')
+  end
+
+  it 'mensagem só de texto não dispara leitura de mídia; caixa fora do agente também não' do
+    expect { fire(incoming) }.not_to have_enqueued_job(Crm::MediaReadingJob)
+    other = create(:conversation, account: account, inbox: other_inbox, contact: contact)
+    message = incoming(other, content: nil)
+    message.attachments.create!(account_id: account.id, file_type: :image,
+                                file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.png'), 'image/png'))
+    expect { fire(message) }.not_to have_enqueued_job(Crm::MediaReadingJob)
+  end
+
+  it 'sem card no CRM (contato novo) → agenda o job do agente com 12 s de espera' do
+    Crm::Contact.where(contact_id: contact.id).delete_all
+    expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob).with(conversation.id, kind_of(Integer), 'atendente_agendamento')
+  end
+
+  # 🚧 auditoria 10/2026 (#253): paciente de parceiro (etiqueta of_) — o listener não enfileira NADA
+  it 'cerca dos parceiros: paciente do Oftalmofácil não enfileira o job do agente' do
+    Crm::Contact.where(contact_id: contact.id).delete_all
+    contact.add_labels(%w[oftalmofacil of_clinica_parceira])
+    expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
+  end
+
+  it 'card numa coluna do agente → agenda o job' do
+    Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) { |c| c.stage_id = stage_new.id }
+    expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob)
+  end
+
+  it 'coluna do agente B (pós-agendamento) → o job vai para o B, não para o A' do
+    CrmSetting.find_by(account: account).update!(ai_config: { 'agents' => {
+                                                   'atendente_agendamento' => agent_cfg,
+                                                   'atendente_pos' => { 'enabled' => true, 'mode' => 'shadow', 'inbox_ids' => [inbox.id],
+                                                                        'stage_ids' => [stage_booked.id] }
+                                                 } })
+    Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) { |c| c.stage_id = stage_booked.id }
+    expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob).with(conversation.id, kind_of(Integer), 'atendente_pos')
+  end
+
+  it 'card numa coluna que NÃO é do agente → ninguém responde' do
+    Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: pipeline.id) { |c| c.stage_id = stage_booked.id }
+    expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
+  end
+
+  it 'caixa que não é do agente → nada' do
+    other = create(:conversation, account: account, inbox: other_inbox, contact: contact)
+    Crm::Contact.where(contact_id: contact.id).delete_all
+    expect { fire(incoming(other)) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
+  end
+
+  it 'em SOMBRA, resposta humana não pausa nem escreve nota de pausa' do
+    human = create(:user, account: account, role: :agent)
+    outgoing = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'oi, sou eu',
+                                sender: human)
+    expect { fire(outgoing) }.not_to(change { conversation.messages.where(message_type: :activity).count })
+    expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_nil
+  end
+
+  # 21/09 ("confira se funciona"): os comandos do card — humano responde = pausa;
+  # 👍 = reativa; pausado, o paciente não chega ao agente
+  context 'with modo AO VIVO (janela sem restrição)' do
+    let(:agent_cfg) do
+      { 'enabled' => true, 'mode' => 'live', 'live_days' => [], 'inbox_ids' => [inbox.id], 'stage_ids' => [stage_new.id], 'no_card' => true }
+    end
+    let(:human) { create(:user, account: account, role: :agent) }
+
+    it 'resposta humana PAUSA o agente nessa conversa e deixa a nota ⏸' do
+      outgoing = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'oi, sou eu',
+                                  sender: human)
+      fire(outgoing)
+      expect(conversation.reload.additional_attributes.dig('cevico_atendente_wa', 'paused')).to be(true)
+      expect(conversation.messages.where(message_type: :activity).last.content).to include('pausado')
+    end
+
+    # item 212 (23/09): robô de follow-up, régua da jornada, lembrete/campanha
+    # e formulário disparado por automação são SISTEMA — não pausam a IA
+    it 'mensagem do robô de follow-up (marca cevico_followup_bot_id) NÃO pausa nem deixa nota', :aggregate_failures do
+      robot = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'oi, ainda quer?',
+                               sender: human, additional_attributes: { 'cevico_followup_bot_id' => 7, 'cevico_followup_step' => 0 })
+      fire(robot)
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
+      expect(conversation.messages.where(message_type: :activity)).to be_empty
+    end
+
+    it 'régua da jornada (cevico_journey) e lembrete (cevico_auto) também não pausam' do
+      %w[cevico_journey cevico_auto].each do |mark|
+        auto = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'lembrete',
+                                sender: human, additional_attributes: { mark => 'x' })
+        fire(auto)
+      end
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
+    end
+
+    it 'mensagem enviada SEM remetente (campanha/automação nativa) não pausa' do
+      # (a factory sempre põe um remetente; aqui criamos direto, como as automações fazem)
+      auto = conversation.messages.create!(account: account, inbox: inbox, message_type: :outgoing, content: 'formulário')
+      fire(auto)
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
+    end
+
+    it 'a nota de pausa diz QUEM assumiu e o estado guarda o nome' do
+      outgoing = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'oi', sender: human)
+      fire(outgoing)
+      expect(conversation.reload.additional_attributes.dig('cevico_atendente_wa', 'by')).to eq(human.name)
+      expect(conversation.messages.where(message_type: :activity).last.content).to include(human.name)
+    end
+
+    it 'pausado, a mensagem do paciente NÃO vai para o agente' do
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true } })
+      expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
+    end
+
+    # 🚨 auditoria 10/2026 (#443): pausado por URGÊNCIA clínica, a mensagem ainda
+    # chega ao job — que só repete a orientação de pronto atendimento, sem IA
+    it 'pausado por URGÊNCIA, a mensagem do paciente ainda vai para o agente (orientação de pronto atendimento)' do
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true, 'reason' => 'chamou_humano', 'urgente' => true } })
+      expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob)
+    end
+
+    it 'pausado por URGÊNCIA, a resposta de uma pessoa tira a marca (a pausa continua) e a próxima mensagem do paciente não vai ao agente',
+       :aggregate_failures do
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true, 'reason' => 'chamou_humano', 'urgente' => true } })
+      outgoing = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing,
+                                  content: 'vem agora pra clínica', sender: human)
+      fire(outgoing)
+      state = conversation.reload.additional_attributes['cevico_atendente_wa']
+      expect(state).to include('paused' => true, 'reason' => 'humano_assumiu', 'by' => human.name)
+      expect(state).not_to include('urgente')
+      expect(conversation.messages.where(message_type: :activity).last.content).to include('assumiu esta conversa')
+      expect { fire(incoming) }.not_to have_enqueued_job(Crm::ResponderAgentJob)
+    end
+
+    it '👍 do atendimento REATIVA e deixa a nota ▶️' do
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true } })
+      thumbs = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: '👍', sender: human)
+      fire(thumbs)
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to eq({})
+      expect(conversation.messages.where(message_type: :activity).last.content).to include('reativado')
+      expect { fire(incoming) }.to have_enqueued_job(Crm::ResponderAgentJob)
+    end
+  end
+end

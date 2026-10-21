@@ -1,0 +1,782 @@
+<script setup>
+// 🏷️ FONTES DE PACIENTES (item 322, 04/10/2026 — só admin). Pedido do
+// Guilherme: "gerenciar pacientes de diversas fontes; cada fonte com o seu
+// ambiente isolado", começando pelo Oftalmofácil.
+//   1. Fontes  → cada fonte com o seu ambiente (funis e caixas), quanto tem
+//                de cada coisa e COMO as entradas em coluna nasceram
+//   2. Carimbo → quanto do banco ainda está sem carimbo + prévia + gravar,
+//                e a conferência carimbo × cerca dos parceiros
+//   3. Nova fonte / editar → nome, cor, funis e caixas
+// 🧭 item 341 (13/10, "Ambientes do CRM"): pedido do Guilherme — "quero um
+// ambiente de configuração do CRM, ou das caixas de entrada, em que eu
+// seleciono qual número fica dentro de qual ambiente de CRM". A tela vira a
+// verdade única: cada número (caixa) e cada funil pertencem a UM ambiente
+// (o do Oftalmofácil também se escolhe aqui); chip que já é de outro ambiente
+// fica apagado; cada ambiente parceiro mostra a Conferência (cards que ainda
+// estão no CRM errado) com o comando que resolve.
+import { ref, computed, onMounted, nextTick } from 'vue';
+import { useAlert } from 'dashboard/composables';
+import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
+import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
+import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import CrmAPI from 'dashboard/api/crm';
+
+const isLoading = ref(true);
+const isWorking = ref(false);
+const data = ref(null);
+const preview = ref(null); // prévia do carimbo: { tabela: { fonte: n } }
+const form = ref(null); // fonte em criação/edição
+const formBlock = ref(null); // o formulário fica no fim da página: "Editar" leva até ele
+
+const pal = useCevicoPalette({
+  scope: 'crm:sources',
+  blocks: [
+    { id: 'fontes', label: 'Ambientes', icon: 'i-lucide-git-fork' },
+    { id: 'carimbo', label: 'Carimbo', icon: 'i-lucide-stamp' },
+    { id: 'nova', label: 'Novo ambiente', icon: 'i-lucide-plus' },
+  ],
+});
+const { cvVars, blockVars, blockFamily } = pal;
+
+// COMO NASCEU — nome e cor de cada jeito ('' = registro anterior ao carimbo)
+const VIAS = {
+  paciente: { label: 'Paciente escreveu', color: '#2563EB' },
+  equipe: { label: 'Equipe', color: '#16A34A' },
+  robo: { label: 'Robô / sistema', color: '#7C3AED' },
+  sync: { label: 'Sincronização', color: '#0D9488' },
+  carga: { label: 'Carga em massa', color: '#D97706' },
+  integracao: { label: 'Integração (N8N)', color: '#DB2777' },
+  '': { label: 'Antes do carimbo', color: '#94A3B8' },
+};
+const TABLES = [
+  { key: 'contacts', label: 'Pacientes' },
+  { key: 'cards', label: 'Cards do CRM' },
+  { key: 'stage_logs', label: 'Entradas em coluna' },
+  { key: 'tasks', label: 'Agendamentos e tarefas' },
+  { key: 'surgeries', label: 'Itens do hub' },
+];
+const COLORS = [
+  '#0D9488',
+  '#2563EB',
+  '#7C3AED',
+  '#DB2777',
+  '#EA580C',
+  '#16A34A',
+];
+
+const load = async () => {
+  try {
+    const { data: payload } = await CrmAPI.getSources();
+    data.value = payload;
+  } catch {
+    useAlert('Não consegui carregar os ambientes do CRM.');
+  } finally {
+    isLoading.value = false;
+  }
+};
+onMounted(load);
+
+// 🧩 item 344: PRÉ-DEFINIÇÃO das colunas do funil do Oftalmofácil (prévia →
+// "Criar as que faltam"; nada é apagado nem renomeado)
+const funnelPreset = ref(null);
+const loadPreset = async () => {
+  try {
+    const { data: payload } = await CrmAPI.getFunnelPreset();
+    funnelPreset.value = payload.preset;
+  } catch {
+    funnelPreset.value = null;
+  }
+};
+onMounted(loadPreset);
+const presetMissing = computed(
+  () => (funnelPreset.value?.columns || []).filter(c => !c.exists).length
+);
+const applyPreset = async () => {
+  isWorking.value = true;
+  try {
+    const { data: payload } = await CrmAPI.applyFunnelPreset();
+    funnelPreset.value = payload.preset;
+    useAlert('Colunas criadas no funil do Oftalmofácil.');
+  } catch (e) {
+    useAlert(
+      e?.response?.data?.error || 'Não consegui criar as colunas agora.'
+    );
+  } finally {
+    isWorking.value = false;
+  }
+};
+
+const sources = computed(() => data.value?.sources || []);
+const pending = computed(() => data.value?.pending || {});
+const pendingTotal = computed(() =>
+  Object.values(pending.value).reduce((s, n) => s + Number(n || 0), 0)
+);
+const fence = computed(() => data.value?.fence);
+const fenceOk = computed(
+  () => fence.value && !fence.value.only_stamp && !fence.value.only_fence
+);
+const nameOf = (list, id) =>
+  (data.value?.[list] || []).find(item => item.id === id)?.name || `#${id}`;
+const sourceName = key => sources.value.find(s => s.key === key)?.name || key;
+const fmt = n => Number(n || 0).toLocaleString('pt-BR');
+
+const viaSlices = source =>
+  Object.entries(source.entries?.by_via || {}).map(([via, value]) => ({
+    label: (VIAS[via] || VIAS['']).label,
+    color: (VIAS[via] || VIAS['']).color,
+    value,
+  }));
+
+// ── carimbo: prévia → gravar ─────────────────────────────────────────
+const runBackfill = async apply => {
+  isWorking.value = true;
+  try {
+    const { data: payload } = await CrmAPI.backfillSources(apply);
+    if (apply) {
+      preview.value = null;
+      useAlert('Passado carimbado.');
+      await load();
+    } else {
+      preview.value = payload.result;
+    }
+  } catch {
+    useAlert('Não consegui carimbar agora. Nada foi alterado.');
+  } finally {
+    isWorking.value = false;
+  }
+};
+const previewRows = computed(() =>
+  TABLES.map(t => ({ ...t, by: preview.value?.[t.key] || {} })).filter(
+    t => Object.keys(t.by).length
+  )
+);
+
+// ── nova fonte / editar ──────────────────────────────────────────────
+// funis e caixas livres = os da casa (ninguém pegou) + os desta fonte
+const own = computed(() => sources.value.find(s => s.kind === 'own'));
+// (o funil principal da casa nunca muda de dono)
+const freeIds = (list, current) =>
+  [...new Set([...(own.value?.[list] || []), ...(current || [])])].filter(
+    id =>
+      list !== 'pipeline_ids' ||
+      !(data.value?.main_pipeline_ids || []).includes(id)
+  );
+// 🧭 item 341: TODOS os funis/caixas aparecem; o que é de outro ambiente
+// fica apagado com o nome do dono (cada um pertence a um ambiente só)
+const allIds = list =>
+  (data.value?.[list === 'pipeline_ids' ? 'pipelines' : 'inboxes'] || []).map(
+    item => item.id
+  );
+const takenBy = (list, id) => {
+  if (!form.value || freeIds(list, form.value[list]).includes(id)) return null;
+  if (
+    list === 'pipeline_ids' &&
+    (data.value?.main_pipeline_ids || []).includes(id)
+  )
+    return 'funil principal da casa';
+  const owner = sources.value.find(
+    s => s.kind !== 'own' && s.id !== form.value.id && s[list].includes(id)
+  );
+  return owner ? `já está em ${owner.name}` : null;
+};
+const conferenceOk = source =>
+  !source.conference || !source.conference.foreign_cards;
+const openForm = source => {
+  form.value = source
+    ? {
+        id: source.id,
+        name: source.name,
+        color: source.color || COLORS[0],
+        pipeline_ids: [...source.pipeline_ids],
+        inbox_ids: [...source.inbox_ids],
+        fixed: source.kind === 'own',
+        pipelines: allIds('pipeline_ids'),
+        inboxes: allIds('inbox_ids'),
+      }
+    : {
+        id: null,
+        name: '',
+        color: COLORS[1],
+        pipeline_ids: [],
+        inbox_ids: [],
+        fixed: false,
+        pipelines: allIds('pipeline_ids'),
+        inboxes: allIds('inbox_ids'),
+      };
+};
+const openFormAndShow = async source => {
+  openForm(source);
+  await nextTick();
+  formBlock.value?.scrollIntoView({ block: 'start' });
+};
+const toggle = (list, id) => {
+  if (takenBy(list, id)) return;
+  const ids = form.value[list];
+  form.value[list] = ids.includes(id)
+    ? ids.filter(i => i !== id)
+    : [...ids, id];
+};
+const save = async () => {
+  if (!form.value.name.trim()) {
+    useAlert('Dê um nome para o ambiente.');
+    return;
+  }
+  isWorking.value = true;
+  const payload = {
+    name: form.value.name.trim(),
+    color: form.value.color,
+    pipeline_ids: form.value.pipeline_ids,
+    inbox_ids: form.value.inbox_ids,
+  };
+  try {
+    const { data: fresh } = form.value.id
+      ? await CrmAPI.updateSource(form.value.id, payload)
+      : await CrmAPI.createSource(payload);
+    data.value = fresh;
+    form.value = null;
+    useAlert('Ambiente salvo.');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui salvar o ambiente.');
+  } finally {
+    isWorking.value = false;
+  }
+};
+</script>
+
+<template>
+  <!-- 🧭 item 344: rolagem própria (a tela cresceu e o fim ficava escondido) -->
+  <div
+    class="cv-page cv-overlay flex flex-col h-full overflow-y-auto bg-n-surface-1"
+    :style="cvVars"
+  >
+    <CevicoHero
+      :pal="pal"
+      title="Ambientes do CRM"
+      subtitle="cada número de WhatsApp e cada funil pertencem a um ambiente · de quem é cada paciente · como cada dado nasceu"
+      icon="i-lucide-git-fork"
+    />
+
+    <SkeletonScreen v-if="isLoading" variant="dashboard" />
+
+    <template v-else-if="data">
+      <!-- ══ 1. FONTES: cada uma com o seu ambiente ══ -->
+      <div class="cv-block p-6 sm:p-9 mb-10" :style="blockVars('fontes')">
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="cv-icon">
+            <span class="i-lucide-git-fork text-base" />
+          </span>
+          <h2
+            class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12"
+          >
+            Ambientes
+          </h2>
+        </div>
+        <p class="text-xs text-n-slate-10 mb-6">
+          cada número de WhatsApp (caixa de entrada) e cada funil pertencem a um
+          ambiente só. Conversa nova abre o card no funil do ambiente do número;
+          paciente de um ambiente nunca ganha card no CRM de outro.
+        </p>
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div
+            v-for="source in sources"
+            :key="source.id"
+            class="cv-sub p-5 sm:p-6"
+            :style="{ borderColor: source.color }"
+          >
+            <div class="flex items-center gap-3 mb-4 flex-wrap">
+              <span
+                class="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                :style="{ background: source.color }"
+              />
+              <h3 class="text-lg font-bold text-n-slate-12">
+                {{ source.name }}
+              </h3>
+              <span class="cv-tag cv-tag-tint">
+                {{ source.kind === 'own' ? 'ambiente da casa' : 'parceiro' }}
+              </span>
+              <button
+                class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                @click="openFormAndShow(source)"
+              >
+                <span class="i-lucide-pencil text-xs" /> Editar
+              </button>
+            </div>
+
+            <p
+              class="text-[11px] font-semibold uppercase text-n-slate-9 mb-1.5"
+            >
+              Ambiente
+            </p>
+            <div class="flex flex-wrap gap-1.5 mb-1.5">
+              <span
+                v-for="id in source.pipeline_ids"
+                :key="`p${id}`"
+                class="cv-tag cv-tag-ghost"
+              >
+                <span class="i-lucide-kanban text-[10px]" />
+                {{ nameOf('pipelines', id) }}
+              </span>
+              <span
+                v-for="id in source.inbox_ids"
+                :key="`i${id}`"
+                class="cv-tag cv-tag-ghost"
+              >
+                <span class="i-lucide-inbox text-[10px]" />
+                {{ nameOf('inboxes', id) }}
+              </span>
+              <span
+                v-if="!source.pipeline_ids.length && !source.inbox_ids.length"
+                class="text-xs text-n-slate-9"
+              >
+                nenhum funil nem caixa ainda
+              </span>
+            </div>
+            <p
+              v-if="source.kind === 'own'"
+              class="text-[11px] text-n-slate-9 mb-5"
+            >
+              a casa fica com todo funil e toda caixa que nenhum outro ambiente
+              pegou
+            </p>
+            <p
+              v-else-if="source.legacy_partner"
+              class="text-[11px] text-n-slate-9 mb-5"
+            >
+              funil e caixas escolhidos aqui em Editar (o card OftalmoFácil, em
+              Integrações, só mostra)
+            </p>
+            <div v-else class="mb-5" />
+
+            <div
+              v-if="source.conference"
+              class="cv-strip px-4 py-3 mb-5 flex items-start gap-3"
+            >
+              <span class="cv-icon cv-icon-sm">
+                <span
+                  :class="
+                    conferenceOk(source) ? 'i-lucide-check' : 'i-lucide-info'
+                  "
+                  class="text-xs"
+                />
+              </span>
+              <div class="flex-1 min-w-0 text-xs text-n-slate-11">
+                <p class="font-bold text-n-slate-12">Conferência</p>
+                <p>
+                  cards CEVICO de pacientes de outro ambiente:
+                  <b>{{ fmt(source.conference.foreign_cards) }}</b>
+                  <span class="text-n-slate-9">
+                    ({{ fmt(source.conference.patients) }} pacientes deste
+                    ambiente)
+                  </span>
+                </p>
+                <p
+                  v-if="!conferenceOk(source)"
+                  class="text-[11px] text-n-slate-9 mt-1"
+                >
+                  para passar para o funil deste ambiente, rodar no servidor
+                  (primeiro só mostra; DRY=0 grava, depois do backup):
+                  <code class="block mt-1 break-all">
+                    {{ source.conference.command }}
+                  </code>
+                </p>
+              </div>
+            </div>
+
+            <!-- 🧩 item 344: pré-definição das colunas da jornada -->
+            <div
+              v-if="source.legacy_partner && funnelPreset"
+              class="cv-strip px-4 py-3 mb-5 flex items-start gap-3"
+            >
+              <span class="cv-icon cv-icon-sm">
+                <span
+                  :class="
+                    presetMissing ? 'i-lucide-columns-3' : 'i-lucide-check'
+                  "
+                  class="text-xs"
+                />
+              </span>
+              <div class="flex-1 min-w-0 text-xs text-n-slate-11">
+                <p class="font-bold text-n-slate-12">
+                  Colunas da jornada · {{ funnelPreset.pipeline_name }}
+                </p>
+                <p class="mb-2">
+                  as colunas da jornada que o sistema usa para pôr cada paciente
+                  no lugar certo (a mesma jornada da CEVICO, sem Envio de
+                  Orçamento)
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="(col, i) in funnelPreset.columns"
+                    :key="col.key"
+                    class="cv-chip"
+                    :class="{ 'cv-chip-on': col.exists }"
+                    :title="
+                      col.exists && col.current_name !== col.name
+                        ? `já existe como «${col.current_name}»`
+                        : col.exists
+                          ? 'já existe'
+                          : 'falta — nasce no lugar certo'
+                    "
+                  >
+                    {{ i + 1 }}. {{ col.name }}{{ col.exists ? '' : ' +' }}
+                  </span>
+                </div>
+                <p
+                  v-if="funnelPreset.extras.length"
+                  class="text-[11px] text-n-slate-9 mt-2"
+                >
+                  colunas fora da jornada (ficam, com os cards, no fim do
+                  funil):
+                  {{ funnelPreset.extras.join(', ') }}
+                </p>
+                <button
+                  v-if="presetMissing || !funnelPreset.in_order"
+                  class="cv-btn cv-blue cv-btn-sm mt-3"
+                  :disabled="isWorking"
+                  @click="applyPreset"
+                >
+                  {{
+                    presetMissing
+                      ? `Criar as ${presetMissing} que faltam e organizar`
+                      : 'Organizar na ordem da jornada'
+                  }}
+                </button>
+                <p v-else class="text-[11px] text-n-slate-9 mt-2">
+                  ✓ todas as colunas da jornada existem, na ordem certa
+                </p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-5">
+              <DashKpi
+                compact
+                glass
+                label="Pacientes"
+                :value="fmt(source.counts.patients)"
+                sub="carimbados com esta fonte"
+                :grad="blockFamily('fontes')[0]"
+              />
+              <DashKpi
+                compact
+                glass
+                label="Cards no CRM"
+                :value="fmt(source.counts.cards)"
+                sub="nos funis desta fonte"
+                :grad="blockFamily('fontes')[1]"
+              />
+              <DashKpi
+                compact
+                glass
+                label="Agendamentos"
+                :value="fmt(source.counts.appointments)"
+                sub="consultas e cirurgias"
+                :grad="blockFamily('fontes')[2]"
+              />
+              <DashKpi
+                compact
+                glass
+                label="Itens do hub"
+                :value="fmt(source.counts.hub_items)"
+                sub="espelho do Oftalmofácil"
+                :grad="blockFamily('fontes')[3]"
+              />
+            </div>
+
+            <p class="text-xs font-bold text-n-slate-12 mb-0.5">
+              Entradas em coluna · últimos 30 dias
+            </p>
+            <p class="text-[11px] text-n-slate-9 mb-3">
+              {{ fmt(source.entries.total) }} entradas, separadas por como
+              nasceram
+            </p>
+            <ShareBar
+              v-if="source.entries.total"
+              :items="viaSlices(source)"
+              :format="fmt"
+            />
+            <p v-else class="text-xs text-n-slate-9">
+              nenhuma entrada carimbada nos últimos 30 dias
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 2. CARIMBO: o passado + conferência com a cerca ══ -->
+      <div class="cv-block p-6 sm:p-9 mb-10" :style="blockVars('carimbo')">
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="cv-icon">
+            <span class="i-lucide-stamp text-base" />
+          </span>
+          <h2
+            class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12"
+          >
+            Carimbo
+          </h2>
+        </div>
+        <p class="text-xs text-n-slate-10 mb-6">
+          tudo o que nasce agora já sai carimbado. O que nasceu antes ganha a
+          fonte pelas mesmas regras que separam os dados hoje — sem reescrever
+          nada que já tenha carimbo.
+        </p>
+
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+          <DashKpi
+            v-for="(t, i) in TABLES"
+            :key="t.key"
+            compact
+            glass
+            :label="t.label"
+            :value="fmt(pending[t.key])"
+            sub="sem carimbo"
+            :grad="blockFamily('carimbo')[i % 4]"
+          />
+        </div>
+
+        <div
+          class="cv-strip px-4 py-3.5 flex items-center gap-3 flex-wrap mb-5"
+        >
+          <span class="cv-icon cv-icon-sm">
+            <span
+              :class="pendingTotal ? 'i-lucide-info' : 'i-lucide-check'"
+              class="text-xs"
+            />
+          </span>
+          <p class="text-xs text-n-slate-11 flex-1 min-w-0">
+            <template v-if="pendingTotal">
+              <b>{{ fmt(pendingTotal) }}</b> registros ainda sem carimbo. O robô
+              da madrugada carimba sozinho; aqui dá para ver antes e gravar
+              agora.
+            </template>
+            <template v-else>Tudo carimbado. Nada pendente.</template>
+          </p>
+          <button
+            v-if="pendingTotal"
+            class="cv-btn cv-btn-sm"
+            :disabled="isWorking"
+            @click="runBackfill(false)"
+          >
+            <span class="i-lucide-eye text-xs" /> Ver o que será carimbado
+          </button>
+        </div>
+
+        <div v-if="preview" class="cv-sub p-5 mb-5">
+          <p class="text-xs font-bold text-n-slate-12 mb-3">
+            Prévia — nada foi gravado ainda
+          </p>
+          <p v-if="!previewRows.length" class="text-xs text-n-slate-9">
+            nada a carimbar
+          </p>
+          <div
+            v-for="row in previewRows"
+            :key="row.key"
+            class="flex items-baseline gap-3 flex-wrap py-1.5 text-xs"
+          >
+            <span class="w-44 text-n-slate-11">{{ row.label }}</span>
+            <span
+              v-for="(n, key) in row.by"
+              :key="key"
+              class="text-n-slate-12 whitespace-nowrap"
+            >
+              {{ sourceName(key) }} <b>{{ fmt(n) }}</b>
+            </span>
+          </div>
+          <div class="flex items-center gap-2 mt-4">
+            <button
+              class="cv-btn cv-blue cv-btn-sm"
+              :disabled="isWorking || !previewRows.length"
+              @click="runBackfill(true)"
+            >
+              <span class="i-lucide-stamp text-xs" />
+              {{ isWorking ? 'Carimbando…' : 'Carimbar agora' }}
+            </button>
+            <button
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              @click="preview = null"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+
+        <div v-if="fence" class="cv-sub p-5">
+          <p class="text-xs font-bold text-n-slate-12 mb-0.5">
+            Conferência: carimbo × cerca dos parceiros
+          </p>
+          <p class="text-[11px] text-n-slate-9 mb-3">
+            hoje as telas ainda separam o Oftalmofácil pela cerca. Antes de as
+            telas passarem a ler o carimbo, os dois precisam dizer a mesma coisa
+            sobre cada paciente.
+          </p>
+          <div class="flex items-baseline gap-x-6 gap-y-1 flex-wrap text-xs">
+            <span class="whitespace-nowrap">
+              carimbados Oftalmofácil <b>{{ fmt(fence.stamped) }}</b>
+            </span>
+            <span class="whitespace-nowrap">
+              na cerca <b>{{ fmt(fence.fenced) }}</b>
+            </span>
+            <span class="whitespace-nowrap">
+              só no carimbo <b>{{ fmt(fence.only_stamp) }}</b>
+            </span>
+            <span class="whitespace-nowrap">
+              só na cerca <b>{{ fmt(fence.only_fence) }}</b>
+            </span>
+            <span
+              class="cv-tag"
+              :class="fenceOk ? 'cv-tag-tint' : 'cv-tag-solid'"
+            >
+              {{ fenceOk ? 'batem' : 'há diferenças' }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 3. NOVA FONTE / EDITAR ══ -->
+      <div
+        ref="formBlock"
+        class="cv-block p-6 sm:p-9 mb-10"
+        :style="blockVars('nova')"
+      >
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="cv-icon">
+            <span class="i-lucide-plus text-base" />
+          </span>
+          <h2
+            class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12"
+          >
+            {{ form?.id ? `Editar: ${form.name}` : 'Novo ambiente' }}
+          </h2>
+          <button
+            v-if="!form"
+            class="cv-btn cv-blue cv-btn-sm ml-auto"
+            @click="openFormAndShow(null)"
+          >
+            <span class="i-lucide-plus text-xs" /> Criar ambiente
+          </button>
+        </div>
+        <p class="text-xs text-n-slate-10 mb-6">
+          outro parceiro, outra unidade, outra origem de pacientes: dê um nome e
+          entregue a ele os funis e os números (caixas) dele.
+        </p>
+
+        <div v-if="form" class="cv-sub p-5 sm:p-6">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div>
+              <p
+                class="text-[11px] font-semibold uppercase text-n-slate-9 mb-1.5"
+              >
+                Nome
+              </p>
+              <input
+                v-model="form.name"
+                class="cv-input w-full text-sm"
+                maxlength="60"
+                placeholder="ex.: Clínica parceira Zona Norte"
+              />
+            </div>
+            <div>
+              <p
+                class="text-[11px] font-semibold uppercase text-n-slate-9 mb-1.5"
+              >
+                Cor
+              </p>
+              <div class="flex gap-2 flex-wrap">
+                <button
+                  v-for="c in COLORS"
+                  :key="c"
+                  class="w-8 h-8 rounded-full flex items-center justify-center"
+                  :style="{ background: c }"
+                  :title="c"
+                  @click="form.color = c"
+                >
+                  <span
+                    v-if="form.color === c"
+                    class="i-lucide-check text-white text-sm"
+                  />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <template v-if="!form.fixed">
+            <p
+              class="text-[11px] font-semibold uppercase text-n-slate-9 mb-1.5"
+            >
+              Funis deste ambiente
+            </p>
+            <div class="flex flex-wrap gap-1.5 mb-5">
+              <button
+                v-for="id in form.pipelines"
+                :key="id"
+                class="cv-chip"
+                :class="{
+                  'cv-chip-on': form.pipeline_ids.includes(id),
+                  'opacity-40 cursor-not-allowed': takenBy('pipeline_ids', id),
+                }"
+                :disabled="!!takenBy('pipeline_ids', id)"
+                :title="takenBy('pipeline_ids', id) || ''"
+                @click="toggle('pipeline_ids', id)"
+              >
+                {{ nameOf('pipelines', id) }}
+              </button>
+              <span
+                v-if="!form.pipelines.length"
+                class="text-xs text-n-slate-9"
+              >
+                nenhum funil livre — crie o funil desta fonte no CRM primeiro (o
+                funil principal da casa não muda de dono)
+              </span>
+            </div>
+            <p
+              class="text-[11px] font-semibold uppercase text-n-slate-9 mb-1.5"
+            >
+              Números (caixas de entrada) deste ambiente
+            </p>
+            <div class="flex flex-wrap gap-1.5 mb-5">
+              <button
+                v-for="id in form.inboxes"
+                :key="id"
+                class="cv-chip"
+                :class="{
+                  'cv-chip-on': form.inbox_ids.includes(id),
+                  'opacity-40 cursor-not-allowed': takenBy('inbox_ids', id),
+                }"
+                :disabled="!!takenBy('inbox_ids', id)"
+                :title="takenBy('inbox_ids', id) || ''"
+                @click="toggle('inbox_ids', id)"
+              >
+                {{ nameOf('inboxes', id) }}
+              </button>
+            </div>
+            <p class="text-[11px] text-n-slate-9 mb-5">
+              ao salvar, os cards e as entradas em coluna dos funis escolhidos
+              passam a ser deste ambiente, e as conversas novas desses números
+              abrem card no funil dele. Número ou funil apagado já é de outro
+              ambiente: tire de lá primeiro.
+            </p>
+          </template>
+          <p v-else class="text-[11px] text-n-slate-9 mb-5">
+            a casa fica com todo funil e todo número que nenhum outro ambiente
+            pegou — aqui só o nome e a cor.
+          </p>
+
+          <div class="flex items-center gap-2">
+            <button
+              class="cv-btn cv-blue cv-btn-sm"
+              :disabled="isWorking"
+              @click="save"
+            >
+              <span class="i-lucide-check text-xs" />
+              {{ isWorking ? 'Salvando…' : 'Salvar ambiente' }}
+            </button>
+            <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="form = null">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</template>

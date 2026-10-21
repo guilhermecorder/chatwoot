@@ -10,6 +10,21 @@ class TasksAPI extends ApiClient {
     return axios.get(this.url, { params });
   }
 
+  // 🐢 Rodada 7: só o número do badge de Tarefas na barra lateral
+  alertCount() {
+    return axios.get(`${this.url}/alert_count`);
+  }
+
+  // 🗑️ item 304: "excluir" um agendamento = Lixeira (o servidor devolve a
+  // tarefa cancelada); apagar de vez só o admin, pela Lixeira
+  trash(id, reason = 'excluida_agenda') {
+    return axios.delete(`${this.url}/${id}`, { params: { reason } });
+  }
+
+  purge(id) {
+    return axios.delete(`${this.url}/${id}`, { params: { force: 1 } });
+  }
+
   // solicitação/ajuda dentro da tarefa (executor ↔ criador)
   comment(id, text) {
     return axios.post(`${this.url}/${id}/comment`, { text });

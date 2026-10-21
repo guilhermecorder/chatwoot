@@ -1,108 +1,217 @@
-// Dados e helpers da agenda — usados pela Agenda e pelos indicadores do
-// Meu Painel. Profissionais, janelas, unidades e modalidades vêm do
-// SEGMENTO (window.SEGMENTO ← config/segmentos/<id>.yml, sistema coringa);
-// os valores chumbados abaixo são o preset clínica, usado como fallback
-// quando não há pacote (testes, contexto sem layout).
-import { SEGMENTO } from './segmento';
+// Dados e helpers da agenda da CEVICO — usados pela Agenda, pelo painel de
+// Agendamentos e pelos indicadores do Meu Painel.
 
-const FALLBACK_DOCTORS = [
+export const DOCTORS = [
   { name: 'Dr. Gustavo Bittar', short: 'Gustavo', color: '#0F5FA6' },
   { name: 'Dr. Henrique Gemelli', short: 'Henrique', color: '#B8860B' },
   { name: 'Dra. Roberta Negri', short: 'Roberta', color: '#7C3AED' },
 ];
 
-// os "médicos" do segmento (na clínica, os 3 de sempre)
-export const DOCTORS = Array.isArray(SEGMENTO.profissionais) && SEGMENTO.profissionais.length
-  ? SEGMENTO.profissionais.map(p => ({
-      name: p.nome,
-      short: p.apelido || p.nome,
-      color: p.cor || '#64748B',
-    }))
-  : FALLBACK_DOCTORS;
-
-// unidades do segmento (keys gravadas nas tasks; label/cor p/ exibição)
-const FALLBACK_UNITS = [
-  { key: 'tatuape', nome: 'Tatuapé', cor: '#2563EB' },
-  { key: 'paulista', nome: 'Av. Paulista', cor: '#EA580C' },
+// ── 📅 item 210 (23/09): os 4 TIPOS da agenda — cada um com a sua cor ──
+// Consultas (avaliação/retorno), Teleconsultas (online), Exames e Cirurgias.
+// No banco: cirurgia = task_type 'cirurgia'; os outros três são task_type
+// 'consulta' e se separam pela modality ('teleconsulta' | 'exames' | resto).
+// Assim o Atendente de Agendamento, o Secretário, a conferência do dia e o
+// CRM continuam enxergando tudo como consulta — só a Agenda e os
+// Agendamentos mostram cada tipo no seu trilho e na sua cor.
+export const ONLINE_UNIT = 'online';
+export const KINDS = [
+  {
+    key: 'consultas',
+    label: 'Consultas',
+    noun: 'consulta',
+    plural: 'consultas',
+    article: 'a',
+    icon: 'i-lucide-stethoscope',
+    color: '#2563EB',
+    deep: '#1E40AF',
+    grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)',
+    grad2: 'linear-gradient(135deg, #2563EB, #60A5FA)',
+    grad3: 'linear-gradient(135deg, #3B82F6, #93C5FD)',
+    hero: 'linear-gradient(135deg, #152C61 0%, #1D4ED8 55%, #60A5FA 100%)',
+    hint: 'avaliação e retorno nas unidades',
+  },
+  {
+    key: 'teleconsultas',
+    label: 'Teleconsultas',
+    noun: 'teleconsulta',
+    plural: 'teleconsultas',
+    article: 'a',
+    icon: 'i-lucide-video',
+    color: '#7C3AED',
+    deep: '#5B21B6',
+    grad: 'linear-gradient(135deg, #6D28D9, #A78BFA)',
+    grad2: 'linear-gradient(135deg, #7C3AED, #C4B5FD)',
+    grad3: 'linear-gradient(135deg, #8B5CF6, #DDD6FE)',
+    hero: 'linear-gradient(135deg, #3B0764 0%, #6D28D9 55%, #A78BFA 100%)',
+    hint: 'consulta por vídeo, sem unidade',
+  },
+  {
+    key: 'exames',
+    label: 'Exames',
+    noun: 'exame',
+    plural: 'exames',
+    article: 'o',
+    icon: 'i-lucide-scan-eye',
+    color: '#0D9488',
+    deep: '#0F766E',
+    grad: 'linear-gradient(135deg, #0F766E, #2DD4BF)',
+    grad2: 'linear-gradient(135deg, #14B8A6, #5EEAD4)',
+    grad3: 'linear-gradient(135deg, #2DD4BF, #99F6E4)',
+    hero: 'linear-gradient(135deg, #134E4A 0%, #0F766E 55%, #2DD4BF 100%)',
+    hint: 'pentacam, OCT, topografia… nas unidades',
+  },
+  {
+    key: 'cirurgias',
+    label: 'Cirurgias',
+    noun: 'cirurgia',
+    plural: 'cirurgias',
+    article: 'a',
+    icon: 'i-lucide-slice',
+    color: '#0284C7',
+    deep: '#075985',
+    grad: 'linear-gradient(135deg, #0369A1, #38BDF8)',
+    grad2: 'linear-gradient(135deg, #0EA5E9, #7DD3FC)',
+    grad3: 'linear-gradient(135deg, #38BDF8, #BAE6FD)',
+    hero: 'linear-gradient(135deg, #0C4A6E 0%, #0284C7 55%, #7DD3FC 100%)',
+    hint: 'sala cirúrgica das clínicas parceiras',
+  },
 ];
-export const UNITS_LIST = Array.isArray(SEGMENTO.unidades) && SEGMENTO.unidades.length
-  ? SEGMENTO.unidades
-  : FALLBACK_UNITS;
-export const UNIT_LABELS = Object.fromEntries(UNITS_LIST.map(u => [u.key, u.nome]));
-export const unitLabel = key => UNIT_LABELS[key] || key || '';
-export const DEFAULT_UNIT = UNITS_LIST[0]?.key || '';
+export const KIND_BY_KEY = Object.fromEntries(KINDS.map(k => [k.key, k]));
+export const kindFor = key => KIND_BY_KEY[key] || KINDS[0];
+
+// 📅 item 305 (01/10): AGENDAMENTO (consulta, retorno, exame, teleconsulta,
+// cirurgia) é da Agenda — nunca cartão do quadro de Tarefas nem do selo do
+// menu. A regra é uma só, usada pela Agenda, por Tarefas e pela store.
+export const isAppointmentTask = task =>
+  !!task &&
+  (task.task_type === 'consulta' || task.task_type === 'cirurgia' || !!task.unit);
+
+// a que tipo uma task pertence
+export const kindOf = task => {
+  if (!task) return 'consultas';
+  if (task.task_type === 'cirurgia') return 'cirurgias';
+  if (task.modality === 'teleconsulta') return 'teleconsultas';
+  if (task.modality === 'exames') return 'exames';
+  return 'consultas';
+};
+
+// variáveis --cv* do kit "iMac G3 + vidro" para um tipo (a Agenda inteira
+// veste a cor do trilho ativo)
+export const hexToRgbSpaced = hex => {
+  const h = String(hex || '').replace('#', '');
+  if (h.length !== 6) return '37 99 235';
+  return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)).join(' ');
+};
+export const kindVars = kind => {
+  const k = typeof kind === 'string' ? kindFor(kind) : kind || KINDS[0];
+  return {
+    '--cv': k.color,
+    '--cv-rgb': hexToRgbSpaced(k.color),
+    '--cv-deep': k.deep,
+    '--cv-deep-rgb': hexToRgbSpaced(k.deep),
+    '--cv-grad': k.grad,
+    '--cv-grad-2': k.grad2,
+    '--cv-grad-3': k.grad3,
+    '--cv-hero': k.hero,
+    '--cv-alt': k.color,
+    '--cv-alt-rgb': hexToRgbSpaced(k.color),
+    '--cv-alt-grad': k.grad,
+    '--cv-alt-ink': '#ffffff',
+  };
+};
 
 // dow: 0=Dom … 6=Sáb; end é exclusivo (último bloco = end - block).
 // Mapa padrão — editável em Agenda → "Janelas dos médicos".
-const FALLBACK_WINDOWS = [
+export const DEFAULT_WINDOWS = [
   { dow: 1, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '10:00', block: 15 },
   { dow: 2, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Manhã', start: '08:00', end: '11:30', block: 15 },
   { dow: 2, unit: 'paulista', doctor: 'Dra. Roberta Negri',   turno: 'Tarde', start: '14:30', end: '16:30', block: 15 },
-  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '13:00', end: '17:00', block: 15 },
+  // item 307 (01/10): quarta 13h–14h do Dr. Henrique = só pós-operatório; consulta a partir das 14h
+  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '13:00', end: '14:00', block: 15, only: ['pos_op'] },
+  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '14:00', end: '17:00', block: 15 },
   { dow: 3, unit: 'tatuape',  doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 10 },
   { dow: 4, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 15 },
   { dow: 5, unit: 'tatuape',  doctor: 'Dra. Roberta Negri',   turno: 'Manhã', start: '10:30', end: '13:00', block: 10 },
 ];
-export const DEFAULT_WINDOWS = Array.isArray(SEGMENTO.janelas_padrao)
-  ? SEGMENTO.janelas_padrao.map(w => ({
-      ...w,
-      dow: Number(w.dow),
-      block: Number(w.block) || 15,
-    }))
-  : FALLBACK_WINDOWS;
-
-// ── Personalização por conta (Configurações → Personalização) ──
-// resolução: conta (settings.segment) > segmento (window.SEGMENTO) >
-// preset clínica. Sem nada salvo, comportamento idêntico ao de sempre.
-export const resolveDoctors = settings => {
-  const saved = settings?.segment?.professionals;
-  return Array.isArray(saved) && saved.some(p => p.nome)
-    ? saved
-        .filter(p => p.nome)
-        .map(p => ({ name: p.nome, short: p.apelido || p.nome, color: p.cor || '#64748B' }))
-    : DOCTORS;
-};
-
-export const resolveUnits = settings => {
-  const saved = settings?.segment?.units;
-  return Array.isArray(saved) && saved.some(u => u.key) ? saved.filter(u => u.key) : UNITS_LIST;
-};
-
-export const resolveUnitLabels = settings =>
-  Object.fromEntries(resolveUnits(settings).map(u => [u.key, u.nome || u.key]));
-
-// listas editáveis (problemas, procedimentos) — conta > segmento > fallback
-export const resolveSegmentList = (settings, key, fallback) => {
-  const saved = settings?.segment?.[key];
-  return Array.isArray(saved) && saved.length ? saved : fallback;
-};
-
-// metas ({vendas_mes: 100}) — conta > segmento > fallback
-export const resolveGoal = (settings, key, fallback) => {
-  const v = Number(settings?.segment?.metas?.[key]);
-  return Number.isFinite(v) && v > 0 ? v : fallback;
-};
 
 // médicos com a agenda FECHADA (item 76) — as janelas deles somem em
 // TODO consumidor (agenda, ocupação, saúde do Meu Painel)
 export const resolveClosedDoctors = settings =>
   Array.isArray(settings?.agenda_closed_doctors) ? settings.agenda_closed_doctors : [];
 
-// janelas salvas nas settings (ou o padrão) — sem os médicos fechados
-export const resolveWindows = settings => {
+// TODAS as janelas salvas (ou o padrão), inclusive as de médico com a agenda
+// fechada — é o que a tela de Configurações da Agenda edita (item 307)
+export const resolveAllWindows = settings => {
   const saved = settings?.agenda_windows;
-  const list = Array.isArray(saved) && saved.length
+  return Array.isArray(saved) && saved.length
     ? saved.map(w => ({ ...w, dow: Number(w.dow), block: Number(w.block) }))
     : DEFAULT_WINDOWS;
+};
+
+// janelas em vigor — sem os médicos fechados
+export const resolveWindows = settings => {
+  const list = resolveAllWindows(settings);
   const closed = resolveClosedDoctors(settings);
   return closed.length ? list.filter(w => !closed.includes(w.doctor)) : list;
 };
+
+// 🗂️ item 307 (01/10, "todas as quartas, das 13h às 14h, só retornos de
+// pós-operatório"): FAIXA RESERVADA. Cada janela pode aceitar só alguns tipos
+// de atendimento (`only`); sem `only` aceita tudo. A IA marca consulta nova
+// (avaliação): faixa que não aceita avaliação ela não oferece. Espelho de
+// Crm::AgendaSlots (RESERVABLE / accepts?).
+export const RESERVABLE = ['avaliacao', 'retorno', 'pos_op'];
+export const AI_MODALITY = 'avaliacao';
+export const reservedFor = win =>
+  Array.isArray(win?.only) ? win.only.filter(k => RESERVABLE.includes(k)) : [];
+export const windowAccepts = (win, modality) => {
+  const only = reservedFor(win);
+  return !only.length || only.includes(modality);
+};
+const hmToMin = hm => {
+  const [h, m] = String(hm || '0:0').split(':').map(Number);
+  return h * 60 + (m || 0);
+};
+// a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade)
+export const windowAt = (windows, { dow, unit, minutes, doctor }) =>
+  windows.find(
+    w =>
+      w.doctor &&
+      w.dow === dow &&
+      w.unit === unit &&
+      (!doctor || w.doctor === doctor) &&
+      minutes >= hmToMin(w.start) &&
+      minutes < hmToMin(w.end)
+  );
 
 export const resolveBlocked = settings =>
   Array.isArray(settings?.agenda_blocked) ? settings.agenda_blocked : [];
 
 // janelas da SALA CIRÚRGICA (trilho de cirurgias) — unit recebe a key do
 // local para reusar slotsFor/scanAgenda/blockKey sem mudança
+// 🔬 AGENDA DE EXAMES (23/09, pedido dele): os exames têm janela PRÓPRIA,
+// separada dos médicos — padrão: segunda a sexta, 08h–17h, no IOP da Av.
+// Paulista, blocos de 30 min. Editável em Agenda → trilho Exames → "Janela
+// de exames" (agenda_config.exam_windows).
+export const DEFAULT_EXAM_WINDOWS = [1, 2, 3, 4, 5].map(dow => ({
+  dow,
+  unit: 'paulista',
+  start: '08:00',
+  end: '17:00',
+  block: 30,
+}));
+export const resolveExamWindows = settings =>
+  Array.isArray(settings?.exam_windows) && settings.exam_windows.length
+    ? settings.exam_windows.map(w => ({
+        ...w,
+        dow: Number(w.dow),
+        block: Number(w.block) || 30,
+        unit: w.unit || 'paulista',
+        exam: true,
+      }))
+    : DEFAULT_EXAM_WINDOWS.map(w => ({ ...w, exam: true }));
+
 export const resolveSurgeryWindows = settings =>
   Array.isArray(settings?.surgery_windows)
     ? settings.surgery_windows.map(w => ({
@@ -115,6 +224,20 @@ export const resolveSurgeryWindows = settings =>
 
 export const resolveBlockedDays = settings =>
   Array.isArray(settings?.agenda_blocked_days) ? settings.agenda_blocked_days : [];
+// item 267: a lista mistura dias INTEIROS ('2026-10-12') e PARTES do dia
+// ({ date, unit } ou { date, doctor })
+export const wholeBlockedDays = list =>
+  new Set(list.filter(b => typeof b === 'string'));
+export const partialBlocksOn = (list, key) =>
+  list.filter(b => b && typeof b === 'object' && b.date === key);
+export const isWindowBlocked = (list, key, win) =>
+  partialBlocksOn(list, key).some(
+    b => (!b.unit || b.unit === win.unit) && (!b.doctor || b.doctor === win.doctor)
+  );
+export const sameBlock = (a, b) => {
+  if (typeof a === 'string' || typeof b === 'string') return a === b;
+  return a.date === b.date && (a.unit || '') === (b.unit || '') && (a.doctor || '') === (b.doctor || '');
+};
 
 // blocos ('08:30', '08:45'…) de uma janela
 export const slotsFor = win => {
@@ -134,38 +257,181 @@ export const dateKey = d => {
 
 export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 
-// modalidades de atendimento — alimentam a ocupação por tipo
-// (keys fixas — gravadas nas tasks; labels/cores do segmento)
-const FALLBACK_MODALITIES = [
-  { key: 'avaliacao', label: 'Avaliação', color: '#0F5FA6' },
+// 🩺 item 297 (30/09, equipe: "este bloco da janela dos médicos está aparecendo
+// diversos pacientes duplicados ocupando agendamentos disponíveis… quando
+// apagamos um duplicado todos somem"): na janela do MÉDICO cada agendamento
+// ocupa SÓ o bloco em que começa. Antes valia a sobreposição pela duração
+// presumida (consulta 15 min, exame 30 min): numa janela de blocos de 10 min a
+// mesma consulta aparecia em 2 ou 3 horários e roubava vaga livre.
+// Sala cirúrgica e agenda de exames continuam por sobreposição (lá o
+// procedimento pode mesmo durar mais que um bloco).
+export const occupiesSlot = ({ taskStart, duration, slotStart, block, win }) => {
+  const slotEnd = slotStart + (Number(block) || 15);
+  if (win && win.doctor) return taskStart >= slotStart && taskStart < slotEnd;
+  return taskStart < slotEnd && taskStart + duration > slotStart;
+};
+
+// modalidades de consulta — alimentam a ocupação por tipo e o formulário.
+// item 210: entra 'teleconsulta' (trilho próprio na Agenda, cor violeta).
+export const MODALITIES = [
+  { key: 'avaliacao', label: 'Avaliação', color: '#2563EB' },
   { key: 'retorno', label: 'Retorno', color: '#D4A017' },
-  { key: 'exames', label: 'Exames', color: '#7C3AED' },
+  { key: 'pos_op', label: 'Pós-operatório', color: '#DB2777' }, // item 234
+  { key: 'exames', label: 'Exames', color: '#0D9488' },
+  { key: 'teleconsulta', label: 'Teleconsulta', color: '#7C3AED' },
 ];
-export const MODALITIES = Array.isArray(SEGMENTO.modalidades) && SEGMENTO.modalidades.length
-  ? SEGMENTO.modalidades.map(m => ({
-      key: m.key,
-      label: m.label,
-      color: m.cor || '#64748B',
-    }))
-  : FALLBACK_MODALITIES;
+
+// 🎨 item 234 (25/09, pedido dele: "cada coisa precisa ter a sua própria cor"
+// + "agenda geral" com CAMADAS): os 6 TIPOS de agendamento. Cada tipo tem cor
+// própria e vira uma camada que liga/desliga na Agenda; o balão veste a cor
+// do TIPO (a unidade virou uma etiqueta pequena). `kind` = trilho antigo que
+// o backend e o painel de Agendamentos ainda usam; `resource` = o que o tipo
+// ocupa (janela do médico, janela de exames, sala cirúrgica ou nada/online).
+const mkType = t => ({
+  ...t,
+  grad: `linear-gradient(135deg, ${t.deep}, ${t.color})`,
+  grad2: `linear-gradient(135deg, ${t.color}, ${t.light})`,
+  grad3: `linear-gradient(135deg, ${t.light}, ${t.pale})`,
+  hero: `linear-gradient(135deg, ${t.dark} 0%, ${t.deep} 55%, ${t.light} 100%)`,
+});
+export const TYPES = [
+  mkType({ key: 'avaliacao', label: 'Avaliação', noun: 'avaliação', plural: 'avaliações', article: 'a', icon: 'i-lucide-stethoscope',
+    color: '#2563EB', deep: '#1E40AF', light: '#60A5FA', pale: '#BFDBFE', dark: '#172554', kind: 'consultas', modality: 'avaliacao',
+    resource: 'doctor', hint: 'primeira consulta com o médico, nas unidades' }),
+  mkType({ key: 'retorno', label: 'Retorno', noun: 'retorno', plural: 'retornos', article: 'o', icon: 'i-lucide-rotate-ccw',
+    color: '#D4A017', deep: '#A16207', light: '#FACC15', pale: '#FEF08A', dark: '#713F12', kind: 'consultas', modality: 'retorno',
+    resource: 'doctor', hint: 'volta ao médico depois de exames ou tratamento' }),
+  mkType({ key: 'pos_op', label: 'Pós-operatório', noun: 'pós-operatório', plural: 'pós-operatórios', article: 'o', icon: 'i-lucide-heart-pulse',
+    color: '#DB2777', deep: '#9D174D', light: '#F472B6', pale: '#FBCFE8', dark: '#500724', kind: 'consultas', modality: 'pos_op',
+    resource: 'doctor', hint: 'revisão depois da cirurgia' }),
+  mkType({ key: 'exames', label: 'Exame', noun: 'exame', plural: 'exames', article: 'o', icon: 'i-lucide-scan-eye',
+    color: '#0D9488', deep: '#0F766E', light: '#2DD4BF', pale: '#99F6E4', dark: '#134E4A', kind: 'exames', modality: 'exames',
+    resource: 'exam', hint: 'pentacam, OCT, topografia… na janela de exames' }),
+  mkType({ key: 'teleconsulta', label: 'Teleconsulta', noun: 'teleconsulta', plural: 'teleconsultas', article: 'a', icon: 'i-lucide-video',
+    color: '#7C3AED', deep: '#5B21B6', light: '#A78BFA', pale: '#DDD6FE', dark: '#3B0764', kind: 'teleconsultas', modality: 'teleconsulta',
+    resource: 'online', hint: 'consulta por vídeo, sem unidade' }),
+  mkType({ key: 'cirurgia', label: 'Cirurgia', noun: 'cirurgia', plural: 'cirurgias', article: 'a', icon: 'i-lucide-slice',
+    color: '#EA580C', deep: '#9A3412', light: '#FB923C', pale: '#FED7AA', dark: '#431407', kind: 'cirurgias', modality: null,
+    resource: 'surgery', hint: 'sala cirúrgica das clínicas parceiras' }),
+];
+export const TYPE_BY_KEY = Object.fromEntries(TYPES.map(t => [t.key, t]));
+
+// 🎨 item 290 (29/09, pedido dele: "parecido com o Google Agenda, mudar as
+// cores"): as 12 cores que a equipe pode dar a UM agendamento para se
+// organizar. Vale para todos; sem cor = cor padrão do tipo. A lista é a
+// MESMA do servidor (Task::COLORS) — cor fora dela o servidor recusa.
+export const TASK_COLORS = [
+  { value: '#DC2626', label: 'Tomate' },
+  { value: '#DB2777', label: 'Pitaya' },
+  { value: '#EA580C', label: 'Tangerina' },
+  { value: '#EAB308', label: 'Banana' },
+  { value: '#84CC16', label: 'Limão' },
+  { value: '#16A34A', label: 'Kiwi' },
+  { value: '#0D9488', label: 'Hortelã' },
+  { value: '#0891B2', label: 'Piscina' },
+  { value: '#2563EB', label: 'Mirtilo' },
+  { value: '#7C3AED', label: 'Uva' },
+  { value: '#86198F', label: 'Ameixa' },
+  { value: '#475569', label: 'Grafite' },
+];
+const TASK_COLOR_SET = new Set(TASK_COLORS.map(c => c.value));
+// cor escolhida pela equipe (só se for da lista) ou null
+// sinal de presença no balão da grade: ✓ verde (foi) · ✕ vermelho (faltou)
+// · ! âmbar (cirurgia: veio e não fez). Só LÊ o dado oficial `attendance`.
+export const attendanceMarkOf = task => {
+  const surgery = task?.task_type === 'cirurgia';
+  if (task?.attendance === 'attended') {
+    return {
+      sign: '✓',
+      cls: 'cv-ag-ev-mark-ok',
+      title: surgery ? 'Realizada' : 'Compareceu',
+    };
+  }
+  if (task?.attendance === 'missed') {
+    return {
+      sign: '✕',
+      cls: 'cv-ag-ev-mark-no',
+      title: surgery ? 'Não veio' : 'Faltou',
+    };
+  }
+  if (task?.attendance === 'attended_not_done') {
+    return { sign: '!', cls: 'cv-ag-ev-mark-warn', title: 'Veio e não fez' };
+  }
+  return null;
+};
+// ✅ item 300 (30/09): CONFIRMOU a consulta. O dado oficial é `confirmed_at`
+// (SIM ao lembrete, card na coluna "Consulta Confirmada" ou a equipe marcou na
+// Agenda). O ✅ que a equipe digitava no nome também vale — e sai do nome, para
+// o selo ser um só. `declined_at` = respondeu NÃO ao lembrete.
+const TYPE_PREFIX = /^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i;
+const HAND_CHECK = /^\s*✅\s*/;
+const bareTitle = task => String(task?.title || '').replace(TYPE_PREFIX, '');
+export const patientNameOf = task => bareTitle(task).replace(HAND_CHECK, '');
+export const handConfirmed = task => HAND_CHECK.test(bareTitle(task));
+export const isConfirmed = task =>
+  !task?.canceled_at && (Boolean(task?.confirmed_at) || handConfirmed(task));
+export const isDeclined = task =>
+  !task?.canceled_at && !isConfirmed(task) && Boolean(task?.declined_at);
+export const confirmationTitle = task => {
+  if (!isConfirmed(task)) return '';
+  if (!task.confirmed_at) return 'Paciente confirmou (marcado pela equipe)';
+  const at = new Date(task.confirmed_at);
+  const when = `${at.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+  return `Paciente confirmou a consulta em ${when}`;
+};
+// 🏥 item 300: de quem é o paciente (escolha obrigatória no formulário)
+export const ORIGINS = [
+  { key: 'cevico', label: 'CEVICO', icon: 'i-lucide-eye', color: '#152C61', hint: 'Paciente nosso: etiqueta cevico, card no CRM da CEVICO e lembrete pela caixa da CEVICO.' },
+  { key: 'oftalmofacil', label: 'Oftalmofácil', icon: 'i-lucide-hospital', color: '#0D9488', hint: 'Paciente do Oftalmofácil: etiqueta of_agenda, card no CRM do Oftalmofácil e lembrete só pela caixa do Oftalmofácil — sem IA.' },
+];
+export const ORIGIN_BY_KEY = Object.fromEntries(ORIGINS.map(o => [o.key, o]));
+// origem para MOSTRAR: a escolhida no formulário ou, no que veio do hub, o parceiro
+export const originOf = task => {
+  if (task?.origin && ORIGIN_BY_KEY[task.origin]) return ORIGIN_BY_KEY[task.origin];
+  if (task?.source === 'oftalmofacil' && task.source_detail) return ORIGIN_BY_KEY.oftalmofacil;
+  return null;
+};
+export const taskColorOf = task => {
+  const hex = String(task?.color || '').toUpperCase();
+  return TASK_COLOR_SET.has(hex) ? hex : null;
+};
+// a "Agenda geral" (todas as camadas ligadas) veste um tom neutro
+export const GENERAL_TYPE = mkType({ key: 'geral', label: 'Agenda geral', noun: 'agendamento', plural: 'agendamentos', article: 'o',
+  icon: 'i-lucide-layers', color: '#475569', deep: '#1E293B', light: '#94A3B8', pale: '#CBD5E1', dark: '#0F172A', kind: null,
+  modality: null, resource: null, hint: 'todos os tipos juntos — ligue e desligue as camadas' });
+export const typeOf = task => {
+  if (!task) return 'avaliacao';
+  if (task.task_type === 'cirurgia') return 'cirurgia';
+  return TYPE_BY_KEY[task.modality] ? task.modality : 'avaliacao';
+};
+// ?kind=consultas (links antigos) → camadas
+export const LEGACY_KIND_TO_TYPES = {
+  consultas: ['avaliacao', 'retorno', 'pos_op'],
+  teleconsultas: ['teleconsulta'],
+  exames: ['exames'],
+  cirurgias: ['cirurgia'],
+};
+export const modalityFor = key =>
+  MODALITIES.find(m => m.key === (key || 'avaliacao')) || MODALITIES[0];
 
 // varre um intervalo de dias e devolve estatísticas + primeiras vagas livres:
 // tasks = consultas (com due_at); blockedSet = Set de blockKey.
 // byModality: blocos ocupados POR TIPO de consulta (avaliação/retorno/exames)
+// 23/09: igual ao servidor (Crm::AgendaSlots) — uma consulta COM unidade só
+// ocupa o bloco daquela unidade; sem unidade ocupa em todas. Teleconsultas
+// (unidade 'online') não ocupam bloco físico nenhum.
 export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set(), from, days, freeLimit = 3, futureOnly = false, pastOnly = false }) => {
   const occupied = new Set();
   const modalityByKey = new Map();
   tasks.forEach(t => {
     if (!t.due_at) return;
+    if (t.unit === ONLINE_UNIT) return;
     const d = new Date(t.due_at);
     const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     const mod = t.modality || 'avaliacao'; // consulta sem tipo = avaliação
-    const withUnit = blockKey(dateKey(d), hm, t.unit || '');
-    const noUnit = `${dateKey(d)}|${hm}|`; // sem unidade também ocupa
-    occupied.add(withUnit);
-    occupied.add(noUnit);
-    if (!modalityByKey.has(withUnit)) modalityByKey.set(withUnit, mod);
-    if (!modalityByKey.has(noUnit)) modalityByKey.set(noUnit, mod);
+    const key = blockKey(dateKey(d), hm, t.unit || '');
+    occupied.add(key);
+    if (!modalityByKey.has(key)) modalityByKey.set(key, mod);
   });
 
   const now = new Date();
@@ -207,4 +473,154 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
   }
 
   return { total, filled, freeSlots, byModality, pct: total ? Math.round((filled / total) * 100) : 0 };
+};
+
+// ── 💰 item 324 (05/10): VALOR do agendamento ─────────────────────────
+// O servidor (Crm::AppointmentPrice) é quem decide o valor que vai na
+// mensagem; aqui é a MESMA regra para o card mostrar antes de salvar:
+// lançado à mão → "Valor: X" escrito na observação → "R$ X" escrito no TIPO
+// DE CONSULTA (item 340) → pré-configurado do tipo (particular por médico,
+// exames, avaliação, retorno, pós-op) → outro "R$ X" na observação → valor
+// padrão. 🤖 item 340: o que a IA gravava na observação até a auditoria
+// ("Valor da consulta: R$ 150" fixo, bloco "Reagendada pela IA:") não conta.
+export const moneyToNumber = text => {
+  const t = String(text ?? '')
+    .trim()
+    .replace(/^R\$\s*/i, '');
+  if (/^\d+\.\d{1,2}$/.test(t)) return Number(t);
+  if (!/^\d[\d.]*(,\d{1,2})?$/.test(t)) return null;
+  return Number(t.replace(/\./g, '').replace(',', '.'));
+};
+export const formatMoney = n =>
+  Number(n).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+// "150" → "R$ 150,00" · "sem custo" → "sem custo"
+export const priceLabel = text => {
+  const n = moneyToNumber(text);
+  return n === null ? String(text ?? '') : `R$ ${formatMoney(n)}`;
+};
+const foldText = s =>
+  String(s ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .trim();
+const sumPrices = values => {
+  const numbers = values.map(moneyToNumber).filter(n => n !== null);
+  if (!numbers.length) return String(values[0] ?? '');
+  return formatMoney(numbers.reduce((a, b) => a + b, 0));
+};
+const PRICE_TYPES = ['avaliacao', 'retorno', 'pos_op', 'teleconsulta'];
+export const PRICE_TYPE_LABELS = {
+  avaliacao: 'Avaliação',
+  retorno: 'Retorno',
+  pos_op: 'Pós-operatório (1º)',
+  teleconsulta: 'Teleconsulta',
+};
+// o pré-configurado do tipo: { text, label } ou null
+export const presetAppointmentPrice = (prices, appt) => {
+  if (!prices || appt.kind === 'cirurgias') return null;
+  if (appt.particular && appt.doctor) {
+    const hit = Object.entries(prices.particular || {}).find(
+      ([doctor]) => foldText(doctor) === foldText(appt.doctor)
+    );
+    if (hit && hit[1])
+      return { text: hit[1], label: `particular · ${appt.doctor}` };
+  }
+  if (appt.kind === 'exames' || appt.modality === 'exames') {
+    const wanted = foldText(appt.procedure);
+    const hits = (prices.exames || []).filter(
+      e => e.price && e.name && wanted.includes(foldText(e.name))
+    );
+    if (!hits.length) return null;
+    return {
+      text: sumPrices(hits.map(e => e.price)),
+      label: hits.map(e => e.name).join(' + '),
+    };
+  }
+  const type = PRICE_TYPES.includes(appt.modality)
+    ? appt.modality
+    : 'avaliacao';
+  const text = prices[type];
+  return text ? { text, label: PRICE_TYPE_LABELS[type].toLowerCase() } : null;
+};
+// 🤖 item 340: a observação sem as linhas que a IA escrevia nos blocos
+// antigos (mesma regra de Crm::AppointmentPrice.human_notes). Num parágrafo
+// com o carimbo "— agendado pela IA", tudo até o carimbo é da IA; o bloco
+// "Reagendada pela IA:" sem carimbo é dela inteiro; sem carimbo, só o
+// "Valor da consulta: R$ 150" fixo que abre a observação é da IA.
+const VALUE_PATTERN = /valor\s*:\s*(?:R\$\s*)?([\d.]+(?:,\d{1,2})?)/i;
+const REAL_PATTERN = /R\$\s*([\d.]+(?:,\d{1,2})?)/i;
+const AI_FIXED_VALUE_LINE = /^\s*Valor da consulta:\s*R\$\s*150(?:,00)?\s*$/i;
+const AI_STAMP_LINE = /agendado pela IA\s*$/i;
+const AI_RESCHEDULE_LINE = /^\s*Reagendada pela IA:/i;
+export const humanNotes = text =>
+  String(text ?? '')
+    .split(/\n[ \t]*\n/)
+    .flatMap((paragraph, index) => {
+      const lines = paragraph.split('\n');
+      let stamp = -1;
+      lines.forEach((line, i) => {
+        if (AI_STAMP_LINE.test(line)) stamp = i;
+      });
+      let aiUntil = -1;
+      if (stamp >= 0) aiUntil = stamp;
+      else if (AI_RESCHEDULE_LINE.test(lines[0] || ''))
+        aiUntil = lines.length - 1;
+      else if (index === 0 && AI_FIXED_VALUE_LINE.test(lines[0] || ''))
+        aiUntil = 0;
+      return lines.filter((_line, i) => i > aiUntil);
+    })
+    .join('\n');
+// o valor que VALE para o agendamento: { text, source, label }
+export const effectiveAppointmentPrice = (prices, appt) => {
+  const manual = (appt.charges || []).filter(c =>
+    String(c.amount || '').trim()
+  );
+  if (manual.length)
+    return {
+      text: sumPrices(manual.map(c => c.amount)),
+      source: 'manual',
+      label: 'lançado à mão neste card',
+    };
+  const notes = humanNotes(appt.description);
+  const explicit = VALUE_PATTERN.exec(notes);
+  if (explicit)
+    return {
+      text: sumPrices([explicit[1]]),
+      source: 'observacao',
+      label: 'escrito na observação',
+    };
+  const written =
+    VALUE_PATTERN.exec(appt.procedure || '') ||
+    REAL_PATTERN.exec(appt.procedure || '');
+  if (written)
+    return {
+      text: sumPrices([written[1]]),
+      source: 'procedimento',
+      label: 'escrito no tipo de consulta',
+    };
+  const surgery = appt.kind === 'cirurgias';
+  const preset = surgery ? null : presetAppointmentPrice(prices, appt);
+  if (preset)
+    return {
+      ...preset,
+      source: 'preset',
+      label: `pré-configurado · ${preset.label}`,
+    };
+  const loose = REAL_PATTERN.exec(notes);
+  if (loose)
+    return {
+      text: sumPrices([loose[1]]),
+      source: 'observacao',
+      label: 'escrito na observação',
+    };
+  if (surgery) return null;
+  return {
+    text: '',
+    source: 'padrao',
+    label: 'valor padrão do lembrete de confirmação',
+  };
 };

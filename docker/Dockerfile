@@ -19,7 +19,12 @@ ENV RAILS_SERVE_STATIC_FILES ${RAILS_SERVE_STATIC_FILES}
 ARG RAILS_ENV=production
 ENV RAILS_ENV ${RAILS_ENV}
 
-ARG NODE_OPTIONS="--max-old-space-size=4096 --openssl-legacy-provider"
+# 🗺️ CEVICO (item 170): o mermaid deixou o build do Vite mais pesado — com 4096
+# o Node estourava o heap ("JavaScript heap out of memory") no assets:precompile
+# 13/10/2026 (auditoria): o build passou a usar ~6,0 GB e estourou os 6144 no
+# GitHub. 10240 piorou (a máquina engasgou por 19 min). Ficou 8192 + o relatório
+# gzip desligado no vite.config.ts (volta para ~5,6 GB, igual à versão 85ece38).
+ARG NODE_OPTIONS="--max-old-space-size=8192 --openssl-legacy-provider"
 ENV NODE_OPTIONS ${NODE_OPTIONS}
 
 ENV BUNDLE_PATH="/gems"
@@ -128,7 +133,12 @@ RUN apk update && apk add --no-cache \
   imagemagick \
   git \
   vips \
+  # 📞 CEVICO: ffmpeg remuxa as gravações das ligações (webm → ogg) antes de transcrever
+  ffmpeg \
   && gem install bundler -v "$BUNDLER_VERSION"
+
+# Restrict libvips to its trusted image loaders when generating variants
+ENV VIPS_BLOCK_UNTRUSTED=1
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
@@ -150,3 +160,9 @@ COPY --from=pre-builder /app/.git_sha /app/.git_sha
 WORKDIR /app
 
 EXPOSE 3000
+
+# 🩺 CEVICO Rodada 6: teste de saúde. Web → /health responde; Sidekiq → batimento
+# recente no Redis; migration rodando → sempre saudável (ver docker/entrypoints/healthcheck.sh).
+# Folgado de propósito: só marca "doente" depois de ~2,5 min seguidos falhando.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=5 \
+  CMD sh /app/docker/entrypoints/healthcheck.sh

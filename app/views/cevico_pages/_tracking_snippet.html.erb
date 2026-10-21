@@ -9,10 +9,15 @@
     page = nil → modo HUB (raiz do domínio): protocolo sai de /hub/ref. %>
 <% ref_path = page ? "/p/#{page.slug}/ref" : '/hub/ref' %>
 <% default_origin = page ? "a página \"#{page.title}\"" : 'o site da CEVICO' %>
-<script>
+<%# item 306: letra da variação do teste A/B que este visitante está vendo %>
+<% ab_variant = page&.serving_variant.to_s[/\A[a-z0-9]{1,3}\z/] %>
+<script nonce="<%= content_security_policy_nonce %>">
 (function () {
   var KEY = 'cevico_trk';
-  var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid', 'ref_host'];
+  // utm_id = ID da campanha no Google Ads ({campaignid}) — liga o lead ao custo da campanha (ROI)
+  var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_id', 'utm_content', 'utm_term', 'gclid', 'gbraid', 'wbraid', 'fbclid', 'ref_host'];
+  // código de clique (Google/Meta) é comprido: cortado em 150 ele não serve mais
+  var CLICK_IDS = ['gclid', 'gbraid', 'wbraid', 'fbclid'];
   var qs = new URLSearchParams(location.search);
   var trk = {};
   try { trk = JSON.parse(sessionStorage.getItem(KEY) || '{}'); } catch (e) { trk = {}; }
@@ -20,7 +25,7 @@
   var hasParams = KEEP.some(function (k) { return k !== 'ref_host' && qs.get(k); });
   if (hasParams) {
     trk = {};
-    KEEP.forEach(function (k) { var v = qs.get(k); if (v) trk[k] = String(v).slice(0, 150); });
+    KEEP.forEach(function (k) { var v = qs.get(k); if (v) trk[k] = String(v).slice(0, CLICK_IDS.indexOf(k) >= 0 ? 500 : 150); });
   } else if (!Object.keys(trk).length && document.referrer) {
     try {
       var refHost = new URL(document.referrer).hostname;
@@ -28,6 +33,10 @@
     } catch (e) { /* referrer inválido */ }
   }
   try { sessionStorage.setItem(KEY, JSON.stringify(trk)); } catch (e) { /* sessão cheia */ }
+<% if ab_variant.present? %>
+  // teste A/B (item 306): a gravação do Clarity fica marcada com a headline vista
+  try { if (window.clarity) window.clarity('set', 'headline', '<%= ab_variant %>'); } catch (e) { /* sem Clarity */ }
+<% end %>
 
   function appendTrk(url) {
     Object.keys(trk).forEach(function (k) {
@@ -46,14 +55,23 @@
       if (a.dataset.cevicoRef) return; // já processado — segue o clique
       e.preventDefault();
       var body = new URLSearchParams(trk);
+<% if ab_variant.present? %>
+      body.set('v', '<%= ab_variant %>'); // teste A/B: o clique e o lead contam para esta headline
+<% end %>
       // identidade GA4 da sessão (cookies _ga e _ga_*): viaja no Protocolo
       // para a conversão do CRM voltar AMARRADA à sessão que clicou no
       // anúncio — é o que faz o Google Ads contabilizar
       try {
         var mGa = document.cookie.match(/(?:^|;\s*)_ga=GA\d+\.\d+\.(.+?)(?:;|$)/);
         if (mGa) body.set('ga_client_id', mGa[1].slice(0, 64));
-        var mSess = document.cookie.match(/(?:^|;\s*)_ga_[^=]+=GS\d+\.\d+\.(\d+)/);
+        // formato antigo "GS1.1.<sessão>." e o novo (2025) "GS2.1.s<sessão>$"
+        var mSess = document.cookie.match(/(?:^|;\s*)_ga_[^=]+=GS\d+\.\d+\.s?(\d+)/);
         if (mSess) body.set('ga_session_id', mSess[1].slice(0, 32));
+        // identidade do Pixel da Meta (cookies _fbp/_fbc) — item 313
+        var mFbp = document.cookie.match(/(?:^|;\s*)_fbp=([^;]+)/);
+        if (mFbp) body.set('fbp', mFbp[1].slice(0, 100));
+        var mFbc = document.cookie.match(/(?:^|;\s*)_fbc=([^;]+)/);
+        if (mFbc) body.set('fbc', mFbc[1].slice(0, 540));
       } catch (err) { /* sem cookies GA — segue sem */ }
       fetch('<%= ref_path %>', { method: 'POST', body: body, keepalive: true })
         .then(function (r) { return r.ok ? r.json() : { token: null }; })
@@ -72,7 +90,10 @@
           // Pixel/GA4 (item 117): o Protocolo vira eventID do Lead —
           // a mesma chave que a CAPI usará na rodada 2 (sem duplicar)
           if (window.cevicoLead) { try { window.cevicoLead(data && data.token ? data.token : null); } catch (err) { /* segue o clique */ } }
-          location.href = dest;
+          // 19/10: abrir o WhatsApp na mesma hora cortava o aviso do Pixel (zero
+          // Contact na Meta). Um instante para ele sair; o servidor manda o mesmo
+          // Contact com o Protocolo (Cevico::PageContactEventJob), sem duplicar
+          setTimeout(function () { location.href = dest; }, window.fbq ? 300 : 0);
         });
       return;
     }

@@ -2,7 +2,6 @@
 # (só as publicadas; admin vê rascunhos também); escrever é só admin.
 class Api::V1::Accounts::Crm::TeamToolsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action :require_administrator!, except: [:index]
 
   def index
     scope = Current.account.cevico_tools.ordered

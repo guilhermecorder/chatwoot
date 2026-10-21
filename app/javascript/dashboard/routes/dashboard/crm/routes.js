@@ -1,9 +1,15 @@
 import { frontendURL } from '../../../helper/URLHelper';
 import CrmBoard from './CrmBoard.vue';
 import CrmCampaigns from './CrmCampaigns.vue';
+import CrmJourney from './CrmJourney.vue';
+import CrmCalls from './CrmCalls.vue';
+import CrmAppointments from './CrmAppointments.vue';
+import AppointmentAlerts from './AppointmentAlerts.vue';
+import OftalmofacilHub from './OftalmofacilHub.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
 import CrmIntegrationsPage from './CrmIntegrationsPage.vue';
+import PatientSources from './PatientSources.vue';
 
 export default {
   routes: [
@@ -12,6 +18,41 @@ export default {
       name: 'crm_board',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmBoard,
+    },
+    {
+      path: frontendURL('accounts/:accountId/crm/jornada'),
+      name: 'crm_journey',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmJourney,
+    },
+    // 📞 ambiente Chamadas (item 176): ao vivo + indicadores + histórico
+    {
+      path: frontendURL('accounts/:accountId/crm/chamadas'),
+      name: 'crm_calls',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmCalls,
+    },
+    // 📅 ambiente Agendamentos (item 200): monitorar cada consulta marcada,
+    // remarcada ou cancelada no período, com caixa, etiquetas e atalhos
+    {
+      path: frontendURL('accounts/:accountId/crm/agendamentos'),
+      name: 'crm_appointments',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmAppointments,
+    },
+    // 🔔 item 346: Notificações sobre agendamentos (divergências para conferir)
+    {
+      path: frontendURL('accounts/:accountId/crm/notificacoes'),
+      name: 'crm_appointment_alerts',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: AppointmentAlerts,
+    },
+    // 🏥 item 229: ambiente Oftalmofácil (espelho do hub) dentro do sistema
+    {
+      path: frontendURL('accounts/:accountId/crm/oftalmofacil'),
+      name: 'crm_oftalmofacil',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: OftalmofacilHub,
     },
     {
       path: frontendURL('accounts/:accountId/crm/campaigns'),
@@ -30,6 +71,13 @@ export default {
       name: 'crm_forms',
       meta: { permissions: ['administrator'] },
       component: CrmForms,
+    },
+    // 🏷️ item 322: Fontes de pacientes (cadastro + carimbo de origem) — só admin
+    {
+      path: frontendURL('accounts/:accountId/crm/fontes'),
+      name: 'crm_sources',
+      meta: { permissions: ['administrator'] },
+      component: PatientSources,
     },
     {
       path: frontendURL('accounts/:accountId/crm/integrations'),

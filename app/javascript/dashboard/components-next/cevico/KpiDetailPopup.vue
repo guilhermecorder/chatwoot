@@ -9,6 +9,7 @@
 import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import CrmAPI from 'dashboard/api/crm';
+import { PERIOD_PRESETS } from 'dashboard/helper/cevicoPeriod';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
 import { formatKpi } from 'dashboard/helper/cevicoFormula';
 
@@ -28,11 +29,10 @@ const bag = ref(null);
 const isLoadingBag = ref(false);
 const preset = ref(null); // null = período da tela
 const granularity = ref(null);
+// item 321: a mesma lista de períodos do sistema inteiro (helper/cevicoPeriod.js)
 const MODAL_PRESETS = [
   [null, 'Régua da tela'],
-  ['last7', '7 dias'],
-  ['month', 'Este mês'],
-  ['year', 'Este ano'],
+  ...PERIOD_PRESETS.map(p => [p.key, p.label]),
 ];
 const MODAL_GRAINS = [
   [null, 'Auto'],

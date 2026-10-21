@@ -61,7 +61,7 @@ class Crm::PageEditorService
     message = client.messages.create(
       model: model,
       max_tokens: max_tokens_config || 30_000,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: EDIT_SCHEMA }),
       messages: [{ role: 'user', content: user_content }]
     )

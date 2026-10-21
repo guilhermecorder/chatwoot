@@ -51,7 +51,7 @@ class Crm::FormInsightService
     message = client.messages.create(
       model: model,
       max_tokens: 2048,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: build_corpus }]
     )
@@ -84,8 +84,9 @@ class Crm::FormInsightService
   def build_corpus
     lines = ["Formulário: #{@form.name} — #{@responses.size} respostas\n"]
     @responses.each_with_index do |r, i|
-      lines << "--- Resposta #{i + 1} ---"
-      r.answers.each do |a|
+      # 🔐 achado #118: a IA fica sabendo quando a resposta não é confirmada
+      lines << "--- Resposta #{i + 1}#{' (não confirmada: quem respondeu se identificou só com nome e WhatsApp)' unless r.verified?} ---"
+      r.answer_items.each do |a|
         value = a['value'].is_a?(Array) ? a['value'].join(', ') : a['value'].to_s
         next if value.blank?
 

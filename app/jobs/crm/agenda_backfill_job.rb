@@ -69,17 +69,18 @@ class Crm::AgendaBackfillJob < ApplicationJob
     settings = CrmSetting.find_by(account: account)
     return if settings.blank?
 
-    cfg = settings.agenda_config || {}
-    cfg['backfill_last_run'] = {
-      'at' => Time.current.iso8601,
-      'scanned' => scanned,
-      'created' => stats[:created],
-      'rescheduled' => stats[:rescheduled],
-      'already' => stats[:already],
-      'skipped' => stats[:skipped],
-      'errors' => stats[:errors]
-    }
-    settings.update!(agenda_config: cfg)
+    # Rodada 4 (achado #383): sob a trava da linha, só 'backfill_last_run' muda
+    Cevico::SettingMerge.merge_key!(settings, :agenda_config, 'backfill_last_run') do |_old|
+      {
+        'at' => Time.current.iso8601,
+        'scanned' => scanned,
+        'created' => stats[:created],
+        'rescheduled' => stats[:rescheduled],
+        'already' => stats[:already],
+        'skipped' => stats[:skipped],
+        'errors' => stats[:errors]
+      }
+    end
   rescue StandardError => e
     Rails.logger.warn "[Crm::AgendaBackfill] falhou ao salvar last_run: #{e.message}"
   end

@@ -2,7 +2,6 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
   include Crm::AccessControl
 
   # cirurgias feitas fora do sistema = área concedível (padrão: só admin)
-  before_action -> { require_capability(:data_tools) }
 
   MAX_LINES = 3000
 
@@ -88,6 +87,8 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
       total_value: parsed[:rows].sum { |r| r[:value] }.round(2),
       months: months_summary(parsed[:rows]),
       matched: match[:matched].size,
+      matched_by_phone: match[:matched].count { |m| m[:via] == :phone },
+      has_phone_column: parsed[:rows].any? { |r| r[:phone].present? },
       matched_sample: match[:matched].first(5).map { |m| m[:row][:name] },
       ambiguous: match[:ambiguous].first(20).map { |m| m[:row][:name] },
       ambiguous_count: match[:ambiguous].size,
@@ -99,10 +100,38 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
     }
   end
 
+  # 🤖 POST ai_match_sheet — item 154: a IA compara os nomes que NÃO casaram
+  # com candidatos do banco (mesma pessoa escrita diferente). Só sugere:
+  # nada é gravado aqui; os pares de confiança ALTA entram no apply quando
+  # o admin marcar "usar os achados da IA".
+  def ai_match_sheet
+    rows = Rails.cache.read(sheet_cache_key(params[:token].to_s))
+    return render_could_not_create_error('A prévia expirou — envie a planilha de novo') if rows.blank?
+
+    match = match_rows_by_name(rows)
+    result = Crm::SheetNameMatchService.new(account: Current.account, rows: match[:unmatched]).call
+    return render_could_not_create_error(result[:error]) if result[:error]
+
+    # guarda no MESMO cache da prévia: o apply relê daqui (nunca do navegador)
+    Rails.cache.write("#{sheet_cache_key(params[:token].to_s)}:ai", result[:matches], expires_in: 2.hours)
+
+    alta = result[:matches].select { |m| m[:confidence] == 'alta' }
+    media = result[:matches].select { |m| m[:confidence] == 'media' }
+    render json: {
+      found_high: alta.size,
+      found_medium: media.size,
+      still_unmatched: match[:unmatched].size - alta.size,
+      pairs_high: alta.first(30).map { |m| { sheet: m[:name], system: m[:contact_name] } },
+      pairs_medium: media.first(15).map { |m| { sheet: m[:name], system: m[:contact_name] } }
+    }
+  end
+
   # POST apply_sheet — recasa no servidor a partir do cache (nunca confia em
   # ids do navegador) e dispara o job com DATA REAL + procedimento por linha.
   # create_missing: cria contato (sem telefone) para as linhas não casadas —
   # o histórico entra inteiro e os dashboards passam a contar a realidade.
+  # use_ai_matches: os pares de confiança ALTA achados pela IA (do cache,
+  # derivados no servidor) também entram como casados.
   def apply_sheet
     rows = Rails.cache.read(sheet_cache_key(params[:token].to_s))
     return render_could_not_create_error('A prévia expirou — envie a planilha de novo') if rows.blank?
@@ -114,7 +143,18 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
     entries = match[:matched].map do |m|
       [m[:contact_id], m[:row][:value], m[:row][:date], m[:row][:procedure]]
     end
-    create_rows = params[:create_missing] == true ? match[:unmatched].first(2000) : []
+    unmatched = match[:unmatched]
+
+    if params[:use_ai_matches] == true
+      ai = Array(Rails.cache.read("#{sheet_cache_key(params[:token].to_s)}:ai"))
+      ai_by_name = ai.select { |m| m[:confidence] == 'alta' }.to_h { |m| [normalize_name(m[:name]), m[:contact_id]] }
+      if ai_by_name.any?
+        ai_rows, unmatched = unmatched.partition { |r| ai_by_name.key?(normalize_name(r[:name])) }
+        entries += ai_rows.map { |r| [ai_by_name[normalize_name(r[:name])], r[:value], r[:date], r[:procedure]] }
+      end
+    end
+
+    create_rows = params[:create_missing] == true ? unmatched.first(2000) : []
     return render_could_not_create_error('Nenhuma linha casou — ative "criar pacientes não encontrados" para importar o histórico') if entries.empty? && create_rows.empty?
 
     Crm::ExternalSurgeryJob.perform_later(
@@ -125,7 +165,7 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
       {
         'set_value' => params[:set_value] != false,
         'overwrite_value' => params[:overwrite_value] == true,
-        'create_rows' => create_rows.map { |r| r.slice(:name, :value, :date, :procedure).transform_keys(&:to_s) }
+        'create_rows' => create_rows.map { |r| r.slice(:name, :phone, :value, :date, :procedure).transform_keys(&:to_s) }
       }
     )
     render json: { enqueued: true, matched: entries.size, to_create: create_rows.size }
@@ -178,21 +218,27 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
     "cevico/closing_sheet/#{Current.account.id}/#{token}"
   end
 
-  # nome normalizado (sem acento/caixa/pontuação) → contato; 2+ homônimos = ambíguo
+  # casa TELEFONE primeiro (pedido 01/09 — único, resolve homônimos), nome
+  # normalizado como reserva pra linha sem telefone. Planilha sem a coluna
+  # Telefone se comporta exatamente como antes (só nome).
   def match_rows_by_name(rows)
-    index = Hash.new { |h, k| h[k] = [] }
-    Current.account.contacts.pluck(:id, :name).each do |id, name|
+    name_index = Hash.new { |h, k| h[k] = [] }
+    phone_index = Hash.new { |h, k| h[k] = [] }
+    Current.account.contacts.pluck(:id, :name, :phone_number).each do |id, name, phone|
       key = normalize_name(name)
-      index[key] << id if key.present?
+      name_index[key] << id if key.present?
+      digits = phone.to_s.gsub(/\D/, '')
+      phone_index[digits.last(8)] << [id, digits] if digits.length >= 8
     end
 
     matched = []
     ambiguous = []
     unmatched = []
     rows.each do |row|
-      ids = index[normalize_name(row[:name])]
+      phone_ids = phone_match_ids(phone_index, row[:phone])
+      ids = phone_ids || name_index[normalize_name(row[:name])]
       if ids.size == 1
-        matched << { contact_id: ids.first, row: row }
+        matched << { contact_id: ids.first, row: row, via: phone_ids ? :phone : :name }
       elsif ids.size > 1
         ambiguous << { contact_ids: ids, row: row }
       else
@@ -200,6 +246,19 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
       end
     end
     { matched: matched, ambiguous: ambiguous, unmatched: unmatched }
+  end
+
+  # candidatos pelo fim do número + confirmação de linha (mesmo critério do
+  # resto do CEVICO — dois DDDs com o mesmo final de 8 não casam).
+  # nil = linha sem telefone utilizável → cai no casamento por nome.
+  def phone_match_ids(phone_index, phone_digits)
+    digits = phone_digits.to_s
+    return nil if digits.length < 8
+
+    ids = phone_index[digits.last(8)]
+          .select { |(_id, contact_digits)| Crm::AppointmentRecorder.same_phone_line?(digits, contact_digits) }
+          .map(&:first).uniq
+    ids.presence
   end
 
   def normalize_name(name)
@@ -251,21 +310,10 @@ class Api::V1::Accounts::Crm::ExternalSurgeriesController < Api::V1::Accounts::B
 
   # Valor em formato brasileiro ou simples: "3900", "3900,00", "3.900,00",
   # "3.900" (milhar), "R$ 3.900". Inválido ou zero = sem valor.
+  # Rodada 5 (#192): mesma regra única do Cevico::Money.
   def parse_value(raw)
-    text = raw.to_s.gsub(/r\$/i, '').gsub(/\s/, '')
-    return nil if text.blank?
-
-    text = if text.include?(',')
-             text.delete('.').tr(',', '.')
-           elsif text.match?(/\A\d{1,3}(\.\d{3})+\z/) # "3.900" sem vírgula = milhar BR
-             text.delete('.')
-           else
-             text
-           end
-    value = Float(text)
-    value.positive? ? value.round(2) : nil
-  rescue ArgumentError, TypeError
-    nil
+    value = Cevico::Money.parse(raw)
+    value&.positive? ? value : nil
   end
 
   # Casa por SUFIXO de 9 e 8 dígitos — cobre telefone BR com/sem o 55 do país

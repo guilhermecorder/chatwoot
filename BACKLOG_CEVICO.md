@@ -104,6 +104,21 @@ backup validado (~39MB). Restore: `gunzip -c ARQUIVO.sql.gz | docker exec
 - PENDENTE (próximo passo de resiliência): cópia off-VPS automática (rclone
   → Google Drive/S3) para proteger contra falha total da VPS. Hoje o backup
   é só local ao disco da VPS.
+- ⚠️ 16/09 e 05/10: `/root/backup_cevico.sh` NÃO gerou arquivo — não confiar nele.
+- 🧯 RODADA 6 (13/10, auditoria #215, sem commit): script VERSIONADO
+  `script/backup_cevico.sh` (contêiner por prefixo sistema_cevico_postgres,
+  pg_dump do chatwoot_migrado + tar de /root/cevico-storage — fotos de exame —,
+  rclone para fora, 14 dias aqui / 30 lá fora, alerta por webhook se o arquivo
+  do dia não existe ou tem < 1 MB, modo `verificar`) + bilhete lido por
+  `rake cevico:backup_check`. Passo a passo de instalação, cron e RESTORE em
+  `docs/BACKUP.md`. FALTA (na VPS, pelo Guilherme): instalar rclone + remoto,
+  /root/.cevico_backup.env, trocar o cron, rodar 1× na mão e testar 1 restore.
+- 🧯 Ajustes da revisão (13/10, sem commit): o banco vai para fora PRIMEIRO e
+  vai mesmo se o pacote dos arquivos falhar; `tar` com código 1 ("arquivo mudou
+  durante a leitura", normal com o sistema no ar) não é mais falha; arquivos
+  guardados só 3 dias na VPS (banco segue 14) para não encher o disco do
+  Postgres; aviso com disco > 80% e sem pacote de arquivos > 90%. Na instalação,
+  conferir `df -h /` antes (docs/BACKUP.md passo 5).
 
 ## 7. Caixas de entrada por atendente ("selecionar e ocultar")
 
@@ -4531,3 +4546,4977 @@ crm_opportunity_radar_job registrados.
 - Seeds de teste deixados no local: ação "Campanha refrativa nova no ar"
   (10/08) e perda_valor na Gabriela Almeida teste (R$ 4.800).
 - AGUARDANDO "pode subir" (junto da 143+144).
+
+## 146. ✅ COMPARECIMENTO POR UNIDADE + CONSULTA DE 5 MIN (pedidos 26/08: "comparecimento é uma chave")
+- Pedidos dele: (a) filtrar consultas agendadas e comparecimento por
+  UNIDADE (Paulista × Tatuapé); (b) "abrir mais agenda" no Tatuapé:
+  consulta de 5 min em vez de 15, ajustando os agentes; (c) ideias de
+  automação pra subir a taxa de comparecimento.
+- 🏥 POR UNIDADE: home_controller ganhou unit_breakdown(periodo) —
+  group(:unit, :attendance) das consultas do período (tasks.unit) →
+  by_unit: [{unit, label, consultations, attended, missed, show_rate}]
+  nos painéis CONDUÇÃO e GESTOR (UNIT_LABELS = mesmos do AgendaSlots).
+  Nos popups dos cards "Consultas no período" e "Comparecimento"
+  (condução) + "Comparecimento" (gestor): seção "🏥 por unidade" com
+  cartão por casa — chip semafórico (≥80% verde · ≥60% ouro · <60%
+  vermelho), ✓ vieram / ✗ faltaram / sem conferência e barra da taxa.
+  Teste local: Av. Paulista 94,1% × Tatuapé 57,1% lado a lado.
+- ⏱ CONSULTA DE 5 MIN: a duração JÁ era por janela (windows[].block) e os
+  prompts dos agentes JÁ nascem das janelas (Crm::AgendaSlots.free_slots
+  → free_slots_text no prompt do Secretário/Atendente) — faltava só a
+  OPÇÃO no editor: "5 min" adicionado ao seletor de blocos das Janelas
+  dos médicos (AgendaBoard). Sanitizer do windows já aceita (permit
+  :block). Teste ponta a ponta local: janelas do Tatuapé → 5 min →
+  free_slots_text passou a oferecer "Tatuapé: 10:30, 10:35, 10:40…"
+  enquanto Paulista segue 08:30, 08:45… — ou seja, os agentes se ajustam
+  SOZINHOS, sem mexer em prompt.
+- ⚠️ PÓS-DEPLOY (ELE): Agenda → Janelas dos médicos → Editar → janelas do
+  Tatuapé → blocos de 5 min → Salvar. E ATENÇÃO: o Atendente IA do
+  WhatsApp (N8N, externo) tem grade PRÓPRIA no prompt do supervisor —
+  se ainda estiver com a grade de 15 min escrita, precisa ajustar lá no
+  N8N também (o interno segue as janelas sozinho).
+- 📦 N8N ENTREGUE (26/08): ele mandou o JSON do workflow (v19 em uso;
+  Tatuapé estava em 10min nas janelas 5 e 7) → gerei os prompts prontos
+  em ~/Downloads/TATUAPE 5MIN/ (SUPERVISOR systemMessage + CALENDAR_AGENT
+  systemMessage c/ Tatuapé 5min: grade, exemplo de blocos, duração e
+  "fim do evento = início + 5 min"; toolDescription e nodes do Google
+  Calendar NÃO mudam — o fim do evento vem do prompt). LEIA-ME junto:
+  2 colagens no N8N + teste real numa quarta no Tatuapé.
+- Ideias de automação p/ comparecimento entregues na conversa (D-1/D-0,
+  resgate no dia da falta, etiqueta risco_falta etc.) — viram itens
+  quando ele escolher.
+- Sem migration, sem cron. Testado local conta 3 (seeds Teste146
+  paulista/tatuape deixados no banco local).
+- ✅ SUBIDA 29/08 junto de 147+148 (develop; Meta Leads separado como sempre).
+  Aguarda build verde → implantar WEB+SIDEKIQ (pula a 785fa58 — esta etiqueta
+  carrega 140–148); reversão = 781aa6b.
+
+## 147. ✅ 🕐 HORÁRIO DE ENVIO DO FOLLOW-UP CONFIGURÁVEL + MEU PAINEL SEM TRAVA DO WHATSAPP (pedidos 28/08)
+- Pedido dele: "quero que ele envie mensagens durante a janela de 24h do
+  dia, não quero que empilhe tudo pro dia seguinte" — controle mais
+  preciso da cadência. (Contexto: o expediente fixo 08h–20h fazia etapa
+  vencida à noite esperar as 08h e sair empilhada de manhã, às vezes já
+  fora da janela de 24h do WhatsApp.)
+- 🕐 EXPEDIENTE VIROU JANELA CONFIGURÁVEL por conta: Automações → Robôs →
+  cartão "Horário de envio das cutucadas" (só admin): selects das/às +
+  chips "Padrão 08h–20h" e "24 horas". Persistência
+  agenda_config.followup_hours {start 0–23, end 1–24}, sanitizada no
+  update_agenda (start >= end não salva; lixo cai no padrão — o robô nunca
+  fica sem janela). FollowupBotJob.send_hours(account) cacheado por rodada;
+  effective_overdue_hours passou a usar a janela da conta (etapa que vence
+  fora espera a janela REABRIR — o atraso conta a partir dali, nada é
+  descartado por vencer de madrugada). Com 0–24, o "empilhamento" some:
+  cada etapa sai na hora certa. As demais travas (piso 30min, teto 4/dia,
+  momento perdido 3h, 1 por rodada) continuam valendo.
+- Rótulo "fora do expediente 08h–20h" da aba Robôs agora mostra a janela
+  configurada. Aviso no cartão: texto simples só chega dentro da janela de
+  24h do WhatsApp — madrugada/cadência em dias pede mensagem modelo.
+- ⚡ MEU PAINEL DESTRAVADO: timeout de 5s no Whatsapp::HealthService
+  (HTTParty sem timeout = Net::HTTP espera 60s+60s; quando a Meta
+  demorava, o payload do crm/home inteiro ficava preso atrás do health —
+  a 1ª carga a cada 10min de cache pagava o pato). Falha segue caindo no
+  cache de 10 minutos do home_controller — errar rápido é barato.
+- Testes: runner (sem config=8...20, 24h=0...24 cobre 3h, 07–22, inválida
+  22→10 cai no padrão, overdue 2.0h certinho na janela 24h), HTTP na conta
+  3 (salva 24h, GET devolve, inválida mantém a anterior, volta ao padrão)
+  e VISUAL (cartão na aba Robôs, chip 24 horas → toast "liberadas 24 horas
+  por dia" + banco confirmado, chip Padrão restaura). Sem migration, sem
+  cron. Banco local deixado no padrão 08–20.
+- ⚠️ settings_controller/api crm.js seguem MISTOS c/ Meta Leads — separar
+  no commit como sempre.
+- Na MESMA conversa (28/08): varredura do follow-up explicada (precisão
+  ~2–4min, 5 travas) + diagnóstico do Secretário da Agenda "não pega todo
+  mundo" — virou a RODADA 148 na sequência.
+- ✅ SUBIDA 29/08 junto de 146+148 (mesmo commit; ver nota de deploy no 146).
+
+## 148. ✅ 🎯 AGENDAMENTO 100% — Secretário v2 (releitura, reagendamento, cancelamento) (direção dele 28/08)
+- Direção dele: "preciso favorecer que o agendamento fique redondo e 100%
+  preciso, inclusive reagendamentos — a conferência da agenda depende
+  disso; hoje o agente interno só 'duplica a agenda' do N8N". FUTURO
+  ANOTADO (conversa grande a ter): CENTRALIZAÇÃO da operação no sistema,
+  com agenda PRÓPRIA como fonte da verdade (aposentar o Google Calendar).
+- CAUSA RAIZ corrigida: o Secretário lia a conversa UMA vez ("Entrou na
+  coluna"), geralmente ANTES de dia/hora estarem confirmados → tarefa de
+  revisão e a confirmação posterior nunca era lida.
+- 🧠 Crm::AppointmentApplier NOVO — caminho ÚNICO do Secretário (usado
+  pela automação de coluna E pela releitura): extrai → cria/REAGENDA/
+  CANCELA/tarefa de revisão + nota privada + linha no registro. Trava
+  MIN_GAP 2min (leituras quase simultâneas não gastam IA 2x).
+  CrmAutomationFireJob#schedule_appointment virou delegação de 8 linhas.
+- 👂 AUTOMAÇÃO-IRMÃ por coluna de atuação: sync_scheduler_stages e
+  sync_agent_stages(scheduler) agora criam/removem JUNTO uma automação
+  "Secretário da Agenda (mensagens)" (message_created incoming, delay 1min
+  junta mensagens picadas, throttle 3min) — o card entra E cada mensagem
+  do paciente na coluna redispara a leitura. Config ZERO pra ele: basta
+  salvar as colunas de atuação (que ele já tem) — resincronizar 1x após o
+  deploy pra criar as irmãs.
+- 🔁 RELEITURA FORA DAS COLUNAS (CrmListener → Crm::SchedulerRecheckJob
+  novo, wait 20s, throttle 10min/paciente): (a) quem tem tarefa
+  "⚠️ Confirmar consulta"/"⚠️ Pediu cancelar" aberta → QUALQUER mensagem
+  dele relê (é a confirmação chegando); (b) mensagem c/ remarcar/
+  reagendar/desmarcar/cancelar/adiar/"mudar o horario"/etc (sem acento,
+  RECHECK_TERMS) de quem TEM consulta futura → relê. Roda mesmo sem card.
+- ❌ CANCELAMENTO: campo cancelamento no schema da extração (regra: SÓ
+  sem novo horário; remarcou = reagendamento) → Recorder.cancel_future
+  seta canceled_at na consulta futura + rastro na descrição + nota
+  "CANCELADA a pedido do paciente"; sem consulta futura achada → tarefa
+  "⚠️ Pediu cancelar/remarcar: nome" (pode estar só no Google Calendar).
+- 🧾 ANTI-DUPLICATA da tarefa de revisão POR CONTATO (bug antigo: dedup
+  por título — dois pacientes sem nome = "Paciente" e o 2º era pulado em
+  silêncio; título exato agora só segura tarefas antigas sem contact_id).
+- 👁 VISIBILIDADE: erro da IA e "sem dia/hora" (1ª detecção) agora entram
+  no scheduler_log — outcomes novos canceled/cancel_no_match/erro c/
+  rótulos no card do agente; banner do card reescrito (relê mensagens,
+  cancela, releitura fora das colunas).
+- Testes (extração STUBADA, sem IA): 15/15 ✅ — revisão+log, MIN_GAP,
+  não-duplica, homônimo "Paciente" destravado, criação c/ nota,
+  reagendamento sem duplicar, cancelamento c/ canceled_at+nota, cancelar
+  sem consulta → tarefa, log c/ 5 desfechos, gatilhos do listener (a/b,
+  acento, negativo, freio 10min); HTTP: sync cria/remove o PAR; visual:
+  banner novo no card. Limpeza completa (contatos/tarefas/log de teste).
+- Sem migration, sem cron. PÓS-DEPLOY (ELE): abrir o card do Secretário →
+  Salvar colunas de atuação (recria e já cria as irmãs "mensagens").
+- ⚠️ settings_controller segue MISTO c/ Meta Leads — separar no commit.
+- ✅ SUBIDA 29/08 junto de 146+147 (mesmo commit; ver nota de deploy no 146).
+
+# RODADA 01/09 — item 149 (formulários oficiais: link amigável + atrelamento por telefone)
+
+## 149. ✅ 📋 FORMULÁRIOS: LINK LIMPO + IDENTIFICAÇÃO POR TELEFONE + AÇÃO "ENVIAR MENSAGEM MODELO" (pedidos 01/09)
+- Pedidos dele: (a) o link do formulário tinha um token gigante e feio
+  ("precisamos construir essa extensão do link de uma forma mais amigável
+  pra enviar pro paciente"); (b) pedir o telefone pra "relacionar e atrelar
+  o formulário ao card e deixar no ambiente do paciente" (aprovado:
+  obrigatório nome + WhatsApp); (c) ação "Enviar mensagem modelo" no
+  "O que fazer?" das automações de coluna (print da tela Nova automação).
+  Contexto do uso: automação envia o link só pra quem JÁ decidiu agendar.
+- 🔗 LINK LIMPO: rotas novas sem token (GET/POST /forms/:slug + POST
+  /forms/:slug/track ANTES das rotas c/ :token — 'track' literal primeiro
+  senão o Rails leria "track" como token). Editor ganhou campo "Endereço
+  do link" (…/forms/ + slug editável; normalize_slug parameteriza
+  "Avaliação Teste" → avaliacao-teste; validação só [a-z0-9-] c/ unicidade;
+  em branco no criar = ensure_slug gera). form_json devolve short_link
+  (Cevico::PublicSite.base_url — produção sai clinica.cevico.com.br) e a
+  tela tem botão dourado "Copiar link do paciente" ao lado do de teste.
+  Link ASSINADO continua funcionando (disparos automáticos personalizados
+  pulam a identificação; token genérico antigo TAMBÉM pede identificação).
+- 🙋 IDENTIFICAÇÃO: card novo (type 'identity') como 1º passo quando não
+  há paciente no token — nome + WhatsApp obrigatórios (validação leve no
+  JS, real no servidor: nome + 10-13 dígitos). No submit:
+  resolve_identity_contact acha o paciente pelos últimos 8 dígitos +
+  same_phone_line? do AppointmentRecorder (mesma máscara do resto do
+  CEVICO); achou → resposta atrela ao contato (nome só COMPLETA cadastro
+  sem nome); não achou → cria contato (E.164 +55) + card na coluna
+  "AGENDAMENTO DE CONSULTA" (booking_stage por ILIKE, fallback 1ª coluna;
+  origin 'formulario') — decisão dele 01/09. Corrida/duplicata → re-busca
+  antes de 422. Erro de identidade → volta pro card c/ mensagem (não
+  agradece em falso).
+- 📨 AÇÃO "ENVIAR MENSAGEM MODELO" (send_template): ACTION_TYPES +
+  despacho no CrmAutomationFireJob → TemplateSource leve (account/inbox/
+  sender nil/template_params/message_preview) no Crm::SendTemplateService
+  (o MESMO das Campanhas — cria conversa + mensagem c/ template_params,
+  entrega via webhook). Trava anti-rajada: cooldown 7d POR automação/
+  contato (additional_attributes.cevico_templates_sent, mesmo padrão do
+  send_form). Modal: caixa WhatsApp → templates da Meta (mesmo
+  fetchWhatsappTemplates das Campanhas) → variáveis {{n}} c/ prévia →
+  save valida tudo preenchido; aviso da trava no card. FIX de quebra:
+  resposta não-array do endpoint de templates (token inválido) quebrava o
+  modal — coerção Array.isArray + aviso.
+- 🛡️ THROTTLES Rack::Attack (da rodada de segurança, viraram requisito):
+  cevico/form_submit 10/min por IP (POST /forms/* cria registros/paciente),
+  cevico/public_beacons 90/min (track/ref/hub_ref) e cevico/builder 6/min
+  (construtor gasta IA). Rack::Attack já vem ligado em produção.
+- Testes: runner 7/7 (slug normaliza, short_link, send_template dispara 1x
+  c/ variável renderizada + template_params na mensagem, 2º disparo
+  BLOQUEADO pelo cooldown, marcador no contato) + HTTP 8/8 (GET limpo 200
+  c/ ASK_IDENTITY, POST telefone EXISTENTE atrela sem duplicar, telefone
+  NOVO cria paciente E.164 + card em Agendamento de Consulta origem
+  formulario, reenvio REUSA paciente, identidade inválida 422, track 204,
+  404, link assinado 200 c/ "Olá, Guilherme") + VISUAL conta 3 (card de
+  identificação dopamine c/ validação, editor c/ campo endereço salvando
+  normalizado, botão Copiar link do paciente [toast de erro no teste =
+  clipboard bloqueado no browser automatizado, não é bug], modal c/ ação
+  nova + caixa + "Selecione o template…" + validação do salvar). Limpeza
+  completa (respostas 14-16, pacientes e automações de teste removidos;
+  slug revertido). Rubocop: só ofensa pré-existente (InverseOf).
+- Sem migration, sem cron — deploy só WEB. ⚠️ routes.rb segue MISTO c/
+  Meta Leads (minhas rotas de forms + as de meta_leads) — separar no
+  commit como sempre.
+- LEMBRETE p/ ele: a mensagem modelo c/ o link do formulário precisa estar
+  APROVADA no Gerenciador da Meta antes de ligar a automação.
+- AGUARDANDO "pode subir".
+
+## 149B. ✅ AJUSTE: "ENVIAR FORMULÁRIO" MANDA O LINK LIMPO (decisão dele 01/09: "quero sem token")
+- Na conversa pós-149 ele cravou: o {{link}} da ação "Enviar formulário"
+  deve ser o link LIMPO (clinica.cevico.com.br/forms/pre-avaliacao), sem
+  token nenhum (proposta de código curto /i/<código> foi REJEITADA no meio
+  da construção e revertida por completo — nada dela ficou no código).
+- Mudança: send_form no CrmAutomationFireJob usa form.public_short_link
+  (todo paciente recebe o mesmo link bonito; identifica-se com nome +
+  WhatsApp no 1º card e a resposta atrela pelo telefone). Texto do modal
+  atualizado. Link ASSINADO antigo continua aceito (mensagens já enviadas
+  não quebram). Travas mantidas (não reenvia a quem respondeu + cooldown 7d).
+- Testes: runner 4/4 (mensagem criada, link limpo no texto, SEM token,
+  {{nome}} renderizado) + regressão HTTP (limpo 200, assinado antigo 200,
+  identidade inválida 422). Limpeza completa.
+- Arquivos: crm_automation_fire_job.rb + ColumnAutomationsModal.vue +
+  comentário em routes.rb. Sem migration, sem cron; WEB+SIDEKIQ juntos
+  (a ação roda no sidekiq).
+- ⚠️ A etiqueta fbfc8e5 (149 pura) fica SUPERADA — implantar direto a
+  etiqueta deste ajuste quando o build ficar verde.
+- AGUARDANDO "pode subir".
+
+## 150. ✅ 🏷️ CONDIÇÃO DE ETIQUETA EM QUALQUER GATILHO das automações de coluna (pedido 01/09 c/ print)
+- Pedido dele: "automação que reconheça na coluna, quando o card entrar,
+  SE tiver uma etiqueta XYZ, dispare e mova o card para a coluna que eu
+  escolher" — card entrou + contém etiqueta → ação.
+- Motor: should_fire? do CrmAutomationFireJob ganhou
+  required_label_matches? — action_config.required_label (opcional); sem
+  a etiqueta no paciente, a automação NÃO dispara (nem gera log).
+  Checagem NA HORA DO DISPARO (case-insensitive via label_list) — vale
+  também p/ automação com tempo de espera (etiqueta saiu no meio do
+  caminho = não dispara mais). Vale pra QUALQUER gatilho e QUALQUER ação
+  (mover coluna, enviar formulário, mensagem modelo...).
+- Modal: bloco novo "🏷️ Só dispara se o paciente tiver a etiqueta
+  (opcional)" na seção Quando disparar? (select das etiquetas da conta +
+  "Sem exigência — dispara para qualquer card" + explicação). required_label
+  no emptyForm/hydrate; action_config: {} do backend já permitia.
+- Testes: runner 5/5 (SEM etiqueta: card não move + zero log; COM
+  etiqueta: move pra coluna alvo + log fired; MAIÚSCULA casa) + visual
+  conta 3 (bloco no modal, select c/ etiquetas reais da conta). Limpeza
+  completa. Sem migration, sem cron; WEB+SIDEKIQ juntos (motor no sidekiq).
+- Nota de uso: mover card por automação dispara as automações da coluna
+  DESTINO (encadeamento é proposital) — evitar pares A→B e B→A.
+- AGUARDANDO "pode subir".
+
+## 151. ✅ 📱 PLANILHA DE FECHAMENTO CASA PELO TELEFONE (pedido 01/09: "case pelo telefone, não pelo nome")
+- FATO IMPORTANTE descoberto ao espiar a planilha REAL dele (10_2025 até
+  07_2026.xlsx): as colunas são Status·Data·Paciente·Procedimento·Olho·
+  valor total·Comissão·FIXO·REPASSE TOTAL — NÃO EXISTE coluna de telefone.
+  O casamento por nome era o único possível com o dado disponível.
+- Solução: o leitor agora reconhece a coluna Telefone/Celular/WhatsApp/
+  Fone QUANDO ELA EXISTIR e o casamento vira TELEFONE PRIMEIRO (últimos 8
+  dígitos + same_phone_line?, mesmo critério do resto do CEVICO — resolve
+  homônimos), nome normalizado como RESERVA pra linha sem telefone.
+  Planilha sem a coluna = comportamento idêntico ao de antes.
+- ClosingSheetReader: HEADER_ALIASES + parse_phone (célula numérica
+  '11987654321.0'/notação científica normalizada p/ dígitos; <8 dígitos =
+  nil) + status_skip extraído (AbcSize). Controller: match_rows_by_name c/
+  phone_index + phone_match_ids (2+ contatos na mesma linha = ambíguo);
+  payload novo matched_by_phone + has_phone_column. Job: paciente criado
+  da planilha agora NASCE COM phone_number E.164 (+55) quando a linha tem
+  telefone — alcançável no WhatsApp. UI: prévia mostra "X pelo 📱 telefone
+  e Y pelo nome" + dica azul quando a planilha não tem a coluna.
+- Testes: leitor 5/5 (numérico, formatado "(11) 93333-4444", sem fone=nil,
+  planilha real 550 linhas sem phone) + preview HTTP conta 3 c/ planilha
+  sintética (matched 2 = 1 por fone [nome diferente de propósito] + 1 por
+  nome; 1 unmatched; has_phone_column true) + job criou paciente c/
+  +5511933334444 e card na coluna c/ valor + regressão da planilha real
+  (has_phone_column false). Limpeza completa (contato/card/recibo undo).
+  Rubocop: só pré-existentes.
+- AÇÃO DELE: adicionar a coluna "Telefone" (com DDD) na planilha de
+  fechamento — daí em diante o casamento é por número.
+- Sem migration, sem cron; WEB+SIDEKIQ juntos. AGUARDANDO "pode subir"
+  (junto do 150).
+
+## 152. ✅ ✨ POPUP DOS INDICADORES "PADRÃO APPLE" — varredura de usabilidade (pedido 02/09)
+- Pedido dele: "melhorar a expansão de indicadores dos cards do Meu Painel,
+  varredura com carinho, usabilidade padrão Apple". Varredura AO VIVO achou
+  problemas reais: popup MAIOR QUE A TELA (cabeçalho e botões cortados, sem
+  rolagem própria), gráfico vazio mudo, fórmula em tecniquês
+  (appointments_booked / new_leads * 100), legenda ilegível, chips
+  minúsculos, sem Esc, fundo rolava junto, abertura seca sem transição.
+- 🍎 REFORMA (InicioPage.vue, popup dos itens 140/144):
+  (1) NUNCA maior que a tela: max-h 88vh + corpo c/ rolagem própria
+  (overscroll-contain) e cabeçalho fixo; (2) TRANSIÇÃO tipo folha: fundo em
+  fade c/ leve blur, cartão sobe c/ escala (cubic-bezier suave; saída mais
+  rápida; prefers-reduced-motion = só fade); (3) Esc FECHA + clique no
+  fundo + rolagem da página TRAVA enquanto aberto (watch kpiModal →
+  body.overflow; listener no ciclo de vida); (4) FÓRMULA EM PORTUGUÊS:
+  prettyFormula troca as chaves pelos nomes do cesto ("Consultas agendadas
+  (registradas) ÷ Novos contatos (leads) × 100") — chaves ordenadas por
+  tamanho p/ não colidir; linha de detalhe quebra em vez de estourar;
+  (5) ESTADO VAZIO gentil: série toda zero → "Sem movimento neste recorte —
+  experimente Este mês ou Este ano"; some sozinho quando o recorte tem
+  dado; (6) LEGENDA VISUAL: tracinho tracejado + "período anterior", ⭑
+  meta, 📌 ação da empresa (substitui o "tracejado = ..." escondido);
+  (7) MINI-RÉGUA com grupos NOMEADOS "Período" e "Ver por" em linhas
+  separadas, chips h-7 maiores; (8) carregamento SUAVE (gráfico esmaece a
+  40% enquanto busca o recorte); (9) toques: ✕ redondo 32px c/ aria-label
+  "Fechar (Esc)", role=dialog/aria-modal, títulos de seção legíveis
+  ("🧩 De onde vem este número", "🏥 Por unidade", "📥 Leads por caixa"),
+  valor grande tabular-nums, botões admin h-9.
+- Testes AO VIVO (conta 3): popup cabe na tela c/ rolagem própria; body
+  trava/destrava; Esc e fundo fecham c/ transição completando (classes
+  enter/leave limpas); fórmula traduzida na tela; vazio aparece na régua
+  curta e some no "Este ano" (dados carregam c/ 📌 e decomposição 8×49);
+  chips 28px; grupos rotulados. ⚠️ LIÇÃO DE AMBIENTE: o browser pane de
+  teste roda como aba OCULTA (document.hidden) → requestAnimationFrame
+  congela e a <Transition> do Vue fica presa no 1º frame — NÃO é bug do
+  produto (usuário real tem aba visível); p/ testar ciclo completo, stub
+  rAF→setTimeout na sessão de teste.
+- Refino futuro anotado: aplicar o mesmo pacote UX no KpiDetailPopup.vue
+  (Dashboard CRM) quando unificar o popup 144 (já estava na lista).
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
+  150+151).
+
+## 153. ✅ 🏥 INDICADORES POR UNIDADE no cesto (pedido 02/09: "separar as consultas da Paulista e do Tatuapé")
+- Pedido dele: visualização das métricas cada vez mais fácil + dados
+  relevantes; indicador que SEPARE as consultas por unidade.
+- KpiBagService: 6 métricas novas com série + período anterior, geradas de
+  Crm::AgendaSlots::UNIT_LABELS (tasks.unit, mesma fonte do 146) —
+  Consultas · Av. Paulista/Tatuapé (pela data), Presenças · cada casa,
+  Faltas · cada casa. Categoria "📅 Consultas" no construtor é automática
+  (prefixo appointments_). Cesto foi de 29 p/ 35 métricas.
+- READY_FORMULAS: categoria nova "🏥 Por unidade" c/ 2 taxas prontas de 1
+  clique — Comparecimento · Av. Paulista e · Tatuapé (presenças ÷
+  (presenças+faltas) × 100) — coloca os 2 cards lado a lado e compara as
+  casas no mesmo olhar.
+- Testes: runner 6/6 (labels/séries; soma paulista+tatuape = total 21 ✅) +
+  visual conta 3 ponta a ponta (construtor lista a categoria e os 6
+  números-base; 1 clique na taxa pronta → prévia viva 94,4% na régua Este
+  ano → Salvar card → card na fileira c/ 94,4% → popup → Remover [limpeza]).
+  Nota: prévia mostra "—" quando o recorte da régua não tem consulta
+  (divisão por zero protegida) — comportamento correto.
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto de
+  150+151+152).
+
+# RODADA 03/09 — item 154 (IA casa nomes da planilha)
+
+## 154. ✅ 🤖 CASADOR DE NOMES POR IA na planilha de fechamento (pedido 03/09: "recurso de IA pra comparar a planilha com o banco")
+- Contexto: prévia em PRODUÇÃO mostrou 224 casados × 294 "não existem" —
+  ele cravou "todos estão no sistema" → maioria é MESMA PESSOA ESCRITA
+  DIFERENTE (abreviação, nome do meio, apelido), que o casamento exato não
+  pega. (O backup pré-import foi feito: 57M em
+  /root/backup_antes_planilha_20260903_1647.sql.gz — importação PAUSADA
+  até resolver os 294.)
+- Crm::SheetNameMatchService NOVO (Crm::AiAgentConfig, AGENT_KEY
+  sheet_match, recomendado sonnet/medium): funil de CANDIDATOS
+  determinístico (tokens sem preposição; 1º+último nome, último+inicial,
+  2 nomes em comum; máx 6) → lotes de 40 pra IA decidir ENTRE os
+  candidatos apresentados (nunca inventa id — trava re-valida no retorno);
+  prompt conservador (na dúvida NÃO casa; alta × media); gasto registrado
+  no painel (crm_ai_usages). SEM interruptor na aba Agentes de propósito:
+  só roda no clique explícito do admin e não grava nada.
+- Controller: POST ai_match_sheet (token da prévia → roda nos unmatched →
+  cacheia matches 2h em <token>:ai) devolve found_high/medium/pairs;
+  apply_sheet ganhou use_ai_matches (relê o cache NO SERVIDOR, só
+  confiança ALTA entra como casado; media/sem par seguem pro criar).
+- UI (DataTreatmentTools): botão roxo "🤖 Procurar os N com IA" na prévia
+  → painel c/ altas/duvidosos/novos + lista dos pares ("planilha" → sistema)
+  + checkbox "usar os achados de confiança alta na importação".
+- Testes: funil 4/4 (Jose C. Silva acha José Carlos E João Carlos como
+  candidatos [IA decide]; Maria Ap. → Maria Aparecida; inexistente = 0) +
+  service stubado 2/2 + HTTP: sem chave de IA → erro claro; fluxo COMPLETO
+  prévia→semear ai→apply c/ use_ai_matches → matched 1 (card R$4.500 na
+  coluna certa via IA) + to_create 1 (media/sem par criado como novo, id
+  falso da IA descartado). Limpeza completa. LIÇÕES DE AMBIENTE: dev usa
+  :null_store sem tmp/caching-dev.txt (cache dev→redis TEMPORÁRIO p/ o
+  teste, revertido); zsh come "$TOKEN:ai" como modificador de histórico
+  (usar ${TOKEN}) — o 1º apply de teste rodou sem IA por isso.
+- Custo estimado pros 294 dele: ~8 chamadas sonnet ≈ centavos de dólar.
+- ⚠️ api/crm.js e routes.rb MISTOS c/ Meta Leads — separar no commit.
+- Sem migration, sem cron; deploy só WEB (roda no request). AGUARDANDO
+  "pode subir".
+
+## 155. ✅ 📖 CAMPOS DA LEITURA DO GA4 NO MODAL DE INTEGRAÇÕES (pedido 03/09: "fizemos a integração mas o sistema não pega os dados")
+- Diagnóstico: o ENVIO funcionava (31 conversões via Measurement Protocol);
+  a LEITURA (cliques/custo/CPC por palavra-chave + investimento automático
+  da caixa GOOGLE) usa a GA4 Data API e depende de ga4_property_id +
+  service_account_json — campos que SÓ existiam na tela antiga
+  (settings/integrations/GoogleAds.vue), enquanto os avisos laranja
+  apontavam pro modal novo (CrmIntegrationsModal) que não os tinha.
+  Fragmentação de UI, não bug de dados.
+- Fix: seção "📖 Leitura automática (GA4)" no modal — status conectada/
+  falta configurar (cost_configured do payload, que o backend já devolvia),
+  guia de 3 passos (ativar Google Analytics Data API, conta de serviço +
+  chave JSON, Leitor na propriedade, nº da propriedade) e os 2 campos
+  (propriedade + JSON write-only "cole pra substituir"). Save envia
+  ga4_property_id sempre (permite limpar) e service_account_json só quando
+  preenchido; limpa o textarea após salvar. Backend intocado (update_google_ads
+  → apply_google_cost_config já existia do 126D).
+- Testes: HTTP round-trip (salva property+JSON → cost_configured true;
+  limpa property → false) + visual conta 3 (seção no modal c/ aviso âmbar,
+  guia e campos). JSON de teste removido do banco local.
+- AÇÃO DELE (destrava HOJE, sem deploy, pela tela antiga OU depois do
+  deploy pelo modal): criar conta de serviço no Google Cloud + ativar a
+  Data API + Leitor na propriedade GA4 + colar propriedade/JSON.
+- Sem migration, sem cron; deploy WEB. AGUARDANDO "pode subir" (junto do 154).
+
+# RODADA 09/09 — item 156 (lembretes D-1/D-0 pela data da consulta)
+
+## 156. ✅ 📅 LEMBRETES DO DIA DA CONSULTA — D-1 c/ confirmação + D-0 às 07h (pedido dele 09/09: "lembrete às 07h da manhã do dia da consulta"; peça central do pacote COMPARECIMENTO aprovado 29/08)
+- Crm::AppointmentReminderSendJob NOVO + CRON NOVO (schedule.yml, */15min,
+  23 crons) = ⚠️ REIMPLANTAR SIDEKIQ no deploy. Cada régua (d1=véspera,
+  d0=no dia) age só na HORA configurada da conta; consultas do dia-alvo
+  (task_type consulta, não cancelada/arquivada, sem presença marcada, com
+  contato+telefone) recebem MENSAGEM MODELO (Crm::SendTemplateService —
+  chega fora da janela de 24h); {{hora}}/{{unidade}} nos valores das
+  variáveis viram o dado da consulta ({{contact.name}} = Liquid). Marca
+  anti-duplicata POR CONSULTA em contact.additional_attributes
+  .cevico_appt_reminders[task_id] (poda >60 entradas) — reprocessar não
+  duplica.
+- ✅ CONFIRMAÇÃO POR RESPOSTA (CrmListener): "sim/confirmo/👍/blz..."
+  (sem acento) de quem TEM lembrete D-1 enviado e consulta hoje/amanhã
+  não confirmada → marca confirmed + NOTA PRIVADA na conversa ("✅
+  Paciente CONFIRMOU a consulta de dd/mm às hh:mm"). Um "sim" de quem não
+  recebeu lembrete não marca nada. Refactor em helpers (confirmation_text?/
+  pending_confirmation_task/record_confirmation).
+- Config: agenda_config.appointment_reminders {d1,d0} c/ enabled/hour/
+  inbox_id/template_params/message_preview (sanitizada, admin); payload no
+  GET e no update_agenda. UI: cartão "📅 Lembretes do dia da consulta" na
+  aba Robôs (toggle+hora+caixa+modelo da Meta c/ variáveis e prévia, dica
+  {{hora}}/{{unidade}}; "Modelo salva: X" quando não re-seleciona).
+  CrmAPI.updateAppointmentReminders.
+- Testes: 12/12 runner c/ relógio congelado (D-1 10h → só consulta de
+  amanhã, variável "às 14:30 na Tatuapé"; idempotência na mesma hora; D-0
+  07h → consulta de hoje "às 09:15 na Av. Paulista"; 13h nada; cancelada
+  nunca; confirmação marca + nota; pergunta neutra não marca) + regressão
+  pós-refactor + HTTP round-trip da config + visual (cartão na aba Robôs
+  hidratando config salva). Config de teste limpa do banco local.
+  schedule_spec só proíbe duplicata (chave única ok).
+- TEMPLATES pra ele submeter na Meta (Utility): lembrete_d1_confirma
+  ("consulta amanhã, {{2}} — responde SIM?") e lembrete_d0_hoje ("Bom dia
+  {{1}}! Hoje é sua consulta — {{2}}"), {{1}}=contact.name,
+  {{2}}="às {{hora}} na {{unidade}}".
+- PÓS-DEPLOY DELE: aba Robôs → cartão novo → ligar D-1 (10h) e D-0 (07h) +
+  caixa + templates aprovados + Salvar.
+- ⚠️ settings_controller e api/crm.js MISTOS c/ Meta Leads — separar no
+  commit. Deploy WEB+SIDEKIQ JUNTOS (cron novo). AGUARDANDO "pode subir".
+
+# RODADA 10/09 — item 157 (integração OftalmoFácil + Lucratividade)
+
+## 157. ✅ 🏥 INTEGRAÇÃO OFTALMOFÁCIL (leitura direta do banco) + 💰 LUCRATIVIDADE (direção dele 10/09)
+- CONTEXTO: o Henrique mandou o código do OftalmoFácil (tar.gz). Autópsia
+  (agente Explore, relatório completo entregue na conversa): PHP 7.4 vanilla
+  (~60k linhas, sem testes) + API Laravel 9 pequena (só TEF); MySQL com
+  tabelas MAIÚSCULAS; é um MARKETPLACE de cirurgias — PROVIDERS = fornecedor
+  (quem indica; CEVICO = CATARATA_SP, confirmado por ele), CLINICS =
+  prestador (onde opera), SCHEDULING_ITEMS = a cirurgia com AMOUNT (valor
+  cobrado), CLINIC_PRICE (custo do prestador) e PROFIT (taxa da plataforma);
+  split Zoop/Getnet; NF SP; SEM estoque; médico = string do CRM. Achados de
+  SEGURANÇA graves no sistema dele (senhas-mestras no login, cookie forjável,
+  SQLi em 5 pontos, endpoint que despeja a base de pacientes, crons por URL
+  c/ token fixo, credenciais vivas no pacote) — comunicados a ele; pacote é
+  material sensível. Sugerido relatório de hardening como valor pro sócio.
+- DECISÕES DELE: integração por LEITURA do banco (usuário só-leitura, ZERO
+  mudança no OftalmoFácil); valor da cirurgia no CARD; ficha completa no
+  Espaço do Paciente (só admin); 🛡️ nunca voltar card adiante; realizada
+  → Pós Operatório (aceito o refino: até 30d → Cirurgia Realizada p/ rodar a
+  jornada); histórico em silêncio, só cirurgia nova/futura dispara
+  automação; valor do OF vence sempre; cancelada/ausente só etiqueta
+  (cirurgia_cancelada / falta_cirurgia); paciente inexistente é criado;
+  de-para de médicos (CRM→nome) em Configurações.
+- CONSTRUÍDO: gem ruby-mysql (100% Ruby — trilogy não compilou no container e
+  poderia quebrar o build) · migration 20260910000001
+  cevico_oftalmofacil_surgeries (espelho por item, único por account+token) ·
+  Crm::OftalmofacilSurgery · Crm::OftalmofacilSyncService (conexão
+  só-leitura c/ SET SESSION TRANSACTION READ ONLY, prepared statements,
+  probe, pull incremental por SCH_ITE_LAST_MODIFICATION em lotes de 500,
+  upsert do espelho, classificação de status pelo rótulo, casamento telefone
+  → CPF (custom_attributes.cpf) → nome exato único → cria; enriquece CPF/
+  e-mail/nome; place_card c/ 🛡️, valor, StageLog retrodatado, automações só
+  em evento recente; etiquetas leves; erros amigáveis) ·
+  Crm::OftalmofacilSyncJob + CRON */15 (24 crons) ⚠️ REIMPLANTAR SIDEKIQ ·
+  settings: update_oftalmofacil (db_host/port/name/user/password write-only,
+  provider_name, enabled, doctors) + test_oftalmofacil (probe) +
+  sync_oftalmofacil (job agora / full) + oftalmofacil_json c/ last_result ·
+  patients#show ganha surgeries (admin) · finance#profitability (receita,
+  custo, taxa, resultado, margem, ticket, resultado/cirurgia, pago,
+  agendadas, marketing rateado do inbox_investments, resultado líquido, CAC
+  por cirurgia; cortes procedimento/prestador/médico; mês a mês) · UI:
+  card OftalmoFácil repaginado no modal (banco + toggle + de-para + testar +
+  sincronizar + última rodada), aba "Lucratividade" no Financeiro
+  (ProfitabilityTab.vue, cards dopamine + cortes + mês a mês + estado vazio
+  que ensina a ligar), seção "🏥 Cirurgias no OftalmoFácil" no Espaço do
+  Paciente (admin).
+- TESTES: MariaDB de teste (container of_mysql na rede do compose) c/ o
+  schema das 11 tabelas + usuário só-leitura c/ os MESMOS grants + 6 itens
+  (5 CEVICO + 1 de outro fornecedor). Sync 14/14: probe conta 5; realizada
+  45d → Pós Operatório c/ valor 5.690 e StageLog retrodatado; realizada 5d
+  casou por TELEFONE → Cirurgia Realizada; futura casou por CPF → Cirurgia
+  Agendada + e-mail preenchido; cancelada/ausente sem card + etiqueta; CPF
+  vira chave; outro fornecedor fora; cursor; incremental 0; 🛡️ Beatriz em
+  Pós não volta (ahead=1); sem duplicar. Job grava cursor+resumo; cron
+  incremental 0. HTTP: probe, update c/ de-para, profitability (9.590 −
+  2.910 − 700 = 5.980 · 62,4% · por médico c/ nome · mensal), ficha do
+  paciente. Rubocop: novo serviço c/ disables conscientes nos métodos
+  grandes.
+- GRANTS pro Henrique (adicionar EYES à lista enviada!): SCHEDULING,
+  SCHEDULING_ITEMS, CLINICS, PROVIDERS, PROCEDURES, PROCEDURES_TYPE, EYES,
+  TB_STATUS_APPOINTMENTS, PAT_PATIENTS, PAT_SCHEDULING_LINK, TRANSACTIONS —
+  SELECT only, host = IP da VPS (72.60.159.160) + liberar no Remote MySQL.
+- ⚠️ DEPLOY: MIGRATION (backup antes) + gem nova (build normal) + CRON novo
+  (WEB+SIDEKIQ juntos). Mixed c/ Meta Leads: settings_controller, routes,
+  api/crm.js (stage parcial por hunk). AGUARDANDO "pode subir".
+- PENDENTE de confirmação do Henrique: qual campo é o preço que o paciente
+  paga vs custo do prestador (o dashboard rotula AMOUNT=receita,
+  CLINIC_PRICE=custo, PROFIT=taxa — ajustar rótulos se a leitura for outra).
+- VISUAL (conta 3) ✅: aba Lucratividade (cards dopamine + tabela por
+  procedimento + mês a mês, "Este mês" = 1 realizada R$3.900 → resultado
+  R$2.315 · 59,4%), ficha "Cirurgias no OftalmoFácil" no Espaço do Paciente
+  (grade interna em 1 coluna — cabe na coluna estreita), card no modal c/
+  "Testar conexão" → "✅ Conectou! 5 cirurgia(s) do fornecedor lá desde
+  2026-07-27". Limpeza total (espelho, contatos de teste, config local
+  resetada, container of_mysql removido). Rubocop dos arquivos novos: zero.
+
+# RODADA 12/09 — item 158 (follow-up: espaçamento da cadência + janela 24h + etiquetas de encerramento + previsão por conversa)
+
+## 158. ✅ ⏱ FOLLOW-UP SEM EMPILHAMENTO + JANELA 24H + ETIQUETAS DE ENCERRAMENTO + PREVISÃO POR CONVERSA (pedido dele 12/09: "o timer e a automação de mensagens ainda não está ok — revisite e melhore")
+- CASO REAL (print da conversa #15475, Fabiana, caixa GOOGLE): silêncio desde
+  11/09 18:34 → "Oi, pode falar?" 18:52 ✓ (etapa de 15min) → "no seu tempo
+  ok?" 12/09 08:00 (venceu à noite, saiu na abertura da janela) → "avançar ou
+  encerrar?" 08:30 ✗ (a etapa de 10h venceu de madrugada e saiu 30 min depois
+  da anterior — só o piso MIN_GAP separava) → "Automation System added
+  att_encerrado" → 16:57 nova mensagem "Fabi, vc gostaria de consluir..."
+  ("Fabi" + erro de digitação = NÃO é etapa do robô; é humano ou outra
+  automação — só o registro de atividade/produção confirma).
+- DIAGNÓSTICO: (1) EMPILHAMENTO na abertura da janela — etapas vencidas à
+  noite saíam em sequência separadas só pelo piso de 30 min (o item 147 só
+  resolvia se ele liberasse 24h); (2) nada impedia cutucada depois de uma
+  etiqueta de encerramento aplicada por automação, se o robô não tivesse a
+  etiqueta em "NÃO TEM"; (3) texto simples fora da janela de 24h do WhatsApp
+  era enviado e falhava em silêncio; (4) sem previsão visível — ninguém sabia
+  QUANDO a próxima cutucada sairia (a desconfiança dele no "timer").
+- ⏱ ESPAÇAMENTO DA CADÊNCIA (Crm::FollowupBotJob): due_at da etapa i =
+  max(base + prazo_i, última cutucada REAL deste robô + (prazo_i − prazo_i−1)),
+  depois ajustado à janela de envio. Etapa vencida à noite sai na abertura e a
+  SEGUINTE espera a diferença de prazo (3h→10h = 7h depois: 08:00 e 15:00, não
+  08:00 e 08:30). Motivo novo: aguardando_espacamento. "Momento perdido" (3h)
+  conta a partir do due_at ajustado. Sem cutucada anterior, nada muda.
+- 🏷️ ETIQUETAS DE ENCERRAMENTO (globais, valem p/ todos os robôs):
+  nao_perturbe e perda_* fixas (mesma convenção da Colheitadeira) + lista da
+  conta agenda_config.followup_stop_labels — cartão "Etiquetas que encerram o
+  follow-up" em Automações → Robôs (chips clicáveis, só admin; update_agenda
+  sanitiza strip/downcase/uniq/máx 30; settings_json e update_agenda devolvem
+  followup_stop_labels; CrmAPI.updateFollowupStopLabels). Contato OU conversa
+  com uma delas → motivo etiqueta_de_encerramento, nenhum robô cutuca.
+- 📵 JANELA 24H DO WHATSAPP: etapa de TEXTO com conversation.can_reply? false
+  (core Conversations::MessageWindowService — WhatsApp/Instagram = 24h da
+  última msg do paciente; caixa sem janela = true) é tratada SEM enviar, nota
+  no registro "fora da janela de 24h — só mensagem modelo entrega", motivo
+  janela_whatsapp. Etapa de MODELO segue normal.
+- 👁 PREVISÃO POR CONVERSA: FollowupBotJob#forecast(bot, conversa) (público,
+  só leitura, usa o MESMO plan_for do robô) → conversation_summary devolve por
+  robô {status proxima|parado|pausado|completa|desligado, text PT-BR, sent,
+  total, next_at, timeline[{label, status enviada|pulada|proxima|aguardando|
+  pendente, when "hoje 15:00"/"amanhã 08:00", note}]}; card lateral da conversa
+  (ConversationSummaryCard) mostra robô + frase + chips ✅⏭️🔜⏳. Cada cutucada
+  passou a carregar cevico_followup_step (nº da etapa) na mensagem.
+- REFATORAÇÃO do job: DECISÃO (plan_for → pending_steps / apply_physical_locks
+  / no_send_reason) separada da AÇÃO (process_conversation → settle_handled +
+  envio). Mantidos: travas físicas (piso 30min, teto 4/dia, cadência completa
+  por mensagens), marcar-antes-de-enviar, 1 cutucada por rodada, momento
+  perdido, regras de etiqueta por etapa, estado por robô. Hub: REASON_LABELS
+  ganhou aguardando_espacamento, etiqueta_de_encerramento, janela_whatsapp,
+  protegida_por_etiqueta e trava_*; textos de ajuda do modal atualizados.
+- TESTES: tmp/test_followup_spacing.rb 30/30 ✅ (A: caso real 15min/3h/10h/24h
+  → 18:50, 08:00, 15:02, 13/09 08:01, cadência completa, nº da etapa nas msgs;
+  B: previsão texto + linha do tempo, fora do horário, paciente respondeu;
+  C: att_encerrado da conta, nao_perturbe e perda_* barram, sem etiqueta sai;
+  D: texto fora da janela pulado c/ nota + modelo sai + [nome] no modelo;
+  E: âncora à noite → 1ª na abertura, 2ª espaçada 2h45 depois) +
+  tmp/test_followup_guard.rb (incidente 18/07) PASSOU ✅. Rubocop: 0 aviso
+  novo (9 restantes = métodos intocados). VISUAL conta 3 ✅: card lateral
+  ("próxima: cutucada de 10h hoje 18:35 (espaçamento da cadência) · 2 de 4
+  enviadas" + chips ✅✅⏳⏳), cartão de etiquetas no Hub (clique → toast →
+  persistiu após reload; banco ["att_encerrado"]). Limpeza total feita.
+- AÇÕES DELE PÓS-DEPLOY: (1) Automações → Robôs → "Etiquetas que encerram o
+  follow-up" → marcar att_encerrado (e as demais de encerramento); (2) conferir
+  QUEM aplica att_encerrado (Regras da caixa de entrada / Tratamento de dados /
+  automação de coluna): se a regra é "mensagem contém 'encerrar'", ela casa com
+  o TEXTO DO PRÓPRIO ROBÔ ("prefere encerrar seu atendimento") — restringir a
+  mensagens RECEBIDAS; (3) abrir a conversa #15475: a previsão/registro mostra
+  de onde saiu cada mensagem.
+- ⚠️ DEPLOY: sem migration, sem cron novo; o job roda no SIDEKIQ → WEB+SIDEKIQ
+  juntos. ✅ SUBIU 13/09 23h: commit cac8ef20b (job/summary/card/hub) + os
+  hunks de settings_controller/api/crm.js no 4761f9aaf. Meta Leads ficou fora.
+
+# RODADA 12/09 — item 159 (varredura de design do Meu Painel)
+
+## 159. ✅ 🎨 VARREDURA DE DESIGN DO MEU PAINEL — hero moderno, cards que contam a história, gráficos legíveis (pedido dele 12/09: "indicadores mais relevantes, gráficos (também os expandidos) mais bonitos e fáceis de entender, painel de boas-vindas modernizado")
+- VARREDURA AO VIVO (conta 3, tema claro/escuro, 1440 e 390px) achou:
+  (1) "Boa tarde, Guilherme,!" — vírgula do cadastro entrava no nome;
+  (2) selo 🏆 RECORDE truncava o nome do card ("Novos c… 🏆 RECORDE");
+  (3) card fixo sem contexto: número sem "vs período anterior" nem forma
+  do período (só o card de fórmula tinha variação); (4) gráfico do popup
+  plano (cor fixa #0F5FA6, sem eixo/valores, texto ESTICADO pelo
+  preserveAspectRatio=none em popup mais largo que o desenho); (5) 🐛 REAL:
+  "Volume por dia da semana" do Dashboard da Agenda SEMPRE zerado —
+  EXTRACT(DOW) devolve NUMERIC (BigDecimal) e o hash era lido por
+  Integer/Float (nunca casava); (6) meta de cirurgias da Saúde da Agenda
+  fixa em 100 mesmo com meta oficial no Painel de Metas; (7) termômetro
+  (conversas abertas/aguardando/consultas hoje) escondido no rodapé.
+- 🏠 HERO DE BOAS-VINDAS (InicioPage): chips de vidro (dia + painel ·
+  responsável), saudação 40px tracking negativo com nome LIMPO (só letras,
+  capitalizado), lead do painel em uma frase (HERO_LEADS por painel; o do
+  Construtor tem a sua), botões em pílula de vidro (Modo edição/Reportar),
+  o PULSO DO MOMENTO em vidros cristalinos clicáveis (conversas abertas →
+  Conversas · aguardando resposta [borda âmbar quando > 0] · consultas hoje
+  → Agenda · pacientes quentes → CRM quando o Radar tem fila), luzes
+  difusas e o OLHO CEVICO (public/brand-assets/cevico-eye.svg) como marca
+  d'água. Cor continua a do painel. Celular: chips e vidros em 2 por linha.
+  ⚠️ LIÇÃO: <img src="/brand-assets/…"> fixo vira import de módulo no Vite
+  (erro "Failed to resolve import") → binding dinâmico :src="HERO_EYE".
+- 📌 CARDS DE INDICADOR (todos os painéis): selos (🏆/✓ META/⚠️) saíram da
+  linha do nome (nome inteiro, sem truncar) e ficaram ao lado do número;
+  pílula de TENDÊNCIA ▲/▼ x% vs período anterior (tooltip com o valor
+  anterior e o rótulo do período) — fórmula usa o próprio valor, card fixo
+  usa o indicador do cesto do seu gráfico (só contagens; taxa fica sem;
+  painel Médicos fica sem porque a série é da clínica); SPARKLINE branca
+  (linha + área) com a série do período, mesma do popup; sub em 11px. O
+  card de fórmula passou a mostrar "anterior: X · dd/mm–dd/mm" no sub (a
+  variação virou a pílula). Sem mudança de dados/endpoint: tudo do kpiBag
+  que a página já carregava.
+- 📊 MINIBARS v3 (kit, vale pros popups do Meu Painel E do Dashboard CRM):
+  SVG com a largura REAL do contêiner (ResizeObserver; 1 unidade = 1px —
+  texto e barras não esticam mais), barras com degradê vertical na cor do
+  card e topo arredondado, eixo com calha, linhas-guia no teto "redondo"
+  (7→8, 23→25, 130→150) e na metade, linha de base, VALOR em cima de cada
+  barra quando cabe (≤16 baldes, barra ≥14px; compacta 1.234→1,2k),
+  rótulos de baixo por passo que cabe (34px), série anterior com
+  pontinhos, linha de meta com rótulo "meta N", tooltip 11px. Props novas
+  opcionais (axis, showValues) — API v2 intacta.
+- 🔍 POPUP: tendência ▲/▼ já no CABEÇALHO ao lado do número (com "vs
+  período · valor"); gráfico na COR DO CARD (hexFromGrad do gradiente);
+  128px de altura; linha de LEITURA em 1 frase ✨ "pico em 06/07: 7 · média
+  1,3 por semana · total 49 · 24 semanas sem movimento" (sem "sem
+  movimento" em fórmula/taxa). A linha antiga de delta sob o gráfico saiu
+  (virou o cabeçalho).
+- 📅 DASHBOARD DA AGENDA embutido: fix do by_weekday (transform_keys
+  &:to_i) + gráfico semanal com o dia mais cheio em destaque, base, título
+  no hover e "% da semana" no rótulo (Seg · 24%).
+- 🩺 SAÚDE DA AGENDA: meta de cirurgias = meta OFICIAL surgeries_done do
+  Painel de Metas quando existe (surgeryGoalTarget); 100 só como reserva.
+- TESTES: visual conta 3 — hero claro/escuro/celular; "Este ano" (cards c/
+  sparkline, popup Novos contatos c/ eixo 0/4/8 + valores + leitura + leads
+  por caixa; popup Taxa de agendamento c/ decomposição), "Mês passado"
+  (pílulas ▼ 100% / ▼ 90% c/ tooltip do anterior), painel Gestor (veredito
+  + 4 cards + sparkline). Vite compila; sem erro novo de console. Rubocop
+  do controller: 0 aviso meu (SymbolProc corrigido; 15 pré-existentes).
+- Nota: o bloco "Termômetro do momento" continua no rodapé (mesmos números
+  do pulso do hero) — pode ser ocultado no Modo edição se ele achar
+  repetido; tirei de propósito NÃO mexer nos layouts salvos.
+- Sem migration, sem cron; deploy WEB (controller + front). Sem mistura c/
+  Meta Leads nesta rodada. ✅ SUBIU 13/09 23h no commit 4761f9aaf.
+
+# RODADA 13/09 — item 160 (concluir o Meu Painel: cores do dia iMac + painéis por pessoa)
+
+## 160. ✅ 🍎 COR DO DIA (iMac G3) NO BANNER E NOS CARDS + 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (pedidos dele 13/09: "cada dia da semana uma cor principal, referência iMac, mesmo vidro; criar painéis específicos para outros funcionários com drag and drop de ímã; indicadores com cores que combinem, mais opacas")
+- 🍎 COR DO DIA (para todos os usuários): FLAVORS por dia da semana, nomes e
+  tons dos iMac G3 da foto dele — seg Bondi Blue (o original de 1998), ter
+  Blueberry, qua Strawberry, qui Lime, sex Tangerine, sáb Grape (a ordem
+  da foto, early 1999), dom Graphite (edição especial de 1999). O BANNER
+  veste a versão translúcida de vidro (mesmo hero da 159: luzes, olho
+  CEVICO, chips e vidros); os CARDS de indicador vestem a FAMÍLIA OPACA do
+  dia (4 degraus escuro→médio, número branco sempre legível — pedido "mais
+  opaco, melhor contraste"). Precedência nos cards: cor escolhida pelo
+  admin no card > alerta de meta (vermelho/âmbar/verde) > TEMA do painel
+  (Configurações → Painéis, se existir) > família do dia. Chip do sabor no
+  hero com bolinha da cor; CLICÁVEL = prévia das 7 cores só nesta tela
+  (não salva; ao recarregar o dia manda). Chips/botões do hero viraram
+  vidro "fumê" (rgba navy .22) — texto branco legível em qualquer cor.
+  PANEL_FAMILY (família fixa por painel) saiu do código.
+- 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (chave 'variant:<id>'): admin cria uma versão de
+  um painel-base (5 fixos) para uma ou mais pessoas — mesmos números,
+  metas e recordes do base; LAYOUT PRÓPRIO (blocos, ordem/ocultos/cores
+  dos cards) organizado no Modo edição com o arrasto magnético já
+  existente. Botão "Painel por pessoa" no seletor de pílulas (admin) →
+  modal: painel-base em chips, "quem vê" em chips (agentes da conta),
+  nome (sugerido = primeiros nomes) → Criar abre a variante já
+  selecionada. Hero da variante ganha chip "Editar painel" (renomear,
+  trocar pessoas, Excluir em 2 cliques). A variante NASCE com o layout do
+  base (fallback) e passa a ter o seu ao primeiro ajuste; "voltar ao
+  padrão" apaga só o dela. Quem está na lista fica ATRIBUÍDO à variante
+  (abre o Meu Painel já nela); continua editável em "Painel de cada
+  pessoa" (o select lista as variantes).
+  BACKEND: settings_controller — panel_variants sanitizado (≤20; base ∈ 5
+  fixos; nome ≤40; user_ids só usuários da conta; id gerado "v"+hex);
+  sincroniza panel_assignments a partir de user_ids (entra quem está,
+  sai quem saiu e apontava pra ela); variante removida leva assignments
+  + kpi_layout + block_layout dela; kpi_layout/block_layout aceitam as
+  chaves 'variant:<id>' existentes (layout_panel_keys). home_controller —
+  valid_panel_keys inclui variantes; panel_key resolve 'variant:<id>' →
+  base (resolve_variant) p/ panel_data, metas e recordes; refatorado em
+  valid_panel_keys/default_panel_key/assigned_panel_key (rubocop limpo).
+  FRONT: allPanels lista variantes (cor/ícone do base, nome do admin);
+  computed panelBase = chave-base (tiles, destaque, metas, STATUS_GRADS,
+  tema, custom KPIs, médico, gestor…) enquanto selectedPanel segue a chave
+  real (layouts, atribuição, fetch). CrmAPI.updatePanelVariants.
+- TESTES (conta 3, ao vivo): hero em Graphite no domingo; prévia clicável
+  passou por Bondi/Blueberry/Strawberry/Lime; cards do Gestor mantiveram o
+  tema Flor del Mar (precedência ok). Variante: criada "Atendente" (base
+  Agendamento, pessoa Atendente Teste) → banco panel_variants
+  [{id v7e777d32…}] + panel_assignments {"2"=>"variant:v7e777d32"}; pílula
+  nova selecionada, hero "Painel de Atendente" + "Editar painel", cards do
+  base; Modo edição na variante → ocultou "Taxa de agendamento" →
+  kpi_layout ganhou SÓ a chave da variante (herdou os ocultos do base;
+  'agendamento' intacto); Excluir → confirmação em 2 cliques → variante,
+  atribuição e layout limpos; voltou ao painel-base. Rubocop dos 2
+  controllers: 0 aviso meu. Vite sem erro; console sem erro novo.
+- Sem migration, sem cron; deploy WEB. Mixed c/ Meta Leads NÃO (routes/
+  crm.js só hunks meus — conferido). ✅ SUBIU 13/09 23h no commit 4761f9aaf.
+
+# RODADA 13/09 — item 161 (Meu Painel inteiro no formato novo: kit "iMac G3 + vidro")
+
+## 161. ✅ 🍎 TODO O MEU PAINEL NO FORMATO NOVO — kit de vidro na cor do dia em todos os blocos, modais e popup (pedido dele 13/09: "ainda não chegamos lá — todo o tema do Meu Painel deve entrar no novo formato; faça em todos de uma vez, capriche")
+- KIT `.cv-*` (CSS GLOBAL no InicioPage, sem scoped, tudo sob `.cv-page`): as
+  variáveis `--cv` (tom do dia), `--cv-deep`, `--cv-grad/2/3` (família) e
+  `--cv-rgb/--cv-deep-rgb` nascem no computed `cvVars` (root da página e nos
+  3 overlays teleportados). Sem tema no painel manda a cor do dia (iMac G3);
+  com tema (Configurações → Painéis) manda a família do tema — o BANNER
+  continua na cor do dia (regra da 160). Peças: `.cv-block` (carcaça
+  translúcida: branco leitoso + tom do dia por trás, borda de vidro, crista
+  de luz, luz difusa no canto), `.cv-strip` (faixa fina), `.cv-block-hover`,
+  `.cv-icon` (squircle no degradê do dia, ícone lucide branco; -sm/-lg/-xl),
+  `.cv-chip` (+ -lg), `.cv-btn` / `.cv-btn-ghost` / `-sm` / `-lg` /
+  `-danger` / `.cv-iconbtn` / `.cv-btn-pulse`, `.cv-sub` (sub-cartão) +
+  `-hover` / `-on`, `.cv-row`, `.cv-stat`, `.cv-track` / `.cv-fill` (barras),
+  `.cv-seg` / `.cv-seg-item` / `.cv-seg-on` / `-sm` (segmentado de vidro),
+  `.cv-tile` (acabamento de vidro nos cards coloridos), `.cv-tile-add`,
+  `.cv-editbar` / `.cv-handle` (modo edição), `.cv-glass` / `.cv-glass-chip`
+  / `.cv-glass-btn` (vidro cristalino sobre fundo colorido, agora global),
+  `.cv-modal` / `.cv-modal-head` (cabeçalho no degradê do dia c/ luzes) /
+  `.cv-modal-foot` / `.cv-pop` / `.cv-input` / `.cv-label`. Modificadores
+  semânticos `.cv-red/.cv-amber/.cv-green/.cv-gold/.cv-slate` trocam as
+  variáveis localmente (a mesma peça fica vermelha/âmbar/verde). Tema escuro
+  (`.dark .cv-page …`) e prefers-reduced-motion cobertos. A página ganha uma
+  luz suave do dia no alto (`.cv-page` background radial; `.cv-overlay` sem).
+- BLOCOS convertidos (todos): avisos do topo (WhatsApp faixa — vermelha SÓ
+  com problema real via `.cv-red`; Briefing; Radar — bloco do dia, card da
+  frente branco c/ pulso verde e "Atender agora" mantidos; Tarefas — botão
+  pílula, linhas `.cv-sub`, prioridade em chip; Feedback — pílulas do time
+  em `.cv-seg`, ponto forte/corrigir em `.cv-sub` verde/âmbar, soluções
+  numeradas), bug resolvido, barra sticky + alças do modo edição (ícones
+  lucide no lugar dos emojis: BLOCK_ICONS), seletor de painéis (`.cv-seg`,
+  ativo no degradê do dia; médicos mantêm a cor do médico; botão "Dashboard
+  da Agenda" saiu de dentro do segmentado → pílula própria, sem barra de
+  rolagem), PeriodRuler (prop `glass`), veredito do Gestor (cabeçalho de
+  vidro c/ luzes, avisos em `.cv-glass`), cards de indicador (`.cv-tile`) e
+  "Novo indicador", linha de destaque, Meu desempenho (colunas `.cv-sub`, a
+  sua `-on`, números em `.cv-stat`, chips), Dashboard da Agenda embutido
+  (AgendaDashboardCore props `glass` + `family`: KPIs no degradê do dia,
+  caixas `.cv-sub`, barras `.cv-track/.cv-fill`, chips; DashKpi props `grad`
+  + `glass`), Saúde da Agenda (barras do dia, vagas em chips c/ bolinha do
+  médico, meta verde ao bater, "Ir para agenda" pulsando no tom do dia),
+  Metas · Rotinas · Ferramentas (3 blocos), Acesso rápido (4 blocos c/
+  squircles nos 4 degraus da família), Termômetro (faixa de chips; âmbar
+  quando há espera), modais Painel de cada pessoa / Painel por pessoa /
+  Metas (concha `.cv-modal`, cabeçalho no degradê, inputs e botões do kit),
+  popup dos indicadores (cabeçalho na cor do card c/ luzes, seções `.cv-sub`,
+  mini-régua em `.cv-seg`, Editar/Remover em pílulas), Construtor e palheta
+  de cor (mesmo tratamento). Emojis das barrinhas/botões viraram lucide.
+- FORA DO MEU PAINEL nada muda: PeriodRuler/AgendaDashboardCore/DashKpi só
+  vestem o kit com as props novas (Relatórios → Dashboard da Agenda conferido
+  igual ao anterior).
+- TESTES (conta 3, ao vivo): desktop 1280 claro (Este ano: hero Graphite +
+  blocos na família do tema do painel Agendamento do banco local), escuro,
+  celular 390 (hero, WhatsApp, feedback, seletor, cards, desempenho, agenda),
+  popup do indicador (Taxa de agendamento), modal Metas, modal Painel por
+  pessoa, Modo edição (barra + alças + cards ocultos), Relatórios → Dashboard
+  da Agenda sem regressão. Vite HMR sem erro; console sem erro novo (os 500
+  do mini-profiler e o 404 do favicon são antigos). ESLint: só prettier
+  (o arquivo já falhava no prettier antes da rodada); zero erro de regra.
+- 🐛 REAL achado no teste: no Modo edição o BANNER aparecia "cortado" à
+  esquerda — as luzes difusas e o olho CEVICO saem ~90px pra fora do hero
+  (overflow: hidden) e o clique no botão da borda fazia o navegador ROLAR
+  o hero (scrollLeft 90). Fix: `overflow: clip` (não cria contêiner de
+  rolagem) no .cevico-hero e nas peças do kit com luz fora da caixa
+  (.cv-block/.cv-glass/.cv-modal/.cv-modal-head). Conferido: scrollLeft 0.
+- DECISÃO EM ABERTO p/ ele: com TEMA no painel, o banner segue a cor do dia
+  e os blocos seguem o tema (regra da 160) — se preferir, o banner passa a
+  seguir o tema também (1 linha em cvVars/hero).
+- Sem migration, sem cron; deploy WEB. ✅ SUBIU 13/09 23h no commit 4761f9aaf.
+
+# RODADA 13/09 — item 162 (paletas: iMac G3 + frutas da Apple + salada, controle do admin por bloco)
+
+## 162. ✅ 🍎🍊 PALETAS DO MEU PAINEL — frutas da Apple + salada de frutas + controle do admin bloco a bloco (pedido dele 13/09: "quero ter o controle das cores, como admin, editar cada seção do Meu Painel em relação às cores e paletas; cada fruta pode ser um tema de paleta e uma cor principal; gosto da ideia da salada de frutas")
+- CATÁLOGO (helper NOVO `dashboard/helper/cevicoPalettes.js`): 17 paletas —
+  as 7 dos iMac G3 (bondi, blueberry, strawberry, lime, tangerine, grape,
+  graphite; a cor do dia continua por dia da semana) + 10 FRUTAS 🍊 Laranja,
+  🍋 Limão, 🍉 Melancia, 🍇 Uva, 🥝 Kiwi, 🥥 Coco, 🍑 Pêssego, 🍒 Cereja,
+  🥑 Abacate, 🫐 Mirtilo. Cada paleta = dot (tom principal) + hero (degradê
+  translúcido do banner, 3 paradas) + family (4 degradês OPACOS escuro→médio,
+  número branco legível). 🥗 SALADA DE FRUTAS = cada bloco leva uma fruta
+  pela posição padrão (SALAD_ORDER: laranja, uva, kiwi, cereja, mirtilo,
+  pêssego, limão, melancia, abacate, coco — reordenar não troca), os cards da
+  fileira alternam as frutas, e o banner mistura laranja→melancia→uva→kiwi.
+  Utilidades `paletteVars(pal)` (as --cv* do kit) e `hexToRgb/hexFromGrad`.
+- CONTROLE DO ADMIN (InicioPage): por painel (variante herda do base),
+  `panel_palettes[painel] = { mode: day|fixed|salad, key, blocks: {bloco:
+  paleta} }`. Precedência de cada bloco: paleta própria do bloco > salada >
+  paleta do painel (cor do dia / fixa / tema legado de Configurações →
+  Painéis, que agora também veste o banner). Onde escolher: chip do banner
+  (admin abre o popup; quem não é admin continua passeando pela cor do dia
+  só na tela), botão "Paleta" na barra do Modo edição, e o CHIP da barrinha
+  de cada bloco (bolinha + nome da paleta; @pointerdown.stop para não
+  disputar com o arrasto). POPUP "Paleta de cores · <painel>": "Onde
+  aplicar" (Painel inteiro + os 12 blocos, cada um com a bolinha da paleta
+  em vigor) → modo do painel (Cor do dia / Salada) ou uma paleta fixa
+  (amostras `.cv-swatch` com a bolinha no degradê: iMac G3 e Frutas) — num
+  bloco, "Igual ao painel" volta a seguir o painel; resumo "Blocos com
+  paleta própria" com ✕; "Voltar ao padrão" apaga tudo do painel; salva
+  sozinho (CrmAPI.updatePanelPalettes → settings/update_agenda).
+  Cada `<section>` de bloco recebe `:style="blockVars(blockId)"` (as
+  variáveis --cv* do kit mudam por bloco); Dashboard da Agenda e Acesso
+  rápido usam `blockFamily(...)`; a fileira usa `tileGradAt(i)` (cor do
+  card/alerta de meta continuam por cima, item 143).
+- BACKEND (settings_controller): `panel_palettes` sanitizado por painel
+  (chaves de layout_panel_keys; mode ∈ day/fixed/salad; key ∈ PALETTE_KEYS;
+  blocks só PANEL_BLOCK_IDS × PALETTE_KEYS; "cor do dia" sem bloco próprio
+  não é guardada); variante excluída limpa a sua entrada; devolvido no
+  settings_json e na resposta do update_agenda. Rubocop: 0 aviso meu.
+- TESTES (conta 3, ao vivo): popup pelo chip do banner → Salada de frutas
+  (banner misto, blocos cada um numa fruta: Feedback mirtilo, Desempenho
+  limão, Agenda melancia, Saúde abacate, Metas coco, Atalhos laranja,
+  Termômetro uva; seletor/régua na laranja) → banco panel_palettes
+  {"agendamento"=>{"mode"=>"salad"}}; Modo edição mostra o chip de paleta em
+  cada barrinha com a fruta certa; paleta por bloco (Feedback → Coco) pelo
+  chip da barrinha. Vite sem erro; ESLint sem erro de regra no trecho novo.
+- Sem migration, sem cron; deploy WEB. ✅ SUBIU 13/09 23h no commit 4761f9aaf.
+
+# RODADA 13/09 — item 163 (Relatórios e Dashboards no formato novo, com paletas do admin)
+
+## 163. ✅ 🍎📊 RELATÓRIOS E DASHBOARDS NO FORMATO NOVO — kit "iMac G3 + vidro" e paleta do admin em todas as telas de Relatórios (pedido dele 13/09: "está ficando incrível; vamos estender essa customização para os nossos RELATÓRIOS E DASHBOARDS")
+- FUNDAÇÃO compartilhada (o kit saiu do InicioPage e virou peça de todos):
+  `assets/scss/_cevico-glass.scss` (todo o CSS `.cv-*` + o CSS do banner
+  `.cevico-hero*`, importado no app.scss — vale em qualquer tela com
+  `.cv-page` e as variáveis `--cv*`); composable NOVO
+  `composables/useCevicoPalette.js` (o motor das rodadas 162: escopo,
+  fallback de escopo, blocos, tema legado; devolve cvVars/blockVars/
+  blockFamily/tileGradAt + todo o estado do popup; salva sozinho via
+  CrmAPI.updatePanelPalettes); componentes NOVOS `components-next/cevico/
+  CevicoPalettePicker.vue` (o popup "Paleta de cores", agora com "Página
+  inteira"/"Igual à página") e `CevicoHero.vue` (banner de vidro compacto p/
+  relatórios: chip do dia + chip da paleta [admin abre o popup, os demais
+  passeiam pela cor do dia], ícone em vidro cristalino, título 28px, slots
+  chips/actions/default/pulse; já inclui o popup). O InicioPage passou a usar
+  o composable e o popup compartilhado (nada muda pra quem usa).
+  BACKEND: `REPORT_PALETTE_SCOPES` (report:crm, campanhas, funil, medicos,
+  agentes, agenda, meta, google, whatsapp, etiquetas) aceitos em
+  panel_palettes; ids de bloco viraram genéricos (/[a-z0-9_-]{1,40}/, até
+  30 por escopo) porque cada tela tem as suas seções.
+- PÁGINAS convertidas (cada uma: root `cv-page` + `cvVars`, CevicoHero com
+  título/subtítulo/ícone lucide, PeriodRuler `glass`, cada seção em
+  `cv-block` com `blockVars(id)` e título em `cv-icon`; DashKpi `glass` +
+  `grad` da família do bloco; sub-cartões `cv-sub`, tiles `cv-stat`, linhas
+  `cv-row`, chips `cv-chip`, barras `cv-track/cv-fill`, pílulas `cv-seg`;
+  verde/âmbar/vermelho/ouro SÓ onde têm significado; cores de identidade —
+  médico, caixa, etiqueta, coluna do CRM, série de gráfico — mantidas):
+  · Dashboard dos Agentes (report:agentes — radar, meta, pessoas) [referência]
+  · Dashboard CRM (report:crm — kpis, caixas, agentes, responsividade, tempo,
+    faturamento, etiquetas, radar, perdas, nps, cirurgias, dinheiro_parado,
+    funil; wrapper CrmDashboardReport sem ReportHeader, seletor de funil em
+    `cv-seg` no banner [≤6 funis] ou `cv-input`; blocos escuros de tempo/
+    faturamento em `cv-block-deep` no tom escuro da família; ícone do banner
+    i-lucide-kanban [layout-kanban não existe no set]; ProMaxStudio só a concha)
+  · Dashboard — Campanhas (report:campanhas — custo, kpis, modelos, campanhas)
+  · Funil de Tráfego (report:funil — indicadores, funil [4 visões num bloco],
+    etiquetas, agentes; etapas Alcance/Cliques/Conversas nos degraus do bloco,
+    etapas do CRM mantêm stage.color; mapa de calor em rgb(var(--cv-rgb)/α))
+  · Dashboard dos Médicos (report:medicos — kpis, ranking, clinicas,
+    unidades, gestao; abas em cv-seg; cor do médico mantida; faturamento verde)
+  · Dashboard da Agenda (report:agenda — kpis, tipos, semana, medicos,
+    unidades, cirurgias, ocupacao; AgendaDashboardCore ganhou prop opcional
+    `pal` → cada seção com a própria paleta; sem `pal` [Meu Painel] nada muda)
+  · Anúncios (Meta) (report:meta — kpis, formulas, investimento, fatia,
+    leads, tabela; faixa da conversão por extenso segue VERDE de propósito
+    [o texto cita "a faixa verde"]; rosca mantém 6 cores categóricas)
+  · Google (Ads + GA4) (report:google — integracao, palavras, funil,
+    conversoes, colunas; verde = conectado, âmbar = aguardando)
+  · Saúde do WhatsApp (report:whatsapp — numeros, legenda; Atualizar e
+    "atualizado às" no slot actions do banner; qualidade em cv-green/amber/red)
+  · Dashboard de Etiquetas (report:etiquetas — top, grafico, matriz; textos
+    seguem no $t; cor da etiqueta nas bolinhas/barras; mapa de calor da matriz
+    em `cv-heat-0..4` lendo as --cv*; OverviewReportFilters do core sem
+    cv-block porque o calendário abre em position:absolute e o clip cortaria)
+- TESTES (conta 3): as 10 páginas carregam com banner, blocos e `cv-page`
+  (checagem por JS: Agentes 3 blocos, CRM 13, Funil 4, Campanhas 1+strip,
+  Médicos 3, Agenda 6, Meta 5, Google 5, WhatsApp 2, Etiquetas 3); paleta
+  do relatório de Agentes trocada p/ Laranja pelo chip do banner → banco
+  panel_palettes["report:agentes"]={mode fixed, key laranja}; Meu Painel
+  íntegro (14 blocos, agenda embutida com 9 sub-cartões). ESLint: zero erro
+  de regra real nos arquivos tocados (restam prettier/bare-strings/inline-
+  styles/use-before-define, que o repo já tolera). Rubocop: 0 aviso meu.
+  PASSADA VISUAL feita (após o Docker Desktop ter desligado no meio e
+  voltado com `open -a Docker` + `docker compose up -d rails vite`; o
+  Vite recompila cada rota na 1ª visita, 20–40 s por tela): prints em
+  1280px claro de CRM (Graphite: KPIs, blocos escuros de tempo/faturamento,
+  perdas em vermelho, funil), Agentes (Laranja), Campanhas, Funil (faixa
+  âmbar da Meta, 4 visões em cv-seg, etapas do CRM com a cor da coluna),
+  Médicos (abas cv-seg, faturamento verde), Agenda (Core com pal),
+  Meta (faixas âmbar/verde, KPIs com squircle), Google (integração
+  âmbar), Etiquetas (cores das etiquetas, matriz); Agentes também no
+  ESCURO (blocos de vidro escuro, tiles laranja) e no CELULAR 375px
+  (banner empilhado, tiles 2 por linha) e Saúde do WhatsApp (chip
+  "atualizado às" + Atualizar no banner; a tela demora porque a chamada à
+  Meta falha por token inválido no local — comportamento antigo). Nada a corrigir
+  nesta passada; ajustes finos ficam para o feedback dele com prints.
+  Rubocop: sanitize_panel_palette quebrado em palette_mode +
+  sanitize_palette_blocks → 0 aviso meu.
+- REGRESSÃO OPERACIONAL/SEGURANÇA (13/09 22h30–23h, pedido dele "não zoou
+  nada operacional nem segurança?"): zeitwerk:check "All is good";
+  controllers/job tocados carregam; update_agenda continua admin-only —
+  atendente.teste recebeu 403 ao tentar gravar paleta; admin mandando chave
+  inválida + id de bloco malicioso + escopo desconhecido → saneado (mode day,
+  bloco fora, escopo fora), paletas restauradas depois. Robô de follow-up:
+  tmp/test_followup_spacing.rb 30/30 ✅; tmp/test_followup_guard.rb falhou
+  à noite ("0 cutucadas") porque o job lê a janela 08–20 de
+  agenda_config.followup_hours e o script só abre a constante — abrindo a
+  janela da conta (0–24) PASSOU ✅ e a janela voltou a 08–20 (não é
+  regressão: HEAD já lia a config). Sidekiq de pé, cron do robô */2 min
+  enabled; os "RecordNotFound" de SendReplyJob às 22:48 são das mensagens
+  920–928 apagadas pela limpeza do próprio teste. Conversas: lista abre,
+  conversa #1 (37 msgs) renderiza com o cartão de previsão do robô, nota
+  privada enviada e apareceu na hora, console sem erro; rastros dos
+  testes (5 msgs + nota) apagados da conversa #1.
+- Sem migration, sem cron; deploy WEB. ✅ SUBIU 13/09 23h no commit 4761f9aaf
+  (junto de 159–162; 158 no cac8ef20b). Deploy na VPS: WEB + SIDEKIQ (o job
+  do 158). Meta Leads segue no working tree, fora dos commits.
+
+# RODADA 14/09 — item 164 (busca com atalhos do CRM + funil na linha; filtro Funil nas Conversas)
+
+## 164. ✅ 🔎 BUSCA: 2 BOTÕES DO CRM + FUNIL NA LINHA DO PACIENTE · CONVERSAS: FILTRO "FUNIL" (pedido dele 14/09, logo após a integração OftalmoFácil entrar no ar: "quero adicionar os dois botões do CRM no contato pesquisado; na linha do paciente mostre o funil em que ele está; adicione uma opção no 'conversas' para novo funil")
+- CONTEXTO DO DIA: ligação REAL do OftalmoFácil concluída de manhã (VPS
+  GoDaddy do Henrique, usuário só-leitura, firewalld, 1.349 cirurgias do
+  fornecedor desde 22/08/2023; primeira carga rodada) — detalhes na memória
+  oftalmofacil_conexao.md.
+- BUSCA (linha do contato em /search): os MESMOS 2 atalhos do card do CRM —
+  medalhão "Espaço do Paciente" (→ /patient/:id) e balão da conversa (→ a
+  conversa mais recente; sem conversa = balão tracejado que abre o contato
+  p/ iniciar uma). Abaixo do nome, um chip por funil: "🔻 Funil › ● Coluna"
+  (cor da coluna); contato sem CRM = chip tracejado "Fora do CRM".
+  Backend: _contact.json.jbuilder da busca ganha crm_journeys (pipeline/
+  stage/cor) + last_conversation_id (display_id); SearchService.filter_contacts
+  faz includes(crm_contacts: [:pipeline, :stage]) — sem N+1.
+- CONVERSAS (ChatList): botão "Funil" ANTES de "Colunas CRM", só aparece quando
+  a conta tem MAIS DE UM funil (com 1 funil nada muda na tela). Escolheu o
+  funil → pílula teal, lista mostra só conversas de contatos naquele funil
+  (qualquer coluna) e "Colunas CRM" passa a listar SÓ as colunas daquele
+  funil (coluna de outro funil já escolhida é limpa). Backend:
+  ConversationFinder#filter_by_crm_pipeline (param crm_pipeline_id; ignorado
+  quando crm_stage_id veio junto, pois coluna já implica funil). Payload da
+  conversa ganha crm_stage_ids + crm_pipeline_ids (contato pode estar em mais
+  de um funil; crm_stage_id mantido por compatibilidade) e o filtro
+  client-side (helpers.applyPageFilters) usa as listas — corrige o caso de
+  contato em 2 funis que sumia da lista filtrada por coluna.
+- ARQUIVOS: search/_contact.json.jbuilder · search_service.rb ·
+  conversations/partials/_conversation.json.jbuilder · conversation_finder.rb
+  · api/inbox/conversation.js · store/conversations/helpers.js · ChatList.vue
+  · modules/search/components/SearchResultContactItem.vue +
+  SearchResultContactsList.vue.
+- TESTES: rspec finder + search_service + search_controller 79/79 ✅; visual
+  na conta 3 c/ funil temporário "Funil teste 14/09" (2 colunas; contato 1 em
+  2 funis): busca "guilherme" mostrou 2 chips + 2 botões, balão abriu a
+  conversa mais recente, medalhão abriu o Espaço do Paciente; Conversas: Funil
+  → 3 conversas do Guilherme, Colunas CRM só c/ Entrada/Em avaliação. Funil de
+  teste APAGADO ao final (conta 3 voltou a 1 funil). Rubocop limpo nos .rb;
+  eslint dos arquivos novos limpo (bare strings PT-BR = padrão da casa).
+- Sem migration, sem cron; deploy WEB basta. AGUARDA "pode subir".
+
+# RODADA 14/09 — item 165 (dashboards Google / Meta / Agentes no kit, gráficos próprios, as duas "conversões" explicadas)
+
+## 165. ✅ 📊 DASHBOARDS GOOGLE (ADS + GA4), ANÚNCIOS (META) E AGENTES DE IA — gráficos mais claros e bonitos, sem rolagem lateral, e a diferença entre "Conversões enviadas" e "Conversões" na tela (pedido dele 14/09)
+- 2 PEÇAS NOVAS NO KIT (components-next/cevico): **HBars.vue** = lista de
+  barras horizontais (1 ou 2 séries na mesma escala, calha leve, ponta
+  arredondada, valor em texto ao lado, legenda automática c/ 2 séries, cor
+  por linha p/ identidade, EMPILHA sozinho quando o contêiner < 380px) e
+  **ShareBar.vue** = "pizza deitada" (barra 100% c/ até 6 fatias + Outros,
+  respiro de 2px entre fatias, legenda c/ valor e %). Sem lib. MiniBars (já
+  existia) virou o gráfico diário oficial. Seguem o método da skill dataviz
+  (marcas finas, texto nunca na cor da série, legenda c/ ≥2 séries, sem eixo
+  duplo, sem rosca p/ comparar valores próximos).
+- GOOGLE (GoogleDashboard.vue): faixa "Tem duas conversões nesta tela — e
+  elas não deveriam bater": **Conversões enviadas** = eventos que a CEVICO
+  mandou ao GA4 pelo Measurement Protocol quando o card entrou numa coluna
+  plugada (sent_log em google_ads_config; 1 por card; só HTTP 204; guarda 90
+  dias); **Eventos-chave (GA4)** (antes rotulado "Conversões" na tabela) =
+  metric keyEvents da GA4 Data API por sessionGoogleAdsKeyword = TUDO que o
+  GA4 marca como conversão nas sessões daquele termo (clique WhatsApp,
+  formulário do site, + os nossos), por sessão e no dia do clique → sempre
+  maior. Dica na tela: p/ bater, deixar como evento-chave no GA4 só os
+  eventos que a CEVICO envia. Rótulos dos 3 cards do estado ("a CEVICO
+  ENVIA" / "a CEVICO LÊ"); KPI c/ sub. Bloco Palavras: 4 números-resumo
+  (cliques/custo/CPC médio/eventos-chave), gráfico "Onde o dinheiro foi" (8
+  maiores custos, HBars) + tabela c/ barra fina de participação nos cliques
+  sob o termo (sem fundo lavado), coluna "Ev.-chave" c/ ponto verde. Bloco
+  Funil: "A jornada de quem veio do Google" (4 barras Leads→Agendaram→
+  Compareceram→Cirurgia c/ %) + tabela por termo. Conversões por dia =
+  MiniBars c/ eixo, valores, datas e tooltip + ShareBar por tipo de evento.
+  Faixa "Como cada número é calculado" (7 fórmulas). Lado a lado só em xl.
+- META (AdsReport.vue): chart.js/vue-chartjs REMOVIDOS da tela (HBars p/
+  Investimento × Receita e Leads × Conversões; ShareBar p/ fatia do
+  investimento). KPIs viraram 4 vidros DashKpi (Investimento/Leads/
+  Conversões/Receita) + linha CPL/CAC/ROAS/Campeão; impressões e cliques
+  totais no cabeçalho do bloco. TABELA SEM ROLAGEM LATERAL: sem
+  min-w-[900px]/overflow-x; grid de 8 colunas (Anúncio + 7 números) só em
+  xl (≥1280); impressões/cliques desceram p/ a linha de baixo do anúncio
+  ("56,6 mil impressões · 437 cliques"); abaixo de xl cada anúncio vira um
+  cartão c/ chips rotulados. Mesma lista COLS desenha cabeçalho, linha e
+  cartão.
+- AGENTES (AiAgentsDashboard.vue, aba do AutomationsHub): entrou no kit
+  (useCevicoPalette scope report:agentes + CevicoPalettePicker próprio,
+  botão "Paleta" acima da régua — a aba não tem banner): 4 vidros DashKpi
+  (Mais ativo em tile próprio, nome legível), "Ritmo do time, dia a dia"
+  (MiniBars 14d somando todos os agentes + dia mais cheio), "Fatia do
+  custo" (ShareBar, cor = agente), "Quem mais trabalhou" (HBars c/ medalhas,
+  cor = agente, custo+modelo na sub), cards por agente em cv-sub c/ MiniBars
+  de verdade (56px, 3 datas) no lugar das divs de 5px, chip do modelo,
+  ligados/desligados no cabeçalho.
+- TESTE LOCAL: as 3 telas dependem de API externa (GA4/Meta) → initializer
+  LOCAL fora do git (config/initializers/zz_cevico_local_demo.rb, no
+  .git/info/exclude; liga só com tmp/cevico_demo.on) que devolve dados
+  fictícios dos serviços GoogleKeywordsService/MetaAdsReportService, +
+  sent_log/carimbos meta_ads/page_ads/ai_usages semeados na conta 3 e
+  APAGADOS ao final (config real restaurada). Visual conferido em 1024 e
+  1440px (Meta: 8 colunas sem rolagem em 1440; cartões abaixo). Nada de
+  backend mudou. eslint dos arquivos novos limpo nas regras da casa.
+- Sem migration, sem cron; deploy WEB. AGUARDA "pode subir".
+
+# RODADA 15/09 — item 166 (OftalmoFácil: entrada em "Cirurgia Agendada" retrodatada + conserto da primeira carga)
+
+## 166. ✅ 🏥 OFTALMOFÁCIL — "ENTROU EM CIRURGIA AGENDADA: 723 nos 7 dias" (print dele 15/09, primeira carga real feita: 1.349 cirurgias do fornecedor)
+- CAUSA: o sync só retrodatava o StageLog da cirurgia REALIZADA (data/hora da
+  cirurgia). Os cards que a carga pôs em "Cirurgia Agendada" (agendada +
+  aguardando pagamento — 723 itens, muitos antigos que o Henrique nunca
+  fechou lá) ficaram com entered_at = dia da carga → Gestor/Metas/Meu Painel
+  contaram 723 entradas na semana (▲2792%) e o banner "Tudo bem" ficou
+  inflado.
+- CÓDIGO: OftalmofacilSyncService#backdate! vale para todos os status;
+  reference_time = realizada → dia/hora da cirurgia; agendada/aguardando →
+  of_created_at (quando foi MARCADA lá; a data da cirurgia pode ser futura).
+  Nunca retrodata para o futuro.
+- CONSERTO DOS DADOS JÁ CARREGADOS: rake `cevico:oftalmofacil_backdate_agendadas
+  ACCOUNT_ID=1` (dry-run lista card a card; `DRY=0` aplica) — só toca a
+  entrada criada pela carga (entered_at posterior à marcação), reescreve
+  entered_at (+ stage_moved_at se o card ainda está na coluna). Testado local
+  c/ card temporário: dry → aplica → data volta 12 dias → limpo.
+- PENDÊNCIA DE NEGÓCIO (perguntar a ele): cirurgias com data no PASSADO e
+  status ainda "agendada/ativa" no OftalmoFácil — hoje viram "Cirurgia
+  Agendada" na CEVICO. Opções: (a) Henrique atualiza o status lá (o cron traz
+  em 15 min); (b) regra na CEVICO: data passada + N dias sem status = tratar
+  como realizada. Decisão dele.
+- Sem migration, sem cron; deploy WEB+SIDEKIQ (o job roda no sidekiq) + rodar
+  o rake uma vez. AGUARDA "pode subir".
+
+## 167. ✅ 📞 CHAMADAS DE WHATSAPP PRÓPRIAS (RODADA 1 no develop 17/09 [imagem a28ceaf implantada; 1ac1201 com os cards em Integrações do CEVICO ainda não subiu]; RODADAS 2+3 CONSTRUÍDAS 18/09 na branch feat/rodada-171 — ver item 171) — receber (e depois fazer) ligações de pacientes DENTRO do Sistema Unificado, no nosso código (pedido dele 16/09: "eu prefiro construir tudo próprio"; "vamos neste sentido")
+- CONTEXTO 16/09: fork atualizado para o Chatwoot v4.17.1 (merge 9cff06e, no ar).
+  O Chatwoot traz chamadas de WhatsApp e canal de Voz (Twilio), mas TODO esse
+  código vive em `enterprise/` — licença Chatwoot Enterprise: uso em produção
+  só com assinatura; desenvolvimento e teste são livres. Hoje a bandeira
+  `channel_voice` foi ligada na conta 1 por console (runner) SÓ PARA TESTE
+  com o Henrique; DESLIGAR quando o nosso ficar pronto
+  (`Account.find(1).disable_features!(:channel_voice)`).
+- TENTATIVA 16/09 na aba Chamadas da caixa GOOGLE (+5511991651628): a Meta
+  recusou — "número ainda não está cadastrado na API de Chamadas do WhatsApp
+  Business". É pré-requisito do LADO DA META, vale igual para a solução
+  própria: o Henrique precisa habilitar Calling no número (WhatsApp Manager →
+  número → Chamadas / ou app da Meta) e o token precisa de
+  whatsapp_business_management. O erro real da Graph fica no log do WEB
+  (buscar "calling" / "settings").
+- DESENHO (escrito a partir da documentação oficial da Meta — WhatsApp
+  Business Calling API — sem copiar `enterprise/`; nosso namespace
+  Cevico::Calls): a Meta manda webhook `calls` (connect c/ oferta SDP,
+  terminate, status); o navegador da atendente responde com WebRTC (áudio
+  ponto a ponto Meta↔browser, Opus, SDP completo sem trickle ICE); o servidor
+  só sinaliza (accept/pre_accept/reject/terminate na Graph) e registra.
+- RODADA 1 (MVP = RECEBER): webhook + tabela própria `cevico_calls` + ActionCable
+  → popup "chamada recebida" (nome, conversa do lado, atender/recusar, mudo)
+  → aceitar via Graph + WebRTC no browser → item de chamada na conversa
+  (duração, quem atendeu) → PERDIDA vira aviso no Radar (mesma lógica do
+  follow-up). Toque para os agentes da caixa; horário de funcionamento
+  recusa fora do expediente.
+- RODADA 2 (LIGAR PARA O PACIENTE): a Meta exige permissão prévia do
+  contato — enviar pedido de permissão pelo WhatsApp, guardar o consentimento,
+  botão "Ligar" na tela do contato/conversa quando aprovado.
+- RODADA 3 (EXTRAS): histórico/dashboard de chamadas no kit iMac G3, para
+  quem toca primeiro, transferência, transcrição com a IA já integrada
+  (Gemini), métrica no Dashboard dos Agentes.
+- PRÉ-REQUISITOS DELE: (1) Henrique habilitar Calling no número na Meta;
+  (2) de preferência um SEGUNDO NÚMERO (ou número de teste do app) na mesma
+  conta para construir sem afetar o atendimento — WebRTC c/ Meta só se testa
+  com número real; (3) webhook do app apontando para o sistema c/ o campo
+  `calls` assinado; (4) "pode construir".
+- CONSTRUÍDO 17/09 (rodada 1, contrato em docs/CHAMADAS_NATIVAS.md, commit
+  8d8f9a54ea, 45 arquivos): tabela cevico_calls (Crm::Call), desvio do webhook
+  `calls` (Cevico::WhatsappCallsWebhook via prepend, só quando o módulo está
+  ligado p/ a caixa), Crm::Calls::{MetaClient (Graph v23, modo simulação),
+  WebhookService, ConversationFinder, CardMessageBuilder, Broadcaster (cable
+  account_<id>), PermissionReplyService, OutboundService, DashboardService,
+  TranscriptionService (ffmpeg→ogg + Gemini 2.5 Flash)}, CallsController
+  crm/calls (index/show/accept c/ lock+409/reject/hangup/recording/transcribe/
+  dashboard/initiate/request_permission/permission_status), settings
+  agenda_config['calls'] (+update_calls/enable_calls_at_meta/calls_meta_status),
+  rake cevico:calls_simulate|calls_end, ffmpeg no Dockerfile, 10 specs.
+  Frontend: Pinia stores/cevicoCalls.js, composables/useCevicoCallSession.js
+  (WebRTC puro + gravação MediaRecorder + toque WebAudio), CevicoCallPopup.vue
+  (tocando/em chamada/encerrada/perdida, empilhável), bubble CevicoCall.vue
+  (player + transcrição dobrável + resumo), CevicoCallsCard (painel da conversa +
+  Espaço do Paciente, botão Ligar c/ permissão), CallsDashboard.vue (Relatórios →
+  Dashboard de Ligações, kit iMac G3), Integrações → "Ligações (WhatsApp)"
+  (CevicoCalls.vue c/ erro cru da Meta + dica dos 2.000/dia).
+  TESTADO LOCAL no browser (conta 3, simulação): balão tocando → Atender →
+  timer/mudo/desligar → encerrada; card "📞 Chamada recebida · atendida por
+  Guilherme · 1 min 35 s"; perdida (banner + conversa reaberta + "Chamada
+  perdida" na lista); dashboard; Espaço do Paciente; "Ligar" mostra o erro da
+  Meta e oferece "Pedir permissão"; rubocop 0, eslint 0 erros novos, rspec
+  10/10, sem 5xx. NÃO TESTADO (impossível sem a Meta): WebRTC real, gravação,
+  transcrição e ligação de saída reais.
+- PRÓXIMOS PASSOS: (1) Henrique habilita Calling no número (≥ 2.000 msgs/dia;
+  token c/ whatsapp_business_management); (2) Integrações → Ligações → salvar
+  + "Ativar na Meta"; (3) teste real c/ o celular dele; (4) desligar a bandeira
+  enterprise `channel_voice` da conta 1; (5) merge no develop + deploy (1
+  migration 20260917000001).
+- MERGE + IMAGEM (17/09 ~13h50): o Henrique liberou as chamadas na Meta →
+  `git push --no-verify origin feat/chamadas-nativas:develop` (fast-forward;
+  o hook pre-push não existe no worktree) → Build & Push verde (run
+  35248827099) → imagem `ghcr.io/guilhermecorder/chatwoot:3cfa77f` (traz a
+  migration 20260917000001 + ffmpeg); reversão = `9cff06e`. Entregue p/ ele
+  implantar WEB+SIDEKIQ. Depois do deploy: Integrações → Ligações (WhatsApp)
+  → caixa → salvar → "Ativar ligações na Meta" → ligar do celular → desligar
+  `channel_voice` da conta 1.
+- COMO FACILITAR PRÓXIMAS ATUALIZAÇÕES DO CHATWOOT (proposta 16/09, baratos
+  primeiro): rotas CEVICO em config/routes/cevico.rb via draw(:cevico);
+  migrations c/ timestamp real (nunca redondo — 20260728000001 colidiu);
+  lista viva dos arquivos do upstream que alteramos; bloco "CEVICO" no
+  package.json/Gemfile (chart.js foi removido pelo upstream sem aviso);
+  atualizar a cada minor; smoke specs; skill /atualizar-chatwoot.
+
+## 168. ✅ 🗺️ MENSAGENS DA JORNADA — CONSTRUÍDO 18/09 (rodadas 1+2 na branch feat/rodada-171, ver item 171; contrato docs/MENSAGENS_JORNADA.md) — motor nativo de mensagens-modelo (substitui o N8N "CONFIRMACAO CIRURGICA - IOP" e vira a porta de entrada p/ "centenas" de mensagens ao longo da jornada do paciente; pedido dele 17/09)
+- O QUE O N8N FAZ HOJE (JSON lido 17/09; roda 10h): lê a planilha Google
+  "CONFIRMACOES CIRURGICAS" (aba IOP: Procedimento, Paciente, Data, Telefone,
+  Hora) → p/ cada linha c/ telefone: busca contato por telefone na API; se não
+  existe cria (inbox 5); acha conversa aberta na inbox 5 ou cria; manda a
+  mensagem c/ template `confirmar_cirurgia` (UTILITY, idioma "en", 3 variáveis:
+  nome, data, hora) e o texto da Gabriela (endereço Alameda Casa Branca 35 cj
+  906, estacionamento, documentos, sem convênio, "Você confirma que irá
+  comparecer?"). Nó de aprovação por Gmail (linhaoftalmo@) está DESCONECTADO.
+  Fragilidades: planilha alimentada à mão (Henrique), telefone sem
+  normalização, só "conversa aberta" (cria conversas repetidas), sem registro
+  de quem confirmou, token da API em texto puro no JSON (⚠️ rotacionar se o
+  arquivo circulou), nada aparece no CRM/Radar.
+- O QUE JÁ EXISTE NATIVO (mapeado 17/09): 1 enviador único
+  `Crm::SendTemplateService` (Liquid + ContactInboxBuilder + reaproveita a
+  última conversa da caixa) e CINCO réguas em cima dele: Campanha WhatsApp
+  (lote por público), Automações de coluna (`send_template` no evento de
+  etapa/etiqueta, cooldown 7d), Régua de mensagens (N dias na etiqueta/etapa),
+  Follow-up bots (cutucadas por silêncio, respeita janela 24h) e LEMBRETES DE
+  CONSULTA d1/d0 (`Crm::AppointmentReminderSendJob`, cron */15 + hora
+  configurada, variáveis {{hora}}/{{unidade}}, marca em
+  contact.additional_attributes.cevico_appt_reminders, confirmação detectada
+  pelo `CrmListener` c/ CONFIRM_WORDS → nota privada). O espelho do
+  OftalmoFácil (`cevico_oftalmofacil_surgeries`: surgery_date, surgery_hour,
+  patient_name, contact_id, procedure_name, status_kind=agendada; sync a cada
+  15 min) É A PLANILHA — só que automática.
+- DESENHO (rodadas):
+  R1 "Confirmação de cirurgia nativa": regra de jornada "cirurgia amanhã às
+  10h" lendo o espelho OftalmoFácil (status agendada, surgery_date = amanhã),
+  template confirmar_cirurgia (nome/data/hora automáticos; unidade/endereço
+  por clínica), caixa configurável, marca de envio por cirurgia (1x), resposta
+  "confirmo/sim" → confirmado (etiqueta + nota + card verde na Agenda/Espaço do
+  Paciente), "não/remarcar" → aviso no Radar p/ a atendente; painel "Fila de
+  hoje" às 09:50 com aprovar/pular (substitui o e-mail do N8N). Desliga o N8N.
+  R2 "Jornada" (tela): linha do tempo da jornada (Lead → Consulta → Orçamento →
+  Cirurgia agendada → Pós-op → Retorno) c/ as mensagens penduradas em cada
+  momento; assistente "Nova mensagem" em 3 passos (QUANDO: data relativa a
+  consulta/cirurgia/pós-op, evento de etapa/etiqueta/formulário/chamada
+  perdida, silêncio; PARA QUEM: filtros de público; O QUÊ: modelo aprovado +
+  variáveis preenchidas automaticamente a partir da fonte + prévia c/ paciente
+  real + "enviar teste p/ meu número"); biblioteca pesquisável; estatísticas
+  por mensagem (enviadas/entregues/respondidas/confirmadas). Tabela nova
+  `cevico_journey_messages` + log `cevico_journey_sends` (1 envio por
+  paciente×evento, idempotente), `Crm::TemplateSource` compartilhado (hoje há 5
+  cópias do Struct), regras de silêncio (nao_perturbe, perda_*, janela 24h só
+  p/ texto livre, horário comercial, teto diário).
+  R3: unificar as cinco réguas atrás da tela Jornada (Campanha, Automações de
+  coluna, Régua, Lembretes d1/d0 viram "mensagens da jornada" com o mesmo
+  motor), modelos com botões/mídia, respostas por botão (Confirmar / Remarcar).
+- PRÉ-REQUISITOS: template `confirmar_cirurgia` aprovado na WABA da caixa que
+  vai enviar (hoje o N8N usa inbox 5 — confirmar qual é); OftalmoFácil ligado
+  (item 157) e sincronizando; decidir se IOP e CEVICO usam caixas diferentes.
+
+## 169. ✅ 🤖📞 AGENTE DE LIGAÇÃO (IA que ATENDE e FAZ ligações; campanhas por telefone) — RODADA 1 CONSTRUÍDA 17/09 (branch feat/fluxos-agente-ligacao; aguarda a conta ElevenLabs + número importado p/ o teste real em 18/09) — pedido dele 17/09 ("postergando já faz um tempo")
+- O QUE ELE QUER: IA com base no script do "agente de agendamento" que atende
+  a ligação do paciente; campanhas em que a IA LIGA para os pacientes; não
+  precisa conduzir a conversa inteira — pode direcionar para o WhatsApp.
+- REALIDADE TÉCNICA: quem "atende" precisa ser um servidor de mídia (não o
+  navegador), fazendo voz→texto→LLM→voz em tempo real. Em Ruby não dá. Caminho
+  limpo: a Meta oferece SIP na Calling API (calling.sip.servers) — a ligação do
+  WhatsApp vai por SIP para uma PLATAFORMA DE AGENTE DE VOZ que fala pt-BR e
+  chama nossos webhooks (ferramentas: buscar paciente, horários livres, marcar,
+  enviar WhatsApp, transferir p/ atendente). Candidatas: ElevenLabs
+  Conversational AI (SIP trunk, vozes pt-BR excelentes, LLM à escolha incl.
+  Claude/Gemini, transferência p/ humano, ~US$0,08–0,10/min) ou OpenAI Realtime
+  (SIP nativo, ~US$0,06/min, voz boa mas menos natural em pt-BR). Saída
+  (campanha): a plataforma faz o INVITE SIP p/ a Meta (business-initiated via
+  SIP) — exige permissão prévia do paciente (7 dias) como qualquer ligação da
+  clínica; quem já ligou p/ a clínica concede automaticamente
+  (callback_permission_status ENABLED).
+- O QUE FICA NO NOSSO SISTEMA (construível já): tela "Agente de Ligação" em
+  Automações (script/persona a partir do agente de agendamento, horário em que
+  a IA atende × toca p/ humano, regra de transferência, mensagem de WhatsApp
+  de encaminhamento); campanhas de ligação (público = mesmo motor da Campanha
+  WhatsApp; fila; janela de horário; permissão checada/pedida antes; resultado
+  por paciente: atendeu/agendou/quer WhatsApp/não atendeu/recusou); webhooks de
+  ferramentas p/ a plataforma (paciente por telefone, agenda_slots,
+  AppointmentRecorder, envio de template, transferir); ingestão do resultado +
+  transcrição na MESMA tabela cevico_calls (handled_by: 'ia', outcome) → card
+  na conversa, Espaço do Paciente e Dashboard de Ligações já mostram.
+- PRÉ-REQUISITOS: (1) número habilitado na Meta (item 167); (2) escolher a
+  plataforma de voz e criar a conta (chave); (3) decidir a voz/persona e o
+  aviso "assistente virtual" no início da ligação (LGPD/boa prática).
+- ORDEM: R1 atender (IA recebe fora do horário/quando ninguém atende, agenda
+  ou encaminha p/ WhatsApp) → R2 campanha de ligação (permissão + fila + IA
+  liga) → R3 transferência quente p/ atendente.
+
+- DECISÕES 17/09 (dele): plataforma ELEVENLABS; números existentes ficam c/
+  as chamadas no navegador (167); a IA usa um NÚMERO PRÓPRIO; IA se apresenta
+  como "assistente virtual". DESCOBERTA 17/09 (mudou o desenho): a ElevenLabs
+  tem integração NATIVA c/ WhatsApp Business (painel dela → WhatsApp → Import
+  account → atribui o agente; atende e liga pela API `whatsapp/outbound-call`;
+  "Enable messaging" pode ficar OFF = só ligações) → sem SIP/TLS/codec. O SIP
+  ficou como plano B documentado (docs/AGENTE_LIGACAO.md §9).
+- CONSTRUÍDO 17/09 (contrato docs/AGENTE_LIGACAO.md; API conferida no
+  OpenAPI oficial; assinatura do webhook lida do SDK: `ElevenLabs-Signature:
+  t=…,v0=HMAC_SHA256(segredo, "t.corpo")`, janela 30 min):
+  · config em `ai_config['voice']` (segredos nunca voltam p/ a tela; `tools_token`
+    por conta protege as ferramentas) — `Crm::VoiceAgent::Settings`;
+  · `Crm::VoiceAgent::{Client (HTTParty, simulação CEVICO_VOICE_SIMULATE=1),
+    Script (script de VOZ ~75 linhas: frases curtas, números por extenso,
+    confirmar repetindo, máx. 2 horários, unidades/médicos/tabela de preços,
+    guardrail), ToolDefinitions (6 ferramentas webhook), ToolsService
+    (buscar_paciente, horarios_livres, marcar_consulta c/ trava Redis +
+    AppointmentRecorder, minha_consulta, enviar_whatsapp (texto livre → modelo
+    → erro legível), registrar_resultado; toda ferramenta faz upsert da
+    Crm::Call), AgentBody, SyncService (webhook+segredo → 6 ferramentas →
+    agente → atribui o número WhatsApp c/ mensagens OFF), PostCallService
+    (idempotente: transcrição "Assistente:/Paciente:", resumo, resultado,
+    custo US$, card na conversa, cable, Crm::AiUsage 'voice', fecha contato
+    da campanha; áudio mp3 → gravação)}`;
+  · `Webhooks::CevicoVoiceController` (`/webhooks/cevico/voice/:account_id/
+    {tools/:tool, initiation, post_call}`), concern `Crm::VoiceAgentSettings`
+    (update/test/sync/whatsapp_accounts/voices/state), `Crm::CallCampaign` +
+    `Crm::CallCampaignContact` (tabelas cevico_call_campaigns/_contacts,
+    público = mesmo motor da Campanha WhatsApp), `CallCampaignsController`,
+    `Crm::VoiceAgent::CampaignDialerJob` (cron */5: horário, simultâneas,
+    teto/dia, fecha `calling` > 30 min), colunas novas em cevico_calls
+    (handled_by, provider, provider_call_id, outcome, campaign_id, analysis,
+    cost_usd — migration 20260917173000), DashboardService c/ IA × humanos e
+    resultados, rake `cevico:voice_simulate|voice_tools|voice_sync`;
+  · FRONTEND: Integrações → "Agente de Ligação (IA)" (CevicoVoiceAgent.vue:
+    conexão/URLs, contas WhatsApp da ElevenLabs, persona/voz/LLM/idioma/
+    script c/ restaurar padrão/transferência, WhatsApp da clínica c/ modelo de
+    continuidade e de permissão, limites, Salvar · Sincronizar c/ log · ligar/
+    desligar, painel Estado c/ últimas ligações); Campanha → aba "Ligações"
+    (CallCampaignsTab.vue: composer em 4 passos, prever público, começar/
+    agendar, progresso, tabela de contatos c/ resultado); bolha/card/Espaço
+    do Paciente/Dashboard de Ligações mostram 🤖 assistente virtual + resultado.
+  · TESTES: rubocop 0 nos arquivos novos; rspec 92/0 (167+169+170+fix);
+    ferramentas e webhooks via curl (token certo 200/errado 401; HMAC válido
+    200/inválido ou velho 401); simulação semeada na conta 3 local (ligação
+    #12 recebida "agendou", #17 da campanha "remarcou", campanha #1 pausada).
+- INTEGRAÇÃO E VERIFICAÇÃO NO NAVEGADOR (17/09 fim da tarde, conta 3 local):
+  tela Agente de Ligação (estado, últimas ligações, "Como usar"), Campanha →
+  Ligações (campanha simulada listada c/ progresso), card 🤖 na conversa #342,
+  Dashboard de Ligações (KPIs da IA, Humanos × assistente, resultados), aba
+  Fluxos (25 fluxos, estado ao vivo, diagrama em claro/escuro/celular).
+  Ajustes feitos na integração: índice das campanhas devolve
+  `{ call_campaigns: [...] }` (a tela lia assim); lista de contas WhatsApp
+  devolve `items` (idem); interruptor/prompt do card no Painel dos agentes
+  espelha em `ai_config['voice']` (`mirror_voice_agent!` no update_ai);
+  cabeçalho de assinatura malformado vira 401 (não 500); VARREDOR no
+  discador (`sweep_stale_ai_calls`): ligação da IA tocando/em chamada há
+  mais de 2 h sem pós-chamada → failed `sem_pos_chamada` + card atualizado
+  (rótulos "Sem retorno da ElevenLabs"/"Sem registro" no dashboard);
+  cabeçalho do fluxo empilha no celular. ⚠️ Reiniciar o container `vite`
+  refaz o `pnpm install` do zero (entrypoint) — 8 min c/ rede lenta; evitar.
+- SUBIU TUDO DE UMA VEZ (17/09 ~19h, pedido dele: "vamos subir tudo de uma
+  vez, já tenho a conta do elevenlabs"): fast-forward do branch p/ o develop
+  (179d14e) → build falhou ("JavaScript heap out of memory" no
+  assets:precompile: o mermaid pesou) → Dockerfile: `ARG NODE_OPTIONS` de 4096
+  p/ 6144 (a28ceaf) → Build & Push verde (run 35259001480, 28 min em vez de 4)
+  → **imagem `ghcr.io/guilhermecorder/chatwoot:a28ceaf`** (167 + 169 + 170;
+  migrations 20260917000001 + 20260917173000); reversão = `9cff06e`.
+  ⚠️ Build local de produção do Vite morre por falta de memória no Docker
+  Desktop (7,75 GiB) — validar só no CI. Melhoria futura: servir o bundle
+  pré-compilado do mermaid fora do Vite p/ o build voltar aos 4 min.
+- PRÉ-REQUISITOS DELE (18/09): conta ElevenLabs + chave de API; número novo
+  na WABA importado na ElevenLabs (Import account) c/ "Enable messaging" OFF
+  e Call settings ligado no WhatsApp Manager; modelo Meta c/ componente
+  `call_permission_request` (nome + idioma) p/ as campanhas; FRONTEND_URL
+  público. Depois: Integrações → Agente de Ligação → chave → Testar → Buscar
+  contas → escolher número → Salvar → "Sincronizar com a ElevenLabs" → ligar
+  do celular. Ponto a confirmar na 1ª sincronização real: código de idioma
+  (`pt-br`; fallback `pt`) — a tela mostra o erro cru da ElevenLabs.
+- FORA DESTA RODADA: transferência quente c/ contexto (SIP REFER), voz
+  clonada, agente por unidade, mensagens de texto no número da IA, plano B SIP.
+
+## 170. ✅ 🗺️ MAPA DE FLUXOS DOS AGENTES — CONSTRUÍDO 17/09 (branch feat/fluxos-agente-ligacao) — visualizar as automações/agentes de IA como fluxograma (pedido dele 17/09: "tanto eu quanto o Henrique entendemos a visualização de fluxo; a interação seria mais precisa")
+- Tela "Fluxos" dentro de Automações: um fluxograma por agente/automação
+  (Radar, Follow-up bots, Colheitadeira, Gestor Autônomo, Auditor, Secretário
+  da Agenda, Lembretes d1/d0, Confirmação de cirurgia (168), Chamadas (167),
+  Agente de Ligação (169)), renderizado no browser (Mermaid via npm) a partir de
+  uma descrição declarativa em código (cada agente declara seus passos:
+  gatilho → condições → ações → saídas), com o estado ao vivo (ligado/desligado,
+  última execução, contadores) nos nós; clique no nó abre a configuração.
+- Regra de trabalho: toda rodada que cria/muda um agente entrega também o
+  fluxograma (no sistema e no resumo da rodada).
+- CONSTRUÍDO 17/09 (contrato docs/MAPA_DE_FLUXOS.md; insumo = passo a passo
+  real dos jobs em docs/MAPEAMENTO_FLUXOS_JOBS.md): DSL `Crm::FlowMap::Flow`
+  (gatilho/nós/arestas/live → `to_mermaid` flowchart TD c/ formas por tipo e
+  `classDef`; desligado = tracejado), `Crm::FlowMap::Registry` (25 fluxos em
+  `app/services/crm/flow_map/flows/*.rb`: scheduler, instagram, comments, nps,
+  conversation, calls, voice, reminders, followup_bots, sales, closing,
+  opportunity, form, column_automations, campaigns, copywriter, pagebuilder,
+  creative, harvest, manager, auditor, mentor, stalled_cards, oftalmofacil,
+  surgery_confirmation [N8N externo]), `GET crm/flows` + `crm/flows/:key`
+  (estado ao vivo: ligado, última execução, contadores), aba **Fluxos** em
+  Automações (FlowsMap.vue: lista agrupada c/ chips, cabeçalho c/ "Abrir
+  configuração", diagrama, rodapé; refresh 60 s; `?flow=` deep link; botão
+  "Ver fluxo" em cada card de agente), `FlowDiagram.vue` (mermaid 11 importado
+  sob demanda, tema claro/escuro, clique nos nós, zoom, Baixar PNG), item
+  "Fluxos" no menu. Spec `registry_spec` (todo agente do AGENT_META e todo job
+  CEVICO do schedule.yml têm fluxo; 50 definições validadas no mermaid.parse).
+- REGRA DE TRABALHO (vale a partir de agora): toda rodada que cria/muda um
+  agente entrega o fluxograma (`flows/<key>.rb` + Mermaid no resumo da rodada).
+
+## 171. ✅ 🧰 RODADA 18/09 — "vamos construir tudo o que vc lembrou": 167 R2/R3 + várias caixas + 168 (Jornada do paciente) + segurança no código + facilitar atualizações + build mais leve — SUBIU 18/09 ("pode subir" → commit a54060e6fa no develop, inclui a 1ac1201) → imagem ghcr.io/guilhermecorder/chatwoot:a54060e p/ implantar WEB+SIDEKIQ (migration 20260918143000 → BACKUP antes; reversão a28ceaf)
+- CONTEXTO: ele confirmou que a última implantada é a `a28ceaf`; a `1ac1201`
+  (cards Ligações/Agente de Ligação na página de Integrações do CEVICO) segue
+  pendente de deploy. Pediu pra construir tudo do meu lado sem esperar.
+- 📞 167 RODADA 2 (ligar pro paciente): botão de telefone do CEVICO no
+  cabeçalho da conversa (`CevicoCallButton.vue` em `ConversationHeader.vue`;
+  o botão Enterprise some quando o módulo está ligado) e no painel do contato
+  (`ContactInfo.vue`): consulta a permissão na Meta → liga na hora, ou abre o
+  balão com "Pedir permissão"; resposta do paciente chega pelo cable.
+- 📞 167 RODADA 3: ⭐ "quem toca primeiro" (Integrações → Ligações: linha de
+  frente + espera 5–60 s; `ring_first_user_ids`/`ring_cascade_seconds` no
+  webhook e na store — os demais só ouvem depois da espera, e só se ainda
+  estiver tocando); ligação perdida vira AVISO NO RADAR (`Crm::Calls::RadarAlert`,
+  some quando alguém respondeu/ligou de volta; aparece mesmo com o Radar de IA
+  desligado); métricas "Ligações atendidas" e "Minutos ao telefone" no Meu
+  desempenho (Painéis → 🎯). Transferência entre atendentes NÃO entrou: a
+  Calling API da Meta não renegocia a chamada do lado do negócio — o caminho é
+  desligar e ligar de novo.
+- 📞 VÁRIAS CAIXAS DE LIGAÇÃO (pedido dele 18/09 à noite: "consigo selecionar
+  apenas uma caixa; é importante acionar mais de uma e selecionar os agentes
+  responsáveis"): Integrações → Ligações virou uma LISTA de caixas
+  (`calls.inboxes[]`), cada uma com seus atendentes, sua ⭐ linha de frente,
+  sua espera e seu "Ativar na Meta"/estado. O webhook desvia a chamada de
+  qualquer caixa configurada e toca só para os atendentes DAQUELA caixa;
+  ligar pro paciente sai pela caixa da conversa aberta (senão a da última
+  conversa dele, senão a primeira). Config antiga (1 caixa) migra sozinha.
+  Spec cobre 2 caixas com equipes diferentes.
+- 🗺️ 168 RODADAS 1+2 — MOTOR + TELA "Jornada do paciente" (`/crm/jornada`,
+  menu ao lado da Campanha; contrato completo em docs/MENSAGENS_JORNADA.md):
+  regras com gatilho (dia da cirurgia no OftalmoFácil / dia da consulta /
+  entrou na coluna / recebeu etiqueta / ligação perdida) + dias antes/depois +
+  hora; público (etiquetas/colunas); modelo aprovado com variáveis ligadas ao
+  paciente ({{primeiro_nome}} {{data}} {{hora}} {{unidade}} {{endereco}}
+  {{procedimento}} {{medico}}…) ou texto livre; aprovação na FILA DE HOJE
+  (aprovar/pular/reenviar/aprovar todos); resposta "confirmo" → etiqueta +
+  nota ✅, "não vou/remarcar" → nota ⚠️ + Radar; prévia com paciente real;
+  teste pro meu número; histórico por mensagem; locais/endereços por unidade
+  e por clínica do OftalmoFácil; janela e teto diário; silêncio
+  (nao_perturbe/perda_*). Job `Crm::JourneyRunJob` a cada 15 min. Fluxograma
+  `journey` substituiu o externo do N8N. `Crm::TemplateSource` compartilhado.
+  R3 (migrar Lembretes D-1/D-0, Régua, Automações de coluna pro motor) fica
+  pra depois — a tela mostra os links delas.
+  PRÉ-REQUISITOS DELE: template `confirmar_cirurgia` aprovado na caixa que vai
+  enviar (o N8N usa a inbox 5); preencher "Locais e horário" (endereço da
+  IOP/Alameda Casa Branca); criar a regra "Confirmação de cirurgia (véspera
+  10h)" com aprovação ligada na primeira semana; desligar o N8N depois de
+  ver a primeira fila sair; ROTACIONAR o token da API que estava no JSON do N8N.
+- 🔐 SEGURANÇA (Fase C do plano de 30/08, só código): links de prévia (30 d)
+  e retoque (7 d) das páginas e do formulário (90 d; links antigos seguem
+  aceitos) com validade e finalidade; cadeado do acesso clínico (só admin muda
+  quem lê o prontuário — antes bastava a área "settings" concedida); Rack::Attack
+  para os webhooks de voz (120/min), GETs públicos de páginas/formulários
+  (300/min) e relatórios de CSP; HSTS forte quando FORCE_SSL=true +
+  Referrer-Policy + Permissions-Policy em toda resposta
+  (`config/initializers/zz_cevico_security.rb`); CSP em modo SÓ RELATAR nas
+  páginas públicas (`Cevico::PublicSecurity` + `Cevico::PublicCsp`, nonce nos
+  10 scripts inline, X-Frame-Options DENY; violações no log via
+  POST /webhooks/cevico/csp_report — ligar pra valer depois de 1–2 semanas sem
+  relatório; o formulário ainda usa onclick= inline); protocolo das páginas
+  com SecureRandom. PENDENTE DELE (infra): fechar a porta 3000 do EasyPanel,
+  senha+2FA, backup automático, SSH por chave, FORCE_SSL=true (conferir
+  X-Forwarded-Proto no proxy antes).
+- 🔧 FACILITAR AS ATUALIZAÇÕES: rotas CEVICO saíram do routes.rb (1168 → 811
+  linhas) para `config/routes/cevico_crm.rb` (draw dentro de accounts) e
+  `config/routes/cevico_public.rb` (formulários/páginas/webhooks) — tabela de
+  rotas conferida IDÊNTICA (1099 rotas); `script/cevico_touchpoints.sh` gera
+  `docs/PONTOS_DE_CONTATO_UPSTREAM.md` (134 arquivos do upstream que
+  alteramos); bloco `"cevico"` no package.json com as dependências que o
+  upstream pode remover; spec `spec/cevico/migration_timestamps_spec.rb` cobra
+  timestamp real nas migrations novas; skill `/atualizar-chatwoot` (na pasta
+  do projeto CEVICO) com o passo a passo da 4.17.1.
+- 🏗️ BUILD: o Mermaid saiu do build da imagem (vem da CDN jsdelivr, versão 11,
+  só quando a aba Fluxos abre — `FlowDiagram.vue`); é o que deixou o build 7×
+  mais lento e estourou a memória. `NODE_OPTIONS` 6144 fica.
+- TESTES: rspec 85/0 (calls, jornada, segurança, fluxos, voz, automações),
+  rubocop limpo nos arquivos novos, eslint/prettier limpos nas telas novas;
+  visual local conta 3 (Jornada claro/escuro/celular, assistente 3 passos,
+  fila de hoje, prévia com paciente real). Dados de demo locais: cirurgia
+  `demo-journey-1` + 2 regras na conta 3 — limpar antes de usar de verdade.
+- DEPLOY: 2 migrations (jornada) → BACKUP antes; WEB+SIDEKIQ juntos; sem cron
+  novo além do `crm_journey_run_job` (schedule.yml — sidekiq recarrega no boot).
+  Reversão = etiqueta anterior (tabelas novas ficam, não atrapalham).
+
+
+## 172. 🎯 CENTRAL DE CRIATIVOS — gancho, corpo e CTA de cada anúncio com os números da Meta (pedido 19/09)
+- Pedido: entender a performance INDIVIDUAL de cada criativo relacionando gancho,
+  corpo e CTA, com dados da própria Meta (visualizações, cliques…) e gráficos de
+  desempenho para análise profunda e otimização futura.
+- Leitura: a Meta não sabe o que é gancho/corpo/CTA; o sistema traduz em métricas
+  que ela mede — GANCHO = taxa de parada (plays de 3 s ÷ impressões, só vídeo);
+  CORPO = retenção (ThruPlay ÷ plays de 3 s + curva 25/50/75/100 %); CTA = clique
+  (cliques no link ÷ impressões) e conversa (conversas iniciadas no WhatsApp ÷
+  cliques); daí em diante entra o CRM (leads CTWA → consulta marcada → compareceu
+  → cirurgia, mesma régua do relatório Anúncios (Meta)).
+- Dados: tabelas `cevico_ad_creatives` (anúncio + criativo: title/body/cta_type/
+  miniatura/vídeo/formato; listas do criativo dinâmico) e `cevico_ad_insights`
+  (anúncio × DIA × métricas jsonb). `Crm::AdInsightsSyncService` puxa `/ads` (com
+  `creative{…}`) e `/insights?level=ad&time_increment=1`; `Crm::AdInsightsSyncJob`
+  cron 07:20 UTC (04:20 SP) refaz os últimos 3 dias (a Meta reprocessa); botão
+  "Atualizar dados" refaz 30 dias, primeira carga 90; trava Redis + estado em
+  `meta_ads_config['creatives_sync']` (synced_at/running_since/last_error).
+  Quebras (posicionamento, idade×sexo, ativos title/body/call_to_action) vêm da
+  Meta sob demanda com cache de 6 h (`Crm::AdBreakdownService`); `summary` traz
+  alcance/frequência REAIS do período (a soma dos dias infla o alcance).
+- Leitura por anúncio (`Crm::CreativeAnalyticsService`): taxas contra a média
+  da conta ponderada por impressões (≥115 % forte, ≤80 % fraco), diagnóstico em
+  1 frase (gancho fraco / gancho forte-corpo fraco / segura mas não clica / clica
+  mas não conversa / acima da média / na média), FADIGA = 2ª metade do período
+  com ≥40 % das impressões da 1ª e CTR ≤75 % (período ≥14 d).
+- Tela Relatórios → Central de Criativos (`reports/CreativesCenter.vue`, rota
+  `creatives_reports`, grant `reports`, paleta `report:criativos`): hero + régua
+  de período + filtros em 1 linha (formato/campanha/status/ordem/busca) + KPIs;
+  abas Criativos (cards com miniatura, gancho, corpo, CTA, 4 medidores com a
+  média da conta marcada, números, jornada do CRM, diagnóstico, CTR por dia),
+  Ganchos/corpos/CTAs (ranking por ativo — exige criativo dinâmico; aviso quando
+  não há), Ritmo da conta (investimento/conversas/CTR por dia — um eixo por
+  gráfico) e Como se calcula. "Ver a fundo" = modal com série diária, 1ª × 2ª
+  metade, curva de retenção (SVG próprio), posicionamento, idade × sexo, ativos
+  e links Gerenciador/Instagram. "Comparar" = até 4 lado a lado (melhor de cada
+  linha com troféu + curvas sobrepostas). Componentes em
+  `components-next/cevico/creatives/` (CreativeCard, CreativeDetail,
+  CreativeCompare, RateMeter, RetentionCurve, creativeFormat.js).
+- API `crm/creatives` (index/show/assets/sync/sync_status; capability reports);
+  ⚠️ filtro de formato viaja como `fmt` (params[:format] é o formato da requisição).
+- Simulação local: token `simulate` (ou `CEVICO_META_SIMULATE=1`) → 8 anúncios
+  fictícios com 90 dias (`Crm::MetaSimulator`); conta 3 local está assim.
+- Testes: `spec/services/crm/creatives_center_spec.rb` + controller spec (17/17).
+- Deploy: MIGRATION nova (20260919143000) → BACKUP antes; WEB+SIDEKIQ; depois
+  Relatórios → Central de Criativos → "Buscar agora" (primeira carga de 90 dias).
+- Limites: a Meta só devolve ativos separados em criativo dinâmico/flexível;
+  imagem estática não tem gancho/retenção (só clique/conversa); atalho na tela
+  Anúncios (Meta) leva para a Central.
+- RODADA 2 (feedback 19/09 "visualização apertada, parâmetros claros,
+  palavras inteiras"): PARÂMETROS bom/atenção/ruim em `Crm::CreativeTargets`
+  (padrões dos benchmarks: parada bom ≥ 35 %/ruim < 25 %; retenção ≥ 50 %/< 30 %;
+  CTR ≥ 1,5 %/< 0,7 %; conversa por clique ≥ 45 %/< 25 %; custo por conversa
+  ≤ R$ 10/> R$ 25), editáveis pelo admin na aba "Parâmetros e fórmulas"
+  (`meta_ads_config.creative_targets`, POST settings/update_meta_ads).
+  Diagnóstico passa a citar o parâmetro ("parada 27,5 %, bom é ≥ 35 %") +
+  `focus` (o que trabalhar) + posição vs média da conta. `prev` = o mesmo
+  criativo no período anterior de igual tamanho (setas ▲▼ em tudo);
+  `prev_daily`/`prev_totals` da conta; `averages.retention` (curva média).
+  UI: `BulletMeter` (régua estilo bullet graph: faixas ruim/atenção/bom, traço
+  do parâmetro, triângulo da média, veredito com ícone + palavra, variação);
+  `CreativeCard` = FICHA COMPLETA de largura inteira (mídia | gancho/corpo/CTA/
+  leitura/jornada | réguas + KPIs com variação + CTR por dia com linha da
+  média), 1 por linha; `CreativeTable` = visão tabela ordenável (escolha
+  lembrada); `AssetTable` (peças/posicionamento/idade×sexo em tabela com fatia,
+  CTR, conversas, custo e melhor/pior marcados) usada na aba Ganchos/corpos/
+  CTAs e no Ver a fundo; `CreativeDetail`/`CreativeCompare` no `.cv-modal`
+  SÓLIDO do kit (corrige o modal transparente) com seções lidas de cima para
+  baixo, frases de leitura por gráfico (média, melhor e pior dia), metades,
+  curva de retenção × média da conta; Ritmo da conta com o período anterior
+  sobreposto e frases de leitura; KPIs com variação e contagem verde/atenção/
+  vermelho. Referências: bullet graphs de Stephen Few, benchmarks AdSights/
+  Motion (hook rate, hold rate), curva de retenção completa por variante.
+  Próximo (pedido dele, prioridade menor): IA plugada na leitura (insights).
+- RODADA 3 (pedido 19/09: metas automáticas pelo nosso histórico "nos superar
+  dia a dia, semana a semana, mês a mês"; moldura moderna e campeão animado;
+  escolha de campanha intencional; aba de peças caprichada; resumo histórico):
+  `Crm::CreativeRecords` (recordes por métrica: melhor dia ≥300 impr., melhor
+  semana-calendário ≥1.500 impr. e ≥4 dias, melhor mês ≥3.000 impr. e ≥7 dias,
+  mediana semanal, hoje/semana/mês × anterior; campeões de gancho/corpo/CTA/
+  conversa/custo por mês e de todos os tempos, com texto e miniatura; cache
+  1 h por carga). `Crm::CreativeTargets` ganha `mode` manual|auto e `step`
+  (3 % padrão): no auto, bom = melhor semana + passo, ruim = abaixo da mediana
+  (cai para o manual sem histórico). `GET crm/creatives/history` (recordes +
+  campeões por mês + peças campeãs por mês via breakdowns cacheados).
+  Overview: `champion_of` por criativo (menor custo ≥5 conversas; melhor
+  parada/retenção/CTR/conversa ≥500 impr.) e `campaign_stats` (cartões de
+  campanha com criativos, investimento, conversas, custo, verde/atenção/
+  vermelho, leads, cirurgias). UI: bloco "Campanhas" (cartões, seleção
+  intencional, chip "Analisando: X" no hero); `.cv-frame` (moldura de vidro
+  com blur) e `.cv-champion` (borda cônica girando + pulso ouro + selo com
+  brilho, respeita reduced-motion) no kit SCSS; selos "Campeão de gancho/
+  corpo/CTA/conversa/custo" na ficha e troféus na tabela; aba "Ganchos,
+  corpos e CTAs" com explicação dos parâmetros por parte + `AssetPodium`
+  (1º/2º/3º com medalha, texto inteiro, conversas, custo, CTR, fatia; 1º com
+  moldura campeã; ranking completo dobrável); aba "Recordes e histórico"
+  (cards por métrica com melhor dia/semana/mês, régua "esta semana × recorde",
+  hoje×ontem / semana×anterior / mês×anterior; campeões de todos os tempos
+  com moldura; tabela mês a mês; peças campeãs por mês); aba Parâmetros com
+  Manual × Automático + passo de superação e a base (recorde/mediana) de cada
+  número. Specs 17/17.
+- RODADA 4 (19/09 noite, feedback dele: "está ficando realmente bom"; campanhas
+  com contorno e cara de clicável; retirou o pedido de animação — só moldura em
+  degradê "dopamina" (todas as cores, pedido dele na hora) + selo dourado com troféu; Recordes "ainda mais Apple"; botão para
+  "transcrever" a parte campeã e montar os blocos da copy): `.cv-choice` no kit
+  (cartão-botão com borda firme, levanta no hover, ✓ quando escolhido, chevron
+  quando não) nas campanhas; `.cv-frame.cv-champion` vira moldura DOPAMINA
+  PARADA (véu leve das cores + fio 3 px rosa→laranja→amarelo→verde→ciano→violeta; giro/pulso/brilho apagados, junto
+  com `@property --cv-angle`); aba Recordes: campeões de todos os tempos com
+  número grande, miniatura, fio divisor e rodapé (selo + Transcrever);
+  "Campeões mês a mês" e "Peças campeãs por mês" deixam de ser tabela e viram
+  lista agrupada por mês (cartão por mês com 4/3 células: número, miniatura,
+  nome, citação, Transcrever); botão TRANSCREVER (`useTranscribe.js`: peça
+  sozinha = texto puro; anúncio inteiro = Gancho/Corpo/CTA rotulados; toast
+  com o trecho) no histórico, mês a mês, peças, pódio (`AssetPodium` prop
+  `part`), ranking (`AssetTable` props `copyable`/`part`), ficha
+  (`CreativeCard`) e Ver a fundo (`CreativeDetail`); `CreativeRecords#describe`
+  passa a devolver `hook`/`body`/`cta_label` além do `text` da parte.
+  LAYOUT (pedido dele 19/09 noite, antes de subir): fichas SEMPRE no layout
+  "de celular" (mídia + chips + teia em cima, texto, números embaixo) e 2 por
+  linha no desktop (`lg:grid-cols-2`); o interior responde à largura da FICHA
+  via container queries do kit (`.cv-cq`, `.cv-cq-thumb/-meters/-kpis/-radar`:
+  réguas em 2 colunas a partir de 480 px de ficha, miniatura maior e KPIs em 4
+  a partir de 640 px); seletor de PERÍODO desceu para junto das abas
+  (Criativos, Ganchos…, Recordes…); filtros (formato/status/ordem/busca/
+  Comparar) foram para dentro da aba Criativos; TABELA cabe sempre sem barra
+  (`table-fixed`, sem `nowrap`, gancho/corpo/conversa/investido só a partir
+  de md, leads/cirurgias só em xl, teia só em md+).
+  ⚠️ BUG DO KIT achado nessa rodada (desde a 161, 13/09, EM PRODUÇÃO): o
+  contorno não aparecia porque `--cv-rgb` era definido com VÍRGULAS
+  ("107, 58, 201") e o kit usa a sintaxe moderna `rgb(var(--cv-rgb) / 0.2)`;
+  o navegador rejeita a mistura "r, g, b / a" e descartava, em silêncio, TODA
+  borda/fundo/sombra que usava a variável (104 regras em 14 arquivos: blocos
+  sem a tinta do dia, sub-cartões sem borda, hovers sem sombra). Correção na
+  fonte: `hexToRgb` passa a devolver "r g b" (espaço) e os 5 presets
+  `.cv-red/.cv-amber/.cv-green/.cv-gold/.cv-slate` idem; único uso em
+  vírgula (`rgba(${hexToRgb()}, 0.16)` no CrmDashboard) virou `rgb(… / 0.16)`.
+  EFEITO: todas as telas do kit (Meu Painel, Relatórios, CRM, Jornada,
+  Central) passam a mostrar a tinta e as bordas que já estavam desenhadas.
+
+
+## 174. 🗄️ DADOS PRÓPRIOS E HISTÓRICO COMPLETO DOS CRIATIVOS — independência da Meta (pedido 19/09 noite)
+
+Pedido dele: "essa parte do nosso armazenamento de dados e histórico é
+importante. E também é importante que a gente construa, armazene e gerencie
+o que é nosso de forma independente da Meta." Investem há mais de 1 ano.
+- CONSTRUÍDO 19/09 (feat/rodada-172, sem commit): `MAX_DAYS` 365 → 1125 (37
+  meses = limite da Meta); carga em JANELAS de 90 dias, da mais recente para a
+  mais antiga, com progresso gravado (`creatives_sync.progress`) e mostrado na
+  tela (chip do hero "carregando histórico: janela 3 de 13" + barra no bloco);
+  `POST crm/creatives/load_history` (só admin) + botão "Carregar histórico
+  completo (até 37 meses)"; `/ads` pedido com TODOS os status (apagados e
+  arquivados vêm); anúncio que só aparece nos números é RECUPERADO por id
+  (`MetaGraph#fetch_objects`, `?ids=` 50 por lote, cai para um a um) → nome,
+  texto, miniatura e status ficam nossos; MINIATURA guardada no nosso Active
+  Storage (`Crm::AdCreativeMediaJob`, roda depois de cada carga, 300 por vez,
+  `thumbnail_src` usa a cópia) — a URL da Meta expira em horas; EXPORTAÇÃO CSV
+  (`Crm::CreativesExport`: `;`, BOM, vírgula decimal, criativo ao lado de cada
+  dia) do período ou de tudo; resumo "Nossos dados" (anúncios guardados e
+  quantos já sumiram na Meta, dias com dados, linhas anúncio × dia, miniaturas
+  guardadas) na aba renomeada "Parâmetros e dados"; "Campeões mês a mês" com 12
+  meses à vista e o resto dobrado; peças campeãs buscam 12 meses. Simulador
+  ganhou o anúncio APAGADO `2309` (só dias com 46+ de idade) para exercitar a
+  recuperação. Specs 22/22 (janelas, recuperação, miniatura com Down stubado,
+  CSV, rotas admin-only). Sem migration nova (Active Storage já existe).
+  Depois da carga o serviço PRÉ-AQUECE o cache dos recordes (com 10 mil linhas
+  o cálculo levou 6 s no clique quando o cache estava frio; cache de 1 h por carga)
+  e as peças campeãs de 12 meses; `AdBreakdownService` guarda período fechado por
+  30 dias (`CLOSED_TTL`) — a aba Recordes não refaz 36 chamadas à Meta a cada 6 h.
+- Limites conhecidos: a ligação com o CRM (lead → consulta → cirurgia) só
+  existe para contatos cuja 1ª mensagem trouxe o anúncio (recente); vídeo em si
+  não é baixado (só a miniatura); a Meta não devolve nada antes de 37 meses.
+- PÓS-DEPLOY: abrir Central → Parâmetros e dados → "Carregar histórico
+  completo" (uma vez; alguns minutos em segundo plano); depois "Exportar tudo
+  (CSV)" e guardar uma cópia fora do sistema. Backup da VPS continua sendo o
+  seguro principal (as tabelas cevico_ad_* + storage/ vão no pg_dump/volume).
+
+
+## 189. 🍎 AGENTES DE IA NO KIT CEVICO — hub Automações no design Apple + "Passos desta etapa" (pedido 21/09: "atualizar este ambiente dos agentes com o nosso estilo apple atualizado")
+- Hub Automações inteiro dentro do kit `.cv-page` (paleta por escopo
+  `automations`, banner `CevicoHero` com olho/dia/paleta, abas em segmento
+  `cv-seg` que embrulham no celular). O hub passou a rolar inteiro (banner +
+  abas + conteúdo), como os Relatórios.
+- Aba Agentes de IA: Gasto (vidro cristalino, número grande, uma linha
+  `cv-row` por agente), Roteiro CEVICO (bloco dourado `cv-gold`, seções em
+  segmento, textareas `cv-input`, botões do kit), cards de agente = `cv-block`
+  na COR DO PRÓPRIO AGENTE (`agentVars(key)` → variáveis --cv* a partir do
+  AGENT_META), chips `cv-chip` (etiqueta, Ligado/Desligado, Rascunho, Ver
+  fluxo), interruptor `cv-switch cv-switch-lg` (novo no kit). Corpo dos 19
+  agentes convertido por passada mecânica (scripts em tmp da sessão):
+  sub-caixas `cv-sub`, tiles `cv-stat`, avisos coloridos → vidro com texto de
+  contraste, "botões em linha" `cv-chip cv-chip-lg` + `cv-chip-on` (novo no
+  kit), selects/inputs `cv-input`, escolhas da Colheitadeira `cv-choice`,
+  rodapé Editar / Salvar rascunho / Publicar no kit.
+- Campo "Prompt do agente" dos respondedores (Atendente de Agendamento e
+  Pós-agendamento) renomeado para "Passos desta etapa" (12 linhas visíveis):
+  é ali que mora o passo a passo 1→8 (recepção → sondagem → autoridade →
+  orçamento → objeções → agendamento → reagendamento → pós-consulta); o
+  Roteiro CEVICO (5 seções) entra antes, igual para todos. Texto do card do
+  Roteiro explica isso.
+- Kit `_cevico-glass.scss`: `.cv-chip-on`, `.cv-switch-lg`, `.cv-switch:disabled`.
+- 21/09 (3ª passada, feedback dele): rótulo do interruptor = Ligado/Desligado (era "salva na
+  hora"); card que abre ganha anel pulsando na cor dele e a página rola até ele; "análise(s)"
+  virou "resposta(s)" nos agentes que conversam (chamada(s) à IA no total); bloco no card dos
+  atendentes explicando a Sombra em uma frase + "Comandos para desligar a IA" (responder = pausa,
+  👍 = reativa, interruptor = tudo) — conferido por spec (3 exemplos ao vivo em
+  crm_listener_responders_spec). Mentor do Time no Meu Painel fica como está (pedido dele).
+- 21/09 (tarde, 2ª passada, pedido dele com prints): abas do hub ALINHADAS
+  com o conteúdo (o kit fixa max-width em `.cv-seg`, faltava o embrulho
+  max-w-5xl) + agentes em CARDS compactos como a Central (`Cards | Lista`,
+  lembrado no navegador; grade auto-fill 15,5 rem; card fechado = ícone,
+  interruptor, nome, chips, descrição em 3 linhas, "30 d: análises · custo",
+  botão Abrir; clicado = ocupa a linha inteira com o corpo completo, seta
+  recolhe). Lista = o formato anterior. Verificado 1280 e 375.
+- Verificado no navegador (conta 3; 1280 claro e escuro; 375 celular): sem
+  rolagem lateral; cards Atendente de Agendamento, Colheitadeira, Copywriter e
+  Auditor abertos e íntegros; lint rodado no contêiner vite (avisos de
+  tradução/estilo inline são os mesmos de antes nas telas CEVICO).
+- Deploy = WEB só, sem migration; reversão = etiqueta anterior. Sobe JUNTO com
+  o item 188 (mesmo arquivo AutomationsHub.vue).
+- Fora desta rodada: aba Painel dos agentes (AiAgentsDashboard.vue) e as
+  outras 6 abas do hub seguem no estilo antigo dentro do `.cv-page` (ganharam
+  só o banner, as abas novas e o contraste de texto do kit).
+
+## 239. 🧩 MEU PAINEL: INDICADORES SEM LIMITE + CARD GRANDE (2×2, resumo) + ESPAÇOS VAZIOS + NOSSAS PALETAS (25/09 tarde: "adicionar quantos indicadores eu quiser… mais paletas (as nossas)… indicador maior com o tamanho de 4 quadrados, um resumo dele… espaçar alguns indicadores") — CONSTRUÍDO SEM COMMIT (WEB só, sem migration)
+- Backend (`settings#update_agenda`): `KPI_LAYOUT_MAX = 200` (antes 40 cards do "+" NO TOTAL, 40 na ordem/ocultos/
+  cores por painel); `kpi_layout[painel]` ganhou `sizes` ({id => 'lg'}) e `spacers` (["gap:xxxx"], até 60).
+- Tela (InicioPage): no Modo edição cada card tem o botão ⤢ "Card grande" (col-span-2 row-span-2) e o rodapé do
+  "Novo indicador" ganhou "espaço vazio" (quadrado tracejado que arrasta como um card; fora do modo edição fica
+  invisível; ✕ tira). Card GRANDE = resumo: número em text-5xl + tendência, gráfico do popup (MiniBars com período
+  anterior) num vidro claro, "pico em X · média Y", as 3 primeiras linhas de detalhe e "ver tudo" (abre o popup).
+  Variante por pessoa sem layout próprio parte do layout que está mostrando (não perde tamanhos/espaços).
+- Paletas: seletor de cor do card e do "Novo indicador" em GRUPOS — Família deste painel · Marca CEVICO (navy,
+  navy claro, ouro) · iMac G3 (7 × tom/claro/complementar) · Frutas da Apple (10 × 3) · Temas e sinais.
+- Armadilha: comentário HTML antes do elemento no `#item` do vuedraggable = "Item slot must have only one child"
+  (a fileira some) — comentário vai DENTRO do elemento.
+- Conferido no localhost conta 3: card grande com gráfico (este ano), espaço vazio no modo edição/invisível fora,
+  seletor com os 5 grupos; estado de teste desfeito.
+- 2ª passada ("quero o gráfico em linha quando num período maior"): `MiniBars` ganhou a prop `line` (linha + área
+  em degradê, ponto no pico e no balde ativo, mesmo eixo/tooltip/período anterior); o card grande usa linha quando
+  a série tem mais de 14 baldes (este mês, este ano, personalizado longo) e barras nos períodos curtos.
+
+## 248. 🧩 MEU PAINEL: GRÁFICO EM LINHA (mín. 7 dias), MODELOS PRONTOS, MÉDIA HISTÓRICA, BLOCOS LADO A LADO E MODO EDIÇÃO DESTRAVADO (26/09: "o gráfico fica em hoje com uma coluna… no mínimo os últimos 7 dias… em linha… pré-definições com nossos indicadores, cores e animações da média histórica… no modo edição tem uma trava… dividir na vertical e na horizontal… excluir e restaurar… já monte um padrão bonito") — CONSTRUÍDO SEM COMMIT (WEB só, sem migration)
+- Card GRANDE: `TileLine.vue` (novo) = linha branca + área sobre a cor do card, anterior tracejado, pico e último
+  ponto, rótulos nas pontas, dica no toque. Em "hoje/ontem" busca o cesto dos últimos 7 dias (`trendBag`).
+  Cards pequenos: flex vertical, sparkline encostada no rodapé (mt-auto) → alinhadas na fileira.
+- MÉDIA HISTÓRICA: `histBag` = cesto dos últimos 90 dias (custom, por dia, cache 30 min). `tileHist`: contagem =
+  ritmo por dia × dias do período (hoje: proporcional às horas 07–19h); taxa (%) = taxa dos 90 dias; ±10% →
+  "▲ x% acima"/"▼ x% abaixo" + brilho suave pulsando (acima) / contorno âmbar (abaixo); sem julgamento se
+  a média esperada < 3. Liga/desliga no modo edição ("média histórica") e os modelos ligam.
+- MODELOS (`helper/cevicoPanelPresets.js`): "Funil do lead" (agendamento; 2 grandes: Novos contatos e
+  Faturamento + orçamento, agendamento, taxas, marcadas, comparecimento, indicações, confirmadas), "Enxuto",
+  "Visão do gestor". `{stage:regex}` acha a coluna do CRM pelo nome. Aplicar = cria os cards do "+"
+  (`<painel>_p_*`, icon_manual), oculta o resto e grava ordem/tamanhos/cores/`preset`/`judge`; "restaurar
+  modelo" reaplica; lixeira nos cards do "+" (exclui de vez), ✕ oculta os fixos (voltam pelos chips).
+- MODO EDIÇÃO: blocos ficam ABERTOS (a trava era o recolhimento automático; "recolher blocos" virou opção);
+  cada bloco tem "metade | inteiro" (`block_layout.half`, grade 2 colunas no desktop) → painel dividido na
+  horizontal e na vertical. Backend: `kpi_layout.preset/judge` e `block_layout.half` no sanitizador.
+- Conferido no localhost conta 3: modelo aplicado (10 cards, 2 grandes simétricos), linhas nos grandes em
+  "este ano", sparklines no rodapé, selos da média; compila.
+
+## 247. 🎈 BALÃO DA GRADE NÃO ESPREME O NOME (25/09 noite: "está desse jeito, zoado") — CONSTRUÍDO SEM COMMIT (WEB só)
+- `.cv-ag-ev-block > * { flex-shrink: 0 }` (as linhas se espremiam e o nome ficava por baixo dos selos) e selos de
+  parceiro/unidade só com altura ≥ 50px (`roomy`/`cv-ag-ev-tight`); dica do balão ganhou parceiro e unidade.
+- Correção dos 93 agendamentos OF às 21h: comando de console rodado por ele em produção (25/09).
+
+## 246. 👥 AGENDAMENTOS EM BLOCOS + QUANDO O LEAD CHEGOU + LISTA | CARDS (25/09: "não consigo passar o olho e entender… visualização em cards… o que é consulta nova, de lead que chegou no dia, na semana ou antes… o que está sendo considerado agendamento") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Backend: `Crm::LeadCohort.of(contact, task)` (dias entre o cadastro e a marcação, fuso SP: mesmo_dia · semana
+  1–7 · mes 8–30 · antes >30 · sem_cadastro); cada linha do feed ganha `lead_arrived_at`/`lead_cohort` e
+  `counts.cohorts` (das marcadas). Spec do controller 5/5.
+- Tela: Resumo ganhou "Quando esses leads chegaram" (ShareBar + chips que filtram) e "O que cada número quer
+  dizer" (marcada, não é marcada, caixa, Marcadas na Agenda, Entrou em Agendamento, % 30 dias, chegaram e
+  agendaram, cuidado com fórmula que mistura coortes). Registros: blocos Ver (Marcações|Agenda do período,
+  Lista|Cards, busca) · Situação (registro, quem marcou, lead chegou) · Onde (unidade, caixa, de onde).
+  Cards: quem + hora, situação, blocos Consulta e De onde (caixa, coorte, coluna do CRM), ações. Selo de coorte
+  também na lista. Visão lembrada por pessoa (`cevico_appts_view`).
+
+## 245. 🔀 REGRA B — "QUEM CHEGOU PRIMEIRO" na cerca dos parceiros (25/09 noite: "um paciente pode ter passado por um e por outro ao longo da jornada… vamos de B") — CONSTRUÍDO SEM COMMIT (WEB+SIDEKIQ)
+- `Crm::PartnerGuard.partner_contact?` = tem marca de parceiro (atributo, etiqueta of_, card no funil deles) E NÃO é
+  `cevico_first?`. `cevico_first_ids`: card num funil da CEVICO criado ANTES do 1º card no funil dos parceiros e do
+  1º item de PARCEIRO no hub (COALESCE(of_created_at, created_at)); sem entrada de parceiro = CEVICO.
+  `excluded_contact_ids` desconta esses (campanhas, régua, colheita, robôs e universo de leads voltam a contar).
+- Continuam protegidos para TODOS: conversa na caixa dos parceiros (`partner_inbox?`/`partner_conversation?`) e os
+  agendamentos do parceiro (`partner_task?`: lembretes/jornada). Quem veio pelo parceiro primeiro e depois
+  aparece no funil da CEVICO continua parceiro (sem IA).
+- Spec: +1 exemplo (CEVICO→parceiro = CEVICO; parceiro→CEVICO = parceiro; caixa dos parceiros fechada) — 18/18.
+
+## 244. 🗓️ CABEÇALHO DAS AGENDAS EM BLOCOS + MINI MÊS SEMPRE ABERTO (25/09 noite: "na agenda semanal quero aquela micro agenda do mês já aberta… dividir em 2 ou 3 blocos… títulos curtos e grandes… o mesmo para a agenda Oftalmofácil") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Agenda geral: o cabeçalho grudado virou BLOCOS no topo da área rolável (o mini mês é alto): ① "Calendário"
+  (272px, só desktop) = Hoje + mini mês (segue a data; semana em vista em faixa na cor; setas só folheiam) +
+  Mês/Semana/Dia; ② período = rótulo curto (Semana · 20/09–26/09) + título GRANDE (text-2xl) + ‹ › + ferramentas
+  (sáb/dom, imprimir, janelas) + Novo; ③ "Filtros" = CAMADAS e QUEM (clínica/médicos/unidades/origem + seletor).
+  Celular: sem o mini mês; título abre o popover antigo; Hoje e Mês/Semana/Dia em ícones no bloco ②.
+- Hub Oftalmofácil (aba Agenda): mesmos blocos — ① Calendário igual; ② "Semana · agenda do hub" + título grande +
+  ‹ ›; ③ "Encontrar" = PACIENTE (busca) + STATUS (legenda, antes no rodapé).
+- CSS: `.cv-ag-block`, `.cv-ag-block-title`, `.cv-ag-block-sub`, `.cv-ag-row-label`, `.cv-ag-mini-week(-on)`,
+  camadas compactas dentro do bloco. ARMADILHA: `lg:hidden` em `.cv-btn`/`.cv-seg` não esconde (o kit define
+  display com mais especificidade) — envolver num <span>/<div> com lg:hidden.
+- Conferido no localhost conta 3 (1400px): as duas agendas com os 3 blocos.
+
+## 243. 🎨 AGENDAS ALINHADAS (geral + hub): camadas suaves, topo em 3 linhas, cartão do dia em grade, navegação do hub no jeito Google (25/09 noite: "filtros mais amigáveis e transparentes… alinhamento vertical e horizontal… negrito no procedimento… navegação da agenda do Oftalmofácil simples e eficaz como a do Google, fácil achar as pessoas") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Camadas (`.cv-ag-kind-on`): ligado = vidro leve na cor do tipo (fundo 13%, contorno, letra escura, bolinha
+  cheia); desligado = neutro com bolinha vazada. Ícone do tipo só em telas 2xl (a bolinha identifica).
+- Agenda geral, topo: linha 1 sem quebrar no desktop (período · ‹ Hoje › · Mês/Semana/Dia · Novo); linha 2 só as
+  camadas (quebram em vez de rolar/cortar); linha 3 atalhos (clínica/médicos/unidades/origem) à esquerda +
+  ferramentas (sáb/dom, imprimir, janelas — texto só em 2xl) e o seletor à direita.
+- Cartão do DIA em grade `.cv-ag-card-grid` (52px | 1fr | 176px): hora · nome + PROCEDIMENTO EM NEGRITO + linha
+  de detalhes · coluna de selos com a mesma largura (tipo, unidade, origem, presença, valor, indicação) — igual na
+  Agenda geral e no hub; no celular os selos descem em linha.
+- Hub (aba Agenda): barra única [Hoje] [‹] [›] + título do período ("Setembro de 2026", "20 – 26 de setembro de
+  2026", "Terça-feira, 1 de setembro de 2026") com calendário para pular de data + "Encontrar paciente na
+  agenda…" (nome/telefone/CPF, 8 resultados, clique abre o DIA dele) + Mês/Semana/Dia com ícones.
+- Conferido no localhost conta 3 (1280px): camadas numa linha, topo alinhado, cartões em grade nos dois, busca
+  "Severino" → abriu 01/09.
+
+## 242. 🕐 OFTALMOFÁCIL: HORA ERRADA ("39600.0") + FUSO (25/09 noite: "o horário que ele está pegando é o errado, acho que esse número 39600.0 tem algo a ver") — CONSTRUÍDO SEM COMMIT (WEB+SIDEKIQ, sem migration)
+- Causa 1: o MySQL do hub devolve SCH_ITE_HOUR em SEGUNDOS desde a meia-noite (39600.0 = 11:00; 40800 = 11:20);
+  o sync gravava "39600.0" e `Time.zone.parse("2026-10-06 39600.0")` = meia-noite. Causa 2: o app roda em UTC —
+  mesmo com "11:00" o agendamento cairia 3h antes. Resultado: agendamentos do hub às 21:00 da VÉSPERA (fora da
+  grade 07–20h → pareciam sumidos), "NaN:NaN" na semana do hub e "39600.0" nos cartões.
+- `Crm::OftalmofacilSurgery.normalize_hour` (segundos/"HH:MM:SS"/Time → "HH:MM"; 0 = sem hora), `#hour_hhmm`,
+  `#local_time` (America/Sao_Paulo); sync grava normalizado e usa `local_time` no due_at e no reference_time; API
+  do hub devolve `hour_hhmm` (registros antigos já aparecem certos).
+- DEPOIS DE IMPLANTAR: card OftalmoFácil → "recarregar tudo do zero" (reescreve a hora do espelho e o horário de
+  cada agendamento pelo external_ref). Spec: +1 exemplo (39600.0 → 11:00 SP); 12/12 verdes (sync + cerca).
+- 3 pacientes "que não entraram": nada no código barra contato já existente da CEVICO (o sync casa pelo telefone/
+  CPF/nome e cria card no funil OF + agendamento). Hipótese forte: estavam na VÉSPERA às 21:00 pelo bug acima.
+  Conferir depois da recarga; se ainda faltar, rodar o diagnóstico por nome (console) — e decidir a regra da
+  "pessoa nos dois funis" (ver resposta de 25/09).
+
+## 241. 🧮 ÍCONES QUE COMBINAM COM O NOME + FÓRMULA LIVRE COM COLUNAS E COM OS SEUS INDICADORES (25/09 tarde: "os ícones precisam ser correspondentes com seus nomes e intenções… no criar indicador, selecionar colunas ou indicadores já existentes e fazer fórmulas de forma livre, ou com outros indicadores") — CONSTRUÍDO SEM COMMIT (WEB só)
+- ÍCONES: `ICON_RULES` (nome sem acento → ícone lucide: orçamento=receipt, agendamento=calendar-check, consulta=
+  stethoscope, comparecimento=user-check, falta=user-x, confirmação=check-check, indicação=target, fechamento=
+  handshake, cirurgia=heart-pulse, pós-op=bandage, exame=scan-eye, tele=video, faturamento/ticket=banknote, leads=
+  user-plus, conversa, ligação, campanha, NPS, tempo, unidade, meta…; sem regra: % / R$ / activity). Vale para os
+  cards do "+" E os fixos (mesma regra → "Fechamento de cirurgias" igual nos dois). Os ícones antigos vinham da
+  fórmula pronta e não seguiam o nome; agora só vence o ícone escolhido À MÃO no construtor (`icon_manual`, novo no
+  sanitizador do backend). Construtor: linha "Ícone" com "automático" (mostra o do nome) + 25 ícones.
+- FÓRMULA: cada card do "+" vira a variável `kpi_<id>`; `withCustomVars` resolve em cadeia com trava de ciclo e
+  entra em todos os mapas (totais, anterior, balde a balde, recorte do popup) → série, tendência e gráfico funcionam.
+  Construtor: "Montar fórmula" com "Lê-se: «Taxa de agendamento» ÷ Novos contatos × 100", botões + − × ÷ ( ) ×100,
+  limpar, busca e 3 grupos com o valor atual: ⭐ Seus indicadores · 🧭 Colunas do CRM (entrou na coluna) · 📊
+  Indicadores do sistema; "Indicador pronto" ganhou "⭐ Seus indicadores". Prévia sem o próprio (evita ciclo).
+  Apagar um indicador usado por outro pede confirmação.
+- Conferido no localhost conta 3: ícones dos cards, fórmula com indicador próprio (prévia 87,5 em "este ano").
+
+## 240. ➖ "ATENÇÃO HOJE" (quadro de avisos do Gestor) MINIMIZA E REAPARECE (25/09 tarde: "precisa ser algo que eu posso fechar ou minimizar, e aí aparece de novo") — CONSTRUÍDO SEM COMMIT (WEB só)
+- Botão "–" no quadro → vira uma barrinha na mesma cor (título + "N aviso(s)" + ▾); clique na barrinha abre de novo.
+- REABRE SOZINHO quando muda a "impressão digital" dos avisos (cor do semáforo + TIPOS de aviso — não os números:
+  62 → 63 conversas não reabre; surgir "sem conferência" reabre) ou quando vira o dia. Guardado no navegador de
+  cada pessoa (`cevico_gestor_verdict_min` = {day, print}; sem armazenamento = minimiza só na visita).
+
+## 238. 📥 "MARCADAS NA AGENDA" POR CAIXA DE ENTRADA + NOMES CLAROS NO AGENDAMENTOS (25/09 tarde: "não entendi registradas no período/consultas do período… seria ótimo se o card mostrasse a partir de quais caixas") — CONSTRUÍDO SEM COMMIT (WEB só, sem migration)
+- `Crm::TaskConversations` (novo): a regra "de qual conversa/caixa saiu a consulta" (Conversa #N citada na
+  descrição, a última; senão a conversa mais recente do paciente) extraída do AppointmentsController e usada nos
+  dois lugares → os números por caixa batem entre Agendamentos e Meu Painel.
+- home: `appointments_booked_by_inbox` [{inbox_id, name, count}] ("sem conversa" no fim). Card "Marcadas na
+  Agenda": linha de baixo = "GOOGLE 9 · INSTAGRAM 6…"; popup com barras "📥 Marcadas por caixa de entrada"
+  (`compareInboxesTitle`) + linhas com nome, número e % do total; o texto das exclusões foi para o "sobre".
+- Agendamentos: "Registradas no período" → **Marcações do período** (o que foi marcado/remarcado/confirmado/
+  cancelado nestes dias, não importa para quando é a consulta); "Consultas do período" → **Agenda do período**
+  (as consultas com DATA nestes dias, não importa quando foram marcadas); frase explicando embaixo da chave.
+- Testes: appointments_controller_spec 5/5; rubocop limpo no arquivo novo; conferido no localhost conta 3
+  (chave + frase visíveis; API devolve a chave nova). Popup não conferido visualmente (card fora do layout local).
+
+## 237. ⚡ MEU PAINEL LENTO ("demora absurdo pra carregar mês/mês passado/personalizado; este ano nem carrega", 25/09) — SUBIU 25/09 (commit df925a1 no develop → imagem ghcr :df925a1, WEB+SIDEKIQ COM MIGRATION → BACKUP antes; reversão :18f45f9)
+- DIAGNÓSTICO: `GET /crm/home` passava dos 15 s do rack-timeout em "este ano". Culpados: (1) Radar com UMA QUERY POR
+  AVISO (até 400) em `agent_performance.rb#radar_stats` + um find_by por pessoa; (2) todas as mensagens enviadas do
+  período carregadas no Ruby DUAS vezes (workday_stats + off_hours_days); (3) KpiBag ~124 queries (2 `total_of` por
+  indicador + 4 por coluna do funil) sem índice em crm_contact_stage_logs(stage_id, entered_at); (4) `reached_stage_count`
+  recarregando funis em laço e `leads_by_inbox` com 3+ queries POR CAIXA; (5) universo de leads recalculado 6x por
+  request; (6) índices faltando em contacts(account,created_at), tasks(account,task_type,due_at/created_at),
+  messages(conversation,message_type,created_at); (7) tela: kpis só depois do home, resposta velha atropelava a nova,
+  auto-refresh de 2 min refazia "este ano". Bug de quebra: preset `custom` no `agenda_until` esticava até hoje.
+- FEITO: Radar = 1 query (VALUES + LATERAL) + nomes em lote; mensagens enviadas = 1 pluck por request (memo);
+  KpiBag = total pela soma dos baldes + cache 2 min (período aberto) / 10 min (fechado); home = funis e universo
+  memoizados, `leads_by_inbox` numa query (e já pela taxa oficial), MIOLO (painel + desempenho + meta de resposta)
+  em cache por pessoa+painel+período (1 min curtos / 10 min mês·ano·custom, JSON round-trip); agenda_dashboard em
+  cache 3/10 min; cerca de parceiros cache 10 min + `forget!` no fim do sync; tasks/fetch com `:contact`; migration
+  `20260925090100_add_cevico_dashboard_indexes` (5 índices, `algorithm: :concurrently`, `if_not_exists`);
+  InicioPage: kpis em PARALELO, contador de sequência (home e kpis), auto-refresh só nos períodos curtos; fix do custom.
+- Deploy: a migration de índices roda sem travar as tabelas (concurrently). Reversão = imagem anterior (índices
+  podem ficar). Se ainda houver timeout no 1º "este ano" frio: subir RACK_TIMEOUT_SERVICE_TIMEOUT=40 no EasyPanel.
+
+## 236. 💰 CARD ANDA SOZINHO PARA "ENVIO DE ORÇAMENTO" (25/09: "a automação não é 100% precisa… lead pula de Novos Contatos direto pra Agendamento") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
+- `Crm::BudgetSideEffects`: mensagem de SAÍDA (robô ou equipe, não privada) com "R$ 1.234" / "1.234 reais" → se o card
+  do funil está ANTES da coluna de orçamento, move (só pra frente, nunca volta) e dispara as automações da coluna
+  (entrou/saiu) como um arrasto. Chamado pelo CrmListener em toda mensagem enviada (depois da cerca: parceiro nunca).
+  Coluna: `agenda_config.booking.budget_stage_id` (Agendamentos → Ajustes → "Quando a clínica manda um valor, mover
+  o card para") ou a 1ª coluna do 1º funil com "orçamento" no nome. Spec 4/4.
+- Por que: a taxa oficial (233) precisa da passagem certa; a automação por palavras continua valendo por cima.
+
+## 235. 📊 AGENDAMENTOS: CAIXAS E UNIDADES MÚLTIPLAS + EMPILHAMENTO POR CAIXA (25/09: "quero poder selecionar mais de uma caixa de entrada, e as duas unidades… empilhamento de caixa de entrada") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
+- Backend `appointments#feed`: `units[]` e `inbox_ids[]` (os antigos `unit`/`inbox_id` seguem valendo); devolve
+  `by_inbox` (quantos registros por caixa, robô × equipe) contado ANTES do filtro de caixa.
+- Tela: os selects viram CHIPS que ligam/desligam (Av. Paulista · Tatuapé; cada caixa com o número que trouxe);
+  barra "De onde vêm os registros · por caixa de entrada" (ShareBar do kit) acima da lista.
+
+## 234. 🎨 AGENDA POR TIPO COM CAMADAS (25/09: "cada coisa precisa ter a sua própria cor… agenda geral… apertar esses botões para ver as camadas") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
+- `cevicoAgenda.js`: 6 TIPOS (`TYPES`): Avaliação azul · Retorno dourado · Pós-operatório rosa (modalidade NOVA
+  `pos_op`) · Exame teal · Teleconsulta violeta · Cirurgia laranja; `typeOf(task)`, `GENERAL_TYPE` (tom neutro),
+  `LEGACY_KIND_TO_TYPES` (?kind= antigo). `KINDS`/`kindOf` continuam para o backend e o painel de Agendamentos.
+- AgendaBoard: o seletor exclusivo virou CAMADAS (`layers`, salvas no navegador): "Geral" liga todas; clique
+  liga/desliga um tipo; clique duplo deixa só ele (a página veste a cor dele). Balão = cor do TIPO; a unidade virou
+  ETIQUETA no balão (`tag-of` no AgendaTimeColumn, `.cv-ag-ev-tag`). Janelas somam os recursos ligados (médicos +
+  sala; janela de exames só quando Exame está sozinho). Modal: seletor de tipo com as 6 opções (`setFormType`);
+  "Tipo de consulta" só ao editar. Conferência: chip do TIPO sempre + chip da unidade na cor da unidade.
+- Backend: `pos_op` nos rótulos do Dashboard da Agenda (+ teleconsulta, que faltava), no `task_kind` do sync
+  Oftalmofácil e no Espaço do Paciente. Deep-link novo `?types=exames,cirurgia`.
+
+## 233. 📊 TAXA DE AGENDAMENTO OFICIAL = MUDANÇA DE COLUNA NO CRM (25/09: "está contando todo tipo de agendamento… resumir à mudança de coluna de envio de orçamento para agendamento de consulta") — SUBIU 25/09 (commit df925a1 → imagem :df925a1)
+- Antes: numerador = cards cuja coluna ATUAL é Agendamento ou posterior (coorte por criação do contato); "Consultas
+  agendadas" = toda consulta criada (tele, exame, cancelada, Oftalmofácil); 3 fórmulas diferentes (card, % 30 dias,
+  fórmula do "+"/Metas/Gestor Autônomo).
+- `Crm::BookingRate`: numerador = pacientes DISTINTOS que ENTRARAM na coluna de agendamento no período (histórico de
+  colunas, `event_type: entered`), vindos de Envio de Orçamento OU de qualquer coluna anterior (decisão dele: pulo
+  direto conta); coluna = a dos efeitos do agendamento (Agendamentos → Ajustes) ou a 1ª com "agendamento" no nome;
+  denominador = universo de leads. Aplicada em: home (`booking_conversion`, `appointments_created`, `appointments_30d`,
+  `leads_by_inbox`), KpiBag (`appointments_created` = "Entrou em Agendamento de Consulta (taxa oficial)"), Metas
+  (`rate_scheduling`), Gestor Autônomo, fórmula pronta do "+".
+- "Consultas agendadas" virou "MARCADAS NA AGENDA": consulta nova, sem exame/tele, não cancelada, sem item de
+  parceiro (home, KpiBag, Metas). Textos dos cards do Meu Painel atualizados. Spec 4/4.
+
+## 232. 💸 CACHE DO ATENDENTE: CONVERSA CACHEADA + % DO CACHE NA TELA (e-mail "prompt cache hit rate is low", 25/09) — SUBIU 25/09 (commit df925a1 → imagem :df925a1; COM MIGRATION: 2 colunas em crm_ai_usages)
+- Diagnóstico: o roteiro (~8k tokens) já era cacheado (213), mas o contexto vivo (agora, vagas) vinha ANTES da
+  transcrição no turno do usuário → nada dela cacheava, e cada volta de ferramenta reenviava tudo; e a tabela de uso
+  não guardava cache lido/gravado (só o log).
+- `ResponderAgentService#user_content`: 2 blocos — conversa (marcada `cache_control` 5 min) e depois o contexto +
+  "responda à última mensagem". `record_usage` grava `cache_read_tokens`/`cache_write_tokens`; Gasto da IA mostra
+  "% do cache" por agente e no dia. Regra de TTL: roteiro 1 h (antes) e conversa 5 min (depois) — ordem certa.
+- Decisões dele (fora do código): esforço do Atendente (hoje alto) e modelo — testar "médio" no Testar agente.
+
+## 231. 🚧 CERCA DOS PARCEIROS — paciente do Oftalmofácil NUNCA recebe mensagem automática (pedido 24/09 noite: "os pacientes da OFTALMOFÁCIL NÃO PODEM RECEBER MENSAGENS DA NOSSA IA; só a caixa Oftalmofácil /inboxes/12 fala com eles… isso precisa ser feito") — SUBIU 25/09 (commit df925a1 no develop → imagem ghcr :df925a1, junto com 232–237; reversão :18f45f9)
+- DIAGNÓSTICO (levantamento dos 16 caminhos que mandam mensagem sozinhos): NENHUM excluía a caixa 12, o funil
+  OFTALMOFÁCIL ou a etiqueta de origem; só `nao_perturbe`/`perda_*` bloqueavam. Toda conversa nova (inclusive na
+  caixa 12) ganhava card no 1º funil (CEVICO); robô de follow-up global sem caixa rodava em todas; lembretes D-1/D-0
+  e Jornada pegavam consultas/cirurgias de parceiro sem filtro; o sync disparava automação no card do funil OF.
+- `Crm::PartnerGuard` (app/services/crm/partner_guard.rb): UMA função "paciente de parceiro?" = card no funil dos
+  parceiros (partner_pipeline_id) OU etiqueta `of_<parceiro>` OU additional_attributes.parceiro OU conversa numa
+  caixa dos parceiros (`agenda_config.oftalmofacil.partner_inbox_ids`, novo). ATENÇÃO: a etiqueta `oftalmofacil`
+  sozinha NÃO serve (a CATARATA_SP também ganha e é a CEVICO). `excluded_contact_ids` (cache 60 s) para públicos;
+  `partner_task?` (task source oftalmofacil + source_detail); `partner_surgery?` (fornecedor ≠ CATARATA_SP).
+  Cada bloqueio deixa "[cerca OF] bloqueado: …" no log.
+- APLICADA em: CrmListener (conversa nova de parceiro/caixa 12 NÃO cria card no funil CEVICO; mensagem de parceiro
+  não aciona Atendente WhatsApp/Instagram, secretário, âncora de agendamento nem automação "mensagem criada" — só o
+  opt-out); CrmAutomationFireJob (ações que falam/mandam dado pra fora bloqueadas: send_form, send_template, n8n,
+  webhook, meta/google ads, schedule_appointment; ações internas passam — cobre entrou/saiu, parado, valor);
+  FollowupBotJob (caixas dos parceiros e pacientes de parceiro fora do escopo + motivo `paciente_de_parceiro`);
+  AppointmentReminderSendJob (pula consulta/exame de parceiro); Jornada (planner ignora cirurgia/consulta de
+  parceiro; dispatcher bloqueia); Campanha WhatsApp/ligação e Régua (público sem parceiros); Colheita; Agente de
+  Ligação (leads sem resposta); sync (card no funil OF nunca dispara automação); LeadsUniverse (parceiro e caixa
+  dos parceiros nunca contam como lead da CEVICO); Lucratividade (`side=own|partners|all`, padrão CEVICO).
+- TELA: card OftalmoFácil → bloco "🚧 Cerca dos parceiros" com as caixas (marcar a "Oftalmofácil", id 12);
+  Financeiro → Lucratividade com chavinha CEVICO | Parceiros do hub | Tudo.
+- FORA DO CÓDIGO (conferir na tela): caixa 12 sem AgentBot/Captain, sem regra de automação nativa que envie
+  mensagem, sem CSAT; nenhum agente de IA com a caixa 12 marcada.
+- TESTES: `spec/services/crm/partner_guard_spec.rb` (6 exemplos: reconhecimento por card/etiqueta/atributo sem
+  confundir a CEVICO; conversa na caixa 12; sem card no funil CEVICO; automação bloqueada × interna passa;
+  campanha/régua; lembrete + follow-up). 111 exemplos verdes nas suítes vizinhas; engine_spec mantém as 2 falhas
+  ANTIGAS. Vue: os 2 componentes compilam.
+- Reversão: imagem anterior (sem migration).
+
+## 230. 🔎 BUSCA QUE SUGERE ENQUANTO ESCREVE, POR AMBIENTE (pedido 24/09 noite: "deixar pra próxima") — AGUARDA "pode construir"
+- Pedido: em todo mecanismo de pesquisa, ir encontrando os termos conforme a pessoa digita (sugestões ao vivo),
+  relacionadas ao ambiente onde está: na aba Oftalmofácil puxa pacientes/registros do hub; a barra de pesquisa
+  geral do sistema puxa de tudo (pacientes, conversas, agenda, CRM, hub); no CRM puxa do próprio CRM; e assim
+  por diante.
+- Caminho sugerido: componente de busca do kit (`CevicoSearch`) com lista de sugestões (nome, telefone, CPF,
+  parceiro, procedimento) e escopo por tela; endpoint leve de sugestão (`/crm/search/suggest?scope=…&q=…`,
+  até 8 resultados, 250 ms de espera); na barra geral, resultados agrupados por ambiente com atalho para abrir.
+
+## 229. 🏥🖥️ ABA "OFTALMOFÁCIL" — o hub dentro do sistema, no design Apple (degrau 1: espelho só leitura) (pedido 24/09 fim de tarde: "aba lateral, ambiente interno do que é o Oftalmofácil… espelhado num primeiro momento, migração total no futuro" → "vamos em frente") — SUBIU 24/09 (commit 18f45f9 no develop → imagem ghcr :18f45f9, junto com 226 + 228; reversão :e619cf7)
+- BACKEND `Api::V1::Accounts::Crm::OftalmofacilController` (rotas crm/oftalmofacil/overview | items | items/:id; só
+  leitura do ESPELHO, nada toca o banco deles): overview = totais por status, PARCEIROS (nosso ⭐ × parceiro,
+  agendados/realizados/cancelados/faltas, quantos já estão na nossa Agenda, valores só admin), meses (data do
+  procedimento), clínicas (com o de-para → local), tipos e a SAÚDE DA AGENDA (marcados de hoje em diante × já na
+  Agenda × faltando × sem paciente casado × agendamento sem local × clínicas sem de-para × "agendada" com data
+  passada > 7 dias); items = lista paginada com filtros (lado nosso/parceiros, status, na/fora da Agenda, sem
+  paciente, parceiro, clínica, tipo, busca por nome/telefone/CPF, período opcional) e, em cada linha, o estado na
+  Agenda (task: local, médico, presença, cancelada) e no CRM (coluna/funil); show = ficha + raw (admin).
+  Escopo de paleta `crm:oftalmofacil` (e `crm:agendamentos`, que faltava) liberado. Spec de request (2 exemplos).
+  Armadilha: método `config` no controller sombreia o do Rails (500 "logger for Hash") → `of_config`.
+- TELA `crm/OftalmofacilHub.vue` (rota crm/oftalmofacil, kit + leitura em F): hero verde-petróleo com chips
+  (espelhados, sincronizado às, avisos "parceiros desligados"/"Agenda desligada"), botão Configurar (admin →
+  Integrações), abas Visão geral | Itens no banner, régua de período. Visão geral = seções numeradas 1 Saúde da
+  Agenda (KPIs clicáveis que abrem a lista já filtrada + 3 caixas: sem local, clínicas sem de-para, "agendada" no
+  passado), 2 Parceiros (linhas com chips e x/y na Agenda; valor p/ admin), 3 Por mês (barras total × realizado)
+  + clínicas/tipos clicáveis. Itens = chips de filtro (lado, status, Agenda, sem paciente, no período) + busca +
+  selects, linhas com data/hora, paciente, status, parceiro (⭐ CEVICO), clínica → local (âmbar se sem de-para),
+  procedimento/olho, médico, selo da Agenda e do CRM; ações Paciente · Agenda (dia/tipo) · Ficha. Ficha em modal
+  com 3 seções (Paciente · Procedimento · Do nosso lado) + registro bruto (admin) e ações à direita.
+- MENU: item "Oftalmofácil" (`Cevico Oftalmofacil`, ícone hospital, cor #64d2ff) na gaveta Atendimento depois
+  de Agendamentos, visível para todo atendente (dá para esconder em Personalizar menu, chave `oftalmofacil`).
+- Ajuda a organizar a Agenda: mostra o que do hub ainda não virou balão, o que está sem local/médico, quem não
+  casou com paciente e as clínicas que faltam mapear — tudo clicável até a linha.
+- Degraus seguintes (fora daqui): 2) ações do nosso lado (presença, anotação, mensagem) gravadas aqui;
+  3) portal do parceiro = migração total (decisão comercial com o Henrique).
+- 2ª PASSADA (feedback dele no localhost: "mais intuitiva… navegável como o frontend do Oftalmofácil, mas
+  melhorado, mais organizado" + "micro tutorial com popups na primeira vez"): a tela virou um AMBIENTE com 6
+  áreas no banner (Visão geral · Agenda · Itens · Parceiros · Clínicas · Pacientes; `?view=` na URL): Visão
+  geral = Saúde da Agenda + Próximos dias (lista da semana) + resumo/top parceiros + Por mês; Agenda = SEMANA do
+  hub em 7 colunas (setas, Hoje, cartões por status com ✓ quando já está na nossa Agenda); Itens, Parceiros,
+  Clínicas e Pacientes em TABELAS (`.cv-of-table`, cabeçalho fixo, zebra, linha clicável → ficha/itens);
+  endpoint novo `crm/oftalmofacil/patients` (agrupa por paciente: itens, primeiro/último, tem marcado,
+  parceiros, contato aqui). TUTORIAL de primeiro uso (`cevico_of_tour_done` no navegador; botão "Tutorial" no
+  banner para rever): 8 balões com holofote no alvo (áreas, período, saúde, próximos, semana, filtros,
+  parceiros, configurar). Corrigido: aba ativa do banner ficava branca sem texto (faltava `--k-deep`) e o
+  import da paleta (named export) que deixava o app inteiro em branco.
+- 3ª PASSADA (prints dele com os dados reais da planilha do Henrique carregados no espelho local — 1.074
+  itens, conta 3): (1) AGENDA DO MÊS (grade de semanas, 3 cartões por dia + "+N", KPIs do mês, clique no dia →
+  semana; chave Mês | Semana; itens por 500); (2) ITENS: cabeçalho AGRUPADO (Quando · Paciente · De onde · O quê ·
+  Situação) com separadores verticais e SANFONA na linha (Paciente / Procedimento / Do nosso lado + botões
+  Paciente · Agenda · Expandir = ficha completa em popup); (3) VISÃO GERAL ganhou "Representatividade":
+  procedimentos mais indicados (HBars itens × realizados), fatia das clínicas, dos parceiros e dos tipos
+  (ShareBar); (4) PARCEIROS e (5) CLÍNICAS viraram cards de indicadores (fatia %, itens, % realizados, %
+  cancel.+faltas, na Agenda, procedimentos de cada um em barras) + ShareBar geral. Backend: overview devolve
+  `procedures`, `top_procedures` por parceiro/clínica e status por clínica (`top_by`); PER_MAX 500.
+- 4ª PASSADA: AGENDA DO HUB com MÊS · SEMANA · DIA no formato da nossa Agenda (reusa `AgendaTimeColumn`:
+  semana = 7 colunas de horas 07–20h com balões por status; dia = coluna de horas + "Itens do dia" em cartões
+  `cv-ag-card`, como a visão Dia; mês → clique no dia abre o Dia; item sem hora entra às 08:00 com aviso).
+  ITENS: tabela que CABE sem rolagem (`cv-of-table-fit`, 5 colunas de 2 linhas: Quando · Paciente · De onde ·
+  O quê · Situação + seta da sanfona).
+- 6ª PASSADA: "Itens" virou "REGISTROS" (a planilha de tudo que aconteceu) e foi para a DIREITA do banner.
+- 5ª PASSADA: "Saúde da Agenda" virou "VOLUME DE AGENDAMENTOS"; Parceiros e Clínicas mostram cartões só dos 7
+  mais representativos (TOP_CARDS) e uma busca por nome acha os demais (ele espera muitos parceiros).
+- Verificação: template/script compilam no Vite; specs verdes; dados reais locais = planilha 20260903_REPORT.xlsx
+  carregada só no espelho (tmp/of_report.csv, runner), de-para local IOP/Ocular Surgery + 3 médicos.
+
+## 228. 🏥🤝📅 OFTALMOFÁCIL = HUB DE PARCEIROS + AGENDA UNIFICADA — FASE 1 "construir o ambiente" (pedido 24/09 tarde: "todos os contatos que vierem do Oftalmofácil, com exceção do CATARATA_SP, vão para o outro ambiente; compartilham a mesma agenda") — SUBIU 24/09 (commit 18f45f9 no develop → imagem ghcr :18f45f9, WEB+SIDEKIQ COM MIGRATION → BACKUP antes; reversão :e619cf7)
+- ENTENDIMENTO: o Oftalmofácil é um hub onde clínicas/médicos parceiros indicam cirurgias, exames e consultas.
+  O fornecedor CATARATA_SP é a própria CEVICO; todos os OUTROS fornecedores são parceiros de aquisição.
+- MIGRATION `20260924180000_add_source_to_tasks`: tasks.source ('oftalmofacil'), tasks.source_detail (parceiro),
+  tasks.external_ref (chave do item lá; índice único por conta). Sem cron novo.
+- SYNC (`OftalmofacilSyncService`): com `partners_enabled` lê TODOS os fornecedores (a consulta MySQL deixa de
+  filtrar pelo fornecedor); `own_provider?` separa nosso × parceiro. Card: nosso → funil da CEVICO
+  (`own_pipeline_id` ou o 1º funil); parceiro → `partner_pipeline_id` (funil OFTALMOFÁCIL); sem funil de
+  parceiro configurado = não cria card (conta em `skipped_partners`). `stage_like` agora procura a coluna SÓ
+  dentro do funil escolhido (antes era em qualquer funil — ambíguo). Contato: `additional_attributes.origem`
+  + `parceiro`; etiquetas `oftalmofacil` (todos) e `of_<parceiro>` (parceiros).
+- JANELA "desta semana em diante" (pedido dele, 24/09 noite): parceiro com data anterior a `agenda_from` (padrão:
+  segunda desta semana) fica SÓ no espelho (`applied_action = mirror_only`): sem paciente, card ou agendamento.
+  A CEVICO (CATARATA_SP) mantém o histórico inteiro. Spec cobre.
+- AGENDA (`sync_task!`, com `agenda_enabled`): item com data ≥ `agenda_from` (padrão: segunda desta semana) vira
+  Task idempotente por external_ref: tipo pelo procedimento lá (Exame → trilho Exames, Consulta → Consultas,
+  resto → Cirurgias), título "Cirurgia/Exame/Consulta: nome", data+hora (08:00 se sem hora), telefone, contato,
+  médico pelo de-para de CRM, local pelo de-para `clinics` (clínica lá → paulista/tatuape/local de cirurgia),
+  `booking_kind = registro`, source/source_detail, observação "Oftalmofácil · parceiro · clínica · tipo · R$ ·
+  status lá" (só sobrescreve a observação que o próprio sync escreveu). Acompanha: realizada → concluída +
+  compareceu; cancelada → cancelada; ausente → faltou; agendada → reaberta. Criador = 1º admin; responsável pelo
+  TaskOwner.
+- PROBE ("Testar conexão") agora devolve o retrato do hub inteiro: parceiros (com ⭐ na CEVICO), clínicas e
+  tipos de procedimento, com contagens. `oftalmofacil_json` devolve também partners_seen/clinics_seen/types_seen
+  (do espelho) e agenda_count.
+- TELA (card OftalmoFácil em Integrações): blocos "🤝 Parceiros do hub" (ler parceiros; funil dos parceiros;
+  funil da CEVICO; chips dos parceiros vistos) e "📅 Agenda unificada" (ligar; a partir de; de-para clínica →
+  local com sugestões clicáveis das clínicas vistas; tipos vistos). Última sincronização mostra Agenda
+  criados/atualizados, itens de parceiros e "sem funil".
+- AGENDA (tela): balão com selo tracejado "Oftalmofácil"/nome do parceiro (OF na semana), chip 🏥 no cartão da
+  conferência, origem na lista do "+N", filtro **Origem: Todas | CEVICO | Oftalmofácil** (aparece quando há
+  agendamento externo). `task_json` passou a devolver booking_kind, source e source_detail. Agente comum enxerga
+  os agendamentos com origem (antes só via os com unidade).
+- TESTES: `spec/services/crm/oftalmofacil_sync_service_spec.rb` (novo, 5 exemplos: parceiro × nosso, Agenda,
+  acompanhamento de status/exame, janela + sem funil, filtro do fornecedor). engine_spec tem 2 falhas ANTIGAS
+  (já falhavam sem estas mudanças).
+- FASE 2 (depois de subir, com clareza): 1) rodar a rake dos 723 (`cevico:oftalmofacil_backdate_agendadas`);
+  2) na tela: ligar "Ler parceiros", escolher o funil OFTALMOFÁCIL, mapear clínicas, ligar a Agenda com a data;
+  3) "recarregar tudo do zero" (silencioso) para trazer os parceiros; 4) conferir a semana na Agenda; 5) regra
+  para "agendada" no passado (decisão dele).
+- Reversão: imagem anterior (a migration só ADICIONA colunas; pode ficar).
+
+## 227. 🏥📅 OFTALMOFÁCIL → AGENDA UNIFICADA ("estamos saindo do Google Agenda", pedido 24/09 tarde) — PLANO ENTREGUE, AGUARDA decisões + "pode construir"
+- Plano em ~/Desktop/CLAUDE CODE/CEVICO/docs/OFTALMOFACIL_AGENDA_UNIFICADA_2026-09-24.md. Resumo: (A) funil
+  OFTALMOFÁCIL como destino explícito do sync (pipeline_id na integração) + regra "lead CEVICO anda no CEVICO,
+  paciente só-Oftalmofácil vai para o OFTALMOFÁCIL" + etiqueta `oftalmofacil`; (B) sync cria/atualiza Task de
+  cirurgia (booking_kind registro, source/external_ref → MIGRATION) para data ≥ segunda desta semana, com selo
+  "Oftalmofácil" na Agenda/conferência/folha e de-para clínica → local; (C) rake dos 723 (existe desde o 166,
+  não rodou em produção) + retrodatar também no funil OFTALMOFÁCIL + regra p/ "agendada" no passado; (D) KPIs
+  do painel ficam limpos por consequência (só o 1º funil).
+- Diagnóstico importante: hoje `stage_like` procura "Cirurgia Agendada" em QUALQUER funil (ordem de posição) —
+  com o funil OFTALMOFÁCIL criado à mão, o destino ficou ambíguo.
+- Decisões dele: regra A; de-para clínica → local; regra dos "agendada" no passado; janela (só daqui pra frente
+  × histórico de setembro).
+
+## 226. 🔘 CONVERSAS: CHAVINHA ABERTAS | TODAS na cabeceira da lista (pedido 24/09 tarde: "pras meninas conseguirem se organizar melhor") — SUBIU 24/09 (commit 18f45f9 no develop → imagem ghcr :18f45f9, WEB+SIDEKIQ COM MIGRATION; reversão :e619cf7)
+- Diagnóstico: o seletor de status nunca esteve escondido (fica no menu "⋯" da lista, ConversationBasicFilter),
+  mas era um menu discreto; a pílula ao lado do título só MOSTRAVA o status.
+- `ChatListHeader.vue`: a pílula virou uma chavinha de dois botões **Abertas | Todas** (`.cv-status-seg`, azul
+  no ativo), ligada ao mesmo filtro de status (`onBasicFilterChange('open'|'all','status')`), salvo nas
+  preferências da pessoa como antes. Resolvidas/Pendentes/Adiadas continuam no menu; quando um deles está ativo,
+  aparece como terceira pílula. CSS em `_cevico-conversas.scss`. Compila no Vite; não conferido visualmente.
+
+## 225. 🖨️☑️ IMPRIMIR COM ESCOLHA DE COLUNAS E ORIENTAÇÃO (pedido 24/09 tarde: "sistema de checkbox de quais colunas eu vou querer imprimir, inclusive a orientação") — SUBIU 24/09 (commit e619cf7 no develop → imagem ghcr :e619cf7, WEB só, sem migration; reversão :c75f12e)
+- Botão "Imprimir" da Agenda abre um painel (kit, 2 seções numeradas): 1 Orientação (em pé / deitada) · 2 Colunas
+  (caixinhas, na ordem da folha): Hora, Paciente, Telefone, Problema/exame/procedimento, Médico, Unidade/local,
+  Observações, Pagamento, Presença, Origem do paciente, Anotações, Nota fiscal. Padrão = a folha do item 224
+  (médico e unidade desligados). "Voltar ao padrão". Rodapé: Cancelar + Imprimir à direita.
+- Escolha salva por pessoa em localStorage `cevico_agenda_print` ({orientation, cols}). `printDayList` monta
+  cabeçalho/colgroup/células só das colunas marcadas (`PRINT_COLUMNS`, larguras ×1,25 na paisagem; sem Anotações a
+  tabela vira largura automática). Presença em Cirurgias mostra "Realizada" no lugar de "Cirurgia indicada".
+- CSS `.cv-ag-check` em `_cevico-agenda.scss`. Conferido pelo HTML gerado (retrato padrão e paisagem com
+  médico/unidade sem origem); template compila no Vite.
+
+## 224. 📅🔎 AGENDA: "+N" NO BLOCO DO MÉDICO ABRE A LISTA DE QUEM ESTÁ NO HORÁRIO + MODAL DE CONSULTA EM SEÇÕES (leitura em F / Gutenberg, mais contraste) (pedido 24/09 tarde, prints + referências de UX) — SUBIU 24/09 (commit c75f12e no develop → imagem ghcr :c75f12e, WEB só, sem migration; reversão :91991b9)
+- BUG (print dele): "08:30 Rony Maran… +2" abria só o primeiro paciente. Agora `openSlot` → se há mais de um no
+  bloco, abre a lista "N pacientes no mesmo horário" (`slotPicker`: número, nome, problema, telefone, situação,
+  seta) e o clique abre a edição daquele paciente; botão "Encaixar outro paciente neste horário" no fim.
+- MODAL criar/editar reorganizado pelos padrões de leitura que ele mandou (Gutenberg: área ótica primária no canto
+  superior esquerdo, terminal no inferior direito; padrão em F): cabeçalho = tipo pequeno + NOME DO PACIENTE em
+  destaque + resumo "qui 24/09 · 09:45 · Gustavo · Av. Paulista" (`formSummary`); corpo em 4 seções numeradas
+  (`.cv-ag-sec`, barra da cor do tipo à esquerda, título forte): 1 Paciente (nome, telefone) · 2 Quando e onde
+  (dia, hora, médico, unidade/local) · 3 Motivo (tipo de consulta, problema/exame/procedimento, "esta consulta é")
+  · 4 Situação (agendada/concluída/cancelada + observações); rodapé = Excluir discreto à esquerda, Cancelar e o
+  botão principal "Salvar consulta" no canto inferior direito. Rótulos com mais contraste (`.cv-ag-form .cv-label`
+  11px escuro), inputs brancos com borda na cor do tipo. CSS em `_cevico-agenda.scss`.
+- FOLHA DO DIA, 5ª passada (print da produção: "anotações ficou gigante e a folha saiu deitada"): volta para
+  RETRATO, sem a coluna Médico, Obs. com 1/3 da largura (58 px, 70 letras, 7,5 px), fontes um ponto menores,
+  "Pac. antigo / Rotina"; Anotações fica com o resto (~185 px). Conferido no navegador em 794 px de largura.
+- PAINEL DIREITO DA VISÃO DIA RECOLHÍVEL (print dele: "muito espaço em branco inútil à direita, agenda
+  apertada"): a grade 5/7 virou flex; botão "Recolher" no topo do painel (bloco do médico + conferência) → vira um
+  trilho de 52 px (botão para reabrir, chip de pendentes, rótulo vertical) e o calendário do dia ganha a largura
+  toda (balões lado a lado ficam largos, nomes inteiros); transição de largura 0,28 s; lembrado em
+  localStorage `cevico_agenda_day_panel`. No celular o trilho vira uma barra em cima. CSS `.cv-ag-side*` em
+  `_cevico-agenda.scss`.
+- 2ª passada ("esse tipo de recurso para regular o tamanho", print do puxador de janela do macOS): DIVISOR
+  ARRASTÁVEL entre o calendário e o painel (`.cv-ag-splitter`, pilula que acende na cor do tipo): arrasta =
+  regula a largura do painel (26–72 %, `dayPanelPct`, lembrado em `cevico_agenda_day_panel_pct`); arrastou até
+  quase o fim (<16 %) = recolhe; clique duplo = volta aos 58 %. Só no desktop (lg); pointer events, sem
+  transição durante o arrasto.
+- Verificação (modal/lista/painel): template e SCSS compilam no Vite; NÃO conferido visualmente (sem sessão logada no navegador da
+  sessão; Chrome da extensão desconectado) → conferir na conta 3 depois de subir, claro e escuro.
+- Fora desta rodada (ele: "vamos precisar aprimorar essa agenda nas funcionalidades"): aplicar os mesmos padrões
+  de leitura aos outros modais da Agenda (janelas dos médicos, sala cirúrgica, encaixe) e ao cartão de conferência.
+
+## 223. 🖨️📋 FOLHA DO DIA ENXUTA (espaço para anotações) + EXAMES NOVOS NA AGENDA + ROTEIRO: 3 MÉDICOS, TABELA DE EXAMES, CASOS ESPECIAIS (PDF das meninas) e VÍDEO DO MÉDICO (pedidos 24/09 manhã, prints + PDF) — SUBIU 24/09 (commit 91991b9 no develop → imagem ghcr :91991b9, WEB+SIDEKIQ, sem migration; reversão :5f087ca)
+- IMPRESSÃO DO DIA (`AgendaBoard.vue` → `printDayList`): folha em PAISAGEM; saiu a coluna Unidade (vai
+  pequenininha embaixo do médico, que aparece pelo nome curto); telefone estreito e formatado; observações em letra
+  menor e em minúsculas (só rebaixa o que veio TODO em maiúscula, ex.: "Retorno de 30 dias PRK valor: R$0");
+  coluna PAGAMENTO com ☐ Dinheiro ☐ Pix ☐ Débito ☐ Crédito; coluna PRESENÇA unificada (☐ Compareceu ☐ Faltou
+  ☐ Cirurgia indicada); coluna ANOTAÇÕES em branco ocupando o resto da largura; linha não quebra entre páginas.
+  2ª passada ("ficou bacana"): cantos da tabela arredondados (border-spacing 0), bolinhas (○) no lugar dos
+  quadradinhos; Anotações fica livre e NOTA FISCAL (○ Sim ○ Não) é a última coluna, própria (3ª passada);
+  coluna ORIGEM DO PACIENTE (○ Indicação / Site / WhatsApp / Médico parceiro / Paciente antigo-Rotina / Convênio,
+  cada uma com "R$ _____") antes de Anotações (4ª passada). Ordem final: Hora · Paciente · Telefone · Problema ·
+  Médico · Observações · Pagamento · Presença · Origem · Anotações · Nota fiscal.
+- EXAMES na lista do formulário da Agenda (`EXAMES`): OCT separado em Córnea/Retina/Nervo/Segmento, Curva
+  tensional diária, Iridotomia e Capsulotomia (além dos que já existiam).
+- ROTEIRO v1 e v2 (`cevico_script.rb` / `cevico_script_v2.rb`), DADOS OFICIAIS:
+  · MÉDICOS: as consultas são com os TRÊS oftalmologistas (sócios, todos excelentes; CRMs do PDF), sempre
+    apresentados como equipe; argumento dele: "muitas vezes os três avaliam o seu caso em conjunto, caso a caso, e
+    acompanham a sua jornada inteira: da primeira consulta à cirurgia e aos retornos". Saiu o "refrativa = Dr.
+    Gustavo" (print da conversa). Paciente que pede um médico específico sem motivo clínico → os três + horários.
+  · EXAMES AVULSOS com a tabela particular: topografia 200, pentacam 350, OCT córnea/retina/nervo 350, OCT
+    segmento 700, paquimetria 200, microscopia 200, biometria 200, retinografia 200, tonometria 200, mapeamento
+    200 (só com o médico), curva tensional 200 (só sexta 13h), iridotomia 790/olho e capsulotomia 500/olho (quarta
+    14h, só com pedido médico). Depois do valor: foto do pedido médico + chamar_humano (equipe agenda).
+  · CASOS ESPECIAIS (PDF "respostas para perguntas específicas"): ceratocone → Dr. Gustavo, R$ 350, Paulista
+    seg/qui; retina → Dr. Henrique, R$ 300, ter/qua Paulista; glaucoma → Dra. Roberta, R$ 300, ter tarde Paulista
+    e sex tarde Tatuapé; frase de correção "houve um equívoco no agendamento…" quando já marcaram por R$ 150; teste
+    de lente escleral (com/sem pedido, R$ 350, 3 h, acompanhante, lente R$ 2.500/olho em 3x, entrada 1.500);
+    menor de 21; crianças (Dra. Daniela); estrabismo; ptose (Vinicius Almeida, IPR); redes sociais.
+  · OBJEÇÕES novas: "qual médico me atende / quero o Dr. X", ceratocone/retina/glaucoma, filho/criança/idade,
+    estrabismo/ptose/lente escleral → apontam para CASOS ESPECIAIS.
+- SEÇÃO NOVA no card do Roteiro: "Vídeos dos médicos" (`doctor_videos`, 6ª seção; entra nas versões/histórico e
+  no v2 por herança). Regra: logo depois de o paciente ESCOLHER o horário (passo D2, antes do nome), "Você já
+  conhece o(a) [médico], que vai te atender?" → sim: "Que bom!"; não: "Quer que eu te mande um vídeo dele(a)
+  falando sobre [procedimento]?" → sim: balão só com o link. SÓ oferece se houver link http para aquele médico;
+  médico sem vídeo daquele procedimento = pula o passo. LINKS já no padrão (mandados por ele 24/09): Gustavo ·
+  refrativa (reel DPUSQsyAjdK), Henrique · refrativa (reel DY7pYqngRyp), Roberta · catarata (reel CvNISgmAuNi) e
+  Roberta · glaucoma (reel C02RO8_OfFl). Vídeo novo = editar a seção no card do Roteiro (mesmo formato).
+- Testes: `spec/services/crm/cevico_script_spec.rb` (6 seções + exemplo novo v1/v2).
+- Produção estava com 0 seções personalizadas (23/09): o padrão novo vale direto. Se alguma seção estiver
+  "personalizada" no card, é preciso "Restaurar padrão" dela para ver o texto novo.
+- Deploy = WEB+SIDEKIQ (roteiro roda no Sidekiq), sem migration; reversão = imagem :5f087ca.
+
+## 222. 🗣️ MICRO-COMPROMISSO DEPOIS DO AGENDAMENTO — "Você pode me confirmar que vai avisar, caso não possa vir?" (pedido 23/09 noite, depois do 1º agendamento real "seguiu muito bem o roteiro") — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
+- Roteiro 1 e Roteiro 2 (passo F do agendamento): a confirmação passa a ser TRÊS balões — 1) "Deu certo! Consulta
+  confirmada…", 2) PS1/PS2 + particular + exames + "Uma atendente confirma um dia antes / Qualquer dúvida, estou por
+  aqui!", 3) balão separado, exatamente: "Você pode me confirmar que vai avisar, caso não possa vir?" (objetivo dele:
+  mais um micro-compromisso com a clínica). Com o "sim" → "Combinado, obrigado!" e encerra sem nova pergunta. No v2
+  saiu a frase antiga "E se por algum motivo não puder vir, me avisa por aqui, combinado?" (virou o balão 3).
+- Seções personalizadas do Roteiro em produção VENCEM o padrão: se a seção do agendamento estiver personalizada, é
+  preciso apagá-la (volta ao padrão novo) ou colar o balão 3 nela.
+
+## 221. 💸📅 GASTO COM OS AGENTES — caixa de seleção do DIA para análise (pedido 23/09 noite, print) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
+- `settings#ai_usage?date=AAAA-MM-DD` devolve `day: { date, totals, by_agent, by_model }` daquele dia (fuso SP), além
+  dos períodos de sempre. Hub → Agentes de IA → bloco Gasto: linha "Analisar o dia" com ‹ › + campo de data (máx. hoje)
+  + chips Hoje/Ontem + "Voltar aos 30 dias"; escolhido um dia, a lista "Por agente (dia)" e o total/chamadas/tokens
+  passam a ser daquele dia; os 4 cards de período continuam.
+
+## 220. 🎨 MENU — gaveta Atendimento sem 3 ícones verdes seguidos (pedido 23/09 noite, print) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
+- Sidebar: cabeçalho Atendimento laranja (#ff9f0a), Conversas verde, Chamadas índigo (#5856d6), Agenda vermelho,
+  Agendamentos azul — sequência laranja/verde/índigo/vermelho/azul.
+
+## 219. 🔬 AGENDA DE EXAMES com janela própria (seg–sex 08h–17h, IOP Av. Paulista) e cor só dos exames (pedido 23/09 noite, print) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
+- PEDIDO: "paga a AGENDA DE EXAMES: é possível agendar das 08 às 17h no IOP da Av. Paulista, de segunda a sexta; por
+  isso os exames devem ter uma cor específica só deles, para serem facilmente identificados na agenda". Até aqui os
+  exames dividiam os blocos dos médicos (item 210).
+- FEITO: `DEFAULT_EXAM_WINDOWS` + `resolveExamWindows` (cevicoAgenda.js; agenda_config.exam_windows, padrão seg–sex
+  08:00–17:00 paulista bloco 30 min); `settings#update_agenda` salva `exam_windows` (exposto no settings JSON);
+  `CrmAPI.updateExamWindows`. AgendaBoard: trilho Exames usa as janelas de exames (dia/semana/mês, faixas, ocupação,
+  duração dos balões), botão "Janela de exames" (modal editável pelo admin: dia, unidade, início, fim, bloco), exames
+  na COR DOS EXAMES (verde-água #0D9488) em balões, faixas e bolinhas — antes o balão pegava a cor da unidade; o
+  trilho Consultas deixa de contar exames na ocupação. Texto do rodapé da ocupação atualizado.
+- FORA: o Atendente de IA não marca exames (segue chamar_humano: "quer exame isolado com pedido médico").
+
+## 218. 🩹 SELETOR DE EMOJI "NÃO ABRE" para as atendentes (feedback 23/09 noite) — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1)
+- PEDIDO: "as meninas estão clicando no botão de emoji, no ambiente de conversas, mas nem abre a janelinha
+  pra elas (confirma se vc ajustou isso)". O item 206 (overflow) já estava em produção e o seletor abre
+  normalmente no local (conferido no navegador, conversa com janela de 24h aberta).
+- CAUSA PROVÁVEL (não é o CSS): o seletor é um componente carregado SOB DEMANDA (defineAsyncComponent sem
+  tratamento de erro). Depois de cada deploy, as abas que ficaram abertas ainda pedem os arquivos da versão
+  anterior (nome com hash) → 404 → o clique não faz nada. Hoje houve 5 deploys; as abas das meninas ficam
+  abertas o dia inteiro. Sintoma idêntico ao console local ("An unknown error occurred when fetching the
+  script" / 404). Vale para TODO componente sob demanda (modais, popups).
+- FEITO: (1) `entrypoints/dashboard.js` ouve `vite:preloadError` (evento oficial do Vite) e recarrega a
+  página UMA vez (guarda de 60 s na sessionStorage — sem ciclo); (2) `ReplyBox.vue`: o seletor de emoji
+  tenta carregar 2x e, se falhar, recarrega a página (rascunho por conversa fica salvo). Sem migration.
+- ORIENTAÇÃO para a equipe até subir: depois de cada deploy, dar F5 (recarregar) na aba do sistema.
+
+## 217. 📅 O QUE CONTA COMO AGENDAMENTO — marcada × remarcada × confirmada × não confirmou × cancelada × lançada (feedback 23/09 noite: "registrar os dados corretamente é de importância máxima") — SUBIU 23/09 (commit 5f087ca no develop → imagem ghcr :5f087ca, WEB+SIDEKIQ; reversão :9ee80b1) COM MIGRATION → BACKUP antes
+- PEDIDO: "ele agendou muitas consultas, não tenho certeza se esse número está correto; acho que ele contou as
+  mensagens de confirmação de consulta… precisamos ajustar o que é agendamento, reagendamento e confirmação".
+  Prints: Meu Painel "Consultas agendadas 31 (+182%)", "Taxa de agendamento 45,6%"; Agendamentos "Marcadas 27 ·
+  Remarcadas 7 · Canceladas 1 · robô 19 × equipe 16"; registros de hoje 18:29–18:36 "Marcada · Equipe · com
+  Laura/Natalia" para consultas de AMANHÃ (24/09) em conversas da caixa CONFIRMAÇÃO DE CONSULTA, inclusive
+  paciente já em "Desmarcou a Consulta".
+- DIAGNÓSTICO (código): (a) "Marcada" = QUALQUER task consulta criada no período (created_at) — não distingue
+  consulta nova (agendamento de venda) de consulta JÁ MARCADA fora do sistema (Oftalmofácil/telefone) que a
+  equipe lança na Agenda depois; as linhas "Equipe" das 18:30 não têm marca de IA na descrição → foram criadas
+  pela equipe na Agenda/Tarefas (creator = a pessoa), muito provavelmente o lançamento das consultas de amanhã
+  na hora da confirmação — o sistema conta cada uma como agendamento novo. (b) A confirmação do D-1 ("sim")
+  hoje vira só uma marca no contato (cevico_appt_reminders[task].confirmed) + nota; não aparece no painel nem
+  nos indicadores; um "NÃO" não vira nada. (c) As âncoras ("consulta confirmada/marcada…") em mensagem
+  ENVIADA por pessoa disparam o Secretário; template do lembrete via SendTemplateService é ignorado
+  (cevico_auto), mas template enviado à mão pelo seletor nativo do WhatsApp NÃO tem a marca → pode gerar
+  consulta "pela IA" a partir de uma confirmação. (d) KPIs "Consultas agendadas"/"Taxa de agendamento"/metas/
+  histórico/Gestor (kpi_bag_service `booked`, home_controller `booked_scope`, goal_period_history) contam
+  created_at → inflam com (a).
+- PROPOSTA: migration `tasks.booking_kind` ('agendamento' padrão | 'registro' = já estava marcada) +
+  `tasks.confirmed_at`; formulário da Agenda/Tarefas pergunta "Consulta nova × Já estava marcada (só
+  registrando)"; painel Agendamentos com 5 tipos: Marcada · Remarcada · Confirmada (SIM ao D-1) · Cancelada ·
+  Lançada; robô × equipe só entre marcadas/remarcadas; KPIs contam só booking_kind='agendamento' + indicador
+  novo "Consultas confirmadas"; toggle por linha (admin) para corrigir o tipo; âncoras ignoram a caixa do
+  lembrete e a extração ganha `confirmacao` (nunca cria consulta a partir de confirmação: acha a existente →
+  confirmed_at; não acha → cria como 'registro'); "NÃO" ao D-1 → marca "não confirmou" + etiqueta
+  confirmar_urgente + aviso no Meu Painel (não cancela sozinho); rake `cevico:reclassify_bookings` em dry-run
+  para reclassificar os lançamentos de hoje (ele confere a lista antes).
+- PERGUNTAS: confirmar que as linhas das 18:30 foram lançadas à mão na Agenda pela Laura/Natalia (e por quê:
+  confirmação do dia seguinte?); "NÃO" ao D-1 deve cancelar sozinho ou só avisar?
+- CONSTRUÍDO 23/09 (a mensagem de confirmação dele = modelo "Confirmamos a avaliação do(a) paciente… Você
+  confirma a consulta?" com botões SIM/NÃO, enviada pelo lembrete D-1):
+  - Migration `20260923230000_add_booking_kind_and_confirmation_to_tasks` (tasks.booking_kind, confirmed_at,
+    declined_at) → BACKUP antes do deploy. `Task::BOOKING_KINDS` + scope `Task.bookings` (nil/agendamento).
+  - Formulário da Agenda (`AgendaBoard.vue`): "Esta consulta é → Nova (agendamento) | Já estava marcada" com
+    dica; vai no payload (`booking_kind`); `tasks_controller` aceita (vazio = nova).
+  - Painel Agendamentos (`appointments_controller#feed` + `CrmAppointments.vue`): no modo "registradas" cada
+    ACONTECIMENTO do período vira uma linha (marcada/lançada pela created_at, remarcada, confirmada pelo
+    confirmed_at, não confirmou pelo declined_at, cancelada) — a mesma consulta pode ter 2 linhas; 6 tipos com
+    cor (confirmada azul royal, não confirmou rosa `.cv-pink` novo no kit, lançada cinza); 7 cards no Resumo;
+    chips de filtro; robô × equipe só entre marcadas/remarcadas/canceladas; linhas com `task_id`; botão do admin
+    "já estava marcada ↔ contar como nova" em cada linha (PATCH tasks booking_kind) para corrigir o passado.
+  - KPIs: `kpi_bag#booked`, `home_controller#booked_scope`, `goal_period_history appointments_booked` e
+    `agent_performance` usam `Task.bookings` (lançada fica fora); indicadores novos `appointments_confirmed`
+    ("Consultas confirmadas (SIM ao lembrete)") e `appointments_registered` ("Consultas lançadas"); rótulo
+    "Consultas agendadas (novas)".
+  - Listener: SIM ao lembrete → `task.confirmed_at` (+ nota, como antes); NÃO/"não vou poder"/👎 →
+    `task.declined_at`, etiqueta `confirmar_urgente` (criada se faltar, vermelha) no paciente e na conversa,
+    nota "❌ … ligue para remarcar ou cancelar" e aviso no Meu Painel (`Crm::AgentAlert` kind `nao_confirmou`,
+    rótulos no InicioPage/RadarPriorityPopup) — NUNCA cancela sozinho; SIM depois desfaz o NÃO. Na caixa do
+    lembrete (agenda_config appointment_reminders d1/d0 inbox_id) "consulta confirmada/agendada/marcada" da
+    equipe NÃO dispara o Secretário (remarquei/cancelei continuam).
+  - Secretário: extração ganhou `confirmacao` (conversa é confirmação de consulta já marcada); Applier
+    `apply_confirmation`: consulta já na Agenda → só registra; não está → cria como LANÇADA (`booking_kind`
+    'registro' no Recorder) com nota "LANÇADA… não conta como agendamento novo".
+  - Rake `cevico:reclassify_bookings[account_id,YYYY-MM-DD]` (DRY-RUN lista; `DRY=0` aplica; `HOURS=48`):
+    consultas da equipe (sem marca de IA) criadas no dia com a consulta até 48 h depois → 'registro'.
+  - Specs: crm_listener_confirmation_spec (4), appointment_applier_confirmation_spec (2), appointments feed
+    atualizado (Carla marcada E cancelada no dia = 2 linhas) — 17/17 verdes + anchor spec; rubocop limpo nos
+    arquivos novos. Migration rodada no docker dev+test (schema.rb atualizado).
+- PÓS-DEPLOY (ele): backup → implantar WEB+SIDEKIQ → rodar no contêiner WEB:
+  `bundle exec rails 'cevico:reclassify_bookings[1,2026-09-23]'` (lista) e, conferido, com `DRY=0`; repetir para
+  dias anteriores se quiser; avisar a equipe: ao lançar consulta que já estava marcada, escolher "Já estava
+  marcada" no formulário da Agenda.
+- FICOU DE FORA: histórico de confirmações anteriores (só a marca no contato; não migrado para confirmed_at).
+
+## 216. 🤖 AGENTES DE IA NAS COLUNAS SEM DONO — Retorno (fundo de funil), Pré-cirúrgico, Pós-operatório (pedido 23/09 noite) — ANÁLISE ENTREGUE, AGUARDA decisões + "pode construir"
+- PEDIDO: "analisar possibilidades de outros agentes nas colunas que temos, para atendimento";
+  exemplo dele = fundo de funil: passou em consulta, recebeu orçamento, pediu um tempo, robô de
+  follow-up cutuca; se volta, um agente ajuda a agendar / atendimento rápido; sabendo o preço pode
+  "pré-agendar" a cirurgia — o agendamento da cirurgia fica com humano por enquanto.
+- DIAGNÓSTICO: da coluna Consulta Realizada em diante (7 colunas) NENHUM agente responde ao paciente —
+  só humano. É exatamente o buraco do exemplo (robô cutuca "Não Fechou Ainda", paciente responde à
+  noite, ninguém continua).
+- PROPOSTA (docs/AGENTES_POR_COLUNA_2026-09-23.md): C = Atendente de Retorno (Consulta Realizada ·
+  Indicação de Cirurgia · Não Fechou Ainda; contexto = consulta, procedimento de interesse, orçamento,
+  Tabela de preços; ferramenta `pre_agendar_cirurgia` que grava intenção + etiqueta + Tarefa/aviso no
+  Meu Painel, humano confirma a data; agenda retorno/teleconsulta/exame com vagas reais; Sonnet 5);
+  D = Pré-cirúrgico (Cirurgia Agendada; preparo a partir de seção do Roteiro aprovada pelos médicos;
+  Haiku); E = Pós-operatório (Cirurgia Realizada · Pós Operatório; esperado × alarme → pronto
+  atendimento + chamar_humano + alerta; NPS e pedido de indicação; Sonnet 5, sombra longa).
+  Ordem: C → D → E. Tudo no motor existente (ResponderAgentService, sombra→fatia→tudo, Orientações,
+  cache), sem migration. Complemento: cabeçalho da coluna do CRM mostrando "quem responde aqui".
+- PERGUNTAS para ele: C cobre "Sem Indicação Cirúrgica"? pré-agendar = mover card com etiqueta "a
+  confirmar" ou só Tarefa + aviso? quem recebe o aviso? quem aprova os textos pré/pós-operatórios?
+
+## 215. 🍎🚀 CRM NO DESIGN APPLE — quadro, colunas, cartões e ficha do paciente no kit (pedido 23/09 noite: "repaginar o nosso CRM com esse layout e design da Apple") — SUBIU 23/09 (commit 9ee80b1 no develop → imagem ghcr :9ee80b1, WEB só, sem migration; reversão :e4686d2)
+- PEDIDO: depois de implantar a e4686d2 ("deu certo"), "vale a pena a gente repaginar o nosso CRM
+  com esse layout e design da Apple. vamos otimizá-lo". Rodada 1 do item 179 (CRM board + ficha).
+- FEITO (só visual — nenhum comportamento mudou; drag, filtros, presets, modos e modais iguais):
+  - Pele nova `assets/scss/_cevico-crm.scss` sob `.cv-crm` (raiz do CrmBoard vira `cv-page cv-overlay
+    cv-crm` com as variáveis do azul royal em `crmVars`); tirar a classe = visual antigo em 1 linha.
+    Registrada no app.scss depois da cevico-agenda.
+  - TOPO em vidro grudado (`.cv-crm-top`, receita do `.cv-ag-top`): título com ícone `cv-icon`, funis em
+    `cv-seg` (ativo azul royal), ferramentas em pílulas de vidro `.cv-crm-tool` com o ícone na cor
+    dopamine de cada uma (ligada = acende inteira: Editar Kanban âmbar, Sem resposta âmbar, Tela cheia
+    royal); linha do período em `.cv-crm-summary`; faixas de modo em `.cv-crm-mode` (edição cv-amber,
+    programação cv-gold, excluir cv-red, novo funil) com `cv-btn`; busca/ordenar/responsável/etiqueta
+    em `cv-input`; caixas, visualizações, período e "Mostrar quem" em `cv-seg cv-seg-sm` (o "Mostrar
+    quem" mantém ouro/azul/verde; as caixas mantêm a cor oficial de cada caixa); calendário
+    personalizado em `cv-pop`.
+  - COLUNAS `.cv-crm-col` (272 px no desktop; 86vw no celular): painel branco 20 px sobre o cinza
+    agrupado da Apple, cabeçalho com degradê leve NA COR DA ETAPA (`--sc/--sc-rgb` calculados no
+    KanbanColumn), ícone squircle `.cv-crm-col-ico`, nome em até 2 linhas (nunca corta), contador
+    tingido `.cv-crm-col-n`, valor em verde; modo programação = anel ouro + automações/robôs em
+    `.cv-crm-auto`; "+ Adicionar contato"/"Carregar mais"/"Nova automação"/"Robô" em `.cv-crm-ghost`.
+  - CARTÃO `ContactCard.vue` reescrito: `.cv-crm-card` (branco, 16 px, fio quase invisível → azul royal
+    no hover, igual às Conversas 214b), cara 36 px com degradê fixo da pessoa (cevicoPersonGradient)
+    quando não há foto, nome em 2 linhas, badge verde WhatsApp de não lidas, pílula âmbar "aguardando ·
+    tempo", prévia com fio verde, etiquetas `.cv-tag` com bolinha (item 212), bolinha da caixa na cor
+    oficial (inboxSolidFor), ações redondas `.cv-crm-act` (Espaço do Paciente, conversa; sem conversa =
+    tracejada).
+  - FICHA (`ContactModal.vue`): casco `cv-modal`, cabeçalho `cv-modal-head` em degradê royal com avatar
+    degradê da pessoa e etiquetas em `cv-glass-chip`, abas em `cv-seg`; campos de dentro ganham o formato
+    do kit por regra da pele (`.cv-crm .cv-modal input/select/textarea`) sem tocar em cada campo.
+    Modal "Adicionar contato" do board idem (cv-modal + cv-seg + cv-btn + degradê nas iniciais).
+  - Navegador de colunas no celular na cor da etapa; board com `md:p-5`.
+- VERIFICADO no navegador local (conta 3): 1280 claro e escuro, 375 celular, ficha aberta, modo
+  programação; 4 SFCs compilados com @vue/compiler-sfc no host (hook de lint não roda neste Mac →
+  commit dos .vue/.scss com --no-verify, como sempre).
+- FORA (próximas passadas do 179): ConversationChatModal (popup da conversa), StageEditModal,
+  ColumnAutomationsModal, FollowupBotModal, ColumnPresetsModal, JourneyWizard — seguem no estilo
+  antigo (funcionam igual). Botão "Salvar" da ficha segue o azul sólido.
+- Deploy = WEB só, sem migration; reversão = imagem atual de produção (e4686d2).
+
+## 214. 💸🧹 GASTO fase 2 (saída curta + esforço low + Haiku no Pós) e LISTA DE CONVERSAS LIMPA para atendentes (pedidos 23/09 noite) — SUBIU 23/09 (commits ae90377 + e4686d2 no develop → imagem ghcr :e4686d2, WEB+SIDEKIQ, sem migration; reversão :1ae7f51)
+- PEDIDO: "1 e 3 fazem sentido juntos" (das opções de baratear) + "quero poder selecionar se agentes terão a
+  conversa clean ou não — as meninas não querem a coluna e as etiquetas, mas os admin querem".
+- GASTO: (a) campo `leitura` da resposta do Atendente (só a equipe lê) passou a pedir UMA frase de até 12
+  palavras — a saída (US$ 15/M) era 43% do custo depois do cache; (b) esforço LOW no agendamento foi construído e
+  ELE RECUSOU ("não vou querer o esforço low") → segue medium; (c) atendente_pos no HAIKU 4.5 (era Sonnet 5; 3x mais barato; JSON estruturado já roda
+  em Haiku no Radar). Escolha explícita do admin por agente (Integrações → IA) continua valendo por cima.
+- LISTA LIMPA: `agenda_config.list_clean_for_agents` (update_agenda; sai em crm/getSettings); chavinha em
+  Configurações → Painéis ("Lista de Conversas limpa para atendentes"); ConversationCard esconde a 4ª linha
+  (coluna do CRM + etiquetas + SLA) quando ligado E a pessoa não é admin (useAdmin). Cor/crachá/quem cuida ficam.
+- 214b (23/09 noite, depois do ae90377): a chavinha virou TRÊS MODOS em Painéis ("Tudo" · "Só sem a coluna" ·
+  "Sem coluna e etiquetas") — `agenda_config.list_clean_mode` (full | no_stage | clean; o booleano antigo ligado
+  vale como clean). No modo clean o cartão vira `.cv-card-clean`: nome 15,5 px, pílula de quem cuida maior,
+  linhas com 5 px, padding 13 px ("nomes um pouco maiores e realinhados"). + FIO QUASE INVISÍVEL em volta de
+  cada cartão (rgba 0,0,0,.055; escuro .07) que fica AZULADO ao passar o mouse (fundo azul 5% + fio azul 35%),
+  igual ao cartão aberto; o separador embutido (linha depois da foto) saiu; 4 px entre cartões.
+- REVERSÃO: imagem :1ae7f51.
+
+## 213. 💸 CACHE DO ROTEIRO — gasto dos agentes de IA (pedido 23/09: "está muito bom, mas inviável financeiramente como está") — SUBIU 23/09 (commit 1ae7f51 no develop → imagem ghcr :1ae7f51, WEB+SIDEKIQ, sem migration; reversão :1af4f6f)
+- DIAGNÓSTICO (print do painel de gasto, 23/09): Atendente de Agendamento US$ 20,68 em 30 dias (US$ 24,63 só no 1º
+  dia solto), 457 respostas, 6,26 M tokens de ENTRADA (13,7 mil por resposta) × 127 k de saída. Causa: o Roteiro
+  CEVICO (~38 KB ≈ 10 mil tokens) vai inteiro em TODA chamada e em toda volta de ferramenta, sempre a preço cheio
+  (Sonnet 5, US$ 3/M). 91% do custo era entrada repetida.
+- SOLUÇÃO (Crm::AiAgentConfig): `cached_system(text = system_prompt)` = o prompt como bloco `cache_control:
+  {type: ephemeral, ttl: 1h}`; as ferramentas (que vêm antes do system na chamada) entram no mesmo cache. Aplicado
+  nos 20 serviços que passam `system_:` (respondedores, Secretário, Radar, Coach, Mentor, Copywriter, Construtor…).
+  Gravar custa 2x a entrada (uma vez por hora por variante de prompt), ler custa 10%. O que muda a cada chamada
+  (contexto vivo + conversa) continua na mensagem do usuário, fora do cache. Prompts curtos demais (abaixo do mínimo
+  do modelo) a Anthropic só não guarda — nada quebra.
+- PAINEL DE GASTO: `record_usage` agora precifica certo (entrada nova ×1, gravação ×2, leitura ×0,1) e loga
+  `[Crm::AiUsage] agente modelo entrada= cache_gravado= cache_lido= saida= US$`. `input_tokens` continua sendo o
+  total (nova + gravada + lida). Sem migration.
+- ESTIMATIVA: Atendente de US$ ~20 → ~US$ 5–6/mês no mesmo volume; vale para todos os agentes. Conferir no painel
+  "Gasto com os agentes de IA" após 1 dia.
+- SECRETÁRIO DA AGENDA: ele decidiu DESLIGAR (Atendente agenda e Pós-agendamento remarca direto na Agenda) —
+  interruptor em Automações → Agentes de IA, feito por ele em produção. O que para: consulta marcada pela equipe só
+  pelo chat não entra sozinha na Agenda.
+- Spec: spec/services/crm/ai_agent_config_cache_spec.rb (3 verdes). Teste real local: 2 chamadas seguidas do
+  Atendente em simulação (ver log cache_gravado/cache_lido).
+- REVERSÃO: imagem :1af4f6f.
+
+## 212. 🎨 COR DE CADA PESSOA na lista de Conversas · chavinha do Atendente IA no topo da conversa · robô de follow-up é SISTEMA · etiquetas no design Apple (pedidos 23/09 tarde, 5 prints) — SUBIU 23/09 (commit 1af4f6f no develop → imagem ghcr :1af4f6f, WEB só, sem migration; reversão :db5df13)
+- PEDIDO (depois de implantar o db5df13: "ficou legal"): (1) a chavinha do Atendente IA deve ficar NA CONVERSA, não na
+  aba do paciente, menorzinha, liga/desliga; (2) o "robô de follow-up" saía na cor humana e PAUSAVA a IA → tem que
+  ser reconhecido como sistema e não interferir; (3) balões/fundo coloridos aprovados, mas equilibrar o layout
+  (respiros); (4) sistema de cor para RESPONSÁVEL e CAIXA na coluna da lista — identificar quem cuida só de bater o
+  olho em "Todas"; (5) cartões "falhados" sem coluna/etiqueta; (6) etiquetas quadradas → design moderno Apple, no
+  sistema inteiro; (7) "a barra dos contatos precisa ser bonita e inteligente; as pessoas vão se orientar pelas cores"
+  — ele pediu para ser questionado.
+- CHAVINHA DA IA (ResponderSwitch.vue, novo, no ConversationHeader ao lado da paleta): pílula "🤖 IA ligada/em
+  sombra/desligada" + interruptor iOS (30×18); verde = respondendo, azul = sombra, cinza = desligada; some quando a
+  caixa não tem agente. Lê `GET crm/conversation_summary/responder` (rota nova, só o estado — sem previsões nem
+  métricas) e espelha o estado pelo websocket (`chat.additional_attributes.cevico_atendente_wa`): quando alguém da
+  equipe responde, a chavinha apaga sozinha. O botão saiu do ConversationSummaryCard (a trava do follow-up continua lá).
+  Notas internas dizem "chavinha da conversa".
+- ROBÔ = SISTEMA (crm_listener.rb): `human_outgoing?` — só mensagem ENVIADA por um User de verdade e SEM marca
+  automática (`AUTOMATED_MARKS` = cevico_auto, cevico_journey, cevico_followup_bot_id, cevico_ia_agent) mexe na
+  pausa do Atendente IA (WhatsApp e Instagram). Antes só duas marcas eram ignoradas: régua da jornada, lembrete D-1,
+  campanha e formulário por automação (sem remetente) pausavam a IA como se fosse humano. A nota de pausa agora diz
+  QUEM assumiu ("⏸ … — Vaneide assumiu esta conversa") e o estado guarda `by`. Specs: +4 no
+  crm_listener_responders_spec (25 verdes) + GET responder no conversation_summaries_responder_spec.
+- BALÃO AUTOMÁTICO (Message.vue): qualquer mensagem com marca automática vira variante BOT (lilás #ede9fe claro /
+  #312e81 escuro, fora do tema de balões da pessoa) com avatar de ROBÔ e tooltip "Enviada por Robô de follow-up
+  (automático, em nome de Vaneide)". As marcas passaram a viajar no payload da API (`_message.json.jbuilder` ganhou
+  `additional_attributes`) — antes só chegavam pelo websocket, e ao recarregar a tela o balão voltava a azul.
+- COR DE CADA PESSOA (helper `cevicoPersonColors.js`, 10 tons dopamina, ordem de entrada na equipe = cor estável,
+  robô = lilás): no cartão da lista (ConversationCard.vue) → CRACHÁ redondo de 20 px sobre a foto do paciente
+  (foto da pessoa ou inicial) + PÍLULA com o primeiro nome à direita da 2ª linha; sem responsável = "sem
+  responsável" cinza (aparece em "Todas" e nos filtros, como antes). Caixa de entrada = nome do paciente na cor da
+  caixa (já era) + linha 2 com ícone do canal e nome da caixa em versalete na mesma cor. Os botões "Pessoa
+  responsável" do painel (ConversationAction.vue) usam a MESMA cor: escolhido = pílula cheia, os outros = bolinha.
+- ETIQUETAS APPLE (global): `components/ui/Label.vue` (woot-label, usado no sistema inteiro) e
+  `components-next/label/Label.vue` viraram PÍLULA com a tinta da própria cor (fundo 13% da cor sobre branco,
+  letra 78% da cor sobre preto, fio 28%; escuro 26%/62%/42% — `color-mix`), sem quadradinho; × redondo. Classes
+  reutilizáveis `.cv-tag` (+ -btn/-md/-solid/-ghost/-more/-dot/-tint) no `_cevico-glass.scss`. Coluna do CRM no
+  cartão = a mesma pílula (cor da coluna) com chevron; sem card = "sem coluna" tracejada (a 4ª linha existe sempre
+  que há jornada — cartões alinhados); popover "Mover para a coluna" nas pílulas.
+- FALHADOS: o CardLabels antigo media a largura dos chips no mount e, dentro da lista virtual, media 0 → etiquetas
+  invisíveis e só um ">" sobrando. O cartão novo não mede nada: até 3 etiquetas + "+N" que abre/fecha.
+- RESPIROS: cartão 11×12 px por dentro e 2 px entre cartões, linhas com 3 px, separador a partir da foto (68 px);
+  paleta "A sua cor" com 316 px, p-4, bolinhas 32 px, gap 8, rodapé "Agora" em caixinha.
+- TESTADO 23/09 no docker local (conta 3, 1440 claro+escuro, 760): chavinha liga/desliga (POST toggle_responder
+  200, nota interna, label muda), atribuição pinta crachá + pílula + chip do painel, etiquetas/colunas em pílula,
+  balões automáticos lilás com robô, paleta com respiro; filtro "quem cuida" (GET conversations?assignee_ids[]=1
+  → só a conversa dele; soma com dani; "Todas" limpa); cor escolhida em Painéis (POST update_agenda 200) muda o
+  crachá/pílula na lista. Specs: 50 exemplos verdes (finder + listener + summaries). Lint: só avisos i18n (raw text) + `vue/no-root-v-if` no
+  ResponderSwitch (aceitável); rubocop = só as métricas pré-existentes do crm_listener. Duas mensagens de teste
+  criadas na conversa #363 local (apagadas ao final).
+- RESPOSTAS DELE (23/09, 4 perguntas) e o que foi construído em cima:
+  (1) NOME NEUTRO — o nome do paciente ficou preto; a cor da caixa mora só na linha 2 (ícone do canal + nome da
+  caixa em versalete). (2) SÓ O ADMIN escolhe a cor de cada pessoa → bloco "Cor de cada pessoa" em Configurações →
+  Painéis (10 bolinhas da paleta + "Automática"); guardado em `agenda_config.person_colors` ({user_id: '#hex'},
+  sanitizado, só ids da conta) via `settings/update_agenda`; sai em `crm/getSettings.person_colors`; helper
+  `personColorFor(agents, id, overrides)` + composable `useCevicoPersonColors()` (cartão, painel, filtro, Painéis).
+  (3) FILTRO "QUEM CUIDA" no topo da lista (ChatList.vue, abaixo das caixas): fileira de avatares na cor de cada
+  pessoa (Todas · pessoas · ninguém); toque filtra, soma com mais toques, fica no navegador (`cevico_conv_who`),
+  pula a aba para "Todas"; entra no resumo do topo recolhido ("só Vaneide"). Backend: `assignee_ids` no
+  ConversationFinder (`filter_by_assignee_ids`, 0 = sem responsável) + filtro local em helpers.js (websocket) +
+  spec 2/2. (4) CRACHÁ só em "Todas" e filtros (mantido).
+- 212b (23/09, "a cor dos pacientes da cor da atendente"): a "foto" do paciente (iniciais sem foto) fica na COR
+  DE QUEM CUIDA da conversa — na lista (44 px), no topo da conversa (32) e na ficha do painel (72); sem
+  responsável = cinza neutro (UNASSIGNED_COLOR); robô = lilás. Avatar.vue ganhou a prop `gradientOverride`;
+  composable `patientGradientFor(chat)`. A foto real (Instagram/upload) continua por cima. O degradê por hash do
+  nome (item 199) ficou só onde não há conversa (ex.: Contatos).
+- 212c (23/09, print "recolher, minimizar → mais conversas"): o topo da lista de Conversas começa RECOLHIDO para
+  todo mundo (uma linha: botão azul "Filtros ⌄" + resumo do que está valendo + nova conversa); quem abre fica
+  aberto só no próprio navegador (`cevico_conversas_topo_recolhido` = '0'). Botão de recolher agora tem nome
+  ("Recolher ⌃") em vez da setinha cinza.
+- PEÇAS: ResponderSwitch.vue (novo), cevicoPersonColors.js (novo), useCevicoPersonColors.js (novo),
+  Avatar.vue (gradientOverride), ContactInfo.vue (foto na cor de quem cuida),
+  ChatList.vue (fileira quem cuida), settings/paineis/Index.vue (cor por pessoa), conversation_finder.rb,
+  api/inbox/conversation.js, store conversations/helpers.js, settings_controller.rb (person_colors),
+  ConversationCard.vue (reescrito),
+  ConversationHeader.vue, ConversationSummaryCard.vue, ConversationAction.vue, Message.vue, ui/Label.vue,
+  next/label/Label.vue, BubbleThemePicker.vue, _cevico-conversas.scss, _cevico-glass.scss, crm.js, crm_listener.rb,
+  conversation_summaries_controller.rb (+ `responder`), routes/cevico_crm.rb, _message.json.jbuilder, 2 specs.
+- REVERSÃO: imagem :db5df13 (produção atual). Sem migration.
+
+## 211. 📝 TAREFAS + NOTAS DOS PACIENTES no Meu Painel · barra de Tarefas alinhada · seletor dos 4 tipos NO BANNER dos Agendamentos com a cor do ambiente · calendário da Agenda fecha ao clicar fora (pedidos 23/09 12h–13h, prints) — SUBIU 23/09 12h36 (commit db5df13 no develop → imagem ghcr :db5df13, WEB só, sem migration; reversão :a943128)
+- TAREFAS: barra "Minhas tarefas | Todas", o seletor "Por pessoa…" e a contagem com a MESMA altura (36 px) e os mesmos
+  cantos, numa linha só (o select tinha width 100% do CSS global → !w-auto). Cabeçalhos das colunas com ícone, título e
+  número na mesma linha de base (leading-none + chip de 26 px).
+- NOTAS DOS PACIENTES: recado rápido sobre um paciente. É a MESMA nota do contato do Chatwoot (Note) — aparece na ficha,
+  no Espaço do Paciente ("Notas da equipe") e no painel da conversa. Backend novo `crm/patient_notes` (index da clínica
+  inteira, mais recente primeiro, com paciente + autor; create {contact_id, content}; destroy = autor ou admin). Componente
+  compartilhado `PatientNoteForm.vue` (busca o paciente por nome/telefone com o createContactSearcher do Nova conversa,
+  escreve, salva; Ctrl/Cmd+Enter). Em TAREFAS: botão "Nova nota" no banner + bloco "Notas dos pacientes" abaixo do quadro
+  (cards em grade, rolável, seguem o filtro de pessoa do topo, lixeira para autor/admin, nome abre o Espaço do Paciente).
+- MEU PAINEL: a caixa virou "Tarefas e notas" — duas colunas (esperando você | notas dos pacientes), listas roláveis com
+  uma tarefa por linha (bolinha da prioridade, prazo em chip, atrasada em vermelho), até 40 tarefas (antes 5; home
+  my_tasks limit 40) e as 12 notas mais recentes (home patient_notes); "Nova nota" inline. Nos painéis AGENDAMENTO,
+  CONDUÇÃO e CIRURGIAS a caixa fica SEMPRE à mostra e ACIMA DE TUDO, logo abaixo do banner (TASKS_FIRST_PANELS fixa
+  'tarefas' em 1º no orderedBlocks, por cima do layout salvo); nos outros painéis continua como aviso com check.
+- AGENDAMENTOS: o seletor Consultas | Teleconsultas | Exames | Cirurgias subiu para o BANNER, em barra de vidro fumê
+  (.cv-ag-kindbar / .cv-ag-kind-hero: o escolhido acende em branco com a cor escura do tipo), acima da régua de período;
+  ao escolher, a COR DO AMBIENTE INTEIRO (banner, Resumo, Registros, botões) vira a do tipo (pageStyle = paleta base +
+  kindVars; CevicoHero ganhou props hero-bg e palette=false). Ícone e subtítulo do banner seguem o tipo.
+- AGENDA: o calendário do período fecha ao clicar fora (véu invisível atrás do popover).
+- Conferido no navegador local: barra de Tarefas, nota criada pela busca e vista em Tarefas + Meu Painel, painel
+  Agendamento com a caixa em 1º. Peças: TasksBoard.vue, InicioPage.vue, CrmAppointments.vue, CevicoHero.vue,
+  PatientNoteForm.vue (novo), patient_notes_controller.rb (novo), home_controller.rb, crm.js, cevico_crm.rb, _cevico-agenda.scss.
+
+## 210. 🍎📅 AGENDA NO DESIGN APPLE — Consultas | Teleconsultas | Exames | Cirurgias, abre na SEMANA; seletor dos 4 tipos nos Agendamentos; Espaço do Paciente no kit; paleta das Conversas por cima de tudo (pedidos 23/09 11h, prints) — SUBIU 23/09 12h36 (commit db5df13 no develop → imagem ghcr :db5df13, WEB só, sem migration; reversão :a943128)
+- AJUSTES RÁPIDOS: (a) a paleta "A sua cor nas Conversas" ficava POR TRÁS dos balões (o cabeçalho tem backdrop-filter,
+  que cria um contexto de empilhamento próprio) → o popup agora é teleportado para o body em posição fixa, com um véu
+  invisível para fechar ao clicar fora (BubbleThemePicker.vue); (b) "tons leitosos" → "tons suaves" (texto e comentários).
+- OS 4 TIPOS (helper/cevicoAgenda.js → KINDS, kindOf, kindVars): no banco, cirurgia = task_type 'cirurgia'; consulta,
+  teleconsulta e exame são task_type 'consulta' separados pela modality ('teleconsulta' | 'exames' | resto). Assim o
+  Atendente de Agendamento, o Secretário, a conferência do dia e o CRM seguem enxergando tudo como consulta. Cores:
+  consultas azul royal · teleconsultas violeta · exames verde-água · cirurgias azul-céu. Teleconsulta guarda unit
+  'online' (não ocupa bloco físico; UNIT_LABELS ganhou 'online' => 'Online'). Exame ocupa o bloco do médico como
+  consulta (a ocupação soma os dois — é o que o Atendente enxerga ao oferecer horário). MODALITIES ganhou 'teleconsulta'.
+  scanAgenda agora casa com o servidor: consulta COM unidade só ocupa o bloco daquela unidade (antes ocupava em todas).
+- AGENDA NOVA (routes/dashboard/agenda/AgendaBoard.vue reescrita + components-next/cevico/agenda/AgendaTimeColumn.vue +
+  assets/scss/_cevico-agenda.scss): página no kit "iMac G3 + vidro" vestindo a cor do trilho ativo; cabeçalho grudado de
+  vidro com o período grande (clica → calendário), ‹ Hoje ›, seletor Mês/Semana/Dia (padrão SEMANA) e "Nova consulta";
+  seletor dos 4 tipos com a contagem do período; filtros em linha (toda a clínica · médicos · unidades / locais). Vidros
+  de resumo (hoje, semana, por unidade/local) e ocupação numa linha só (abre em dia/semana/mês por tipo). MÊS: grade
+  limpa, hoje em círculo cheio, balões compactos, "+N mais" abre o dia. SEMANA/DIA: coluna de horas com as FAIXAS das
+  janelas (horário em que cada médico/sala atende), balões com altura = duração, encaixes dividindo a largura em raias
+  iguais, linha vermelha de AGORA, clique no vazio agenda (gruda no bloco da janela) e arrastar reagenda (confirma no
+  modal); a grade estica sozinha para cobrir horários fora do expediente. DIA: linha do tempo à esquerda + blocos das
+  janelas (livre/ocupado/cadeado, encaixe) + conferência do dia em cartões (compareceu/faltou/veio e não fez, indicação,
+  agendar cirurgia, marcar retorno a partir de exame/teleconsulta, respostas do formulário, Espaço do Paciente). Modal
+  de criar/editar em concha de vidro na cor do tipo, com o seletor de tipo dentro (ao criar), tipo de consulta
+  (avaliação/retorno), lista de exames (Pentacam, OCT, topografia…) ou procedimentos, unidade/online/local. Deep-links:
+  ?date=AAAA-MM-DD (abre o dia) · ?kind=exames · ?view=month|week|day. Tema Santorini/Flor del Mar saiu da Agenda (a cor
+  agora é a do tipo); Tarefas continua com o tema.
+- AGENDAMENTOS (CrmAppointments.vue): o mesmo seletor dos 4 tipos (cada um acende na sua cor) no lugar da chavinha
+  consultas|cirurgias; textos seguem o tipo; filtro de unidade some na teleconsulta; "Agenda" da linha abre o dia NO
+  TRILHO certo (?kind=). Backend: `GET crm/appointments/feed?track=consultas|teleconsultas|exames|cirurgias` (TRACKS;
+  scope por task_type + modality) e cada linha traz `modality` e `track`. Spec ampliada (5 exemplos verdes).
+- ESPAÇO DO PACIENTE (PatientSpace.vue): página vira .cv-page com a cor do paciente como paleta --cv*; cabeçalho com luzes
+  (cevico-hero) e pílulas de vidro; cartões de informação e blocos (Jornada, Espaço do Médico, Atualizações) em vidro
+  cristalino (cv-sub/cv-block) com o squircle do kit nos títulos; anotações em sub-cartões; modal em concha. Rótulos:
+  teleconsulta e Online entram na linha do tempo e nos próximos compromissos.
+- Conferido no navegador local (conta 3): semana/mês/dia nos 4 tipos, criar exame pelo modal (aparece no trilho verde-água
+  e no painel Agendamentos → Exames com o atalho Agenda), Espaço do Paciente, paleta das Conversas. Reversão: imagem anterior.
+
+## 209. 🎨 A COR DE CADA UMA NAS CONVERSAS — fundo leitoso + balões, escolhas independentes (pedidos 23/09 10h15–10h40; sugestões das meninas: Vaneide Bondi blue bebê, Elizangela roxo bebê, Dalila soft pink, Natalia amarelo soft) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+- Botão de paleta no cabeçalho da conversa (ao lado do telefone) abre "A sua cor nas Conversas" com DUAS escolhas que se
+  combinam à vontade: FUNDO (bolinhas: Padrão · Bondi blue bebê · Azul bebê · Roxo bebê · Soft pink · Amarelo soft ·
+  Verde bebê · Laranja soft · Cinza leve · Preto alto contraste) e BALÕES (pares recebido/enviado nos mesmos tons + Padrão
+  azul royal + Preto com letra branca). Cada clique salva na hora. Escolha É DA PESSOA (ui_settings cevico_bg_theme e
+  cevico_bubble_theme), não da clínica: segue no PC e no celular.
+- Como pinta: ConversationView põe as variáveis na raiz .cv-chat e classes cv-theme-milky / cv-theme-dark / cv-theme-on;
+  _cevico-conversas.scss: fundo leitoso pinta a conversa (--ch-bg) e a lista (mais claro) só no modo claro (no escuro o
+  fundo segue escuro e só os balões mudam); Preto força o ambiente inteiro escuro com letra branca (variáveis inline +
+  ajuste das classes utilitárias de texto/fundo dentro do .cv-chat); balões trocam fundo e letra do recebido
+  (.left-bubble.bg-white) e do enviado (.right-bubble.bg-gradient-to-br), links inclusos. Tons com contraste de leitura.
+- Conferido no navegador local (cores computadas). Peças: helper/cevicoBubbleThemes.js, components-next/cevico/
+  BubbleThemePicker.vue, ConversationHeader.vue, ConversationView.vue, _cevico-conversas.scss.
+
+## 208. 🔪 CHAVINHA CONSULTAS | CIRURGIAS NO PAINEL AGENDAMENTOS (pedido 23/09 10h, "assim todas as meninas podem usar este ambiente") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+- A mesma chavinha da Agenda (estetoscópio | bisturi, azul-claro no trilho de cirurgias), no bloco de filtros do painel
+  Agendamentos. Backend: `GET crm/appointments/feed?track=consultas|cirurgias` (task_type 'consulta' | 'cirurgia'; mesmos
+  modos "Registradas no período" / "do período", mesmos chips marcadas/remarcadas/canceladas). Sem valores de cirurgia no
+  feed: aberto ao time inteiro. Textos do painel seguem o trilho ("cirurgias do período", "cirurgias novas"). Spec no
+  appointments_controller_spec.
+
+## 207. 🤖 BOTÃO "LIGAR/DESLIGAR IA PARA ESTA PESSOA" DENTRO DA CONVERSA (pedido 23/09 09h55, "religar a IA sem precisar do emoji") — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só)
+- No card Resumo do painel do paciente (ConversationSummaryCard), acima da trava do follow-up: botão verde "Atendente IA
+  respondendo nesta conversa · Desligar" / âmbar "Atendente IA desligado nesta conversa · Ligar" (em sombra: "em sombra").
+  Tooltip explica o motivo (pausou sozinho quando o humano respondeu / o agente pediu humano / desligado pelo botão, por quem).
+  Só aparece em caixa atendida por um Atendente ligado. Backend: `POST crm/conversation_summary/toggle_responder
+  {conversation_id, paused}` grava o MESMO estado do 👍/mensagem humana (cevico_atendente_wa) + nota interna com o nome;
+  `GET conversation_summary` traz `responder {available, live, paused, reason, reason_text, by, at}`. O 👍 continua valendo,
+  mas ia como mensagem para o paciente. Notas do ⏸ (listener e job) agora dizem "ligue de novo pelo botão do painel (ou 👍)".
+  Lembrete de uso: qualquer mensagem humana pausa de novo; ligar é o último passo depois de conversar. Spec própria.
+
+## 206. 😀 BUG DOS EMOJIS EM CONVERSAS + PÓS-AGENDAMENTO CONCLUI A REMARCAÇÃO (pedidos 23/09 09h45, prints) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- EMOJIS: o seletor saía como uma tira de 1 emoji de largura em cima da caixa de resposta. Causa: a pele `.cv-chat` do
+  item 199 pôs `overflow: hidden` no `.reply-box` (cantos de 22 px), e o seletor é `absolute w-[22rem]` acima da caixa →
+  cortado. Fix: `overflow: visible` (_cevico-conversas.scss). Visto no navegador local: seletor inteiro de novo.
+- REMARCAÇÃO (conversa #14649): paciente disse "Ók" ao horário proposto e o agente respondeu "vou verificar com a
+  equipe" + chamar_humano, em vez de remarcar. Pedido dele: "quero que ele conclua os reagendamentos, se houver horário
+  na agenda". Fix em 2 lugares: (a) RESPONDER_GUARDRAIL: fora da lista, quem tem horarios_do_dia consulta a ferramenta
+  (só sem ferramenta é que "verifica com a equipe"); (b) Roteiros v1/v2, etapa do Pós-agendamento, passo 0 do REMARCAR:
+  "quem conclui a remarcação é você; havendo vaga, remarca na hora; nunca 'vou verificar com a equipe' nem humano por
+  horário; chamar_humano só se a ferramenta falhar de verdade ou por caso clínico/urgência".
+- Testes: cevico_script_spec + responder_agent_service_spec + responder_tools_spec verdes (31). Reversão: imagem anterior.
+
+## 205. 🗣️ ROTEIRO APÓS O 1º TESTE REAL DO AGENTE PRÓPRIO (pedido 22/09 23h45, prints da conversa #16309) — CONSTRUÍDO, SEM commit, AGUARDA "pode subir" (WEB só, sem migration)
+- O que ele viu no teste: balões de autoridade terminando no ponto final (diálogo morre); "qual valor da consulta?" respondido só com R$ 150; e o agente disse que a CONSULTA parcela em 10x (ERRO DE FATO: consulta é só à vista); mensagens de confirmação (PS1/PS2…) num bloco corrido.
+- Mudanças nos DOIS Roteiros (v1 oficial e v2 do teste), texto PADRÃO das seções (se alguma seção estiver personalizada em produção, o padrão novo não entra nela até ela ser apagada/editada):
+  · Regras de forma: toda resposta termina com UMA pergunta que puxa o próximo passo (exceto pós-confirmação e encerramento); balão de informação nunca fica no ponto final ("…perto do Trianon-MASP. Você sabe onde fica?"); com delicadeza: uma pergunta leve, nunca duas, nunca repetida, nunca cobrando.
+  · Dados oficiais: pagamento em 10x é SÓ da cirurgia; CONSULTAS E EXAMES SEMPRE À VISTA; ao passar valores, SEMPRE O CONJUNTO cirurgia (10x sem juros) + R$ 150 da avaliação (à vista); "qual o valor da consulta?" → R$ 150 e, no mesmo balão, o investimento da cirurgia do paciente + pergunta.
+  · Objeção "Vocês parcelam?": a cirurgia sim; a consulta é à vista.
+  · Etapa do Atendente de Agendamento: autoridade com pergunta em cada balão ("Você sabe onde fica?", "Quer que eu te conte sobre o laser?"); orçamento sempre como conjunto e fechando com "Esse investimento está dentro das suas possibilidades?". v2: volta o "Você sabe onde fica?" e marca a avaliação à vista.
+  · Confirmação (Mensagem 1 e 2): CADA FRASE EM UMA LINHA (quebra real após cada ponto final, linha em branco entre blocos). Âncora "Consulta confirmada:" continua na 1ª linha (BookingSideEffects intacto).
+- 2º feedback (23/09 00h, print #16309, remarcação): o agente REMARCOU para 15:00 e só depois avisou, quando o paciente tinha PERGUNTADO "Tem as 16h?? Ou final de dia?". Regra dele: chegar ao horário JUNTO com o paciente → ele confirma → aí remarca → mensagem oficial → encerra. Feito em duas camadas:
+  · TRAVA NA FERRAMENTA (Crm::ResponderTools#remarcar): se a última fala do paciente tem "?", recusa com motivo ("o paciente fez uma pergunta, não confirmou; pergunte 'Fica bom pra você [dia] às [hora]?' e espere o sim") — vale ao vivo e em sombra, texto ou áudio transcrito. Spec nova em responder_tools_spec.
+  · ROTEIRO (etapa do Pós-agendamento, v1 e v2): passo 3 "chegue ao horário junto com o paciente" (pergunta/contraproposta ≠ confirmação; só remarca depois do sim explícito; nunca remarca e avisa depois); passo 4 mensagem OFICIAL de remarcação, cada frase em uma linha, sem pergunta no fim (encerra; começa com "Prontinho, remarquei!" para manter a âncora); passo 5 obedece o motivo da ferramenta.
+  · DESMARCOU / NÃO FOI (pedido dele: "neste mesmo agente, follow-ups de quem desmarcou ou não foi"): seção nova na etapa do Pós-agendamento — quando o paciente responde à cutucada do robô, o agente ajuda a remarcar com cordialidade, sem cobrar motivo, afunilando e confirmando; como não há consulta futura para mover, usa agendar=true (o sistema cria a consulta nova + confirmação oficial + etiqueta + card). Card: ResponderAgentJob#book! usa a coluna "Ao agendar, mover para" do próprio card ou, vazia, a do Atendente de Agendamento. PRÉ-REQUISITO NA TELA: as colunas "Desmarcou a Consulta" e "Não Foi a Consulta" precisam estar nas colunas do card Pós-agendamento (ele configura), e os robôs de follow-up dessas colunas seguem mandando a cutucada.
+- Testes: cevico_script_spec + responder_agent_service_spec + responder_tools_spec + responder_agent_job_spec verdes. Reversão: imagem anterior.
+
+## 204. 👂🖼️ ÁUDIO E IMAGEM DO PACIENTE LIDOS PELO AGENTE PRÓPRIO (pedido 22/09, 22h40, "muitíssimo importante, quero deixar pronto pra amanhã") — CONSTRUÍDO 22/09 noite na feat/rodada-172, SEM commit, AGUARDA "pode subir" (WEB+SIDEKIQ, sem migration, sem variável nova)
+- Contexto: a migração do N8N para o agente próprio foi FEITA e testada por ele em 22/09 à noite (CEVICO_RESPONDERS_LIVE=true,
+  imagem 3617e2b, N8N + webhook desligados). Lacuna que sobrou: o N8N transcrevia áudio (OpenAI) e descrevia foto; o agente
+  próprio via só "[áudio]" e pedia para escrever.
+- O que faz agora: todo áudio ou imagem que o paciente manda numa caixa atendida pelos Atendentes do WhatsApp passa pelo
+  Gemini 2.5 Flash na hora (mesmo padrão da transcrição de vídeo dos criativos, item 181) e vira texto:
+  · áudio → transcrição fiel, gravada em attachment.meta['transcribed_text'] (a chave que o Chatwoot JÁ mostra embaixo do
+    player de áudio para a equipe) + meta['cevico_media'] (status, modelo, inaudível);
+  · imagem → tipo (receita | pedido_exame | exame_laudo | foto_olho | print | comprovante | documento | outro) + o que a foto
+    mostra (sem diagnóstico) + TODO o texto legível; a bolha da imagem ganha a leitura embaixo (✨, clique expande) e a
+    miniatura (imagem com legenda) mostra no tooltip;
+  · o Atendente lê na conversa "[áudio transcrito: "…"]" / "[imagem (pedido_exame): … · texto na imagem: "…"]" e responde ao
+    CONTEÚDO como se fosse texto (Roteiro v1 e v2 ganharam a regra; a antiga "não consigo ouvir áudio" só vale quando
+    vier "[áudio sem transcrição …]", isto é, sem chave ou falha).
+- Peças: app/services/crm/media_reading_service.rb (leitura + rótulos + read_pending!), app/jobs/crm/media_reading_job.rb
+  (disparado pelo CrmListener em toda mensagem do paciente com áudio/imagem nas caixas dos Atendentes, mesmo com o agente
+  pausado ou coluna sem dono: a equipe se beneficia), Crm::ResponderAgentJob (read_pending! antes da IA = garantia + evento
+  "midia" no registro do card), Crm::ResponderAgentService (marcadores → texto lido; corte de 2.400 chars quando há mídia),
+  Attachment#file_metadata (transcribed_text também para imagem), Roteiros v1/v2, AutomationsHub (linha "Áudio e imagem"
+  no card dos 2 Atendentes: cinza = lendo pelo Gemini; âmbar = falta a chave), bubbles/Image.vue + chips/Image.vue.
+- Custo: Gemini 2.5 Flash (áudio US$ 1,00/M entrada, imagem 0,30/M, saída 2,50/M) registrado em Crm::AiUsage como
+  agent_key media_reading. Falha não insiste (status failed); sem chave = skipped e o agente segue pedindo texto.
+- Limites: 15 MB por anexo; até 4 anexos pendentes por chamada do Atendente (latência); só mensagens do paciente (incoming).
+- PRÉ-REQUISITO NA VPS: a chave do Gemini em CRM → Integrações → IA (a mesma dos criativos). Se já estiver lá, nada a fazer.
+- Testes: spec/services/crm/media_reading_service_spec.rb (6) + exemplos novos em responder_agent_service_spec,
+  responder_agent_job_spec e crm_listener_responders_spec — 74/74 verdes no docker (22/09 22h50). Corrigida de brinde a
+  ordem frágil de um exemplo do job (order(:id)).
+- Reversão: imagem anterior (3617e2b). Sem migration.
+
+## 203. 🙈 BOTÃO "RECOLHER" NO TOPO DE CONVERSAS (pedido 22/09, 21h40, print do FECHAMENTO) — CONSTRUÍDO 23/09 00h30 ("não está subido" = vai junto com 204/205), SEM commit, aguarda "pode subir" (WEB só)
+- Feito em ChatList.vue: chevron (↑) no canto direito da linha "Nova conversa" recolhe o topo inteiro (Nova conversa, pílulas das caixas, chips Funil/Colunas CRM/Etiquetas, chavinha Não lidas, ordem) numa linha só: botão azul royal (↓) + resumo do que está valendo ("Todas as caixas · Agendamento de Consulta · não lidas no topo") + atalho "+" da Nova conversa. Lembra a escolha no navegador da pessoa (localStorage cevico_conversas_topo_recolhido, mesmo padrão da largura da lista). Os filtros continuam valendo recolhidos (só somem da vista). Visto no navegador local.
+- Pedido: "quero um botão 'recolher', para deixar mais clean a visualização de CONVERSAS". O topo (botão Nova
+  conversa + frase, pílulas das caixas, chips Funil/Colunas CRM/Etiquetas, chavinha Não lidas, segmentado de ordem)
+  ocupa quase metade da coluna da lista.
+- Proposta: um botão pequeno (chevron) no cabeçalho da lista que recolhe o bloco inteiro numa linha só (nome da
+  caixa ativa + contadores), lembrando a escolha por pessoa (ui_settings, como o recado das cores), com atalho
+  para abrir de novo. Peças: ChatList.vue (topo do item 199), kit cv-*, azul royal para o estado ativo.
+
+## 202. 🧠 MODELO POR PROVEDOR EM CADA AGENTE — Google, OpenAI ou Anthropic (pedido 22/09, 21h35) — AGUARDA "pode construir" (SESSÃO NOVA)
+- Pedido: "quero ter, ali em cada agente, o modelo que eu vou usar, seja do google, openai, ou anthropic".
+- Hoje: os 20 agentes chamam a API da Anthropic direto (Crm::AiAgentConfig: MODELS = opus-4-8 / sonnet-5 /
+  haiku-4-5, `client.messages.create` com JSON estruturado e, nos atendentes, ferramentas); chave única em
+  Integrações → Claude; custo em Crm::AiUsage.
+- Plano: camada única de conversa com os provedores (JSON estruturado + ferramentas + esforço traduzidos para cada
+  um); chaves por provedor em Integrações (Claude, OpenAI, Google); no card de cada agente o modelo vira
+  "provedor + modelo" (pré-configurado como hoje = Claude, ele troca na tela); tabela de preço por modelo para o
+  gasto continuar certo; registrar o modelo usado em cada resposta (para o 201 comparar conversão por modelo);
+  testar cada provedor no 🧪 Testar agente antes de ligar. Precisa das chaves reais dele para o teste (só via
+  Integrações, nunca no git).
+
+## 201. 📈 EFETIVIDADE DAS AUTOMAÇÕES — conversão em agendamento por automação/robô/agente (pedido 22/09, 21h30) — AGUARDA "pode construir" (SESSÃO NOVA)
+- Pedido: "quero entender qual é a conversão de agendamentos, das automações... a efetividade delas".
+- Hoje só há ATIVIDADE: Automações → Resultados (disparos por automação de coluna, crm_automation_logs), Dashboard
+  dos Agentes (equipe humana), cards dos agentes de IA (respostas/tokens/custo), envios e respostas da Jornada.
+  Nada diz "quem foi tocado e agendou depois".
+- Rastros que já existem: log da automação (contato + fired_at); cutucada do robô de follow-up marcada na mensagem
+  (cevico_followup_bot_id + etapa); envios da Jornada (crm_journey_sends); resposta do atendente de IA
+  (cevico_ia_agent); robô do N8N = usuário 1; campanhas (crm_campaign_contacts); consulta = task 'consulta' com
+  contato, created_at e origem robô × equipe (item 200).
+- Proposta: tela "Efetividade das automações" (hub Automações ou Análises): por automação, robô de follow-up (e por
+  ETAPA de cutucada), mensagem da Jornada, agente de IA (N8N × interno) e campanha → leads tocados no período,
+  quantos agendaram em 7/14/30 dias, conversão %, tempo mediano até agendar; duas atribuições lado a lado (último
+  toque antes de agendar × qualquer toque na janela); linha de base = leads sem toque automático que agendaram;
+  depois o funil completo (agendou → compareceu → indicou cirurgia → operou, a Agenda já guarda). Sem migration.
+
+## 200. 🤖🔓 AGENTE "RODANDO SOLTO" + PAINEL DE AGENDAMENTOS + AFUNILAMENTO E PORTA ABERTA (pedido 22/09 noite, para os NÚMEROS NOVOS de 23/09) — SUBIU 22/09 21h ("vamos subir" → commits 47e03db [199] + 0a07510 [200] na feat/rodada-172, push para origin/develop = 0a07510; + correção dos prompts 22h em 3617e2b → IMAGEM FINAL ghcr.io/guilhermecorder/chatwoot:3617e2b, deploy WEB+SIDEKIQ sem migration; reversão = imagem em produção antes: 87c9564 ou 2d7b2b4)
+
+**Pedido dele (22/09, 19h40, com prints do teste no FECHAMENTO #10912 e do 🧪 Testar agente):**
+"vamos precisar atualizar o nosso prompt N8N em alguns pontos": (1) timing das mensagens entre 5 e 10 s da
+mensagem da pessoa; mensagens curtas e espaçadas; (2) o robô "usa a carinha que PAUSA o agente" e agora a
+gente quer que ele "rode solto" → tirar o emoji; (3) ao chegar no agendamento, ir "etiquetando o paciente e
+movendo o card pelas colunas do CRM automaticamente"; (4) agente sempre ativo, sem tantas amarras, educado,
+desprendido, nunca insistente; (5) "liberar agendamento futuro" (o robô disse "nesse dia 07/10 ainda não tenho
+abertura"); (6) um AMBIENTE onde os agendamentos são registrados, "porque o trabalho das meninas em grande
+parte será de monitoramento": painel de agendamentos e reagendamentos, cada um com uma cor, mostrando caixa
+de entrada, etiquetas, nome e telefone, botão para abrir a conversa e/ou o Espaço do Paciente; (7) no Espaço
+do Paciente e em Contatos precisa ser possível chamar o paciente. "Amanhã já quero pôr os números novos."
+**Complemento (20h05):** (8) no encerramento deixar a janela aberta para o follow-up consensual: "vamos fazer o
+seguinte, te chamo daqui a duas semanas, combinado?"; (9) a lógica de "oferecer as possibilidades e ir
+afunilando", que ele tinha tirado do N8N, volta: valor ok → "maravilha, o próximo passo é agendar a sua
+consulta de avaliação… Vamos em frente?" → não: motivo, acolher, à disposição; sim → "essa semana ou na
+próxima? manhã ou tarde? início do dia ou perto do meio-dia? às 10 ou 10:30?" — "estimula o diálogo e coleta
+pequenos comprometimentos"; perguntas de micro-compromisso ("isso é interessante pra você? é isso que você
+procura?") que ele acredita influenciarem o comparecimento.
+
+**N8N (entrega em ~/Desktop/CLAUDE CODE/CEVICO/docs/n8n-v20-rodando-solto/):**
+- `SUPERVISOR systemMessage (v20 rodando solto).txt` — gerado a partir do v19 (Tatuapé 5 min) por substituições
+  cirúrgicas: sem emoji em nenhuma mensagem ("Deu certo! Consulta confirmada: …"); depois da confirmação
+  CONTINUA disponível (regra de ouro 5 e bloco "DEPOIS DO RESUMO"); balões ≤ 2 por resposta, ~160 caracteres;
+  agendamento futuro liberado (regra 9: dia pedido → consulta esse dia; proibido "ainda não tenho abertura");
+  ETAPA 6 reescrita como AFUNILAMENTO (próximo passo → semana → período/unidade → consultar → afunilar hora →
+  2 horários → nome → confirmar o telefone do WhatsApp, que agora entra no topo do prompt por expressão
+  `$('Info2').item.json.telefone`); micro-compromissos na personalidade; FLUXO DE CANCELAMENTO novo
+  (calendar_agent cancelar + "Consulta cancelada…"); PORTA ABERTA ("te chamo daqui a duas semanas,
+  combinado?"); reagendamento confirma com "Prontinho, remarquei:". Processo de vendas intacto.
+- `LEIA-ME.txt` — 3 ajustes no N8N (colar o prompt em modo EXPRESSION; "Intervalo entre Mensagens" 10 → 4 s;
+  "Wait1" 10 → 3 s) + CONFERIR o node "If" (só passa inbox 1, 2 e 3 — cada número novo precisa da caixa nova
+  na condição) + regras do Chatwoot que procuram 😊 (podem sair; o sistema faz sozinho). O 😊 continua sendo
+  o botão de pausa da EQUIPE (switch "Pausar IA1"); 👍 reativa. Node de split por IA pode virar Code (opcional).
+- `AGENTE DE AGENDAMENTO (v20 rodando solto).json` — o export de 26/08 com os 3 ajustes aplicados (Import from
+  File substitui o canvas; mesmo webhook e credenciais).
+
+**Sistema (feat/rodada-172, ~/chatwoot-upgrade, SEM commit; sem migration; deploy WEB+SIDEKIQ):**
+- `Crm::BookingSideEffects` (novo): consulta CRIADA/REAGENDADA/CANCELADA → etiqueta no paciente e na conversa
+  (consulta_agendada · consulta_reagendada · consulta_cancelada; a contrária sai; a etiqueta é criada no
+  cadastro se não existir) + MOVE O CARD (cria o card se não existir) para a coluna de agendamento
+  (`agenda_config['booking']['stage_id']`, senão a "Ao agendar, mover para" do Atendente de Agendamento) ou de
+  cancelamento (`cancel_stage_id`), disparando card_entered/card_left. Nunca levanta exceção.
+- `CrmListener#handle_booking_anchor`: mensagem ENVIADA (robô do N8N ou equipe) com "Consulta confirmada",
+  "remarquei", "consulta cancelada"… → `SchedulerRecheckJob` em 15 s → `AppointmentApplier` lê a conversa,
+  grava/remarca/cancela na Agenda e chama os efeitos; nota interna ganha "🏷️ etiqueta · card → coluna". Freio
+  de 90 s por paciente; mensagens do Atendente interno, jornada e follow-up ficam de fora.
+- Atendente interno "roda solto" (`ResponderAgentJob`): agendar e encerrar NÃO pausam (só chamar_humano; 👍
+  reativa); balões com 3 s entre eles (BALLOON_GAP) e o 😊 é tirado do texto por garantia; `book!` chama os
+  efeitos (etiqueta + card); `ResponderTools` remarcar/cancelar ao vivo também.
+- Delay de resposta configurável: `reply_delay_seconds` (3–30, padrão 6) nos dois atendentes — campo "Responde
+  em" no card (AutomationsHub) + whitelist no settings_controller; CrmListener usa `responder_delay(cfg)`.
+- Agendamento futuro: `Crm::AgendaSlots.free_slots_on(date)` (até 120 dias; `slot_available?` usa ela), lista
+  do prompt passou de 12 para 28 dias, ferramenta nova `horarios_do_dia {dia, unidade?}` nos dois atendentes.
+- Roteiro v1 e v2 (`cevico_script.rb`/`_v2.rb`): sem emoji; 2 balões ≤ 160 caracteres; micro-compromissos;
+  PORTA ABERTA nas regras de forma; passo 6/5 do Atendente de Agendamento = AFUNILAMENTO (A próximo passo → B
+  semana → C período/unidade → D hora + 2 horários, com horarios_do_dia para dia fora da lista → E nome/telefone
+  → F confirmação "Deu certo! Consulta confirmada:" → G continua disponível); passo 7 remarcar afunilando com
+  "Prontinho, remarquei:"; Pós-agendamento sem pausar=true ao confirmar presença/cancelar. ⚠️ Em produção, seção
+  personalizada na tela (custom) NÃO recebe o texto novo: apagar o texto da seção = volta ao padrão novo.
+- `Api::V1::Accounts::Crm::AppointmentsController#feed` (rota crm/appointments/feed): consultas MARCADAS /
+  REMARCADAS / CANCELADAS no período (modo registradas = aconteceu no período; consultas = a consulta é no
+  período), com tipo, origem (robô × equipe pelo rastro na descrição), conversa de origem ("Conversa #N" ou a
+  mais recente do paciente) com caixa e etiquetas, etiquetas do paciente, card (coluna/cor), contagens e a
+  config dos efeitos; `update_agenda` aceita `booking` (só admin).
+- TELA "Agendamentos" (`routes/dashboard/crm/CrmAppointments.vue`, rota crm/agendamentos, menu Atendimento
+  logo após Agenda, visível a todo atendente): hero + PeriodRuler (padrão 7 dias); 4 KPIs (Marcadas verde,
+  Remarcadas âmbar, Canceladas vermelho, Robô × Equipe); filtros (modo, tipo com contagem, origem, unidade,
+  caixa, busca); lista por dia com fio/chip na cor do tipo, avatar com degradê, nome e telefone sem truncar,
+  quando/unidade/médico, chip da CAIXA na cor oficial, coluna do CRM, etiquetas, origem; ações Conversa ·
+  Paciente · Ligar (CevicoCallButton) · Agenda; atualização silenciosa a cada 60 s; "Ajustes" (admin) = etiquetas
+  + colunas dos efeitos. `api/crm.js`: appointmentsFeed / updateAgendaBooking.
+- Chamar o paciente: Espaço do Paciente ganhou pílulas "Conversa" (modal Nova conversa), "Ligar"
+  (CevicoCallButton) e "Abrir conversa" (última conversa, já no payload) no cabeçalho colorido; ficha de
+  Contatos (ContactsDetailsLayout) ganhou Ligar + "Nova conversa" (modal novo no lugar do compose nativo);
+  linha da lista de Contatos (ContactsCard) ganhou os atalhos Nova conversa + Ligar.
+- Specs novos (todos verdes no docker, 60 exemplos com os vizinhos): booking_side_effects (8), listener
+  âncoras (6), listener delay (2), agenda_slots futuro (4), job "rodando solto" (3), feed do painel (3).
+  Rubocop: sem ofensa nova nos arquivos tocados (as que restam são do baseline).
+- Reversão: reimplantar a imagem anterior; no N8N, colar o prompt v19 de volta.
+- TESTADO 22/09 no docker local (conta 3, 1280 claro/escuro + 375): tela Agendamentos com 57 registros dos 7 dias
+  (KPIs, filtros, grupos por dia, chips de caixa/coluna/etiquetas, ações), Ajustes salvos (coluna Agendamento de
+  Consulta / cancelamento Não Foi a Consulta); PONTA A PONTA na conversa #363 (Paciente de teste, caixa WhatsApp
+  teste): mensagem enviada "Deu certo! Consulta confirmada: quarta-feira, 30/09 às 13:00…" → em 27 s a consulta
+  #448 nasceu na Agenda (30/09 13:00, Paulista, Dr. Henrique), etiqueta consulta_agendada no paciente e na conversa,
+  card Novos Contatos → Agendamento de Consulta, nota "📅 … 🏷️ consulta_agendada · card → …"; depois "Prontinho,
+  remarquei: quinta-feira, 01/10 às 08:30…" → #448 foi para 01/10 08:30 (rescheduled_count 1), etiqueta virou
+  consulta_reagendada. Espaço do Paciente com pílulas Conversa/Ligar/Abrir conversa; Contatos (lista e ficha) com
+  Ligar + Nova conversa; hub com o campo "Responde em". A etiqueta nova já aparece em "Etiquetas que encerram o
+  follow-up" (Robôs) para o admin ligar se quiser parar as cutucadas de quem agendou. Dados de teste ficaram na
+  conta 3 local (consulta #448 do Paciente de teste).
+- **SEM JORGE HADDAD (pedido dele 22/09, 20h45: "eliminar o Jorge Haddad do nosso prompt; exaltar a nossa equipe
+  especializada e estrutura altamente tecnológica")**: saiu do N8N v20 (autoridade da catarata, "achei caro", "tenho
+  medo" + regra nova nas proibições), do Roteiro v1 e v2 (dados oficiais + objeções), do Atendente Instagram, do
+  script de voz (lista de médicos por extenso) e do Analista de Conversas. Texto novo: "a cirurgia é realizada pela
+  nossa equipe cirúrgica especializada em catarata, dentro do IOP, com estrutura de alta tecnologia, equipamentos de
+  última geração e lentes importadas Rayner"; nunca inventar números de cirurgias. Ele confirmou que a atualização
+  é dos 2 agentes (Atendente de Agendamento + Atendente Pós-agendamento). ⚠️ Em produção, a seção "Dados oficiais"
+  do Roteiro, se personalizada na tela, precisa ser apagada (volta ao padrão) ou editada à mão.
+- **NOMENCLATURA dos Roteiros (pedido dele 22/09, 20h50: "melhorar a nomenclatura do prompt, porque assim poderemos
+  testar")**: as versões ganharam nome e descrição nas abas do card Roteiro e no seletor do 🧪 Testar agente:
+  "Roteiro 1 · Fiel ao N8N" (estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem) e "Roteiro 2 ·
+  Otimizado pela análise" (análise do banco de 22/09 + regras de 22/09; só o teste lê). Título dentro do prompt
+  acompanha. Os dois têm as regras novas (sem emoji, rodando solto, afunilamento, porta aberta, sem Haddad); o que
+  os diferencia é a estrutura (1 = fiel ao N8N; 2 = enxuto, promessa quando pedem valor cedo, objeções da análise).
+- **Correção dele 22/09 21h20 ("a estrutura de alta tecnologia não é do IOP, é da CEVICO; nós enaltecemos a CEVICO")**:
+  + ele colou o prompt EM PRODUÇÃO (21h50), que já difere do arquivo de 26/08: Dr Ricardo e Dr Renato na catarata
+  (30.000 cirurgias cada), Tatuapé de 10 em 10 min (não 5), lente escleral R$ 2.500, esclerais + especialista R$ 700.
+  Texto pré-configurado virou "a cirurgia é realizada pelo Dr. Ricardo ou pelo Dr. Renato, cirurgiões de catarata com
+  mais de 30.000 cirurgias cada um, com a estrutura de alta tecnologia da CEVICO: equipamentos de última geração e
+  lentes importadas Rayner" (Roteiro 1 e 2, Instagram, voz, análise; N8N v20 regenerado A PARTIR DO PROMPT DE
+  PRODUÇÃO, base salva em docs/n8n-v20-rodando-solto/SUPERVISOR v19 (base atual de producao, colado 22-09).txt).
+  O IOP fica só como o instituto onde a clínica atua. Tabela de preços do sistema: conferir Lente Escleral 2.500. Ele pode ajustar internamente
+  em Automações → Agentes de IA → Roteiro → seções "Dados oficiais" e "Objeções" (seção editada = personalizada;
+  apagar o texto volta ao padrão). ⚠️ ESTA CORREÇÃO ESTÁ NO WORKING TREE SEM COMMIT (8 arquivos: cevico_script.rb,
+  cevico_script_v2.rb, conversation_insight_service.rb, instagram_agent_service.rb, voice_agent/script.rb, 2 specs
+  com o título novo dos Roteiros, BACKLOG) — specs verdes; aguarda "pode subir" na sessão nova (gera etiqueta nova
+  depois da 0a07510). Também há 1 commit local não enviado (5659a67, só BACKLOG).
+- ⚠️ Freios a saber: âncora = 1 leitura por paciente a cada 90 s; o Secretário ignora leituras a menos de 2 min da
+  anterior (MIN_GAP) — uma remarcação enviada a menos de 2 min da confirmação só entra na próxima mensagem do
+  paciente que fale em remarcar (releitura de sempre).
+
+**Ficou de fora / próximos:** Atendente Instagram (Direct) continua com a regra antiga do 😊 (Meta dev
+pendente); node Code no lugar do split por IA (opcional); admin ligar/desligar "Agendamentos" por pessoa
+(1 linha em DAY_MENU_ITEMS + AgentAccessModal, se ele pedir).
+
+
+## 199. 💬 NOVA CONVERSA EM 3 PASSOS + topo de Conversas no kit Apple (pedido 22/09) — SUBIU 22/09 21h junto com o 200 (commit 47e03db; o 200 depende dele) → imagem ghcr.io/guilhermecorder/chatwoot:0a07510
+- Pedido: "iniciar uma conversa com um contato que temos no nosso banco de dados, através de uma nova
+  caixa de entrada — pra fazer isso é difícil; precisa ser fácil. Já vamos aproveitar a atualizar o layout."
+  Antes o único caminho era o lápis minúsculo ao lado de "Pesquisar..." (janelinha com Para → Via →
+  modelo, 3 passos escondidos; a busca por telefone só achava se digitasse +55 igualzinho).
+- **Modal "Nova conversa"** (`components-next/cevico/conversas/NovaConversaModal.vue`, montado uma vez no
+  Dashboard; abre por `openNovaConversa({ contactId?, inboxId? })` de `helper/cevicoNovaConversa.js`):
+  1) **Quem** — busca no cadastro inteiro (nome, telefone do jeito que digita, e-mail); linha com foto,
+     nome e contatos; ninguém → **Cadastro rápido** (nome + telefone/e-mail; telefone sem +55 vira +55).
+  2) **Por onde** — TODAS as caixas em cartões coloridos (cor oficial de cada caixa), cada um dizendo
+     "Já conversou por aqui · N conversas, última há X" ou "Caixa nova para esta pessoa"; caixa que não
+     serve fica apagada com o motivo ("precisa de telefone no cadastro", "só responde quem chamou
+     primeiro" etc.). Caixa aberta em Conversas já vem escolhida.
+  3) **Mensagem** — WhatsApp: faixa explicando a regra da Meta (1ª mensagem = modelo aprovado), lista de
+     modelos com o texto INTEIRO e busca, variáveis pelo `WhatsAppTemplateParser`; outros canais: texto
+     livre (+ assunto no e-mail). "Enviar e abrir a conversa" → cria e navega pra conversa.
+- **Entradas**: botão dourado "＋ Nova conversa" logo abaixo do cabeçalho da lista de Conversas
+  (com a frase "com qualquer pessoa do cadastro, por qualquer caixa"); o lápis do menu virou o mesmo
+  modal (ícone message-square-plus); o vazio da direita ("selecione uma conversa") ganhou o botão.
+  A ficha do contato continua com o compose nativo (ContactsDetailsLayout) — trocar depois se ele pedir.
+- **Topo de Conversas no kit** (`cv-page cv-overlay > cv-gold`): gatilhos Funil/Colunas CRM/Etiquetas
+  em `cv-chip` (aceso = `cv-chip-on`), janelinha em `cv-pop`, "Não lidas no topo" com chavinha
+  `cv-switch`, ordem em segmentado `cv-seg cv-seg-sm`, caixa das pílulas com cantos 2xl. Cards da lista
+  NÃO mudaram (uso pesado em produção — mudança pequena).
+- **Backend** (`contacts_controller#search`): além do ILIKE de sempre, casa o telefone SÓ PELOS DÍGITOS
+  (`regexp_replace(phone_number, '\D', '')`) quando a busca tem ≥ 4 dígitos — "11 99999-9999",
+  "99999 9999" e "5511…" acham o +5511999999999. Vale para toda busca de contatos.
+- Sem migration. Deploy WEB só. Reversão: reimplantar a imagem anterior.
+- TESTADO 22/09 no docker local (conta 3, viewport 1280 claro/escuro + 375): busca "19 99418" achou
+  +5519994180121; passo 2 com "Já conversou por aqui · 1 conversa, última há 2 meses" × "Caixa nova";
+  WhatsApp → modelo (3 variáveis) → conversa #380 criada com o texto renderizado (falha de envio esperada
+  sem Meta local); cadastro rápido "(19) 98888-7777" → +5519988887777 → canal API com texto → conversa
+  #381 (card do CRM em Novos Contatos). Dados de teste apagados. Modelos de teste ficaram na caixa 3 local
+  (boas_vindas_cevico, retomada_orcamento, pendente_meta = PENDING, não aparece).
+- Lint: eslint 0 erros nos arquivos tocados (host; sobram só prettier de template no baseline);
+  rubocop OK; rspec contacts search 9/0 (spec nova: telefone por dígitos).
+- Docker Desktop travou na abertura (backend sem socket, log parado em "shutting down vital services"):
+  `kill -9` no com.docker.backend + `open -a Docker` resolveu em 10 s.
+- **PARTE 2 (mesmo dia, tarde) — AMBIENTE DE CONVERSAS "APPLE × WHATSAPP" + RECADO DAS CORES:**
+  pedido: "vamos fazer uma reformulação e deixar esse ambiente de conversas bem amigável… aproximar do
+  WhatsApp, mas estilo Apple: super clean, limpo, elegante, divisões claras, contrastes, cores,
+  arredondado; organizar melhor o painel lateral direito do paciente (organização, visualização,
+  contraste)". Feito, SEM commit, aguarda "pode subir" (deploy WEB só):
+  · `assets/scss/_cevico-conversas.scss` (novo, importado no app.scss) = a PELE inteira sob `.cv-chat`
+    (classe na raiz do ConversationView) — tirar a classe = visual antigo. Variáveis `--ch-*` claro/escuro.
+  · LISTA (ConversationCard.vue, template reescrito): formato WhatsApp — foto redonda 44, nome na cor da
+    caixa + hora, linha da caixa/responsável, prévia + bolinha VERDE de não lidas, chip da coluna +
+    etiquetas; cartões arredondados com separador embutido; a conversa aberta = cartão dourado leve
+    com fio de ouro à esquerda.
+  · CENTRO: papel de parede cinza-Apple com pontinhos quase invisíveis, cabeçalho em vidro, avisos em
+    pílula, balões 18 px com rabinho curto (recebido BRANCO — Base.vue; enviado continua azul iMessage),
+    composer flutuante 22 px com sombra.
+  · PAINEL DO PACIENTE (ContactPanel/ContactInfo/ConversationSummaryCard/AdOriginCard reescritos):
+    título "Paciente"; cartões brancos sobre cinza Apple: 1) Identidade (foto 72 centralizada, nome,
+    "no cadastro há X", perfil completo, ações redondas com rótulo Conversa/Ligar/Editar/Mesclar/Excluir
+    — Conversa abre o modal novo com a pessoa já escolhida; telefone/e-mail em caixa; empresa/local só
+    se existir); 2) Veio de anúncio; 3) Jornada (coluna + Mover, funil, etiquetas, 3 mini-indicadores,
+    trava e previsão do follow-up); 4) Inteligência (análise + Ajuda com objeção); 5) Ligações;
+    6) gavetas Conversa / Notas / Anexos / Conversas anteriores com squircle colorido e chevron
+    (AccordionItem ganhou props `lucide`/`tone`, classe `accordion-item` e chevron no lugar do +/−).
+  · RECADO "Seu painel, as suas cores": (a) moldura arco-íris parava no meio no desktop — o
+    `.cv-block::before` tem height 44% e o `::before` do recado herdava; agora `height:auto`;
+    (b) "só uma vez": a dispensa foi para `ui_settings.cevico_notes_dismissed.dopamine_colors_v1`
+    (por PESSOA, em qualquer aparelho); localStorage ficou só de reforço.
+  · Testado no docker local: 1440/1280/1000 claro e escuro + 375 (lista, conversa com balões dos dois
+    lados e nota privada, painel do paciente inteiro); recado some após "Entendi" e não volta no reload
+    (ui_settings confirmado no banco). Vue SFC compila (checagem no host); eslint sem erros novos.
+  · FEEDBACK "gostei; prefiro azul royal bem alegre ao invés do dourado" → kit ganhou o modificador
+    `.cv-blue` (#2563eb, degradê #1d4ed8→#3b82f6); botão "Nova conversa", chips/chavinha/segmentado do
+    topo, cabeçalho do modal e o cartão da conversa aberta (fio azul) usam ele. A pílula "Todas" das
+    caixas continua dourada (decisão de 16/07: dourado reservado para "Todas") — trocar se ele pedir.
+  · FOTO DO WHATSAPP: ele perguntou se dá para ter a foto do perfil. NÃO pela API oficial da Meta
+    (Cloud API manda só número + nome do perfil; sem endpoint de foto; nenhuma liberação muda isso).
+    Instagram/Facebook já mandam foto e o sistema baixa. Espelho de WhatsApp Web (Evolution/Baileys)
+    desaconselhado (termos, risco de bloqueio, número oficial não espelha). Decisão dele: "boa ideia" →
+    **degradê alegre por pessoa** nas iniciais: `helper/cevicoPersonGradient.js` (8 pares dopamina,
+    hash do nome inteiro, cor FIXA por pessoa) + prop `gradient` no Avatar.vue (só sem foto; a foto real
+    sempre fica por cima) nos três tamanhos: cartão da lista (44), cabeçalho da conversa (32) e ficha do
+    painel (72). Testado claro/escuro.
+  · Fora: cabeçalho da conversa e composer continuam com os componentes nativos (só pele CSS);
+    ConversationChatModal do CRM e Espaço do Paciente não usam a pele.
+
+
+## 198. 📊 APRENDIZADO COM O BANCO DE PRODUÇÃO + ROTEIRO v2 PARALELO (22/09) — ANÁLISE FEITA; v2 DISPONÍVEL NO 🧪 TESTAR AGENTE — SUBIU 22/09 ("pode subir" → commit 87c9564 no develop → imagem ghcr.io/guilhermecorder/chatwoot:87c9564, deploy WEB só, reversão 2d7b2b4); sombra dupla AGUARDA "pode construir"
+
+**Pedido dele (22/09, nova sessão):** analisar o backup do banco (backup_cevico_antes_rodada188_20260921_1741, 65 MB gz / 300 MB) e aprender com as conversas; criar um PROMPT PARALELO para testar contra o atual.
+
+**Feito 22/09 (sem tocar em código):**
+- Dump carregado num SQLite no scratchpad da sessão (663 mil mensagens, 16 mil conversas; caixas GOOGLE=1 e INSTAGRAM=2 = 14.399 conversas de leads). Robô do N8N = usuário 1 "Guilherme, da CEVICO" (387 mil msgs); humanas = Vaneide (14,3 mil), Elizangela, Natalia, Dalila.
+- Relatório: `~/Desktop/CLAUDE CODE/CEVICO/docs/ANALISE_CONVERSAS_2026-09-22.md`. Números-chave: robô sozinho fechava 17–23% (jan–mar/26); desde julho a Vaneide entra em 3 de 4 conversas e o total ficou em 12–16% (não subiu). Maior vazamento: 703 disseram "sim" ao orçamento e só 179 agendaram; "Qual unidade e dia?" fecha 26% × "Tenho X ou Y" fecha 56–65%. Fins de semana = 24% das conversas e zero humanas; 37% dos fechamentos do robô acontecem fora do horário humano. Loops robô×robô (Claro: 2.956 msgs; anota.ai: 84). Conhecimento das humanas que o roteiro não tinha: crianças/oftalmopediatra, estrabismo, idade/21 anos, glaucoma (Dra. Roberta), esclerais, exames isolados (biometria só no Tatuapé — CONFLITA com o roteiro), pedido médico, endereço pela Al. Casa Branca 35, "me avisa se não puder vir".
+- Roteiro v2 paralelo (5 seções + passos dos atendentes A e B, pronto para colar na tela): `~/Desktop/CLAUDE CODE/CEVICO/docs/ROTEIRO_V2_PARALELO_2026-09-22.md`, com tabela "mudança → evidência" e 6 itens [CONFIRMAR].
+
+**CONSTRUÍDO 22/09 (feat/rodada-172, SEM commit, pedido "gostaria que ele estivesse disponível no ambiente de teste, testar um depois o outro; a conversa fica no ambiente de teste"):**
+- `Crm::CevicoScriptV2` (novo arquivo): padrão do v2 = 5 seções + passos dos 2 atendentes, gerado do doc ROTEIRO_V2_PARALELO (notas [CONFIRMAR] fora do prompt). `Crm::CevicoScript` ganhou versão ('v1' oficial | 'v2' paralelo): `text/sections/stage_prompt(account, version)`, `STAGE_SECTIONS` (os Passos aparecem como seções extras do v2), personalização em `ai_config['script_v2']` e `agents[key]['prompt_v2']`. Nada fora do teste lê v2.
+- Motor: `Crm::ResponderAgentService.new(..., script_version:)`; a conversa de teste nasce presa à versão (`cevico_simulado_script`) e o `AgentSimulator` passa adiante. Controller: `ai_simulate` aceita `script_version` e devolve; `update_ai` aceita `script_v2` (seções + stage_*); `ai_json` devolve `script_v2` e `script_v2_updated_at`.
+- Telas: card Roteiro CEVICO com abas **Atual | 🧪 v2 paralelo** (chip "só no teste", 7 seções no v2, salvar = "Salvar v2 paralelo (só no teste)", botão "Testar com o v2"); 🧪 Testar agente com seletor **Roteiro atual | v2 paralelo** (trocar recomeça a conversa; rodapé e balões marcam "v2"). Interruptor: erro do servidor agora aparece na tela (era "Erro ao mudar o interruptor" genérico).
+- Specs: 22 verdes (cevico_script 3 novos, responder_agent_service 1, settings_responder 2). Testado no navegador local (conta 3): v2 respondeu à abertura do anúncio com promessa do valor + 1 pergunta.
+- Deploy: WEB só (sem migration). Reversão: reimplantar etiqueta anterior. Ajuste do v2 depois do teste: "SEM emoji" na recepção e "buscar_consulta nunca no primeiro contato".
+- **Interruptor "não ativa" (relato dele 22/09):** localmente o liga/desliga responde 200 e o card muda. Em produção (2d7b2b4) o que está TRANCADO por desenho é o modo **Ao vivo** (variável CEVICO_RESPONDERS_LIVE) e o 🧪 Testar agente recusa com "Agente desligado." (corrigido no 196, ainda não implantado). Com esta versão a tela mostra o motivo exato.
+
+**Proposta para testar em produção sem risco (aguarda "pode construir"):** "Roteiro paralelo" no sistema: segunda cópia das 5 seções + passos guardada em `ai_config['script_v2']` (sem migration), com (a) seletor "Roteiro: atual | paralelo" no 🧪 Testar agente e (b) SOMBRA DUPLA: quando o atendente estiver em sombra, o job roda os dois prompts na mesma mensagem real e a tela Sombra mostra "interno v1 | interno v2 | de verdade (N8N)", com 👍/👎 por versão; contador por versão no card do agente. Ao vivo continua usando só o Roteiro oficial; "Promover v2 → oficial" com snapshot no Histórico do Roteiro (191). Custo: 2× chamadas de IA nas conversas em sombra (Sonnet 5). Reversão: apagar script_v2.
+
+**Também para o motor (fora do prompt):** trava de loop (3 mensagens iguais seguidas ou padrão de robô → pausar + aviso no Meu Painel); etiqueta "não é paciente"; Rodada 2 ao vivo começar pelo fim de semana (dados do relatório).
+
+**Disco do Mac (22/09):** Docker Desktop não sobe ("no space left on device"); Docker.raw ocupa 37 GB reais, Downloads 12 GB, Caches 8,8 GB. Sem Docker não roda o simulador local.
+
+## 195. 🎙️ AGENTE DE LIGAÇÃO no molde dos atendentes — liga para leads NÃO RESPONSIVOS (pedido 21/09) — CONSTRUÍDO 21/09, SEM commit, aguarda "pode subir"
+- Objetivo dele: "ligar para leads não responsivos e conduzir ao agendamento (melhor) ou à conversa no
+  WhatsApp; responder dúvidas". Spec: ~/Desktop/CLAUDE CODE/CEVICO/docs/RODADA_195_SPEC.md.
+- **Prompt:** `STAGE_PROMPTS['voice']` (bloco "SUA ETAPA: LIGAÇÃO PARA LEAD NÃO RESPONSIVO", 7 passos
+  falados: abertura com nome + motivo, "não posso falar" → WhatsApp, retomar de onde parou, dúvidas/objeções
+  do Roteiro por extenso, convite → 2 horários reais → confirmar → marcar → WhatsApp de confirmação, porta
+  aberta sem insistir > 2x, registrar resultado + despedida; caixa postal, urgência, pessoa). Script de voz =
+  Roteiro CEVICO + regras de voz + ferramentas + etapa + trava (`Crm::VoiceAgent::Script.build`; R$ → "reais");
+  `agents.voice.prompt` = só o bloco da etapa ("Passos desta ligação"); campo antigo `voice.prompt` ignorado.
+- **Seleção:** `Crm::VoiceAgent::UnresponsiveLeads` (colunas vigiadas; última mensagem é da clínica há ≥
+  silence_hours e ≤ lookback_days, sem resposta; com telefone; sem consulta futura; fora do opt-out; sem
+  ligação da IA em 48 h e < max_attempts em 14 dias; não está em campanha aberta) com `motivo` e `objective`.
+- **Job de hora em hora** `Crm::VoiceAgent::UnresponsiveLeadsJob` (schedule.yml, 12 * * * *): SOMBRA =
+  lista "ligaria hoje" em `voice_state.shadow` + evento; AO VIVO (mode live + CEVICO_RESPONDERS_LIVE +
+  janela dias/horas + ElevenLabs configurada + colunas) = campanha do dia "🤖 Leads não responsivos —
+  dd/mm" enfileirada para o discador existente ({{campanha_objetivo}} por contato).
+- Simulador por texto com `agent: 'voice'` + `objective` ("Motivo da ligação") — testado com IA real:
+  abriu com o motivo, respondeu objeção de valor/medo, ofereceu 2 vagas reais por extenso.
+- Card `voice` no hub completo (interruptor, tiles Situação/Colunas/Ligaria hoje/ElevenLabs, explicador +
+  comandos, Sombra | Ao vivo + janela, colunas vigiadas, horas de silêncio, dias, teto, tentativas, caixa
+  do WhatsApp p/ continuar, 🧪 Testar, 📋 Ver quem ligaria hoje (`POST settings/voice_shadow_run`), 🎙️ Voz
+  e número, registro). Publicar com ElevenLabs configurada sincroniza o prompt lá (aviso se falhar).
+- Refatorações de apoio: `Crm::AgentWindow`, `Crm::AgentState`. Specs: 97 verdes (rodada inteira).
+  Deploy = WEB + SIDEKIQ, SEM migration. Pós-deploy: Integrações → chave ElevenLabs → Sincronizar; ligar
+  o card em sombra, escolher colunas; testar por voz no painel da ElevenLabs. Ao vivo de verdade depende
+  do número na ElevenLabs (Meta/Henrique) + CEVICO_RESPONDERS_LIVE.
+
+## 197. 🎙️ BUSCAR VOZES na conta free da ElevenLabs (21/09) — CORRIGIDO, aguarda "pode subir"
+- A busca só olhava as vozes da conta (padrão, em inglês) e devolvia "nenhuma voz". Agora cai na Voice
+  Library em português (feminina/masculina/jovem = filtros), marca "biblioteca", dá "▶ ouvir", e o
+  Sincronizar adiciona a voz à conta antes do agente (`voice_public_owner_id`). Deploy WEB só.
+
+## 196. 🧪 TESTAR AGENTE COM O INTERRUPTOR DESLIGADO (feedback 21/09 pós-deploy da 195) — CORRIGIDO, aguarda "pode subir"
+- "Só consigo testar os agentes se estiverem ligados; o ideal é testar com ele desligado." O motor recusava
+  com "Agente desligado." antes do simulador. Agora `Crm::ResponderAgentService` aceita `simulation: true`
+  (só o `Crm::AgentSimulator` passa) e ignora o interruptor nesse caso; o atendimento real continua
+  exigindo o interruptor ligado. Spec em responder_agent_service_spec. Deploy WEB só.
+
+## 194. 🩹 LEMBRETE DE VÉSPERA JOGAVA O PACIENTE EM "ENVIO DE ORÇAMENTO" (feedback da Vaneide 21/09) — CORRIGIDO, SEM commit, aguarda "pode subir"
+- Sintoma: "todos os pacientes que vêm como uma nova janela de confirmação de consulta estão vindo
+  como orçamento enviado". Causa (pelo código; a configuração real das automações não pôde ser
+  lida daqui — sem chave SSH neste Mac): o lembrete D-1 sai por `Crm::SendTemplateService`; se o
+  paciente ainda não tinha card, `CrmListener#conversation_created` criava o card em "Novos
+  Contatos", e a mensagem ENVIADA do lembrete disparava a automação de coluna "mensagem enviada →
+  mover para Envio de Orçamento" (feita para quando a ATENDENTE manda o orçamento).
+- Correção (2 camadas): (1) toda mensagem que sai pelo SendTemplateService (lembretes, réguas,
+  campanhas, colheita, ferramentas de voz) leva `additional_attributes.cevico_auto`; o gatilho
+  "mensagem criada" das automações de coluna IGNORA mensagens automáticas enviadas (cevico_auto /
+  cevico_journey / cevico_followup_bot_id / cevico_ia_agent) — a menos que a automação tenha
+  `action_config.include_automated = true`. (2) paciente com consulta FUTURA na Agenda que ganha
+  card novo entra na coluna "Ao agendar, mover o card para" do Atendente de Agendamento (se
+  configurada no mesmo funil), não em Novos Contatos.
+- Specs: spec/listeners/crm_listener_automated_messages_spec.rb (6 verdes). Deploy WEB+SIDEKIQ.
+  Conferir com a Vaneide após o deploy; se ainda acontecer, olhar as automações da coluna
+  "Novos Contatos" (Automações → Modo Programação) — pode haver outra regra movendo o card.
+
+## 191. 🎯 OTIMIZAÇÃO DOS ATENDENTES — "eu mesmo jogo orientações" (pedido 21/09) — CONSTRUÍDO 21/09 ("pode construir os 3"), SEM commit, aguarda "pode subir"
+- Pedido: um ambiente onde ele analisa as conversas (reais e as do 🧪 Testar
+  agente), marca uma resposta do agente, escreve a resposta melhor / uma
+  orientação, e isso vira atualização do Roteiro ou dos Passos da etapa,
+  agente por agente. Substitui a proposta 190 (que era só automática).
+- Desenho proposto: (1) em QUALQUER balão do agente (Sombra, Testar agente e
+  conversa real com nota de sombra) um botão "✍️ Orientar": abre um modal com
+  o trecho, a resposta do agente e dois campos: "como deveria responder" e
+  "regra para o futuro" (1 frase) + escolha da seção destino (Roteiro:
+  persona / forma / dados / objeções / humano, ou Passos do agente X);
+  (2) tela "Orientações" na aba Agentes de IA: fila com as orientações
+  (pendente → aplicada), botão "Aplicar no Roteiro" que insere o texto na
+  seção escolhida e grava VERSÃO do Roteiro (histórico + voltar), e "Testar
+  de novo" que reabre o simulador com a mesma conversa; (3) opcional: a IA
+  reescreve a orientação no tom do Roteiro antes de aplicar (você confirma).
+- Dados no NOSSO Postgres: `crm_agent_guidances` (conta, agente, conversa,
+  mensagem, texto do agente, resposta ideal, regra, seção, status, autor) +
+  `crm_script_versions`. Migration → BACKUP antes.
+- Sinais automáticos (👎 da Sombra, chamar_humano, objeção sem resposta)
+  entram na mesma fila como "sugestões" — sem aplicar nada sozinhos.
+
+## 192. 🗓️ ATENDENTE PÓS-AGENDAMENTO DE VERDADE — consulta a Agenda, remarca, avisa (pedido 21/09: "tem potencial, mas no momento é inútil") — CONSTRUÍDO 21/09, SEM commit, aguarda "pode subir"
+- O que falta hoje (visto no teste dele): o motor só injeta a consulta futura
+  do PRÓPRIO contato; se a consulta é de terceiro (mãe Maísa) ou o cadastro
+  não bate, o agente não acha nada e chama humano. Não busca pela Agenda.
+- Construir FERRAMENTAS (tool use da Claude) no motor dos respondedores:
+  `buscar_consulta(nome | telefone | dia)` na Agenda interna (inclusive
+  terceiros: "minha mãe, Maísa, hoje"), `remarcar_consulta(id, dia, hora,
+  unidade)` só para vagas LIVRES, `cancelar_consulta(id, motivo)`,
+  `confirmar_presenca(id)`. Em SOMBRA as ferramentas só leem; ao vivo
+  escrevem na Agenda e movem o card.
+- Depois de remarcar/cancelar: aviso no Meu Painel da pessoa responsável
+  (reaproveitar os avisos do Radar) + nota na conversa + etiqueta.
+- Objetivo dele: "reduzir a necessidade do humano" — as meninas ficam na
+  conferência e no atendimento humano quando precisar.
+
+## 193. 🌙 AGENDAR SEM HUMANO NOS FINS DE SEMANA (pedido 21/09, gráfico de 294 consultas com vales aos sábados/domingos) — CONSTRUÍDO 21/09 (janela ao vivo por dia), SEM commit, aguarda "pode subir"
+- Já existe no card do Atendente de Agendamento o campo "Horário em que
+  atende sozinho" e o modo Ao vivo (trancado até a Rodada 2). Caminho: Rodada
+  2 = ligar AO VIVO primeiro só na janela sem humano (sáb/dom e noite), com o
+  N8N desligado nessa janela; medir consultas agendadas na janela × antes.
+  Precisa: (a) alguns dias de Sombra com 👍 na maioria; (b) destravar
+  LIVE_ENABLED com janela por dia da semana (hoje é só hora início/fim).
+- Rodada 3 = tudo, 24 h, com o agente B (192) cobrindo pré-consulta.
+
+### FEITO 21/09 (191 + 192 + 193, três frentes em paralelo; spec em ~/Desktop/CLAUDE CODE/CEVICO/docs/RODADA_191_193_SPEC.md)
+- **192 backend:** `Crm::ResponderTools` (buscar_consulta / remarcar_consulta / cancelar_consulta /
+  confirmar_presenca; terceiros por nome+dia; em SOMBRA nunca escreve, devolve `simulado: true`; ao vivo
+  = lock Redis + slot_available? + update da task + nota 🔁), laço de tool use em
+  `Crm::ResponderAgentService` (máx 5 voltas, `tools` + json_schema convivem no gem 1.55, uso registrado
+  por volta), campo `acoes` (montado pelo sistema) na nota de sombra / Testar agente / tela Sombra
+  ("🔧 buscou consulta: 2 encontradas (Maísa, hoje 08:30) · remarcaria …"), `Crm::AgentAlert`
+  (kinds agente_remarcou / agente_cancelou na lista do Radar, TTL 24 h, painel do responsável da
+  consulta) + `RadarExtraAlerts`, STAGE_PROMPTS dos dois atendentes com o bloco FERRAMENTAS. Teste real
+  em sombra na conta 3: achou a consulta da mãe, pediu os 4 dígitos p/ desambiguar, ofereceu vagas reais
+  e "remarcaria" (simulado). Caminho AO VIVO só por spec (stub) — primeiro ao vivo real deve ser numa
+  janela curta, com N8N desligado.
+- **193 backend:** `LIVE_ENABLED` = variável de ambiente `CEVICO_RESPONDERS_LIVE=true` (21/09, "ir com
+  calma": sem a variável no EasyPanel, web E sidekiq, nenhum atendente fala com paciente, a tela mostra
+  o cadeado e o backend recusa "Ao vivo" com 422; deploy sem a variável = tudo em sombra); `mode: live` + `live_days` (0..6, vazio = todos) +
+  hours_start/end (vira a noite); fora da janela = sombra; ao vivo exige caixa marcada (422).
+- **191 backend:** migration `20260921120000` (crm_agent_guidances + crm_script_versions → BACKUP
+  ANTES em produção), `Crm::AgentGuidance` (apply! = foto do Roteiro → linha no fim da seção → applied;
+  `from_shadow_note!` no 👎 da Sombra), `Crm::ScriptVersion` (snapshot!/restore!, grava no prompt
+  PUBLICADO do agente), controllers agent_guidances (index/create/update/destroy/apply/ignore/reopen) e
+  script_versions (index/restore), rotas, snapshot automático ao salvar o Roteiro na tela.
+- **Telas:** segmento Sombra | Ao vivo real + chips dos dias + frase por extenso + aviso do N8N + tile
+  Situação (Ao vivo agora / Sombra fora da janela); `GuidancesPanel.vue` abaixo do Roteiro (filtros,
+  Aplicar/Editar/Ignorar/Testar de novo/Reabrir); `GuidanceModal.vue` ("✍️ Orientar" em cada balão do
+  Testar agente e em cada item da Sombra); chips 🔧 das ferramentas; "🕘 Histórico" no Roteiro com
+  "Voltar para esta"; avisos agente_* no Meu Painel (chip, 📅 Agenda, Ver conversa). Verificado claro/
+  escuro/375. Fix de passagem: import de useAlert faltando em InicioPage.vue.
+- Specs: 44 (frente A) + 18 (frente B) + 6 (listener, adapter :test forçado) = verdes. Deploy =
+  WEB + SIDEKIQ, com migration (backup antes); reversão = etiqueta anterior. Pós-deploy: deixar em
+  sombra alguns dias; primeiro ao vivo = janela curta de fim de semana com N8N desligado.
+
+## 190. 🎓 PROPOSTA — AMBIENTE DE APRENDIZADO DOS ATENDENTES DE IA (pergunta 21/09: "é possível ter um ambiente em que o agente aprenda?") — AGUARDA DECISÃO
+- Recomendação: SIM, mas aprendizado SUPERVISIONADO — nunca a IA reescrevendo
+  o próprio Roteiro sozinha (clínica: valor, horário ou orientação errada custa
+  caro). Ciclo: o sistema COLETA sinais → a IA PROPÕE mudanças no Roteiro →
+  o admin APROVA → vira versão nova do Roteiro (com histórico e "voltar").
+  Tudo no NOSSO Postgres; Supabase só existe por causa do N8N e some com ele.
+- Sinais coletados sozinhos: 👎 da tela Sombra (com a nota), conversas em que
+  o humano assumiu (chamar_humano) e o que o humano respondeu, pergunta do
+  paciente sem resposta no Roteiro (objeção nova), agendamento que falhou
+  (vaga inválida), "não" logo depois do orçamento, paciente que repetiu a
+  pergunta.
+- Tela "Aprendizado" na aba Agentes de IA: fila de lições (uma por sinal:
+  trecho da conversa · o que o agente disse · o que o humano/admin diria ·
+  sugestão de texto para a seção certa do Roteiro) com Aprovar / Editar /
+  Ignorar; aprovar = atualiza a seção (objeções, dados oficiais, passos) e
+  grava versão. Painel: lições da semana, objeções novas, % aprovadas.
+- O Mentor do Time (já existe, roda semanal) gera as sugestões em lote a partir
+  dos sinais; o Auditor de Conversas já dá nota — reaproveitar.
+- Migration: tabela `crm_agent_lessons` + `crm_script_versions` → BACKUP antes.
+- Limpeza de banco: NÃO precisa. O motor lê só as últimas 40 mensagens da
+  conversa + Roteiro; nada se acumula (o "Deletar conteúdo" do N8N existia
+  porque lá a memória ficava em tabelas separadas no Supabase).
+
+## 188. 🗣️ ATENDENTE DE AGENDAMENTO INTERNO — Rodada 1 (SOMBRA) + Roteiro CEVICO (pedido 20/09, noite; "pode construir. dê o seu melhor. precisa ser seguro e visualmente controlável")
+- Objetivo: internalizar o agente de agendamento do WhatsApp (hoje fluxo N8N
+  externo, ~15% de conversão, fecha mal no Google Calendar) em agentes DENTRO
+  do sistema, por coluna do CRM, com UMA fonte (o Roteiro). Desenho completo em
+  ~/Desktop/CLAUDE CODE/CEVICO/docs/AGENTE_AGENDAMENTO_DESENHO_2026-09-20.md.
+- 📜 ROTEIRO CEVICO (`Crm::CevicoScript`): fonte única dos respondedores em 5
+  seções (persona · regras de forma · dados oficiais · objeções · passar p/
+  humano), destilado do Supervisor v19 do N8N (26/08, Tatuapé 5 min); valores
+  de cirurgia vêm da Tabela de preços oficial ({{TABELA_DE_PRECOS}}). Editável
+  em Automações → Agentes de IA (card dourado no topo): abas por seção, texto
+  vigente × padrão, "restaurar padrão", salva na hora (`ai_config.script`,
+  seção vazia = padrão). Bloco da ETAPA por agente = campo "prompt" do card
+  (`STAGE_PROMPTS`). Prompt final = Roteiro + etapa + RESPONDER_GUARDRAIL.
+- 🧠 MOTOR (`Crm::ResponderAgentService`): um serviço para todo agente que fala
+  com paciente; contexto vivo injetado (agora, nome/telefone do contato, coluna
+  do card, vagas LIVRES via `Crm::AgendaSlots` 12 dias × 4/janela, consulta
+  futura via `AppointmentRecorder.future_appointment`, últimas 40 msgs com
+  marcadores [áudio]/[imagem]); saída JSON: mensagens (≤3), etapa, agendar +
+  agendamento, pausar, chamar_humano, leitura (1 frase p/ a equipe).
+  `Crm::AiAgentConfig` ganhou `agent_key` (chave dinâmica) + RECOMMENDED
+  (Sonnet 5/médio) + RESPONDER_AGENTS.
+- ⚙️ JOB (`Crm::ResponderAgentJob`, 12 s de espera, anti-picada): modo SOMBRA =
+  nota interna de ATIVIDADE privada "🕶️ Sombra · teria respondido 1) 2) 3) ·
+  agendaria dia/hora/unidade (vaga válida ✓/✗) · chamaria humano · leitura",
+  com `additional_attributes.cevico_ia_shadow`; NADA sai ao paciente, nada é
+  agendado, card não se move, sem pausa. Teto de CONVERSAS/dia na sombra
+  (`shadow_daily_cap`, padrão 30; mesma conversa conta 1). Registro de atividade
+  em `ai_config.atendente_agendamento_state` (events + shadow_days, 7 dias).
+  Modo AO VIVO já escrito na ORDEM SEGURA (trava vaga → confere → grava na
+  Agenda → SÓ ENTÃO 😊 → move card p/ `after_booking_stage_id` → pausa; vaga
+  sumiu = pede outro período; janela de horas; teto 60 msgs/dia; travessão
+  removido antes de enviar) mas TRANCADO por `LIVE_ENABLED = false` (backend
+  recusa mode=live com 422; a tela mostra "Ao vivo · Rodada 2" com cadeado).
+- 🧭 ROTEAMENTO (`CrmListener#handle_responder_agents`): a COLUNA do card decide
+  quem fala — agente com caixa (inbox_ids, só WhatsApp) + stage_ids (+ "sem
+  card" = contato novo). Em sombra, resposta humana/N8N NÃO pausa nem gera nota
+  (só observa); ao vivo, humano pausa / 👍 reativa (estado próprio
+  `cevico_atendente_wa`). O N8N roteia só incoming/outgoing → ignora a nota.
+- 🕶️ TELA SOMBRA (`ShadowReviewModal.vue`, kit): KPIs (notas, agendaria/vaga
+  válida, chamaria humano, 👍/👎), filtros em linha, uma ficha por leitura em 3
+  colunas — Paciente disse | Interno teria respondido (+ agendaria + leitura)
+  | Respondido de verdade (N8N/API, equipe, robô; 30 min seguintes) — 👍/👎 do
+  admin grava em `cevico_ia_shadow.rating` (GET `settings/ai_shadow`, POST
+  `settings/ai_shadow_rate`, só admin). Link abre a conversa.
+- 🎛 CARD DO AGENTE (AutomationsHub, 1º de "Atendimento ao paciente"): painel de
+  situação (Em sombra/Desligado · caixas · colunas · sombra hoje N/teto), faixa
+  explicando a sombra, modo (Sombra ✓ / Ao vivo 🔒), pílulas de caixas de
+  WhatsApp, pílulas de colunas + "Sem card", coluna pós-agendamento, teto da
+  sombra, horário (ao vivo), botões "Abrir tela Sombra" e "Ver o Roteiro",
+  registro de atividade. Rascunho/Publicar iguais aos outros agentes. Fluxo
+  novo na aba Fluxos (`flows/atendente_agendamento.rb`) + AGENT_META no Painel.
+- Testes (docker, verdes): `spec/services/crm/cevico_script_spec.rb` (3),
+  `spec/jobs/crm/responder_agent_job_spec.rb` (6: nota sem outgoing, vaga
+  válida sem agendar, anti-picada, teto, desligado, live trancado),
+  `spec/listeners/crm_listener_responders_spec.rb` (5: sem card, coluna dele,
+  coluna de outro, caixa errada, humano não pausa na sombra),
+  `spec/controllers/api/v1/accounts/crm/settings_responder_spec.rb` (4: recusa
+  live, grava config, Roteiro por seção, tela Sombra + 👍), flow_map (11).
+  Visual local conta 3 (claro/escuro): 4 conversas semeadas na caixa WhatsApp
+  Principal (#345–#348) com IA simulada + resposta "real" p/ a tela Sombra.
+- 🧪 SIMULADOR (`lib/tasks/cevico_wa_agent.rake`, `cevico:wa_agent_simulate`):
+  teste SEGURO com a IA de verdade e sem WhatsApp real — cria um "Paciente
+  Simulado" numa conversa da caixa configurada, manda as mensagens de MSGS
+  (separadas por |) como se fosse ele e imprime o que o agente teria respondido;
+  a conversa entra na tela Sombra. Job ganhou guarda anti-duplicidade (1 nota
+  por mensagem do paciente, mesmo se o job da fila chegar depois do simulador).
+  Local: a chave da Claude vai em CRM → Integrações → Claude da conta 3 (é a
+  mesma chave pré-paga; ~US$ 0,01 por leitura). Conversa simulada
+  (`additional_attributes.cevico_simulado`) alimenta o agente com as próprias
+  notas de sombra como falas da CLÍNICA (senão cada mensagem parecia primeiro
+  contato). TESTADO COM A IA DE VERDADE 21/09 02:33 (conversa #355, conta 3):
+  recepção → sondagem → autoridade → orçamento oficial → objeção convênio →
+  agendamento oferecendo 2 vagas REAIS da Agenda (terça 22/09 08:00/08:15,
+  Dr. Henrique Gemelli). Bug corrigido de tabela: o formato de resposta não
+  aceita minItems/maxItems em array (a Claude devolvia 400) — removido aqui e
+  no Atendente Instagram, que tinha o mesmo erro latente.
+- 🧪 BOTÃO "TESTAR AGENTE" (pedido 21/09 02:40, "melhor coisa"): bate-papo
+  estilo WhatsApp no card (`AgentTestModal.vue`) em que o admin é o paciente e
+  o agente responde com a IA de verdade e o Roteiro atual, em balões azuis,
+  com etapa/agendaria/vaga válida/chamaria humano/leitura em cada resposta;
+  sugestões de frases em chips; "Nova conversa"; atalho "Editar Roteiro".
+  Backend `Crm::AgentSimulator` + `POST settings/ai_simulate` (só admin, só
+  RESPONDER_AGENTS): caixa interna "🧪 Simulador de agentes" (Channel::Api,
+  criada na 1ª vez, SEM canal de envio — nem local nem em produção sai
+  mensagem), contato "Paciente de teste" (+55 11 90000-0000), conversa com
+  `cevico_simulado`; a resposta vira nota de sombra (mesma tela Sombra), zero
+  outgoing. `ResponderAgentJob.write_shadow_note!` compartilhado job/simulador.
+  Ambiente seguro e dedicado para testar TODOS os respondedores futuros.
+  Spec no settings_responder_spec (caixa API, sem outgoing, recusa agente não
+  respondedor). Testado com a IA real 21/09 02:45 (#356).
+- 🛟 AGENTE B "ATENDENTE PÓS-AGENDAMENTO" (`atendente_pos`, pedido 21/09 02:55
+  "antes de acionar, faça o agente de suporte"): mesmo motor/Roteiro/Sombra/
+  Testar agente; bloco da etapa em STAGE_PROMPTS (dúvidas comuns do N8N,
+  "que dia é minha consulta" pela consulta futura do contexto, REMARCAR com 2
+  vagas reais → agendar=true (o Recorder move a consulta), CANCELAR →
+  `cancelar=true` novo no formato de saída, humano p/ caso clínico). Card no
+  hub (cor azul, colunas sugeridas Agendamento de Consulta + Consulta
+  Confirmada + Desmarcou; sem "sem card"/"mover card"), roteamento por
+  coluna no CrmListener (RESPONDER_KEYS), validação "uma coluna tem um dono
+  só" no update_ai (422) e pílula travada na tela, painel/fluxo/AGENT_META.
+  ai_json: `responder_events` e `responder_shadow_today` por agente. Testado
+  com IA real 21/09 03:00 (simulador): respondeu dia/hora/unidade/médico da
+  consulta futura + o que levar; pedido de remarcar → 2 vagas de manhã reais.
+  Ao vivo (remarcar/cancelar de fato) continua trancado até a Rodada 2/3.
+- Sem migration, sem cron. Deploy WEB + SIDEKIQ. Reversão em 1 linha: desligar
+  o interruptor de cada atendente (nada chegou a paciente) ou voltar a
+  etiqueta anterior. PRÓXIMO: Rodada 2 = fatia ao vivo (LIVE_ENABLED, N8N
+  desligado numa janela, áudio/foto), Rodada 3 = tudo + Agente Pós-agendamento
+  + chips 🤖 nas colunas + botão "IA pausada" no painel da conversa.
+
+## 187. 🧩 RODADA DE TELAS 20/09 — Central em cards compactos + "Análise científica", Páginas, Formulários e Tarefas no kit, Funil de Tráfego por último (pedido 20/09, madrugada)
+
+Pedidos dele: (1) "Tarefas com o design da Apple"; (2) em Análises, o dash de
+tráfego por último; (3) Central de Criativos: "cards menores com a teia
+principal, imagem, título, selos, ROAS e cirurgias fechadas — mais
+quadradinhos, bem enquadrados; expandir para análise completa; Ver a fundo
+vira Análise científica com TUDO, inclusive transcrição"; (4) Páginas com a
+nova cara, mais convidativo para criar; (5) Formulários idem + bem enquadrado.
+FEITO (feat/rodada-172; deploy WEB só, sem migration):
+- Menu: 'Reports > Traffic Funnel' passou para o fim de Análises.
+- Central: `CreativeCard.vue` reescrito (compacto: mídia 64×80, título inteiro,
+  selos formato/situação/pior parâmetro/fadiga/fala do vídeo, campeões, teia
+  Copy 150 px com média, tiles ROAS × média e Cirurgias fechadas + leads/
+  consultas, ações Análise científica / copiar / transcrever / Instagram /
+  comparar; card inteiro clicável); grade `auto-fit minmax(15rem)`; seletor
+  "Cards | Tabela"; `CreativeDetail` renomeado "Análise científica"; texto de
+  ajuda do bloco atualizado. Docs: CENTRAL_CRIATIVOS.md.
+- Páginas (`PagesHome.vue`): hero com "Nova página" em destaque + chips de
+  contagem; seletor Todas/Ideias/Em produção/Publicadas em `cv-seg`; um
+  `cv-block` por etapa da jornada (medalhão, dica de 1 linha, contagem) com
+  grade `auto-fill minmax(16rem)` cujo 1º tile é sempre o tracejado "Criar
+  página aqui" (abre o criar já na etapa; etapa vazia mostra só ele); cartões
+  `cv-sub` com miniatura menor, pílula de situação (verde no ar / âmbar em
+  produção), título e URL inteiros, números com ícone, ações `cv-btn`.
+  Paleta `crm:paginas` (captacao/pre_consulta/pre_cirurgia/pos_operatorio).
+- Formulários (`CrmForms.vue`): container na largura toda (acabou a coluna
+  estreita); hero com "Novo formulário"; bloco "Seus formulários" em grade
+  auto-fit com o tile "Criar formulário" primeiro e cartões com 3 mini-tiles
+  (envios/respostas/conversão) na técnica do MoneyTiles + barra de conclusão
+  `cv-track/cv-fill`; ações do selecionado em `cv-btn`; bloco "Respostas"
+  (tiles + Insights sem roxo sólido + retenção card a card + resultado da IA
+  em 4 grupos com ícones); bloco "Pergunta a pergunta" em 2 colunas alinhadas.
+  Paleta `crm:formularios`. Bug herdado corrigido: `i-lucide-loader-2` não
+  existe (spinner do Gerar com IA) → `loader-circle`.
+- Tarefas (`TasksBoard.vue`): hero (abertas · feitas · atrasadas · perto do
+  prazo) com "Nova tarefa"; filtro Minhas/Todas em `cv-seg` + "Por pessoa"
+  para admin; alerta de prazo em `cv-strip`; colunas `cv-block` que embrulham
+  (1/2/3/4 colunas), cartões `cv-sub` com título inteiro, meta e chips de
+  prioridade/situação; painel Resumo com tiles; modo "100 % feito" dourado
+  preservado via preset `cv-gold`; modal no `cv-modal`. Arrastar intacto
+  (draggable segue pai direto dos cartões). Paleta `crm:tarefas`.
+- Backend: `REPORT_PALETTE_SCOPES` ganhou `crm:jornada` (faltava — a paleta
+  da Jornada não salvava), `crm:paginas`, `crm:formularios`, `crm:tarefas`.
+- Verificado no navegador local (conta 3, escuro, 1280 e 390): as 4 telas
+  montam, nenhum texto cortado, sem rolagem lateral; Central com 3 colunas de
+  cards em 1280 (4 em telas largas, 1 no celular).
+
+## 186. 🗄️ MENU EM GAVETAS "PERSONAL ORGANIZER" — ordem pela filosofia do funil + gaveta Marketing para parceiros (pedido 20/09, madrugada)
+
+Pedido: "Atendimento = conversas, chamadas e agenda; CRM solo; um ambiente
+ANÁLISES com os relatórios; Configurações com tudo de config; dúvida onde
+pôr automações, conteúdo, páginas… quero que fique fácil fazer o que era
+difícil (páginas, SEO, conteúdo, carrosséis, vídeo com IA) — para mim e para
+os parceiros; organizar como uma personal organizer: nada se perde, tudo em
+um lugar que faz sentido e é rápido de achar". Depois: "Tarefas solo (chega
+por notificação); Central de Criativos em Marketing (vocabulário certo);
+ordem dentro de cada gaveta também pela filosofia — otimizar o funil etapa a
+etapa".
+FEITO (feat/rodada-172 sobre a0776c8; deploy WEB só, sem migration):
+- `Sidebar.vue`: `MENU_GROUPS/UNGROUPED` → `MENU_LAYOUT` (ordem única do
+  menu) com gramática de entradas: `'Nome'`, `'Pai > Filho'` (puxa um filho
+  como folha), `'Pai > *'` (o que sobrou do pai) e `{ rest: 'Pai' }` (o que
+  sobrou como subgrupo fechável); resolvedor em `groupedMenuItems` com rede
+  de segurança "Mais" (item sem gaveta ou filho que sobrou nunca desaparece).
+  Gavetas: Meu Painel · Atendimento (Conversas, Chamadas, Agenda, Respostas
+  prontas) · CRM · Tarefas · Automações (Jornada, Robôs, Campanha WhatsApp,
+  Agentes de IA, Painel dos agentes, Fluxos, Regras, Programação, Resultados,
+  Tratamento) · Marketing (Central de Criativos, Páginas, Formulários,
+  Montador de Funis, Testes A/B, Planejamento de conteúdos, Análise de funis,
+  Resultados de tráfego) · Análises (Funil de Tráfego, Anúncios Meta, Google,
+  Dashboard CRM, Campanhas, Agenda, Médicos, Agentes, Ligações, Saúde do
+  WhatsApp + subgrupo "Outros relatórios" — os do core) · Gestão (Estratégia, Metas,
+  Financeiro, Pessoas, Academia) · Configurações num nível só (Integrações,
+  Conta, Domínio, Painéis, Construtor, Tabela de preços, Agentes, Times,
+  Cargos, Caixas, Modelos, Etiquetas, Atributos, Respostas, Macros, Robôs,
+  Fluxo de Conversa, SLA, resto, Capitão, Empresas). Rótulos longos encurtados
+  para caber inteiros na barra (Planejamento, Regras da caixa, Outros relatórios);
+  Cobrança (só nuvem Chatwoot) deixa de vazar no self-hosted.
+- Central de Criativos virou item de 1º nível (`Creatives Center`, ícone
+  clapperboard); dashboards ganharam ícone+cor (azulejo); atendente vê
+  "Meu perfil" (era "Configurações" solto). Personalizar menu: só
+  mostrar/ocultar — as setas de ordem saíram (a ordem é das gavetas).
+- Concessão "Marketing" = a capability `pages` (renomeada no
+  AgentAccessModal; grants salvos continuam valendo) passa a liberar a gaveta
+  inteira: `Forms` (menu + forms_controller `check_admin` → `crm_can?(:pages)`),
+  `Creatives Center` (menu + creatives_controller `require_any_capability(
+  :reports, :pages)` — helper novo em `Crm::AccessControl`).
+- Testes: rspec creatives_controller 4/4; rubocop sem ofensa nova (5 antigas
+  em aggregate_questions); eslint só o que já existia (i18n/unused do core).
+- Lição: contêineres chatwoot-* (rails/vite/sidekiq) caíram com o restart do
+  Docker; `docker start` nos mesmos contêineres recupera, mas o vite refaz
+  `pnpm install` (~10 min) e o 1º carregamento demora (otimização de deps).
+
+## 185. 🧩 TEXTO INTEIRO SEMPRE + MENU NO CELULAR + NOMES/ÍCONES + KIT MAIS TRANSPARENTE (pedido 20/09, noite 2)
+
+Prints dele: (1) cards "O que vale dinheiro" com "Consulta a…", "Cirurgia
+re…", "Agendame…" e o "R$" quebrado em duas linhas — "precisa aparecer todo o
+texto sempre, em todas as situações; isso é erro de design; ao invés de 4
+lado a lado, ajustar o tamanho"; (2) menu iPhone no celular cortando
+"Atendime…", "Pacientes …", "Configura…" — "reduza o tamanho para o mobile";
+(3) azulejos cinza nas linhas de Configurações; (4) Jornada com fundo roxo —
+"eu queria o transparente… aumente a transparência disso tudo".
+FEITO — SUBIU no a0776c8 (develop) e IMPLANTADO por ele 20/09 ("ficou legal");
+deploy WEB, sem migration; reversão 780d5d7:
+- `MoneyTiles.vue`: grade `repeat(auto-fit, minmax(9.25rem, 1fr))` — decide
+  pela largura do CONTÊINER, não da janela (o `md:grid-cols-4` errava dentro
+  do modal); rótulo embrulha (sem `truncate`); número em `whitespace-nowrap`
+  com fonte `clamp(1.05rem, 13cqi, 1.6rem)` por container query
+  (`container-type: inline-size` no tile) — encolhe junto com o cartão, nunca
+  quebra. Faixa dos 13 indicadores do Ver a fundo idem (`auto-fit
+  minmax(10rem)`, sem truncate, nowrap). Título do Ver a fundo, BulletMeter e
+  ranking de falas também sem `truncate` (embrulham).
+- Menu (`Sidebar.vue`): "Pacientes e funil" → "CRM e pacientes"; "Caixa de
+  entrada" fora do menu (`OMITTED_FROM_MENU`; a tela segue pela URL e em
+  Configurações → Caixas); "Equipe e marca" = `i-lucide-id-card`;
+  Configurações = engrenagem (`i-lucide-settings`, era um raio); Central de
+  Criativos = 1ª de Relatórios; filhos de subgrupo (Configurações, Automações,
+  Conteúdos…) ganham cor própria (`TILE_COLORS` + `NESTED_CYCLE` em
+  `colorChildren`) — antes herdavam a cor do texto e saíam cinza; Auditoria =
+  `scroll-text`. ESLint --fix reformatou linhas antigas do arquivo (prettier).
+- Celular: barra `w-[min(80vw,320px)]` (era 200 px fixos — cortava os
+  rótulos) e o botão ≡ acompanha (`MobileSidebarLauncher.vue`); skin
+  `.cv-ios-nav` com `@media (max-width: 767px)`: linhas 40/36/32 px, letra
+  14/13,5/13, azulejos 27/24 px.
+- Kit `_cevico-glass.scss` (vale para TODAS as telas): `.cv-block` claro véu
+  branco 0,62→0,46 (era 0,94→0,8), tinta 0,035 (era 0,12), luz do canto 0,14
+  (era 0,32), crista 0,3; escuro véu 0,035→0,012 (era 0,07→0,03), tinta 0,045
+  (era 0,16), borda 0,3. Cristal `.cv-sub/.cv-stat/.cv-row`: claro véu
+  0,5→0,34 e tinta 0,02; escuro véu 0,065→0,018, tinta 0,02, anel 0,12/0,14.
+  `.cv-strip` (faixas de aviso) MANTÉM a tinta antiga por regra própria; cards
+  de KPI com degradê (DashKpi) não mudam.
+- Verificado no navegador local (conta 3, tema escuro, 1280/900/390): menu por
+  DOM (grupos, filhos coloridos, sem Caixa de entrada, Criativos 1º), Jornada
+  sem tinta roxa, tiles sem overflow em card e modal, menu do celular 311 px
+  com todos os rótulos inteiros (linha 40 px, azulejo 27 px, letra 14 px).
+
+## 184. 📱 MENU LATERAL ESTILO IPHONE (pedido 20/09, noite)
+
+Pedido: "algo mais iPhone na barra lateral; importante ter tudo, mas no
+estilo iPhone". FEITO: skin `.cv-ios-nav` (kit scss, fora do .cv-page) sobre
+os grupos do item 182 — cada grupo é um cartão arredondado como os Ajustes
+do iOS, linhas de 44 px, azulejo colorido por item (`TILE_COLORS` no
+Sidebar.vue; `sb-icon` no SidebarGroupHeader/Leaf com a cor no wrapper e o
+glifo branco), texto branco no escuro / quase-preto no claro, divisórias
+finas recuadas, seta à direita que gira ao abrir. A barra recolhida segue
+com os ícones do Chatwoot.
+
+## 183. 🔮 VIDRO CRISTALINO + CONTRASTE EM TODOS OS PAINÉIS (pedido 20/09, noite)
+
+Pedido: "fonte cinza em ambiente acinzentado não fica bom; indicadores com
+contraste ou transparentes com fundo de vidro cristalino (referências de
+glassmorphism); reajuste todos os painéis, principalmente dashboards e Meu
+Painel". FEITO no KIT (`_cevico-glass.scss`, bloco final "CRISTAL +
+CONTRASTE"), então vale para todas as telas de uma vez: `.cv-sub`, `.cv-stat`
+e `.cv-row` viram vidro cristalino (fundo quase transparente com degradê de
+luz, borda clara, crista de luz no topo, desfoque do fundo, halo na cor do
+bloco); tokens `text-n-slate-8…12` ganham contraste dentro do .cv-page
+(escuro: branco 52 %→100 %; claro: cinza-escuro→quase-preto); `.cv-label`
+mais opaco; divisórias visíveis. Ver a fundo v3: faixa de 13 indicadores
+NOMEADOS no topo (Investido, Impressões, Alcance, Conversas, Custo por
+conversa, CTR, Conversa por clique, Parada, Retenção, Custo por consulta,
+Custo por cirurgia, ROAS, % agendamento), mídia menor, teia + seletor de
+eixos (chips compactos, sem interruptores grandes) dentro da Leitura ao lado
+das réguas. Verificado por DOM em claro e escuro, sem rolagem lateral.
+
+## 182. 🗂️ MENU LATERAL EM GRUPOS COM RAMIFICAÇÕES (pedido 20/09)
+
+Print dele: ~20 itens soltos, "Chamadas" duas vezes (o Calls enterprise do
+Chatwoot + o nosso). FEITO: `MENU_GROUPS` no Sidebar.vue — Meu Painel solto;
+grupos Atendimento (Conversas, Chamadas, Caixa de Entrada, Agenda, Tarefas,
+Respostas prontas), Pacientes e funil (CRM, Jornada, Campanha WhatsApp,
+Formulários, Automações), Resultados (Relatórios com os dashboards dentro,
+Metas, Estratégia, Financeiro), Equipe e marca (Pessoas, Academia,
+Conteúdos, Construtor, Captain, Empresas), Configurações (Configurações,
+Integrações). Só um grupo aberto por vez (accordion do kit), o grupo do item
+ativo abre sozinho, itens que já tinham filhos viram subgrupo; Personalizar
+menu (ordem/ocultar) e os acessos por atendente continuam valendo; o Calls
+enterprise sai do menu (o nosso "Chamadas" fica). Nomes dos grupos são
+proposta — fácil de trocar.
+
+## 181. 🎬 CENTRAL DE CRIATIVOS v2.1 — gancho/corpo/CTA pela TRANSCRIÇÃO DO VÍDEO (pedido 20/09)
+
+Pedido: "o que importa é o vídeo; ganchos, corpos e CTAs devem ser com base
+na transcrição dos vídeos". FEITO (docs/CENTRAL_CRIATIVOS.md, seção v2.1):
+serviço + job de transcrição (Gemini, vídeo inline), preservado na carga,
+modelo devolve a fala como gancho/corpo (texto da Meta vira reserva), selo
+"fala do vídeo" nos cards e no Ver a fundo, botão Transcrever vídeo(s),
+bloco "O que os vídeos falam" ranqueando ganchos/corpos/CTAs falados.
+Testado com simulação (5 vídeos da conta 3); spec 20/20. Em produção:
+precisa da chave do Gemini e o token da Meta ler `source` dos vídeos.
+
+## 180. 🛡️ CONFORMIDADE META + GOOGLE — varredura 20/09 e pendências
+
+Varredura completa em docs/CONFORMIDADE_META_GOOGLE.md. FEITO na hora: GA4
+sem dado pessoal; test_event_code só fora de produção; opt-out fixo
+(nao_perturbe/perda_*) em campanha/régua/campanha de ligação + detector de
+"PARE"; travas da Calling API (1 pedido/24 h, 2/7 dias, horário comercial na
+ligação manual); agente de Instagram se identifica como assistente virtual.
+DECISÃO DELE: criptografar segredos do CrmSetting (chaves no EasyPanel +
+backup) e banner de cookies/Consent Mode v2 nas landings. PENDENTES
+menores: categoria do template, teto global por paciente/dia, event_id =
+Protocolo, purga de insights/criativos + janela do ctwa_clid, escopo
+ads_read, token no header, 4 não atendidas → revogação, teto diário dos
+comentários, aviso de gravação no pedido de permissão, aviso de
+privacidade nos formulários.
+
+## 179. 🍎 PADRONIZAR O DESIGN APPLE EM TODO O SISTEMA (pedido 20/09)
+
+Pedido: "design apple para este ambiente também (e todos os outros do
+sistema) — padronizar nosso melhor design por tudo". Regra: kit `.cv-*`
+(vidro, paleta por bloco, CevicoHero, blocos `p-6 sm:p-8`, títulos
+`text-xl/2xl`, muito respiro, alto contraste só no que importa, grids com
+`grid-cols-1` de base, nada de rolagem lateral, texto que embrulha em vez
+de cortar). Já estão no padrão: Meu Painel, Relatórios (10), Central de
+Criativos v2, Chamadas, Jornada (colunas). Plano por rodadas (uma tela por
+vez, sem mudar comportamento): (1) CRM board + ficha do paciente; (2)
+Campanha WhatsApp + Formulários + Integrações; (3) Agenda + Tarefas + Metas;
+(4) Estratégia + Financeiro + Pessoas + Academia; (5) Configurações do CRM.
+Cada rodada entrega print claro/escuro/celular e checagem de overflow.
+
+## 178. 🗺️ JORNADA — colunas legíveis (ajuste 20/09)
+
+Print dele: 6 colunas espremidas em 2000 px com títulos cortados ("Cons…",
+"Lembr…"). FEITO: no máximo 4 colunas por linha (`2xl:grid-cols-4`, as 6
+etapas viram 2 linhas) e os textos dos cartões passam a embrulhar em 2
+linhas (`line-clamp-2`) em vez de `truncate`.
+
+## 177. 🎯 CENTRAL DE CRIATIVOS v2 — o que vale dinheiro, ROAS/CAC/% agendamento como campeões, retenção em todo card, Ver a fundo Apple (pedido 20/09)
+
+Pedido: custo por consulta agendada e por cirurgia realizada nos cards;
+ROAS, CAC e % de agendamento como parâmetros de campeão; gráfico de
+retenção em todos; "Ver a fundo" no design Apple, clean, com respiro e alto
+contraste; sem rolagem lateral; campeões melhores no desktop.
+**FEITO 20/09 — SUBIU no commit 780d5d7 (develop) e foi IMPLANTADO por ele
+20/09 ~23h ("ficou bacana"); deploy WEB+SIDEKIQ, sem migration.** Detalhes: docs/CENTRAL_CRIATIVOS.md
+(seção v2). Testado: rspec 19/19 (Central), campeões novos disputando com
+dados de demonstração, DOM sem overflow em 1024 px e 375 px (card e modal).
+
+## 176. 📞 AMBIENTE "CHAMADAS" — ao vivo para todos, histórico com visualizações e indicadores por período (pedido 19/09 noite, via Henrique)
+
+**20/09 — CONSTRUÍDO (R1 inteira + as ações da R2: retornar, marcar
+retornada, CSV, paleta `crm:chamadas`), no working tree da feat/rodada-172,
+SUBIU no 780d5d7 e IMPLANTADO 20/09 (WEB+SIDEKIQ, sem migration).** Decisão: "Chamadas"
+é item do MENU DO DIA (`calls`, ligado por padrão para todo mundo, o admin
+desliga por pessoa) e não uma concessão — o pedido era "todo mundo vê".
+Testado local: rspec 8/8 novos (overview, live, busca, retornada, CSV),
+ligação simulada ao vivo (tocou → apareceu na faixa "Agora" em 1 s com
+cronômetro → encerrou → entrou em "Perdidas de hoje sem retorno" → botão
+Retornada limpou a fila), 4 visualizações, modal, claro/escuro/375 px.
+Detalhes técnicos: docs/CHAMADAS_NATIVAS.md §9. Falta (R3): recordes/
+campeões, metas, alerta no Radar, aposentar o relatório antigo.
+
+Pedido: um ambiente de CHAMADAS (desktop e celular) onde as ligações ficam
+registradas; todo mundo vê as chamadas EM ANDAMENTO; opções de visualização
+do histórico; indicadores por dia/semana/mês "do nosso jeito" (kit CEVICO:
+CevicoHero + PeriodRuler + DashKpi + gráficos). Precisa ser muito útil.
+
+O que JÁ existe (item 167/169): tabela `cevico_calls` (direção, status,
+started/answered/ended, duração, motivo do fim, gravação, transcrição,
+resumo, IA), `GET crm/calls` (filtros por tipo/ids/período), `GET
+crm/calls/dashboard` (`Crm::Calls::DashboardService`: KPIs, por dia, por
+hora, por atendente, por desfecho, espera, IA), eventos ao vivo
+`cevico_call.*` no stream `account_<id>` (Broadcaster) e o relatório
+"Dashboard de Ligações" (`reports/CallsDashboard.vue`) com PeriodRuler,
+KPIs, gráficos e "recentes".
+
+PLANO (3 rodadas, sem migration nova):
+- R1 — Página `Chamadas` (rota `crm/calls`, item "Chamadas" no menu CEVICO,
+  grant `calls`), no kit e em 1 tela no celular: (a) faixa **"Agora"** ao
+  vivo para TODO MUNDO: tocando / em atendimento (quem está na linha, com
+  quem, há quanto tempo — cronômetro), fila de perdidas de hoje sem retorno;
+  alimentada pelo `GET crm/calls?live=1` + eventos ActionCable; (b)
+  **indicadores do período** com PeriodRuler (hoje/ontem/7 dias/semana/mês/
+  personalizado, comparado com o anterior): recebidas, feitas, atendidas,
+  perdidas, taxa de atendimento, espera média, conversa média, IA; gráfico
+  por dia + por hora (MiniBars), por atendente (HBars); (c) **histórico**
+  com visualizações: Lista (cards com desfecho, duração, gravação,
+  resumo), Tabela (colunas por breakpoint), Por atendente, Linha do tempo
+  do dia; filtros: direção, desfecho, atendente, caixa, IA, busca por
+  nome/número; detalhe da chamada (linha do tempo, gravação, transcrição,
+  resumo, abrir conversa/contato).
+- R2 — Ações no ambiente: retornar ligação perdida (OutboundService), pedir
+  permissão, marcar "retornada"; alertas (perdida sem retorno há X min →
+  Radar); exportar CSV; paleta por bloco (escopo `crm:chamadas`).
+- R3 — Recordes/campeões (dia com mais atendidas, melhor taxa, atendente
+  do mês), metas de atendimento, e o Dashboard de Ligações passa a ser um
+  atalho para o ambiente.
+- Reusar `DashboardService` (acrescentar `live`, `outbound` e `by_inbox`),
+  `calls_controller#index` (parâmetro `live`), Broadcaster como está.
+
+## 175. 🕸️ TEIA (RADAR) DOS CRIATIVOS — força de gancho, corpo, CTA e mais, com eixos por chavinha (pedido 19/09 noite)
+
+Pedido dele: gráfico de teia/radar "estilo o da área de Pessoas" para
+classificar os criativos e a força de gancho/corpo/CTA, com parâmetros
+como retenção, CTR, lead; pequeno, dentro dos cards, em vários ambientes,
+com parâmetros diferentes selecionáveis por chavinhas.
+- CONSTRUÍDO 19/09 (feat/rodada-172, sem commit): `MiniRadar.vue` no kit
+  (mesmo desenho do radar de Pessoas, 46–240 px, 2º polígono tracejado =
+  média da conta, tooltip por ponto); `radarAxes.js` (eixos, força 0–100:
+  com parâmetro 50 = ruim / 100 = bom, custo invertido; sem parâmetro contra o
+  melhor do recorte; frequência 1→100 / 3→0; escolha por ambiente guardada no
+  navegador, mínimo 3); `RadarAxesPicker.vue` (chavinhas `.cv-switch` do kit)
+  e `CreativeRadar.vue`. Onde está: ficha (150 px + média + legenda), tabela
+  (46 px ao lado da miniatura), Ver a fundo (184 px + média, sem eixos
+  relativos), Comparar (uma teia com um polígono por criativo, nas cores das
+  colunas), Recordes (campeões de todos os tempos — backend passou a devolver
+  `rates` em `champions_for`), pódio de peças (eixos de peça: CTA, conversas,
+  custo, fatia, parada). Fórmula explicada na aba Parâmetros e dados.
+- AJUSTE 19/09 noite (pós-deploy da 1bb4084/7fbe5e1, pedido dele): a teia
+  ganhou MODOS por ambiente (`RADAR_GROUPS`): "Retenção do vídeo" (gancho,
+  25 %, 50 %, 75 %, fim ÷ quem parou 3 s, corpo), "Cliques e resultado" (CTR,
+  cliques, CPC, custo por conversa, conversa, leads) e "Completa"; escolher o
+  modo liga os eixos dele e as chavinhas refinam. Objetivo: comparar blocos de
+  copy (gancho/corpo/CTA) para a "disputa de criação" interna. E a moldura
+  `.cv-frame` virou vidro cristalino (fundo quase transparente + blur, brilho só na borda; claro/escuro legíveis) com o degradê só no
+  fio de 2 px do campeão, começando pelo azul em cima (fichas, Recordes, pódio). Depois:
+  interior BRANCO no claro / PRETO no escuro (ele recusou transparente
+  total); TODOS os blocos de fundo da página em `cv-page-sheer` (quase nada +
+  borda translúcida); e cor COMPLEMENTAR por paleta (`alt`/`altFamily` em
+  cevicoPalettes.js + `--cv-alt` + `.cv-alt` no kit) com os cards dos
+  Números do período alternando roxo × ouro (Grape), azul × amarelo, verde ×
+  rosa etc. — `blockAltFamily(blockId)` no composable, reutilizável nas
+  outras telas. E a 2ª revisão da teia: "pouca lógica nos 6 pontos" → cada
+  teia responde UMA pergunta com eixos da mesma régua: "Copy × parâmetros"
+  (gancho/corpo/CTA/conversa/custo contra o parâmetro; ponta curta = bloco a
+  trocar) e "Retenção do vídeo" (3 s + 25/50/75/fim de quem parou), lado a
+  lado na ficha; "Peça × recorte" no pódio; cliques/CPC/leads/frequência
+  saíram das teias. BulletMeter enxuto (parâmetros e "acima da média" no
+  tooltip). Complementar VIVA em 2 tons (âmbar → amarelo de flor, referência
+  de lótus dele) com texto escuro (`ink="dark"` no DashKpi). PALETA: escopo
+  `report:criativos` faltava na lista do backend (por isso não salvava);
+  escolha PESSOAL por usuário em `ui_settings.cevico_palettes` ("Só para
+  mim" no popup; admin também tem "Para todo mundo"); nota "Seu painel, as
+  suas cores" no Meu Painel de todo mundo (dispensável). RESPIRO: blocos
+  p-6/sm:p-9 mb-10, títulos text-xl/2xl, ficha p-6/sm:p-8 gap-7.
+
+## 173. 🗺️ JORNADA DO PACIENTE EM UMA TELA SÓ + mapa do que já age em cada etapa (pedido 19/09)
+- Pedido: tudo na mesma tela, sem rolar para o lado; mais customizável; mostrar
+  também as automações, configurações e follow-ups que já existem.
+- Backend `Crm::Journey::MapService` (GET `crm/journey_messages/map`): pendura em
+  cada etapa (lead/consulta/orcamento/cirurgia/pos_op/retorno) os lembretes D-1/D-0
+  (`agenda_config.appointment_reminders`), follow-ups (`crm_followup_bots` por
+  coluna), réguas (`crm_message_automations`), automações de coluna
+  (`crm_automations`), campanhas (rascunho/agendada/rodando) e agentes do
+  FlowMap (NPS→pós-op, Fechamento→orçamento, Colheita/Comercial→lead; Radar,
+  Cards parados, Ligações e Voz = "Vigias gerais"), com ligado/desligado, quando,
+  detalhe e link para onde se edita. Coluna do CRM → etapa: adivinha pelo nome
+  (cirurgia antes de consulta, "Não Fechou" = orçamento) e aceita ajuste.
+- Personalização em `agenda_config.journey.map` (sanitizada em update_settings):
+  stage_steps, overrides (item → etapa/geral), hidden, show (por categoria),
+  step_order, step_labels, density (compact/comfortable), queue (side/top/hidden).
+- Tela `crm/CrmJourney.vue` refeita no kit CEVICO (paleta `crm:jornada`, blocos
+  por etapa + fila + vigias): hero com chips/ações; grid das etapas que EMBRULHA
+  (1/2/3/6 colunas conforme a largura, `minmax(0,1fr)`), nunca rola de lado;
+  cada etapa = mensagens da jornada (compactas, com toggle/ações) + grupos do
+  mapa (bolinha ligado/desligado, quando, detalhe, contadores ao vivo, botão
+  "abrir onde se edita"); "+ mensagem aqui" abre o assistente já na etapa
+  (`preset-step` no JourneyWizard); Fila de hoje ao lado (fixa, rola por dentro),
+  em cima ou oculta; busca filtra mensagens e itens do mapa; "Personalizar" =
+  barra fixa (mostrar categorias, densidade, posição da fila, colunas do CRM →
+  etapas em modal, renomear/ordenar etapas, mover/esconder item, restaurar) que
+  salva sozinha. Modais (assistente, teste, histórico, locais/horário) mantidos.
+- Corrigido de tabela: o link antigo "Automações de coluna" abria a aba errada
+  (regras da caixa); agora aponta para Programação.
+- Testes: `spec/services/crm/journey/map_service_spec.rb` (adivinhação, fontes,
+  personalização ponta a ponta).
+
+# RODADA 26/09 — itens 249–251 (agenda do hub × nossa Agenda · confirmação de consulta interna · Atendente de Pós-operatório)
+
+## 249. ✅ 🔎 CONFERÊNCIA DO DIA — cirurgias do hub do Oftalmofácil × nossa Agenda (pedido dele 26/09: "segunda teremos 10 cirurgias que não estão encontradas na agenda")
+- Problema: item marcado no hub não aparece na Agenda e ninguém sabe POR QUÊ.
+  Causas possíveis mapeadas: sync incremental nunca releu o item (criado antes
+  de ligar a Agenda unificada e nunca modificado lá); dois itens gravados no
+  mesmo segundo na virada de um lote de 500 (o segundo era pulado para sempre);
+  linha com erro pulada; hora em segundos/fuso (item 242) deixando o
+  agendamento às 21h da véspera; clínica sem de-para (some nas abas por
+  unidade); Agenda unificada desligada; data antes da janela.
+- CONSTRUÍDO: `Crm::OftalmofacilDayCheck` (relatório item a item de UM dia:
+  situação + motivo em palavras simples; `reconcile!` traz o que falta,
+  primeiro pelo hub — só leitura — senão pelo espelho) · endpoints
+  `GET crm/oftalmofacil/day_check?date=&hub=1` e `POST reconcile_day` (admin) ·
+  bloco "✓ Conferência do dia" no ambiente Oftalmofácil (seletor de data,
+  "perguntar ao hub", 4 números, tabela só dos problemas, botão "Trazer N
+  para a Agenda", "o que cada situação quer dizer") · rake
+  `cevico:agenda_dia` (DIA= HUB=1 FIX=1) para o terminal da VPS.
+- Sync: cursor em DUAS partes (momento + `last_sync_id`, desempate por id —
+  fim do item pulado na virada do lote); momento do cursor sempre
+  "AAAA-MM-DD HH:MM:SS"; `pull_day`, `reprocess_rows!`, `reapply_from_mirror!`
+  públicos; SELECT compartilhado (PULL_SELECT).
+- Testes: `spec/services/crm/oftalmofacil_day_check_spec.rb` (8) + sync (6)
+  verdes; visual conta 3 com 4 itens semeados (ok / falta / hora errada /
+  sem local) → "Trazer 2" criou 1 e corrigiu 1; semente apagada.
+- SEM commit, WEB só (rake/serviço no mesmo build). Reversão: imagem anterior.
+
+## 250. ✅ 📋 CONFIRMAÇÃO DE CONSULTA INTERNA (D-2) — substitui os fluxos N8N "CONFIRMACAO CONSULTA PAULISTA/TATUAPÉ" (pedido dele 26/09: "montar internamente esse agente de confirmação, levando em conta a NOSSA agenda e as nossas fontes de pacientes")
+- O N8N lia o Google Agenda ([Av. Paulista]/[Tatuapé] - CEVICO) 2 dias antes
+  às 10h (sexta também D+3), extraía Nome/Telefone/Valor da descrição e
+  mandava o modelo `confirmacao_consulta_paulista` / `confirmao_consulta_tatuape`
+  (4 variáveis: nome, data, hora, valor; padrão 150,00) pela caixa 5.
+- AGORA: régua **D-2** dentro de `Crm::AppointmentReminderSendJob` (junto da
+  D-1/D-0 do item 156), fonte = NOSSA Agenda (consultas `consulta`, não
+  canceladas, sem presença, `confirmed_at` vazio, com telefone), modelo POR
+  UNIDADE (units.paulista / units.tatuape + geral opcional), variáveis
+  {{nome}} {{data}} {{hora}} {{valor}} {{unidade}} (+ {{contact.name}}), valor
+  = "Valor: X"/"R$ X" na observação da consulta senão o padrão (150,00),
+  modalidades (padrão avaliação+retorno), ponte de fim de semana (sexta manda
+  também a de segunda), marca anti-duplicata por consulta, cerca dos
+  parceiros, quem já confirmou não recebe. MODO SOMBRA (padrão): não manda,
+  registra "quem receberia" em `agenda_config.appointment_reminders_state.d2`
+  (lista no card) — para comparar com o N8N antes de desligá-lo.
+- Confirmação por resposta (CrmListener): "sim/confirmo/👍" de quem recebeu
+  D-2 OU D-1, janela de 4 dias → `confirmed_at` + nota ✅; "não" → declined +
+  aviso no Radar (já existia).
+- UI (Automações → Robôs → "Lembretes do dia da consulta"): régua D-2 com
+  Sombra|Ao vivo, valor padrão, "sexta adianta a de segunda", chips de
+  modalidade, caixa, modelo da Paulista / Tatuapé / geral, última rodada
+  (enviadas ou receberiam + puladas com motivo). settings: sanitize da d2.
+- Testes: `spec/jobs/crm/appointment_reminder_send_job_d2_spec.rb` (5) +
+  `spec/listeners/crm_listener_confirmation_spec.rb` verdes.
+- PÓS-DEPLOY DELE: ver seção no doc AGENDA_CONFIRMACAO_POSOP_2026-09-26.md
+  (ligar em sombra 1 semana → comparar → ligar ao vivo → desligar N8N).
+
+## 251. ✅ 🩺 ATENDENTE DE PÓS-OPERATÓRIO (agente `atendente_pos_op`; pedido dele 26/09: "responder 24h dúvidas simples como colírio, ardência; quando necessário gerar tarefa para a agente responsável no Meu Painel")
+- Mesmo motor dos atendentes (Roteiro + bloco da etapa + trava; sombra →
+  ao vivo; pausa/👍; 🧪 Testar agente; cache; áudio/imagem). Bloco da etapa
+  novo em `Crm::CevicoScript::STAGE_PROMPTS['atendente_pos_op']` escrito a
+  partir do PDF "informações cirurgia e pós-op" (sintomas esperados,
+  colírios, dor PRK, compressas PRK×LASIK, banho/cabelo, telas, exercício 7/30
+  dias, maquiagem 7/30, álcool 7, viagem, alimentação, óculos, lente
+  terapêutica, retorno) + REGRA VERMELHA (dor forte, perda súbita de visão,
+  secreção, trauma, lente deslocada → tarefa urgente + chamar humano + pronto
+  atendimento + (11) 98769-0286) + REGRA AMARELA (dúvida do caso, receita,
+  atestado, documento → tarefa). Nunca diagnostica/muda colírio/cita médico
+  fora do Roteiro (regra Jorge Haddad respeitada).
+- Contexto vivo: "Cirurgia realizada: dd/mm (há N dias) · procedimento ·
+  médico · unidade" lido da Agenda (inclusive Oftalmofácil) + retorno marcado.
+- Ferramenta nova `abrir_tarefa {motivo, detalhes, urgencia}` → `Crm::HandoffTask`
+  (tarefa tipo `pos_op` — entra em "tarefas esperando você" do Meu Painel;
+  responsável = pessoa escolhida no card `task_assignee_id` → quem cuida da
+  coluna → conferência de cirurgia; 1 aberta por paciente, chamadas novas
+  complementam; urgente = prioridade urgente + aviso `pos_op_atencao` no Radar
+  do Meu Painel + nota na conversa). Chamar humano no pós-op SEMPRE deixa a
+  tarefa (mesmo se a IA esquecer a ferramenta). Em sombra só simula.
+- Dono da conversa também pela AGENDA: `recent_surgery_days` (padrão 60) —
+  paciente com cirurgia realizada nos últimos N dias é dele mesmo sem card na
+  coluna (CrmListener#responder_owner_for).
+- Registro do agente: RESPONDER_KEYS, RESPONDER_TOOLS_KEYS, RECOMMENDED
+  (Sonnet 5 · médio — maior risco clínico), RESPONDER_AGENTS, AGENT_NAMES
+  (tools + alert), AGENT_META (Painel dos agentes), fluxograma
+  `Crm::FlowMap::Flows::AtendentePosOp`, settings (permit + arrays viraram
+  `CrmListener::RESPONDER_KEYS`), Hub (card, defaults, loadResponder, campos
+  "Quem recebe as tarefas" e "Cirurgia recente na Agenda (dias)"), Orientações
+  (label), Radar (`pos_op_atencao`).
+- Testes: `spec/services/crm/handoff_task_spec.rb` (7) + responder job/
+  service/tools + flow registry + partner guard: 42/42 verdes. Visual conta 3:
+  card abre, campos aparecem.
+- PÓS-DEPLOY DELE: caixa(s) + colunas Cirurgia Realizada / Pós Operatório +
+  responsável + sombra por 1–2 semanas → revisar notas na tela Sombra →
+  ao vivo (24h = dias/horas vazios). Detalhes no doc.
+
+## 252. ✅ 🐛 Busca "Encontrar paciente" por baixo dos "Itens do dia" + painel do dia da Agenda geral no layout de CAIXAS do Oftalmofácil (pedido dele 26/09, print da produção)
+- BUG: `.cv-ag-block` tem backdrop-filter (contexto de empilhamento próprio); a lista de resultados
+  (z-40 dentro do bloco) ficava atrás dos cartões do dia. Correção: o bloco "Encontrar" sobe
+  (`relative z-30`) enquanto a busca está aberta — OftalmofacilHub; mesma proteção no bloco
+  "Período" da Agenda geral quando o calendário do celular está aberto. Conferido no DOM: o
+  elemento mais alto no rodapé da lista agora é a própria lista (8 resultados).
+- LAYOUT: ele gosta mais da agenda do Oftalmofácil (coluna de horas + caixas limpas), mas a Agenda
+  geral tem os filtros importantes. O painel do dia da Agenda geral ganhou o seletor
+  **Itens do dia | Bloco do médico · Conferência** (gravado em `cevico_agenda_day_panel_mode`,
+  padrão Itens do dia): "Itens do dia" = só as caixas (hora | quem e o quê | selos), sem a grade
+  de horários e sem os botões de compareceu/faltou (a caixa abre no clique, onde a conferência
+  continua); "Bloco do médico" = o de sempre. Filtros (camadas, quem, unidade, origem) intactos.
+- Sem backend. Conferido local (conta 3, 23/09: 4 itens nas caixas).
+
+> 26/09: 246–252 SUBIRAM no commit 04a06ed (develop) → imagem ghcr.io/guilhermecorder/chatwoot:04a06ed · Implantar WEB+SIDEKIQ juntos, sem migration · reversão :e47c19a.
+
+## 253. ✅ 📅 AGENTE "CONFIRMAÇÃO DE CONSULTA" no ambiente dos agentes + QUANTOS lembretes quiser (pedido dele 26/09: "não achei ele aqui… só consigo construir um? … preferiria no ambiente dos agentes, mais bonito e organizado")
+- Card próprio `ConfirmationAgentCard.vue` no grupo "Atendimento ao paciente" de Agentes de IA
+  (mesmo visual: fio na cor, interruptor geral, Abrir, Cards | Lista, situação em 4 números,
+  "como funciona"). Não usa IA (mensagem modelo da Meta).
+- Lembretes: 0 a 7 dias antes (chaves dN em agenda_config.appointment_reminders; d2/d1/d0 antigas
+  continuam), atalhos "2 dias antes / Véspera / No dia / outro". Cada lembrete: liga/desliga,
+  quando, hora, Sombra | Ao vivo, valor padrão, quem recebe (modalidades; nenhuma = todas),
+  sexta adianta a de segunda (1–2 dias antes), caixa, modelo da Av. Paulista / Tatuapé / geral
+  com variáveis preenchidas sozinhas ({{nome}} {{data}} {{hora}} {{valor}}), última rodada
+  (enviadas/receberiam + puladas com motivo), apagar.
+- Backend: job itera as chaves dN presentes; interruptor geral `appointment_confirmation.enabled`;
+  sombra em qualquer lembrete (lembrete antigo sem 'mode' segue AO VIVO — nada muda para quem já
+  usava); modelo por unidade em todos; ponte de fim de semana só com a opção ligada; registro de
+  rodada em todos; sanitize apaga o que não vem. Listener: "sim" vale para lembrete de 1–7 dias.
+- Aba Robôs: o card antigo virou atalho "Abrir" → Agentes de IA. Mapa de fluxos: "Confirmação de
+  consulta" aponta para o card novo.
+- Testes: appointment_reminder_send_job_d2_spec (8, inclui 2 lembretes simultâneos, interruptor
+  geral e lembrete antigo ao vivo) + listeners + flow registry verdes. Visual local: card abre,
+  "2 dias antes" + "No dia" criados e salvos juntos; config local restaurada.
+
+## 254. ✅ 🩹 A AGENDA SE CONSERTA SOZINHA — hub do Oftalmofácil × Agenda unificada (print dele 26/09: 28/09 com 14 itens no hub, 3 cancelados, só 3 na Agenda; "no Oftalmofácil tem 17")
+- Causa: itens lidos ANTES de ligar a Agenda unificada nunca voltaram pelo incremental (só relê o
+  que muda lá) → ficaram "fora da Agenda" (Antonio entrou porque o item dele mudou depois).
+- `heal_agenda!` (toda rodada, 15 min): espelho dos próximos 14 dias sem agendamento, com
+  agendamento em outro dia, ou cancelado lá e ativo aqui → refaz só o agendamento (sync_task!;
+  sem contato → tratamento completo). Não reabre o que a equipe cancelou; não usa o hub.
+- `refresh_upcoming!` (rodada das :07 e na recarga completa): pergunta ao hub os próximos 7 dias
+  e traz o que nunca foi lido. `pull_dates`: data do hub em DATE, DATETIME ou texto dd/mm/aaaa
+  com ou sem zero (a conferência do dia usa a mesma busca).
+- last_result ganha `healed` e `unread_found`.
+- Testes: sync spec +4 (item lido antes da Agenda, dia errado/cancelado/equipe/fora da janela,
+  nunca lido, formatos de data) — 18/18 com a conferência.
+
+## 255. ✅ 🚫 PACIENTE DO OFTALMOFÁCIL OCUPA O HORÁRIO — fim do agendamento duplo (pedido dele 26/09: "os pacientes do Oftalmofácil concorrem pelos mesmos horários… é obrigatório exibir para evitar agendamento duplo")
+- Servidor (`Crm::AgendaSlots`): vagas livres (IA oferece / trava do agendamento / remarcar) agora
+  descontam TODO agendamento do Oftalmofácil da mesma unidade por SOBREPOSIÇÃO de tempo
+  (cirurgia 60 min, exame 30, demais 15 — igual à tela). Antes só consulta com hora idêntica
+  bloqueava: cirurgia do hub não bloqueava nada.
+- Tela da Agenda: o bloco do médico conta como ocupado por qualquer agendamento do dia
+  (independe das camadas/filtros ligados) que sobreponha o bloco; hub ocupa qualquer janela da
+  unidade dele. Formulário: aviso "Horário ocupado por paciente do Oftalmofácil" (vermelho) ou
+  "encaixe" (âmbar) listando quem está lá; salvar em cima do hub pede confirmação.
+- Hub: leitura aceita item SEM fornecedor (LEFT JOIN PROVIDERS → "(sem fornecedor)", tratado como
+  parceiro/cerca) e a conferência do dia mostra a contagem CRUA do banco do hub × o que dá para
+  ler (itens sem agendamento-pai aparecem como aviso em vez de sumir).
+- Testes: agenda_slots_future_spec +1 (sobreposição, cancelada não ocupa, outra unidade livre).
+
+## 256. ✅ 📊 PESQUISA DE SATISFAÇÃO (NPS) PÓS-CIRURGIA + Pós-operatório conduz a resposta (substitui "AGENTE DE NPS" do N8N; pedido dele 26/09: "enviar a mensagem de NPS escolhendo data de acordo com cada tipo de cirurgia… e o agente de pós-operatório atender o paciente que respondeu e suas outras dúvidas")
+- `Crm::NpsSurvey` + `Crm::NpsSurveySendJob` (cron 5,20,35,50 — ⚠️ SIDEKIQ): N dias depois da
+  cirurgia REALIZADA na Agenda (presença/concluída; hub da CEVICO incluso; parceiro fora),
+  dia POR TIPO (catarata 30, refrativa 15, outras 15 — palavras do procedimento, editáveis),
+  hora, sombra | ao vivo, caixa, modelo da Meta com botões, {{nome}} {{procedimento}}
+  {{data_cirurgia}} {{dias}}, 1 por cirurgia, intervalo mínimo por pessoa (60 d, 2º olho),
+  nao_perturbe/perda_* fora. Última rodada e respostas em agenda_config.nps_survey_state.
+- Resposta SEM IA no CrmListener (antes do atendente): "🟢 9 a 10", "9-10", "10", "nota 8" (só no
+  início/sozinho — "pingo de 3 a 4 vezes" não conta) → etiqueta nps-9-10…nps-1-2 (painel de
+  satisfação já usa), additional_attributes.nps, nota interna; 5–6 tarefa, 1–4 tarefa urgente +
+  Radar. Quem recebeu a pesquisa nos últimos 10 dias é do Atendente de Pós-operatório.
+- Atendente de Pós-operatório: bloco "PESQUISA DE SATISFAÇÃO" no roteiro (textos do N8N adaptados:
+  Google p/ 9–10, "o que faltou" p/ 7–8, formulário p/ notas baixas, chamar humano no 1–2,
+  convite de indicação SEM a frase "vai aumentar 20–30%" — pendente de confirmação dele; sem
+  Jorge Haddad). Contexto ganha a nota e os links (Google e formulário; padrão = os do N8N).
+- Card `NpsSurveyCard.vue` em Agentes de IA (grupo Atendimento ao paciente): interruptor, 4
+  números, aviso se o Pós-operatório está desligado / sem a caixa, envio, tipos de cirurgia
+  (liga/desliga, dias, palavras, novo/apagar), links, última rodada e respostas por faixa.
+- Flow `nps_survey` no mapa. Testes: nps_survey_spec (8) + registry.
+
+## 257. ✅ 🏷️ Meu Painel: nome do indicador COMPLETO nos cards (print dele 26/09: "% de agen…", "Conv…", "Taxa …")
+- No modo edição os 4 botões dividiam a linha com o nome; agora ficam numa faixa própria acima
+  e o nome quebra em até 2 linhas (texto inteiro no mouse).
+
+## 258. 🐛 Roteiro do Atendente de Pós-operatório estava DENTRO do Agente de Ligação (achado 26/09 noite, EM PRODUÇÃO desde 04a06ed)
+- Causa: na inserção do item 251 a vírgula foi para a linha de fechamento do heredoc ("TXT,") em vez
+  da abertura do 'voice' → o texto do pós-operatório colou no fim do bloco da ligação e a chave
+  'atendente_pos_op' não existia (o agente rodaria só com o Roteiro, sem os passos). O agente
+  nasceu desligado: nenhum paciente atendido com isso. A ligação carregava o texto a mais.
+- Correção + teste de regressão (cevico_script_spec: cada etapa com o próprio texto, nada vaza
+  para a ligação, sem "Haddad"). Também: fallback do v2 usa .presence; mapa da jornada usa os
+  lembretes dN (sempre D-1/D-0 + os salvos) e aponta para o card novo.
+- Falhas pré-existentes conferidas contra 04a06ed (falham igual lá): journey engine ReplyService
+  (2), voice script "R$", voice post_call / calls webhook (matcher de fila), leadsquared setup,
+  setup_job, installation_webhook.
+
+## 259. ✅ 📅 Confirmação de consulta também para os PACIENTES DO OFTALMOFÁCIL — por UMA caixa escolhida (pedido dele 26/09 noite: "o agente de confirmação precisa enviar mensagem para pessoas da oftalmofacil também… uma das caixas de entrada deve poder enviar para esses pacientes")
+- A regra de ouro de 24/09 continua: nenhuma IA fala com paciente de parceiro. O que muda: cada
+  lembrete ganha o bloco "Pacientes do Oftalmofácil" (liga/desliga + caixa + modelo próprio).
+  Ligado → a consulta/exame do parceiro sai SÓ por essa caixa, com esse modelo (nunca o da CEVICO);
+  desligado → pulada pela cerca, como antes. Sem modelo próprio → pulada ("Oftalmofácil: sem modelo").
+- Caixa sugerida = a 1ª marcada como "dos parceiros" na integração Oftalmofácil (caixa 12), aparece
+  com "(Oftalmofácil)" na lista; ele pode escolher outra. Hora, sombra/ao vivo e "Quem recebe" são os
+  do lembrete. Variável nova {{parceiro}} = nome do parceiro do hub. Rodada lista "· Oftalmofácil (X)".
+- A resposta "sim/não" do paciente de parceiro agora é lida (por palavra, sem IA) mesmo dentro da
+  cerca → confirmed_at / declined_at + nota + aviso no Radar; agentes e automações seguem travados.
+- Config: agenda_config.appointment_reminders.dN.partner = { enabled, inbox_id, template_params,
+  message_preview }. Testes: appointment_reminder_send_job_d2_spec (+3) e crm_listener_confirmation (+1).
+
+## 260. ✅ 📊 NPS v1.1 do N8N TRAZIDO PARA DENTRO (27/09 — "só falta 1 fluxo": o último do N8N)
+- Comparação com o fluxo "NPS v1.1" (planilha CONFIRMACOES CIRURGICAS → caixa 6 → modelo
+  nps_pesquisa_de_satisfacao → 6 h depois texto com o link do Google). O item 256 já cobria o
+  principal; faltavam 3 peças, agora no Crm::NpsSurvey + card:
+  · dias padrão = INTENÇÃO do N8N: LASIK/SMILE 1 dia, PRK 29, catarata 15, outras refrativas 15,
+    outras 15 (o 1º tipo que casar vence);
+  · catch_up_days (padrão 7): quem ficou para trás ainda recebe, 1 vez por cirurgia;
+  · lembrete para quem não respondeu (reminder: N horas, MODELO da Meta, 8h–20h, 1 vez, não vai
+    se o paciente já escreveu);
+  · agradecimento com o link do Google para 9–10 e 7–8, SEM IA, só quando o Atendente de
+    Pós-operatório não está ao vivo na conversa (texto editável; {{link}} {{nome}}).
+- BUGS do N8N achados (motivo a mais para desligar): o Switch tinha a regra "PRK" comparando o
+  procedimento com ele mesmo (casa sempre) → catarata ia em 29 dias, não 15; a leitura da planilha
+  não filtrava NPS_ENVIADO e o gatilho é toda sexta → quem operou há >30 dias recebia a pesquisa
+  TODA sexta; o texto de 6 h ia para OUTRO servidor (robomaster-chatwoot) e é texto livre fora da
+  janela de 24 h (não chegaria). O JSON exportado tem o token de API em claro → trocar o token
+  depois de desligar o N8N.
+- Testes: nps_survey_spec 12 exemplos (LASIK 1 / PRK 29 / catarata 15, recuperação, lembrete,
+  agradecimento com e sem Pós-op ao vivo).
+
+## 261. ✅ 👑 PAINEL DO EMPRESÁRIO em ambiente próprio, no TOPO do menu (27/09)
+- Rota nova cevico_business (/empresario, só admin), item "Painel do empresário" com coroa
+  dourada acima do Meu Painel; a aba antiga do Estratégico virou atalho; BusinessPanel.vue saiu.
+- Quadros com ÍMÃ (business/MagnetBoard.vue + magnetLayout.js, grade de 12 colunas): pega pelo
+  título e arrasta (sem "modo edição"), os vizinhos abrem espaço AO VIVO e escorregam de lado
+  antes de descer, a vaga dourada pulsa onde vai encaixar, soltou = desliza com molinha; borda
+  direita / de baixo / canto esticam. Menu ⋯: largura ⅓ ½ ⅔ inteira, "altura do tamanho do
+  conteúdo", esconder. Barra: Arrumar sozinho, Quadros (escondidos), Travar, voltar ao padrão.
+  Conteúdo se reorganiza pela largura do QUADRO (container queries). Tela estreita = 1 coluna.
+- Tudo com DATA: cada anotação guarda created_at; botão "atualizar" = ✅ ação feita, 🏆
+  conquistado, ↪️ pivotou, ✏️ ajuste (+ nota) → histórico no item + LINHA DO TEMPO (quadro novo,
+  filtros, "registrar marco"). Objetivos/Metas/Atividades viraram listas de até 8 com conquista.
+- TEIA RADAR gêmea (GlassRadar.vue, SVG de vidro): "Hoje" (azul) × "Onde queremos chegar"
+  (dourado), áreas Marketing, Comercial, Financeiro, Operacional, Estrutura física, Pessoas
+  (renomear/pôr/tirar, 3–10); puxa a ponta da teia ou a régua (0–10, meio em meio); nota do
+  porquê por área; "Onde focar" = maior distância com "+ ação" para a Semana; "Salvar retrato"
+  com data e comparar com retrato antigo (tracejado + evolução por área).
+- Servidor: strategy_controller sanitiza datas/histórico/layout/radar/events (sem migration,
+  agenda_config.business_board). Testes: magnetLayout.spec.js (7) + strategy_business_board_spec (2).
+
+## 262. 💡 PROPOSTA: novos agentes por ROI/CAC/conversão (27/09) — nada construído
+- docs/AGENTES_ROI_JORNADA_2026-09-27.md (pasta CEVICO): ranking 1) Horários concretos (v2 A/B),
+  2) Atendente de Retorno, 3) Segundo Olho, 4) Reativação da base, 5) Indicação, 6) Analista de
+  CAC (depois da decisão "caixa de origem"), 7) Resgate de falta, 8) Pré-cirúrgico, 9) Coach.
+  Aguarda "pode construir".
+
+## 263. ✅ 🎨 Acabamentos 27/09 (noite): teia transparente, Tarefas e notas limpo, linha de média, Mentor com papéis
+- Teia radar: fundo do disco transparente (só um brilho leve na cor); rótulos maiores.
+- Meu Painel → "Tarefas e notas" redesenhado (pedido: "clean e organizado"): UMA lista por vez
+  (abas Esperando você | Notas dos pacientes, abre onde há coisa), linhas separadas por fio em vez
+  de caixinhas (kit novo `.cv-list` / `.cv-list-row` / `.cv-avatar` em _cevico-glass.scss), nota com
+  avatar de iniciais + nome + hora · autor, lixeira só no hover; cabeçalho com subtítulo
+  "N tarefas esperando você · N notas da equipe" e botões "+ Nota" / "Tarefas".
+- LINHA DE MÉDIA (pedido: "linha de tendência… um parâmetro para seguir"): tracejada com o valor
+  na ponta no gráfico do card grande (TileLine), no gráfico do popup (MiniBars, prop `average`,
+  padrão ligado) e tracinho na sparkline dos cards pequenos. Média = baldes com valor (os dias que
+  ainda não chegaram não puxam para baixo).
+- MENTOR DO TIME ("o agente de feedback precisa levar em conta as nossas melhorias e seus papéis e
+  responsabilidades"): (a) agenda_config.team_roles {user_id → papel, responsabilidades}, editável
+  em Agentes de IA → Mentor → "Papéis e responsabilidades" (CrmAPI.updateTeamRoles); sem texto, o
+  Mentor deduz pelo painel atribuído / responsável de painel / conferência do dia / médico / admin;
+  (b) payload ganha `papel_e_responsabilidades` e `o_sistema_faz_sozinho` (atendentes ligados e se
+  estão ao vivo ou em sombra, nº de robôs de follow-up, confirmação, NPS, Radar, ligação, Agenda/
+  Tarefas); (c) prompt: julga só pelo papel, nunca cobra o que o sistema faz sozinho, soluções usam
+  as ferramentas pelo nome; (d) o login da IA sai do feedback e da mediana; notas privadas não
+  contam como mensagem. Testes: weekly_mentor_service_roles_spec (3).
+
+## 264. ✅ 👑 Painel do empresário — rodada de ajustes dele (27/09 noite, com prints)
+- Teia: alça pegável mesmo em 0 (fica um pouco afastada no eixo; clique no eixo também dá a nota);
+  réguas por área SAÍRAM ("vamos editar direto no gráfico"); média na legenda; "Onde focar",
+  "Retratos" e "Áreas" viraram abas (chips) que abrem embaixo.
+- "Semana do empresário" → "COISAS MUITO IMPORTANTES" (subtítulo: semana do empresário): UMA lista;
+  à direita, alinhadas, as chavinhas A fazer · Fazendo · Feito (segmentado); feitos recolhidos.
+- Objetivos do ano SMART: Específico (texto) + Mensurável + Alcançável + Realista + Tempo (data);
+  5 bolinhas S·M·A·R·T mostram o que falta; chips de medida e prazo (vermelho se venceu).
+- Métricas da empresa: fontes Oftalmofácil (faturamento = soma das cirurgias REALIZADAS da CEVICO no
+  mês, parceiros fora; nº de cirurgias; agendadas; ticket) · Financeiro · Estimativa (você digita
+  faturamento/cirurgias/custo, com data); "Vendas" virou "Cirurgias". strategy#show devolve `metrics`.
+- Matrizes como GRÁFICO: eixos com seta e "baixa → alta" nas pontas, plano cortado em 4, cada
+  quadrante diz sua posição ("alta importância · alta urgência"), mover item entre quadrantes;
+  quadros maiores por padrão (metade da largura cada).
+- "Pessoas estratégicas" → "Equipe" (subtítulo: pessoas estratégicas: sócios, mentores…).
+- Quadro novo "Atividades principais" (ultra específicas, quantas quiser: o quê, por quê, quem,
+  frequência); em Problemas → Solução, botão "→ atividade principal" leva a solução para lá.
+- Servidor: sanitize SMART (measure/achievable/realistic/due), core_activities, estimates.
+
+## 265. ✅ 📅 Agendamentos: "de quais caixas vieram" + respiro (27/09 noite)
+- Resumo ganhou o bloco "De quais caixas vieram as marcações": das MARCADAS, a caixa por onde o
+  paciente CHEGOU (primeira conversa dele) — não a conversa mais recente, então a caixa de
+  confirmação não rouba o crédito (é a recomendação de 26/09, agora aplicada aqui; `by_origin`).
+- Espaçamento (pedido: "a falta de espaçamento deixa tudo embaralhado"): divisórias `.cv-ag-divider`
+  entre as seções do mesmo bloco, títulos `.cv-ag-block-title` 15→17px com margem, subtítulos 12px,
+  blocos p-5/p-6 e gap-4/gap-5 nos Filtros (Situação/Onde) — vale para a AGENDA também (Calendário,
+  navegação e Filtros usam as mesmas classes).
+
+## 266. ✅ 🧲 Ímã no Meu Painel + linha de tendência + anotar nas matrizes + acabamentos (28/09)
+- MATRIZES (Painel do empresário): cada quadrante tem a caixa "+ anotar em X e Enter" SEMPRE à vista
+  (o "+" do título só leva o cursor até ela; agora o "+" tem borda/cor do quadrante). Testado: anota,
+  aparece com data, salva (save_business_board), ✕ apaga.
+- ÍMÃ NO MEU PAINEL (mesma tecnologia do Painel do empresário): MagnetBoard ganhou `auto-height`
+  (altura medida pelo conteúdo via ResizeObserver + medida síncrona na montagem; quadro com 0 px de
+  conteúdo não ocupa vaga), `stack-below` (Meu Painel: 700 px de largura do quadro) e `handle`
+  (seletor da alça). No modo automático anda por left/top (transform viraria "containing block" de
+  fixed/sticky). Meu Painel: as duas áreas (avisos e conteúdo) são MagnetBoards; alça = "orelha" ⠿
+  no meio da borda de cima do bloco (aparece no hover; sempre visível no toque) + a barrinha do modo
+  edição; larguras ⅓ ½ ⅔ inteira na barrinha (substituem "metade/inteiro") ou puxando a borda
+  direita; "blocos soltos/travados" na barra de edição. Salvo em block_layout[painel].grid_top /
+  grid_main ({id,x,y,w}) + locked; quem só tinha ordem antiga + half ganha a grade a partir dela;
+  `half` continua salvo (derivado: w ≤ 6). Servidor: sanitize_block_grid (ids, x/w em 12 colunas).
+  Testado: arrastar Feedback acima de Tarefas (POST update_agenda 200, persistiu após recarregar),
+  ½ de largura, voltar.
+- LINHA DE TENDÊNCIA (pedido: "os indicadores devem ter a opção da linha de tendência"): helper
+  components-next/cevico/trend.js (regressão linear sobre os baldes COM valor, mín. 3; `trendText`
+  = "subindo ~4,7% por semana" / "caindo…" / "estável"). Prop `trend` + `granularity` em TileLine
+  (reta amarela sólida + leitura no topo), MiniBars (reta rosa com ponto na ponta + leitura) e
+  sparkline dos cards pequenos (reta amarela). Liga/desliga em DOIS lugares: barra do modo edição
+  ("tendência ligada/desligada") e chip dentro do popup; salvo por painel em kpi_layout.trend
+  (quem não pode salvar fica ligado só na visita). Popup ganhou a frase "tendência: … — reta
+  traçada sobre os N baldes com valor" (verde/vermelho/cinza); card grande ganhou "📈 tendência: …".
+  Nota: a frase antiga do popup ("média 1,3 por semana") usa TODOS os baldes; a linha de média do
+  gráfico usa só os com valor — os dois estão rotulados, mas vale unificar se ele estranhar.
+- AGENDAMENTOS: Lista | Cards já existia (item 246) e continua; Situação/Onde ganharam mais respiro
+  (p-6/p-7, gap-6 entre linhas, 8–10 px entre pílulas, rótulo 104 px alinhado com a 1ª pílula —
+  classe `.cv-ag-filters`).
+- AGENDA: Mês · Semana · Dia do Calendário em células iguais e centradas (o `pt-2` desalinhava as
+  pílulas; agora `.cv-seg.grid`), e o item LIGADO de qualquer segmentado tem anel claro por dentro +
+  fio escuro por fora + sombra no texto → contraste em todas as paletas (claro e escuro).
+- 266b (28/09, print dele: "o recurso de mudar de tamanho e etc. deve ser aplicável ao ambiente de
+  indicadores"): os CARDS DE INDICADOR também vivem num MagnetBoard (modo de altura fixa: linha de
+  16 px; card pequeno = 3 col × 6 linhas = 166 px; grande 2×2 = 6 × 12 = 346 px). Pega o card e
+  arrasta a qualquer hora (os botões do card continuam clicáveis; o clique que vem depois de um
+  arrasto é engolido pelo MagnetBoard), puxa a borda direita, a de baixo ou o canto para esticar;
+  card com metade da largura ou mais vira "grande" (resumo com gráfico); o botão ⤢ do modo edição
+  alterna pequeno ↔ grande pela grade. Espaço vazio continua existindo. "+ Novo indicador" ficou
+  numa fileira abaixo do ímã. Salvo em kpi_layout.grid ({id,x,y,w,h}); order/sizes seguem gravados
+  (derivados). Servidor: sanitize_tile_grid. Testado: trocar 2 cards de lugar, esticar pelo canto
+  (4×10) e voltar, botão de detalhes abre o popup; layout do teste devolvido. Abaixo de 600 px de
+  largura do bloco vira uma coluna.
+- Testes: trend.spec.js (4), magnetLayout.spec.js (7, intactos), settings_block_layout_spec.rb (2,
+  cobre grid_top/grid_main/locked e kpi_layout.grid). Deploy = WEB+SIDEKIQ (260 usa o cron), sem
+  migration.
+
+> 28/09: 260–266 SUBIRAM no commit 82f289d (develop) → imagem ghcr.io/guilhermecorder/chatwoot:82f289d
+> · Implantar WEB+SIDEKIQ juntos, sem migration · reversão :d3b37d5 (build #156 acompanhado).
+
+## 268. ✅ 🔒 "Fechar dia" evidente na Agenda (28/09 madrugada; pedido: "precisa ser mais simples e evidente esse botão, tanto na visão semanal quanto na do dia")
+- Antes: o botão só existia dentro do bloco do médico, no modo "Bloco do médico · Conferência" da
+  visão Dia — no modo padrão "Itens do dia" (item 252) ninguém achava.
+- Agora: (1) visão DIA → botão "Fechar dia" (vermelho, cadeado) no bloco Período, ao lado de
+  "Novo agendamento", em qualquer modo do painel; dia fechado vira "Reabrir dia" (fundo vermelho);
+  (2) visão SEMANA → cadeado "fechar" no canto de cada coluna de dia (aparece no hover; no toque fica
+  à vista); dia fechado mostra a pílula vermelha "reabrir" sempre. Só admin. Mesma gravação de antes
+  (agenda_config.blocked_days via CrmAPI.updateAgendaBlockedDays), sem backend novo.
+- Testado local: fechar/reabrir 30/09 pela semana (coluna vira "fechado"), botão presente na visão Dia.
+- Fica para depois, se ele quiser: fechar por UNIDADE ou por MÉDICO (hoje é o dia inteiro).
+- SEM commit — aguarda "pode subir" (WEB só).
+
+## 267. ✅ 📊 INDICADORES FIDEDIGNOS — nomenclatura, quebras e funil (28/09 madrugada; prints de produção: "problemas seríssimos… não podemos chamar tudo de agendamento")
+- DECISÕES (assumidas como sugerido): LEAD NOVO = chegou há até 30 dias quando marcou (taxas);
+  volumes seguem a régua; FECHAMENTO só conta cirurgia marcada de quem teve indicação em consulta.
+- Cesto (KpiBagService): rótulos dizem de quem é o número — "Consultas marcadas (leads novos + base)",
+  "Entrou em Agendamento de Consulta (mudou de coluna no CRM)", "Cirurgias marcadas (todas: clínica +
+  Oftalmofácil)"; métricas NOVAS `appointments_booked_new` (leads novos), `appointments_booked_base`
+  (base), `surgeries_booked_indicated` (após indicação). Fórmulas dos modelos apontam para elas.
+- Meu Painel (Agendamento): "% de agendamento" → "Taxa de agendamento · leads novos (30 dias)" com
+  numerador e denominador na mesma régua (antes o numerador contava qualquer card que entrou na coluna);
+  popup com FUNIL EM 3 COLUNAS (FunnelSteps.vue: Novos contatos → Envio de orçamento → Agendamento,
+  % entre etapas e desde o início) + por caixa de entrada. "Marcadas na Agenda" → "Consultas
+  marcadas" (sub: N de leads novos · N da base); "Agendamentos hoje" → "Consultas marcadas hoje";
+  "Cirurgias fechadas" → "Cirurgias marcadas · leads do período". Gestor: "Fechamento de cirurgias
+  (indicação → marcada)" com "N marcadas no total" ao lado; "Taxa de agendamento · leads novos".
+- POPUPS com o que importa (home#booked_breakdown_json / surgery_breakdown_json): quem é o paciente
+  (lead novo × base), de qual CAIXA o paciente chegou (primeira conversa), unidade, procedimento,
+  médico, Atendente de IA × equipe; cirurgias: realizadas/faltaram/canceladas/sem conferência, origem
+  (Oftalmofácil × clínica), procedimentos, unidade, médico. Cards do "+" sobre colunas do CRM
+  (Cirurgia…/Agendamento…) herdam as mesmas seções. Média do popup = a mesma da linha do gráfico.
+- Agendamentos: "Pelo robô × pela equipe" → "Marcadas pelo Atendente de IA × pela equipe", contando SÓ
+  as marcadas (antes somava remarcadas e canceladas: 5 × 28 ≠ 31); card "Marcadas" diz leads novos ×
+  base. Regra do robô unificada em Crm::BookingSource.
+- FECHAR DIA por UNIDADE ou por MÉDICO (menu no botão "Fechar dia" da visão Dia e no cadeado de cada
+  coluna da Semana: Dia inteiro · Só Av. Paulista · Só Tatuapé · Só Dr. X); a janela fechada some da
+  grade e o Atendente de IA não oferece (AgendaSlots#window_blocked?). "As meninas devem poder fechar
+  as agendas": rota própria `settings/update_blocked_days` liberada para a EQUIPE inteira (não é mais
+  admin). blocked_days aceita 'AAAA-MM-DD' (dia inteiro) ou {date, unit} / {date, doctor}.
+- Cards do "+" que ELE criou em produção ("Taxa de agendamento 258%" = marcadas ÷ leads do dia; "Ticket
+  médio por cirurgia" apontando para a coluna errada) não mudam por código: apagar ou refazer a fórmula
+  com `appointments_booked_new / new_leads * 100` e `revenue / {stage:cirurgia realizada}`.
+- Testes: settings_block_layout_spec (3), agenda_slots_blocked_parts_spec (1), agenda_slots_future (6),
+  trend/magnet verdes. Testado local: popups (seções + funil), menu da Agenda (fechar Só Av. Paulista →
+  coluna "Av. Paulista fechado", médicos continuam; reabrir), Agendamentos.
+- Deploy = WEB só (sem migration). SEM commit — aguarda "pode subir" junto com o 268.
+- 28/09 (prints de produção, "Hoje"): 44 marcadas × 11 "Entrou em Agendamento" × 10 na taxa do Gestor —
+  o 11 eram PASSAGENS (um paciente entrou 2x); o cesto agora conta pacientes distintos por balde
+  (`distinct:` no bucketize), igual ao Gestor. 36 das 44 "pela caixa Confirmação" = consultas marcadas
+  pela equipe DENTRO do Oftalmofácil (Agenda unificada) → nova seção "Onde foi marcada: sistema CEVICO
+  × Oftalmofácil" no popup (by_channel = external_ref). "Conversão de Agendamento 44,0%" / "Taxa de
+  Agendamento 44,0%" / "Entrou em Cirurgia Realizada 9,0%" = cards do "+" dele com formato PERCENT em
+  cima de uma CONTAGEM (44 consultas viram "44,0%") — refazer os cards.
+
+## 269. ✅ 🎨 PALETA DOS INDICADORES por família e nível + card que ENCHE ao longo do dia (28/09; pedido: "não fica legal eu escolhendo entre infinitas cores… cores relacionadas para indicadores relacionados… primários, secundários e terciários… mais transparente no início do dia e mais cheio conforme o dia anda, finalizando às 19h")
+- helper/cevicoKpiPalette.js: FAMÍLIAS por regra de texto (financeiro ouro · cirurgia roxo · satisfação
+  rosa · presença laranja · agendamento verde · captação azul · outros grafite; a 1ª regra que casa
+  vence) e NÍVEIS (primário = taxas/fechamento/faturamento/consultas marcadas/comparecimento em cor
+  cheia; secundário = volumes em cor média; terciário = confirmadas/lançadas/faltas/"pela data" em cor
+  clara com texto escuro no tema claro). `classifyKpi(tile)` usa label + gk + id + chartKey + fórmula.
+- Meu Painel: `kpi_layout.auto_palette` (padrão LIGADA; chavinha "cores por indicador" na barra do modo
+  edição, ao lado de Paleta; legenda das famílias embaixo). Ordem de prioridade da cor: alerta de meta
+  (vermelho/âmbar/verde) > paleta automática > cor escolhida por card > chip "Muito bom" > cor do dia.
+- ENCHIMENTO: o card nasce na versão "vazia" da cor (bem mais leve) e uma camada `.cv-tile-fill` sobe
+  do fundo conforme a hora de SÃO PAULO (07h = 6% · 19h = 100%; relógio a cada minuto), com uma linha
+  de luz na superfície; o popup usa a cor cheia. Título do card: "Agendamento · resultado principal ·
+  57% do dia". Servidor: sanitize `auto_palette` (ausente = ligada). Deploy WEB só. SEM commit.
+
+> 28/09: 267–269 SUBIRAM no commit 33b2d49 (develop) → imagem ghcr.io/guilhermecorder/chatwoot:33b2d49
+> · Implantar WEB (SIDEKIQ junto não faz mal), sem migration · reversão :82f289d.
+> 28/09 17h: :33b2d49 IMPLANTADA (produção = 260–269).
+> 28/09 tarde — 269 v2 (feedback dele no print de produção: "não ficou legal, era pra ser 100% transparente
+> e ele vai ficando mais denso com o passar do tempo"): SAI o enchimento tipo líquido (faixa subindo do
+> fundo + linha de luz). AGORA o card nasce em VIDRO 100% transparente (kpiGlass) com só uma borda fina na
+> cor da família (kpiEdge) e a camada `.cv-tile-fill` cobre o card inteiro com opacidade = hora de SP
+> (07h 0 → 19h 1; dayFill sem piso de 6%). Texto: tema claro fica escuro enquanto a cor está rala
+> (fill < 50%) e sempre no terciário (`kpiInkDark` → classe `.cv-tile-ink-dark`, que também escurece os
+> text-white/NN e as pílulas bg-white/NN); no escuro, sempre claro. Legenda: "a cor vai ficando densa até
+> as 19h (N% agora)". Testado local (14h26 = 62%; manhã simulada a 12% no console). SEM commit, WEB só.
+
+## 270. ✅ 📐 CARDS DE INDICADOR COM O TAMANHO DO CONTEÚDO (28/09 tarde; pedido: "precisamos que os quadradinhos dos indicadores ajustem seu tamanho, de acordo com as informações deles... isso é importante")
+- Antes: cada card tinha altura FIXA na grade do ímã (3×6 = 166 px, grande 6×12 = 346 px) → card com
+  só um número sobrava espaço vazio; card com gráfico/quebras apertava e os textos viravam "…".
+- Agora: o MagnetBoard dos cards usa `auto-height` (o mesmo modo dos blocos do Meu Painel): cada card é
+  medido e a altura vem do conteúdo; quem está embaixo desce/sobe sozinho. Só a largura se estica
+  (alça da borda direita); w ≥ 6 continua virando o card "grande" com gráfico. Altura mínima 124 px.
+- Textos que eram cortados (`truncate`) no card agora quebram linha: subtítulo "anterior: …", legenda
+  "leads que chegaram no período…", pico/tendência do card grande e o nome das linhas de detalhe.
+- Sem backend novo (kpi_layout.grid continua {id,x,y,w,h}; h vira só ponto de partida).
+- Testado local junto com o 269 v2. SEM commit — aguarda "pode subir" (WEB só).
+
+
+## 271. ✅ 🌪️ FUNIL DE AQUISIÇÃO por turma + "DA PORTA PRA DENTRO" + a "base" aberta com nomes (28/09 tarde; pedido: "preciso entender os indicadores de agendamento certinho… o funil de aquisição é de importância extrema, assim quanto 'da porta pra dentro'… vamos fazer os 3 blocos")
+- DIAGNÓSTICO no banco real (backup 21/09 restaurado local em `cevico_analise`, 30 dias de marcadas): a
+  "base" (52) era 29 LEADS ANTIGOS (chegaram há meses pelo Google/Instagram e só agora marcaram = ainda é
+  aquisição), 16 RETORNOS (já tinham consultado) e 7 PACIENTES DE CIRURGIA (Oftalmofácil). Mais da metade
+  da "base" era aquisição escondida pela régua de 30 dias.
+- Decisões dele: base = "retornos, exames etc." (descoberto acima); turma de 90 dias; bloco 1 em
+  Agendamentos, funis 2 e 3 no Gestor do Meu Painel (tem o ímã).
+- BLOCO 1 (Agendamentos → Resumo): `Crm::PatientKind` (services/crm/patient_kind.rb) classifica cada
+  marcada em novo · lead_antigo · retorno · cirurgia · sem_cadastro (3 consultas no banco, nunca 1 por
+  tarefa) e devolve a caixa de ORIGEM por linha (`origin_inbox`); feed traz `patient_kind`, `counts.kinds`
+  e `by_origin[].task_ids`. Tela: card Marcadas com "22 leads novos · 29 leads antigos · 16 retornos…",
+  faixa "Quem são os pacientes das marcadas" com chips clicáveis, TODOS os cards do Resumo clicáveis
+  (Marcadas/Remarcadas/Confirmadas/Não confirmou/Canceladas/Lançadas/IA × equipe) e os chips de origem
+  também → `PatientListPopup.vue` (components-next/cevico; kit .cv-modal, busca por nome/telefone,
+  copiar lista, clique abre a conversa ou o Espaço do Paciente).
+- BLOCOS 2 e 3 (Gestor): `Crm::FunnelService` (services/crm/funnel_service.rb) + `FunnelsController`
+  (GET crm/funnels/acquisition?preset&horizon · crm/funnels/clinic?preset; cache 10 min; CrmAPI
+  getAcquisitionFunnel/getClinicFunnel).
+  · AQUISIÇÃO POR TURMA: quem CHEGOU no período (LeadsUniverse) e até onde foi em N dias (30/60/90/180,
+    padrão 90): chegou → conversou (mensagem recebida depois da nossa 1ª enviada) → orçamento (entrou na
+    coluna de orçamento ou depois; quem marcou também conta) → marcou consulta → compareceu → indicação →
+    cirurgia marcada (Agenda ou Oftalmofácil) → cirurgia realizada (realizada/aguardando pagamento).
+    Cascata: etapa alcançada implica as anteriores. Mediana de dias entre etapas ("≈ 3 dias"), tabela por
+    origem, robô × equipe nas marcadas, chips "parou em X" e lista por etapa (chegou/parou).
+  · DA PORTA PRA DENTRO: consultas com DATA no período → compareceram → indicação → cirurgia marcada →
+    realizada → respondeu NPS; ao lado faltas · canceladas · remarcadas · SEM REGISTRO DE PRESENÇA (o
+    funil fica cego aí) · ainda vão acontecer; tabelas por médico e por unidade; tudo com lista.
+  · `FunnelSteps.vue` ganhou `clickable` (emite pick) e `sub` por coluna. Blocos `funil_aquisicao` e
+    `porta_dentro` no MAIN_BLOCKS_DEFAULT (aparecem só com panelBase gestor), ímã normal.
+- Validação no banco real (turma de junho, 90 dias): 1.249 chegaram → 1.104 conversaram → 63 marcaram →
+  20 compareceram (presença pouco registrada) → 11 indicações → 49 cirurgias marcadas (Oftalmofácil
+  ligado ao contato). Por isso o chip "sem registro de presença" ficou em destaque.
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir" (junto com 269 v2 e 270).
+
+## 273. ✅ 🔔 TOQUE DAS CHAMADAS — biblioteca com 6 toques (28/09 tarde; pedido: "precisamos mudar o toque do telefonema… um ring ring das antigas… uma biblioteca com uns 5 pra gente escolher: um mais moderno, um mais clássico etc.")
+- helper/cevicoRingtones.js: 6 toques SINTETIZADOS em WebAudio (sem arquivo de áudio, sem direito autoral):
+  Ring ring clássico (padrão; duas campainhas de telefone de disco batidas 20x/s, ring… ring…) ·
+  Telefone fixo (trim-trim 400+450 Hz) · Moderno (marimba subindo) · Discreto (dois sininhos leves) ·
+  Retrô digital (trinado de onda quadrada) · Tum-tum (o de antes, 440+480 Hz). Cada toque = função que
+  desenha 1 ciclo e devolve o período; `startRingtoneLoop`/`previewRingtone`; escolha em localStorage
+  `cevico_ringtone` (cada atendente escolhe o seu neste computador).
+- useCevicoCallSession.js: startRingtone/stopRingtone passam a usar a biblioteca (mesma assinatura p/ a
+  store cevicoCalls). RingtonePicker.vue (components-next/cevico/calls): modal do kit com ouvir/escolher;
+  botão "Toque" (sino) no topo da tela Chamadas (CevicoHero #actions).
+- O FloatingCallWidget (canal de voz do Chatwoot/Twilio, ringtone.mp3) NÃO mudou — o nosso é o CEVICO.
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir".
+
+> 28/09 15h30: 269 v2 + 270 + 271 + 273 SUBIRAM no commit 7f0521a (develop, --no-verify dele) → build
+> "Build & Push Docker Image" VERDE 15h37 → imagem ghcr.io/guilhermecorder/chatwoot:7f0521a p/ Implantar WEB
+> (SIDEKIQ junto não faz mal), sem migration · reversão :33b2d49.
+
+## 274. ✅ 📐 Cards do Meu Painel presos na grade de 4 colunas (28/09, print de produção: "a organização dele ainda está meio estranha… se organiza feio")
+- Causa: o ímã deixava card em QUALQUER coluna das 12 (x=1, x=4…) — ao arrastar, o vizinho "abria espaço"
+  deslizando de 1 em 1 coluna; com altura variável (270) isso virou escadinha torta.
+- Agora: magnetLayout ganhou `snap` (clampItem/compact/place/mergeLayout): x e largura só em múltiplos de
+  3 colunas (grade de 4; grande = 6). MagnetBoard prop `snap`; InicioPage passa TILE_W nos cards
+  (mergeLayout, placeBlock e no quadro). Layout salvo torto se conserta sozinho ao abrir (sem migration).
+  Spec magnetLayout.spec (8 verdes, novo caso de snap). Blocos do painel e Painel do empresário seguem
+  livres (snap 1). Deploy WEB só. SEM commit — aguarda "pode subir".
+
+## 275. ✅ 🗺️ MEU PAINEL: largura toda no desktop + modelo "Jornada completa · 3 seções" + DIVISÓRIAS com título + editar direto nos indicadores + sem o botão "Dashboard da Agenda" (28/09 tarde; pedido dele com print)
+- LARGURA: o Meu Painel perdeu o teto `max-w-5xl` — ocupa a tela inteira no desktop (`max-w-none`, gutter maior em 2xl).
+- DIVISÓRIAS: novo tipo de card `div:<id>` em `kpi_layout.dividers` ({id => título}); faixa de largura inteira
+  (w=12) com linha + título em caixa alta na cor funda do painel; no modo edição vira input (Enter/blur salva)
+  com X para tirar; botão "divisória" ao lado de "espaço vazio"; arrasta pelo ímã como card. Servidor sanitiza
+  (até 30, título 60 chars). Divisória fica fora de paleta/julgamento/sinais do gestor.
+- MODELO "Jornada completa · 3 seções" (cevicoPanelPresets.js; painéis Gestor e Agendamento): Início da jornada
+  (novos contatos grande · orçamento · entrou em agendamento · marcadas leads novos · marcadas base · taxa de
+  agendamento leads novos · confirmadas · comparecimentos) · Meio (taxa de comparecimento grande · faltas ·
+  indicações · taxa de indicação) · Fim (cirurgias marcadas após indicação · taxa de fechamento · cirurgias
+  realizadas grande · faturamento grande · ticket médio = faturamento ÷ cirurgias). Por procedimento e % =
+  popup de Cirurgias realizadas/Faturamento (quebras do item 267). buildPreset gera as divisórias e zera a grade.
+- EDITAR: botão "editar indicadores" (lápis) no topo do bloco de indicadores (admin, painel não-custom) — o
+  mesmo Modo edição do topo. Botão "Dashboard da Agenda" REMOVIDO da faixa do seletor (bloco e Acesso rápido continuam).
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir" (junto com o 274).
+
+## 276. ✅ 🟦 GRADE EM QUADRADOS: N quadrados por linha + largura × altura livres por card (28/09 tarde; "prefiro tamanho padrão, um 2/3 etc" → "parou de ter a visualização quadrada… precisamos de mais liberdade")
+- DESFAZ o 270 (altura pelo conteúdo) e a versão "frações" da tarde: a grade dos indicadores passa a ter
+  N QUADRADOS POR LINHA (`kpi_layout.cols`, 2 a 12, padrão 4; setinhas − / + "quadrados por linha" na
+  barra do modo edição). Cada card mede em quadrados: largura 1..N e altura 1..3 (setinhas ◂ ▸ ▴ ▾ no
+  card, ou puxando a borda/canto). 1×1 = quadrado de verdade; 2×2 = card grande com resumo (isBigCell).
+- MOTOR: magnetLayout aceita opções { x, h, cols, minW } (cols da grade e largura mínima 1); MagnetBoard
+  ganhou prop `cols`. Blocos e Painel do empresário seguem em 12 colunas.
+- MIGRAÇÃO SEM MIGRATION: `kpi_layout.grid_units` marca grade em quadrados; grade antiga (12 colunas, card
+  = 3, grande = 6, alturas da fase 270 em linhas de 4 px) é convertida ao abrir (legacyToSquares). Servidor:
+  cols 2..12, grid_units, w mínimo 1.
+- Bug de tabela corrigido no ímã: `.mb-stacked` só afeta os filhos diretos (um quadro dentro de outro não
+  virava coluna única). Espaços vazios e divisórias seguem (divisória = linha inteira × 2 linhas).
+- Testado local via console (painel do navegador escondido): 8 specs do motor verdes. Deploy WEB só, sem
+  migration. SEM commit — aguarda "pode subir" (com 274 + 275).
+
+> 28/09 ~18h30: 274 + 275 + 276 SUBIRAM no commit d16c238 (develop, --no-verify dele; push dele) → build
+> "Build & Push Docker Image" VERDE 18h10 → imagem ghcr.io/guilhermecorder/chatwoot:d16c238 p/ Implantar WEB,
+> sem migration · reversão :7f0521a.
+
+## 277. ✅ 🧲📊 Depois do deploy :d16c238 ("ficou uma porcaria o Meu Painel, Agendamentos também, nenhum número me diz muita coisa") — Meu Painel com a tecnologia do Painel do empresário + Agendamentos pelo NÚMERO dele (28/09 noite)
+- MEU PAINEL: os cards passam a viver no MESMO quadro do Painel do empresário — grade livre de 12 colunas,
+  arrasta para qualquer lado, estica largura E altura pela borda/canto (linhas de 16 px, mín. 4), sem
+  quadrados nem frações (saem "quadrados por linha" e as setinhas do 276). Card normal 3×6, grande 6×12.
+  `kpi_layout.grid_free` marca a grade livre; grades das fases anteriores convertem ao abrir (toFreeGrid).
+- AGENDAMENTOS: bloco novo no topo do Resumo "Entraram em Agendamento de Consulta" = card que CHEGOU na
+  coluna do CRM no período (Crm::BookingRate, regra oficial 233), um por paciente: número grande, "de
+  quais caixas vieram" (1ª conversa, ShareBar + chips), "como foi depois" (compareceu / faltou / cancelou /
+  confirmou / consulta marcada / passou sem registro / SEM consulta na Agenda) e robô × equipe; tudo abre a
+  lista (PatientListPopup → conversa). `Crm::StageEntriesReport` + GET crm/appointments/stage_entries.
+  Abaixo fica a régua da Agenda (marcadas etc.) com aviso de que são réguas diferentes.
+- Deploy WEB só, sem migration. SEM commit — aguarda "pode subir".
+
+## 278. ✅ 🧹 VARREDURA dos indicadores do "+" (28/09 noite; print: "tem indicadores errados aqui… elimine o que está errado, corrija o necessário")
+- `Crm::KpiSweep` + `rake cevico:kpi_sweep ACCOUNT_ID=1 DRY=1|0`: regras da régua oficial — taxa/conversão de
+  agendamento = entrou na coluna ÷ leads; ticket médio = faturamento ÷ cirurgias realizadas; fechamento =
+  cirurgias marcadas após indicação ÷ indicações; comparecimento = presenças ÷ (presenças + faltas); "Entrou
+  em X" = stage da coluna X desta conta (pelo nome); % em contagem simples vira número; nome enganoso
+  ("Consultas agendadas (registradas)") renomeado; duplicados apagados; fórmula com variável inexistente apagada.
+- Na cópia de produção (21/09) os errados: "Conversão de Agendamento" e "Taxa de Agendamento" = contagem
+  em %, "Taxa de agendamento" = marcadas ÷ leads (167%), "Ticket médio" = stage_12, "Fechamento" = contagem,
+  "Entrou em Cirurgia Realizada" duplicado em %. Local DRY: 4 correções.
+- Também corrigidos os PRONTOS: fórmula pronta "Fechamento de cirurgias" (→ após indicação) e o modelo
+  Jornada completa (taxa de agendamento → entrou na coluna ÷ leads).
+- Rodar em produção DEPOIS do deploy: DRY=1 (lista) → DRY=0 (aplica). Sem migration.
+
+## 279. ✅ ➕ "Novo indicador": marcar VÁRIOS prontos e salvar todos de uma vez (28/09 noite; "criar mais de um indicador pré selecionado")
+- Nos indicadores prontos (taxas prontas e números do cesto) cada item tem caixinha ☐/☑; o rodapé vira
+  "Salvar N cards" (um card por item, com formato/painel/cor escolhidos no modal). 1 marcado = fluxo antigo.
+
+## 280. ✅ 🩺 ROTEIRO: exames NÃO inclusos (ciclotorsão R$ 300/olho) — só quando o paciente perguntar (29/09 manhã; print de produção: o Atendente disse "valor fixo, sem cobrança extra por ciclotorsão… já tem esse rastreamento incluso")
+- Causa: o roteiro dizia "Na cirurgia está tudo incluso" e a objeção "O que está incluso?" terminava em "Sem
+  surpresas" → o modelo garantiu que não havia custo extra.
+- Correção nos 4 roteiros (Crm::CevicoScript v1 e v2 — a fonte única do WhatsApp/voz —, ConversationInsight e
+  Instagram): bloco "EXAMES ADICIONAIS (NÃO inclusos)": avaliação inclui biometria, microscopia, fundo de olho e
+  pentacam; exame que o médico julgar necessário é à parte e avisado antes — hoje CICLOTORSÃO R$ 300 por olho;
+  só falar quando perguntarem; nunca oferecer; nunca prometer "sem cobrança extra"/"tudo incluso"/"não altera o
+  valor"; resposta modelo educada; se o paciente relatar surpresa em outra clínica, acolher e ser transparente.
+  Objeções "O que está incluso?" e "Quais exames estão inclusos?" reescritas sem o "Sem surpresas".
+- Deploy WEB + SIDEKIQ (o Atendente roda no Sidekiq); o cache do roteiro (item 213) renova em até 1 h. SEM
+  commit — aguarda "pode subir". Para acrescentar outros exames extras: mesma linha do bloco EXAMES ADICIONAIS.
+
+> 29/09 manhã: 277 + 278 + 279 + 280 SUBIRAM no commit aa6acb7 (develop, --no-verify dele; push feito) → build
+> "Build & Push Docker Image" VERDE 11h05 → imagem ghcr.io/guilhermecorder/chatwoot:aa6acb7 p/ Implantar
+> WEB + SIDEKIQ, sem migration · reversão :d16c238 · depois: rake cevico:kpi_sweep ACCOUNT_ID=1 DRY=1 → DRY=0.
+> 29/09 ~11h20: :aa6acb7 IMPLANTADA (produção = 277–280; reversão :d16c238). Falta ele rodar o kpi_sweep na VPS (DRY=1 → DRY=0).
+
+## 281. ✅ 📞 Popup da chamada mostra a COLUNA do CRM de quem liga (29/09; print do popup "Chamada de WhatsApp · Alessandra… · Recusar/Atender"; "pra gente entender melhor quem liga")
+- Onde: components-next/cevico/calls/CevicoCallPopup.vue (popup Recusar/Atender) + o JSON da chamada que a
+  store cevicoCalls recebe (backend das chamadas em app/services/crm/calls/). Incluir: coluna atual do card
+  (nome + cor da etapa, Crm::Contact.stage do contato pelo telefone), e de quebra caixa de origem e última
+  consulta. Kit: chip colorido abaixo do telefone. Sem migration.
+- Também vale para o card "ao vivo" da tela Chamadas e para o histórico.
+- **CONSTRUÍDO 29/09 (SEM commit, aguarda "pode subir"; WEB+SIDEKIQ, sem migration, reversão :aa6acb7):**
+  - Servidor: `Crm::Calls::PatientContext` (em lote, 4 consultas no banco): cards do CRM (coluna + cor, um por
+    funil, até 3), caixa de origem (1ª conversa), última e próxima consulta. Entra no JSON da chamada em
+    `crm` (`Crm::Call#to_payload` / `Crm::Call.payloads` nas listas); o card da conversa NÃO leva (`crm: false`).
+    Se a leitura do CRM falhar, a chamada toca do mesmo jeito (sem o bloco).
+  - Tela: `CallPatientContext.vue` — chip na cor da etapa + "próxima consulta / última consulta (compareceu ·
+    faltou) / chegou por <caixa>"; quem não está no CRM aparece "Primeiro contato — ainda não está no CRM".
+    Usado no popup (tocando = completo; em chamada = só o chip), no card "Agora (ao vivo)", nas linhas do
+    Histórico e no topo do detalhe da chamada.
+  - Testes: spec/services/crm/calls/patient_context_spec.rb (3) + webhook_service_spec (7) verdes; conferido ao
+    vivo no localhost com chamada simulada (`cevico:calls_simulate ACCOUNT_ID=3 CONTACT_ID=296`).
+  - Usuário de teste só do ambiente local: dados em tmp/cevico_teste_local.txt (fora do git).
+
+## 282. ✅ 📞 Chamadas: mostrar a CAIXA DE ENTRADA para onde o paciente está ligando (29/09; "acho interessante saber também nas chamadas, a caixa de entrada para onde ele está ligando")
+- Popup da chamada (tocando): primeira linha do bloco "quem liga" = "ligando para <caixa>". Card "Agora (ao vivo)" da tela
+  Chamadas: linha "ligando para <caixa>" (ou "pela caixa <caixa>" quando a clínica ligou). Histórico já mostrava a caixa.
+- Arquivos: CallPatientContext.vue, CrmCalls.vue. Sem servidor novo (inbox_name já vinha no JSON). SEM commit.
+
+## 284. ✅ 🥗 Salada de frutas: cabeçalho com base AZUL, VERDE e AMARELO (29/09; "gosto muito do tema salada de frutas porque ele vai mudando de cor, só não gosto do gradient do cabeçalho… base maior azul, verde e amarelo, e outras cores de contraste pra dar um tcham; o azul deixa mais suave e agradável")
+- helper/cevicoPalettes.js → SALAD.hero: degradê azul-marinho → azul → verde-água → verde, com brilho amarelo no canto de
+  cima e toques de rosa e roxo nos cantos de baixo. Blocos e cards continuam trocando de fruta como antes. SEM commit.
+
+## 285. ✅ 🌉 AGENDAMENTOS: a PONTE "entraram na coluna × marcadas na Agenda" + gráficos de ÁREA no lugar das barras em linha (29/09; "4 entraram em agendamento de consulta, ok, mas teve 13 marcadas. o que é essa diferença?"; FILOSOFIA: "queremos revelar os dados… buscamos suas conexões: de onde veio? ela se ramifica? pra onde ela vai?"; "os gráficos com barra em linha eu não gosto")
+- Servidor: `Crm::BookingBridge` (entra no JSON de /crm/appointments/stage_entries em `bridge`). Cada MARCADA cai em um
+  ramo: entraram na coluna no período (= nos dois números) · já tinham entrado antes · entraram depois · card em outra
+  coluna (nunca passou pela de agendamento) · card só em outro funil · sem card no CRM · sem cadastro. Cada ENTRADA na
+  coluna: com consulta marcada no período · consulta já marcada antes · marcada depois · sem consulta na Agenda.
+  Cada ramo traz os nomes e ONDE os pacientes estão hoje no CRM.
+- Tela (CrmAppointments.vue, só no trilho Consultas): bloco "Por que X entraram na coluna e Y foram marcadas" com a frase
+  pronta e o desenho `BridgeFlow.vue` (raiz → fitas → ramos; o ramo comum em verde "nos dois números"; clique abre os nomes).
+- Gráficos: `AreaChart.vue` (área suave com degradê, uma por fatia, tooltip; hora a hora até 2 dias, dia a dia até 45,
+  depois semana) + helper/cevicoBuckets.js. Trocou o ShareBar em: caixas de quem entrou na coluna, quem são os pacientes
+  das marcadas, de quais caixas vieram, quando os leads chegaram e "De onde" dos filtros. Os chips clicáveis continuam.
+- Testes: booking_bridge_spec.rb (2), cevicoBuckets.spec.js (3), bridgeArea.spec.js (3) verdes. WEB só, sem migration. SEM commit.
+- FALTA (próximas rodadas): trocar o ShareBar nas outras telas (Chamadas, Google, Anúncios, Meu Painel, Oftalmofácil, Agentes).
+
+## 286. ✅ 🎬 Central de Criativos: a TRANSCRIÇÃO dos vídeos não acontecia (29/09; "não estou conseguindo fazer a transcrição dos anúncios")
+- Causa (vista no backup de produção de 21/09): os 31 vídeos ficaram "pulados — Configure a chave do Gemini" de ANTES da
+  chave existir; "pulado" nunca era tentado de novo em lote. E a tela ESCONDIA o motivo (o botão aparecia por cima do erro).
+  Além disso 33 anúncios "Dinâmicos" têm vídeo e eram recusados.
+- Correção: fila tenta de novo quem foi pulado por falta de chave, quem falhou e quem travou "na fila/transcrevendo" há
+  mais de 20 min; dinâmico com vídeo também transcreve; o motivo aparece em vermelho ("não transcreveu: …") com botão
+  "Tentar de novo"; a tela acompanha sozinha (confere a cada 6 s) e mostra a transcrição quando fica pronta.
+- Depois do deploy: Central de Criativos → botão "Transcrever vídeos" (enfileira todos). Se aparecer outro motivo em
+  vermelho (ex.: a Meta não devolveu o arquivo), é esse o próximo ponto a olhar.
+- Testes: creatives_center_spec.rb 21 verdes. WEB+SIDEKIQ, sem migration. SEM commit.
+
+## 288. ✅ 🔁 REFORÇO (follow-up) dos lembretes de consulta e de cirurgia (29/09; "enviamos uma mensagem de confirmação de consulta, ou de cirurgia e ele passa 6 horas e não responde. precisamos poder enviar outra mensagem de lembrete pra ele (ainda que seja mensagem modelo)")
+- DESLIGADO por padrão. Cada lembrete (Confirmação de consulta) e cada mensagem da Jornada de "dia da cirurgia"/"dia da
+  consulta" ganhou o bloco "Reforço para quem não respondeu": ligar, esperar N horas (padrão 6; 1–48), 1 ou 2 reforços,
+  mensagem modelo do reforço.
+- Regra: recebeu o lembrete há N horas, não escreveu NADA desde então e a consulta/cirurgia segue de pé (não confirmou,
+  recusou, cancelou nem remarcou). Só envia 07h–20h (SP; pedido dele: "prefiro que inicie às 07am"); nunca depois do horário; reforço vencido há mais de 24 h não sai
+  (ligar hoje não dispara para lembretes antigos); nunca duas vezes (marca gravada ANTES de enviar, com trava).
+- Oftalmofácil: segue o item 259 — só pela caixa deles e com modelo de reforço PRÓPRIO; sem esse modelo não recebem.
+- Onde: Automações → Agentes → Confirmação de consulta → abrir o lembrete; e CRM → Jornada → editar a mensagem → passo 3.
+- Arquivos: jobs/crm/appointment_reminder_followup.rb, services/crm/journey/followup.rb (+ dispatcher, reply_service,
+  journey_message/send, settings_controller, journey_messages_controller, ConfirmationAgentCard.vue, JourneyWizard.vue,
+  CrmJourney.vue). Guardado em jsonb que já existia (sem migration).
+- Testes: 30 novos verdes; engine_spec segue com as 2 falhas ANTIGAS (ReplyService, data fixa). WEB+SIDEKIQ. SEM commit.
+- ANTES DE LIGAR: os modelos de reforço precisam existir e estar aprovados na Meta. Decisões assumidas a confirmar com ele:
+  "não respondeu" vale para qualquer conversa do paciente; um modelo por lembrete (não por unidade); erro no envio não
+  tenta de novo sozinho (melhor faltar um reforço do que repetir).
+
+## 283. ✅ 🖱️ MENU DO BOTÃO DIREITO no sistema (29/09; "na agenda… no sistema inteiro, na verdade… um recurso para o botão direito do mouse, de interação")
+- Peça única reutilizável: `CevicoContextMenu.vue` (montado uma vez no Dashboard.vue) + `useCevicoContextMenu.js`
+  (`openMenu` e diretiva `v-cv-menu`). Vira perto das bordas, fecha com Esc/clique fora/rolagem, teclado, segundo nível,
+  toque longo no celular. Campos de texto, links e texto selecionado continuam com o menu do navegador; Shift + botão
+  direito sempre abre o do navegador. Só chama ações que JÁ existiam em cada tela.
+- Onde funciona: AGENDA (consulta/cirurgia: abrir, remarcar, compareceu/faltou, indicação, Espaço do Paciente, copiar,
+  cancelar; horário vazio: novo agendamento/outro tipo/fechar horário ou dia/imprimir; cabeçalho do dia); CRM (cartão:
+  abrir, conversa, Espaço do Paciente, mover para coluna, copiar); TAREFAS (mover, copiar; nota do paciente); MEU PAINEL
+  (card: ver detalhes, copiar número; no modo edição: tamanho, cor, ocultar, excluir).
+- Fora desta rodada: confirmar consulta e abrir conversa pela Agenda (a tela não tem essas ações), excluir pelo menu,
+  telas de Agendamentos/Chamadas/Criativos (ligar depois: 5 a 10 linhas por tela).
+- Testes: 40 verdes em components-next/cevico/specs. WEB só. SEM commit.
+- ACHADO: `:global(.dark) .classe` em <style scoped> compila para `.dark { … }` (Vue 3.5.12) — o popup de chamadas
+  pintava a PÁGINA no modo escuro. Corrigido em CevicoCallPopup.vue, CallPatientContext.vue e AreaChart.vue (`.dark .classe`).
+
+## 287. ✅ 🔗 CRIATIVOS: link só de leitura da análise + curva de retenção detalhada + cliques por trecho (29/09)
+- Rodada 1 pronta (30 testes verdes): botões Compartilhar e Copiar análise completa; página pública
+  /criativos/analise/<token> (token assinado, 30 dias, sem dado de paciente, noindex, limite de acessos); curva de
+  retenção em área, segundo a segundo (precisa de NOVA CARGA da Meta para aparecer), média da conta, maior queda, fala do
+  trecho; "cliques para cada 100 que chegaram" por marco, com o aviso de que a Meta não informa o segundo do clique.
+- Rodada 2 PRONTA (37 testes verdes): compartilhar COM × SEM dados financeiros (padrão sem; escolha dentro do token); 3 a 5 maiores quedas; radar, barras verticais e
+  linha; medidores de % em Barras | Linha; título do modal em branco.
+
+- Rodada 3 PRONTA (41 testes verdes; pedido 29/09 noite): "Onde apareceu" e "Quem viu" apontam os MAIS e os MENOS (volume e
+  aproveitamento, sem inventar vencedor em empate); saiu o gráfico de barras por dia; indicadores = este anúncio × MÉDIA da
+  conta × 🏆 RECORDE da conta ("vamos buscar sempre superar a média… e podemos ter recordes"); recorde exige volume mínimo
+  (1.000 impressões). Pendente pequeno: cartões do topo do modal e "Números da Meta" ainda usam bom/atenção/ruim.
+
+## 289. ✅ 💰 CRIATIVOS: o CAC saía MENOR que o custo da consulta (29/09; "precisa confirmar a origem deste dado, se não está invertido")
+- Causa: `Crm::AdFunnel` contava como CIRURGIA quem passou pelas "colunas de conversão" do relatório de Anúncios, que em
+  produção são [Agendamento de Consulta, Cirurgia Realizada]. No backup de 21/09: 197 "cirurgias" pela régua antiga × 9 de
+  verdade. A receita somava o valor do card (orçamento) de todos eles → ROAS inflado. E "consultas" olhava só a Agenda.
+- Régua nova (um degrau sempre cabe no anterior): consultas = card chegou na coluna oficial de agendamento ou além, OU
+  consulta na Agenda; compareceram = "Consulta Realizada" ou além, OU presença na Agenda; cirurgias = "Cirurgia
+  Realizada"/2º olho/pós-operatório, OU cirurgia realizada no Oftalmofácil; receita = valor do Oftalmofácil, senão o do card.
+  Cada anúncio leva `funnel.sources` (quanto veio do CRM, da Agenda e do Oftalmofácil).
+- ATENÇÃO: os números de CAC e ROAS vão MUDAR MUITO (para o valor real). O relatório de Anúncios e o de Páginas ainda
+  usam as "colunas de conversão" como conversão — lá o nome é "conversões", não cirurgia; revisar com ele.
+- Testes: creatives_center_spec 26 verdes. WEB+SIDEKIQ. SEM commit.
+
+## 291. ✅ 🛟 ATENDENTE DE IA: conversas que ficavam SEM resposta (29/09, produção; "algumas conversas tiveram continuidade, outras não"; prints: Luisa 13h22 e Rayane 13h20/13h31 sem resposta, saldo da Anthropic conferido e ok)
+- Causa no código: quando a chamada da IA falhava (serviço cheio, limite por minuto, rede), o job anotava "erro" no card
+  do agente e DESISTIA — o paciente ficava sem resposta até escrever de novo. Job que morre no meio (fila reiniciada)
+  também não voltava. A causa exata de 29/09 só aparece na lista de atividade do agente em produção (linhas "erro").
+- Correção 1 — nova tentativa: erro passageiro → tenta de novo em 20 s, 1 min e 3 min (sempre conferindo se ainda é a
+  última mensagem do paciente). Erro de configuração (desligado, sem chave) não repete. Card mostra "vou tentar de novo (1/3)".
+- Correção 2 — RESGATE (`Crm::ResponderRescueJob`, a cada 5 min): conversa aberta, em caixa de agente AO VIVO, última
+  mensagem do paciente sem resposta entre 3 min e 2 h, não pausada, coluna com agente dono → devolve ao agente. Cada
+  mensagem é resgatada UMA vez (marca no Redis); evento "resgate" no card.
+- Testes: responder_rescue_job_spec (6) + responder_agent_job_spec (+2) = 24 verdes. WEB+SIDEKIQ, sem migration. SEM commit.
+- Pode subir SOZINHO, antes do resto (arquivos: jobs/crm/responder_agent_job.rb, jobs/crm/responder_rescue_job.rb,
+  config/schedule.yml + os 2 specs).
+
+## 290. ✅ 🎨 AGENDA: cor por agendamento (como no Google Agenda) + compareceu/faltou à mão na lista do dia (29/09; "parecido com o google agenda, mudar as cores (e ter um comando de compareceu ou faltou), relacionado com a lista lateral… assim as meninas vão conseguir se organizar melhor")
+- ⚠️ TEM MIGRATION: db/migrate/20260929170000_add_color_to_tasks.rb (`tasks.color`, texto, pode ser vazio) → BACKUP antes;
+  WEB+SIDEKIQ. Só acrescenta coluna. Sobe junto com o 283 (menu do botão direito).
+- Botão direito em qualquer agendamento (Semana, Dia, Mês, lista lateral, bloco do médico): 12 bolinhas de cor + "Padrão".
+  Pinta na hora, vale para a equipe toda. O selo do TIPO continua na cor do tipo.
+- Lista lateral "Itens do dia": botões ✓ Compareceu / ✕ Faltou (cirurgia: Realizada / Não veio), clique de novo desfaz;
+  selo ✓ verde / ✕ vermelho / ! âmbar no balão da grade. Mesma função de presença de sempre — nenhum indicador mudou.
+- Testes: 28 (servidor) + 53 (tela) verdes. SEM commit. Não conferido: clique real em compareceu/faltou (move card no CRM).
+- ARMADILHA: rodar rspec no contêiner SEM `-e RAILS_ENV=test` usa o banco de desenvolvimento.
+
+- **29/09 — 281–291 SUBIRAM** no commit f3b769b (develop) → imagem ghcr.io/guilhermecorder/chatwoot:f3b769b; WEB+SIDEKIQ COM MIGRATION (backup antes); reversão :aa6acb7.
+
+## 292. ✅ 🎬 CRIATIVOS: "A Meta não devolveu o arquivo do vídeo" (29/09, produção, depois do deploy :f3b769b)
+- O arquivo do vídeo pertence à PÁGINA que publicou; o acesso da conta de anúncios não basta. `Crm::AdVideoSource` tenta 3
+  caminhos: vídeo direto → biblioteca de vídeos da conta → acesso da página dona do anúncio. Sem nenhum, a tela diz o que
+  falta liberar e mostra "o que a Meta respondeu" em cada caminho. NÃO testado contra a Meta real. SEM commit.
+
+## 293. ✅ 🎬 CRIATIVOS: transcrever SEM depender da Meta — soltar o arquivo ou colar o link (29/09; ideia dele: "talvez eu possa usar alguma ferramenta para soltar o link, ler o link e transcrever o vídeo")
+- Detalhe do anúncio: botões "Enviar o vídeo" (ou arrastar o arquivo para o cartão do texto) e "Colar link". Até 200 MB.
+  Vídeo pequeno vai embutido ao Gemini; acima de 18 MB sobe antes pela gaveta de arquivos do Gemini (`Crm::GeminiFiles`).
+  Link: YouTube (o Gemini assiste direto) ou link direto de arquivo (baixado com o SafeFetch do sistema, que barra endereço
+  interno). Link de post do Instagram/Facebook é recusado com a explicação "baixe o vídeo e solte o arquivo".
+- O arquivo enviado fica guardado só até transcrever (`Crm::AdCreative#video_upload`, apagado depois). Sem migration.
+- Testes: creatives_center_spec verdes. NÃO testado contra o Gemini real com vídeo grande. WEB+SIDEKIQ. SEM commit.
+
+## 294. ✅ 🩺 CRIATIVOS: jornada do anúncio campeão aparecia com ZERO cirurgias (29/09; "essa informação da jornada de atendimento parece errada, porque esse criativo é campeão… nesta análise vamos fazer análise do ano")
+- ACHADO GRANDE: no Oftalmofácil NENHUMA cirurgia recebe a situação "realizada" (backup 21/09: 935 Ativa, 280 Aguardando
+  pagamento, 134 Cancelada; 934 das ativas com data já passada). Esperar "realizada" dava sempre zero.
+- Régua (`Crm::AdFunnelSteps`): realizada do Oftalmofácil = situação ATIVA com data já passada; etapa nova "cirurgias
+  FECHADAS" (a venda) = card em Cirurgia Agendada ou além, cirurgia na Agenda, ou ativa/aguardando pagamento no
+  Oftalmofácil; receita das realizadas = valor pago no Oftalmofácil (senão o cobrado), senão o valor do card.
+  Taxas novas: cost_closed e closed_rate.
+- Conferência no backup para "[a.i]/[v.v] Isso aqui consegue corrigir Miopia" (3 anúncios, leads desde 13/07, quando a
+  origem por anúncio começou a ser gravada): 1.046 leads → 77 consultas → 14 compareceram → 3 cirurgias fechadas → 1
+  realizada. A tela antiga dizia 81 cirurgias (contava agendamento de consulta).
+- OUTROS LUGARES que usam `OftalmofacilSurgery.realizadas` (Hub, lucratividade, indicadores) podem ter o mesmo zero —
+  REVISAR com ele.
+- Rodada 4 da tela PRONTA (55 testes verdes): quedas com TEMPO em segundos e ZONA (gancho/corpo/CTA), funil visual com %
+  de conversão entre etapas (Exibições → … → Cirurgias fechadas → realizadas) e "de onde vem" na tela interna, cliques em %
+  de conversão, mais respiro e fontes ≥ 13 px, período "Este ano" como padrão do link. Pendente: o resto do modal interno
+  (cartões do topo, Números da Meta, Ritmo) ainda com letra pequena.
+
+## 295. ✅ (SUBIU 29/09 commit 93fec4d → imagem :93fec4d, build verde, reversão :f3b769b) 🚨 ROTEIRO: lente fácica (Artisan) é POR OLHO (29/09 14h25, produção; print: o Atendente respondeu "O valor de R$ 11.900,00 é para os dois olhos"; recado da equipe: "Gui ajusta esse, esse valor da lente fácica é por olho")
+- Causa: na tabela de preços o grupo "Fácica" era o único sem dizer "por olho" (refrativa diz "2 olhos", catarata diz "por
+  olho") e o passo do orçamento não citava a lente fácica — a IA completou por conta própria.
+- Correção: `Cevico::PriceList` escreve "Fácica (por olho)" mesmo quando a tabela salva pela clínica não diz; regra fixa
+  (PER_EYE_RULE) acompanha a tabela e o roteiro inteiro (v1 e v2), mesmo com texto editado na tela; passo do orçamento
+  ganhou a frase da Artisan; fechamento e redator também dizem "por olho".
+- Testes: cevico_script_spec 11 verdes. SIDEKIQ+WEB, sem migration. Roteiro entra em até 1 h (cache). Sobe SOZINHO (hotfix).
+
+## 296. 💡 AGENDA: permissão de GESTÃO DA AGENDA para alguns agentes (29/09; "preciso conceder permissões de gestão de agenda, para alguns agentes") — A FAZER
+
+- **29/09 — 292–294 + 287 (rodadas 2–4) SUBIRAM** no commit c456694 (develop) → imagem ghcr.io/guilhermecorder/chatwoot:c456694; WEB+SIDEKIQ, sem migration; reversão :93fec4d.
+
+## 297. ✅ 🩺 AGENDA: "pacientes duplicados" no bloco da janela do médico (30/09 08h13, equipe: "este bloco da janela dos médicos está aparecendo diversos pacientes duplicados ocupando agendamentos disponíveis… quando apagamos um duplicado todos somem")
+- Não eram duplicados: o MESMO agendamento aparecia em 2 ou 3 blocos seguidos. A ocupação era por sobreposição da duração
+  presumida (consulta 15 min, exame 30, cirurgia 60 — item 255) e a janela do Dr. Henrique tem blocos de 10 min.
+- Regra nova: na janela do MÉDICO cada agendamento ocupa SÓ o bloco em que começa (tela: helper `occupiesSlot`; servidor:
+  `Crm::AgendaSlots.hub_overlap?`, para a IA voltar a oferecer os horários que estavam livres). Sala cirúrgica e agenda de
+  exames continuam por sobreposição. Encaixe ("+2") continua igual.
+- Testes: agenda_slots_future_spec ajustado, cevicoAgendaOccupies.spec.js (4) verdes. WEB+SIDEKIQ, sem migration.
+- OBS: responder_tools_spec.rb:124 falha também na versão anterior (depende do dia da semana) — não é desta mudança.
+
+- **30/09 — 297 SUBIU** no commit 838f88f (develop) → imagem ghcr.io/guilhermecorder/chatwoot:838f88f; WEB+SIDEKIQ, sem migration; reversão :c456694.
+
+## 298. ✅ 💬 ABRIR CONVERSA da Agenda, do Espaço do Paciente e do botão direito (30/09; "do espaço do paciente precisa ter um ambiente pra abrir a conversa · da agenda também · adicionar opção 'abrir conversa' no botão direito")
+- O "ambiente" é o MESMO popup de conversa do CRM (ConversationChatModal), agora aberto de qualquer tela sem sair dela:
+  `openPatientChat({ contactId, phone })` (composable useCevicoPatientChat + PatientChatHost.vue montado no Dashboard).
+- Servidor: GET /crm/patient_chat (patient_chats_controller.rb) devolve a conversa mais recente do paciente no formato do
+  card do CRM; acha pelo cadastro ou pelo telefone; respeita as caixas que a pessoa logada pode ver.
+- Onde: AGENDA — botão direito "Abrir conversa" (balão, lista do dia, bloco do médico) e botão "Conversa" no topo da ficha
+  do agendamento; ESPAÇO DO PACIENTE — "Abrir conversa" abre o popup ali mesmo e "Tela cheia" leva à tela de Conversas.
+  Paciente sem conversa cai no "Nova conversa" de sempre (item 199).
+- Testes: patient_chats_controller_spec (5) verdes; conferido ao vivo no Espaço do Paciente (popup abriu com a conversa,
+  as colunas e o campo de resposta). WEB só, sem migration. SEM commit.
+
+- **30/09 — :61df3fa IMPLANTADA** (produção = 281–298; reversão :f3b769b).
+
+## 299. ✅ 🧭 LINHA DO TEMPO CONVERGENTE por anúncio (30/09; "gostaria de ter todo o histórico, de todas as fontes, distribuídos em convergência, na linha do tempo, ou seja, tudo sincronizado"; decisão dele: "comece por anúncio, mas também acho importante entender a jornada do paciente")
+- Servidor: `Crm::AdTimeline` — 10 faixas no MESMO eixo: investimento, exibições, cliques, conversas (Meta); leads (chegada
+  pelo anúncio); consultas marcadas, compareceram (CRM + Agenda); cirurgias fechadas, realizadas e receita (CRM + Agenda +
+  Oftalmofácil). Cada passo entra na data em que ACONTECEU. Dia a dia até 45 dias, semana a semana até 1 ano e meio, depois
+  mês a mês. `lags` = mediana de dias entre um passo e o seguinte. Marcos: "entrou no ar", "último dia com investimento".
+  Aviso de desde quando a ligação paciente↔anúncio é gravada. Só contagens, nenhum dado de paciente.
+- Tela: `ConvergentTimeline.vue` (kit) — faixas alinhadas, cursor atravessando todas; bloco "Linha do tempo" no detalhe do
+  anúncio, abrindo em "Este ano" (rota própria GET crm/creatives/:ad_id/timeline) com opção "Período da tela".
+- Link público: bloco "Linha do tempo" desenhado no servidor + texto de copiar; sem financeiro saem investimento e receita;
+  a origem aparece só como "Meta" ou "atendimento da clínica" (não cita os sistemas internos).
+- Testes: 60 no servidor + 3 do componente, verdes. Conferido ao vivo no localhost (10 faixas, ano, atrasos). WEB só
+  (SIDEKIQ não muda), sem migration. SEM commit.
+- PRÓXIMO PASSO combinado: clicar num ponto da linha do tempo e ver os pacientes daquela semana, cada um abrindo a própria
+  jornada no Espaço do Paciente. Depois: linha do tempo da clínica inteira.
+
+## 300. ✅ 🏥 AGENDA: selo "paciente CONFIRMOU" + origem CEVICO × OFTALMOFÁCIL obrigatória + confirmação pelo CRM certo (30/09; "vamos construir um ícone para mostrar quando o paciente confirmou a consulta… quando o paciente tiver uma etiqueta X, ele precisa ser enviado pela caixa de entrada da oftalmofacil, e o card deve ser construído no CRM da oftalmofacil… precisa ser obrigatório ela escolher se a pessoa é da CEVICO ou da OFTALMOFACIL")
+- ACHADOS: (1) o ✅ dos nomes na Agenda era DIGITADO À MÃO pela equipe — nenhuma tela lia o `confirmed_at`; (2) o SIM ao
+  lembrete gravava a confirmação mas NÃO movia o card; (3) o formulário da Agenda nunca criava contato nem etiqueta.
+- SELO: `i-lucide-badge-check` verde antes do nome no balão da grade (mês/semana/dia), no bloco do médico (branco), na lista
+  do dia (+ chip "Confirmou") e no cabeçalho do formulário. "Disse não" = selo vermelho. O ✅ digitado continua valendo e
+  sai do nome (vira o confirmado de verdade ao salvar). Botão direito: "Marcar: paciente confirmou" / desfazer.
+- CONFIRMOU ⇄ COLUNA (`Crm::ConfirmationReflector`): SIM ao lembrete ou marcação da equipe → card vai para "Consulta
+  Confirmada" (CEVICO: com as automações da coluna; Oftalmofácil: funil dele, sem automação). E o contrário: card ENTROU
+  em "Consulta Confirmada" (equipe arrastou ou N8N moveu) → a próxima consulta (8 dias) ganha o selo. Card nunca volta para
+  trás (exceto de "Não foi à consulta"). Coluna: `agenda_config.booking.confirmed_stage_id` ou pelo nome.
+- ORIGEM (`tasks.origin`, MIGRATION; `Crm::AppointmentOrigin`): escolha obrigatória ao criar. Cria o contato (telefone com
+  DDD), etiqueta `cevico` ou `oftalmofacil` + `of_agenda` (o prefixo `of_` liga a cerca: sem IA, sem robô), card em silêncio
+  no funil certo (CEVICO: coluna de agendamento, só se não tem card; Oftalmofácil: "Consulta Agendada").
+- LEMBRETE: `PartnerGuard.partner_task?` reconhece `origin = oftalmofacil` → sai pela caixa e modelo do bloco "Pacientes do
+  Oftalmofácil" do card Confirmação de consulta; ao enviar, o card nasce no funil do Oftalmofácil (`Crm::PartnerFunnel`,
+  que cria as colunas "Consulta Agendada"/"Consulta Confirmada" no começo do funil se não existirem).
+- NÚMEROS: agendamento de origem Oftalmofácil fica fora de "Consultas agendadas"/taxa/metas da CEVICO.
+- FORMULÁRIO: 6 tipos em grade 3×2 (nada cortado), janela mais larga, origem e confirmado no cabeçalho.
+- Testes: 85 no servidor + 13 de tela, verdes; conferido ao vivo no localhost (criar como Oftalmofácil → SIM → selo).
+- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (backup antes). Reversão: imagem anterior (a coluna nova não atrapalha).
+- DEPOIS DO DEPLOY (ele): conferir em Integrações que o funil dos parceiros está escolhido; no card Confirmação de consulta
+  ligar o bloco "Pacientes do Oftalmofácil" (caixa 12 + modelo aprovado); desligar a confirmação do N8N.
+- PENDENTE DE DECISÃO DELE: nome das etiquetas (`cevico` / `of_agenda`); pacientes do Oftalmofácil que o N8N já pôs no funil
+  da CEVICO (limpeza = mover os cards) — não mexi.
+
+## 301. ✅ 💰 CRIATIVOS: card "Cirurgias fechadas" mostrava as REALIZADAS (29/09 noite; "o painel do criativo está com as cirurgias desatualizadas… tinha um número totalmente diferente deste ano")
+- ERRO: `CreativeCard.vue` escrevia "Cirurgias fechadas" e lia `funnel.surgeries` (realizadas). Agora lê `funnel.closed` e
+  mostra "N já realizadas" embaixo. Tabela e Comparar: coluna renomeada para "Cirurgias realizadas".
+- CONFERIDO no backup de produção (21/09): a ligação paciente↔anúncio só é gravada desde 13/07; dos 2.299 leads com anúncio,
+  16 fecharam cirurgia. Das 157 pessoas que fecharam cirurgia desde 13/07, só 11 vieram de anúncio da Meta gravado; 102
+  tiveram a 1ª conversa na caixa GOOGLE. Número grande de antes = régua antiga do item 289 ("colunas de conversão").
+- WEB só, sem migration. SEM commit. PENDENTE DELE: dizer qual número via antes e em que tela.
+
+## 302. ✅ 🔗 CRIATIVOS: link de leitura CURTO (30/09; "vamos ajustar isso pra ter links pequenos, e que o link dure pelo menos 3 dias")
+- Antes: /criativos/analise/<token de ~250 letras>. Agora: /c/<código de 10 letras> (ex.: sistema.cevico.com.br/c/y2Q56UyzAA).
+- O token fechado (cifrado + assinado) continua decidindo o que o link mostra; fica guardado na tabela nova
+  `cevico_short_links` (`Crm::ShortLink`) e o código é só o apelido. Vencidos são apagados na criação do próximo.
+- Validade: continua 30 DIAS (já era; atende o "pelo menos 3 dias"). Links compridos antigos continuam abrindo.
+- Limite de 60 aberturas/min por IP também no /c/. Testes: 17 verdes (abre no 3º dia, vence depois do prazo, código
+  inexistente = vencido). TEM MIGRATION (tabela nova) → backup antes. WEB só. SEM commit.
+
+## 303. ✅ 💸 GASTO DO WHATSAPP: tela em Análises + indicadores no Meu Painel (30/09; "pode construir a tela de gasto de whatsapp")
+- POR QUÊ: em 01/10/2026 a Meta passa a cobrar TODA mensagem enviada (inclusive a resposta do robô/equipe dentro das 24h,
+  categoria "serviço" = preço de utilidade, R$ 0,035). Marketing R$ 0,3217. Cada balão é 1 cobrança (o robô manda até 3).
+  Lead de anúncio Clique-para-WhatsApp respondido em 24h continua com 72h grátis. Contas em BRL até 30/06/2027.
+- WEBHOOK: o status de cada mensagem traz `pricing` (cobrada? categoria? tipo regular/free_customer_service/free_entry_point);
+  agora fica em `messages.additional_attributes.cevico_wa_billing` (merge, sem apagar o carimbo do robô). Antes era descartado.
+- FATURA DA META: tabela nova `crm_whatsapp_charges` (MIGRATION) com o `pricing_analytics` por dia × número × categoria ×
+  tipo, custo na moeda da conta. `Crm::WhatsappPricingSyncJob` 07:40 UTC (35 dias) + botão "Atualizar da Meta" (até 95 dias
+  na hora; 450 vai pra fila). Precisa do `business_account_id` + `api_key` na caixa Cloud API.
+- TELA `Análises → Gasto do WhatsApp` (só admin; rota `reports/whatsapp_spend`): Conta da Meta (valor real, cobradas,
+  grátis na janela, grátis pelo anúncio, por categoria, por número, últimos 12 meses) · Regra de 01/10 (custo estimado ×
+  "se a regra valesse", balões por resposta do robô, economia ao juntar em 1 balão) · Quem gastou (Lista|Cards: Atendentes
+  de IA, follow-up, jornada, campanha, lembretes `cevico_auto`, cada pessoa da equipe, sistema) · Dia a dia (custo /
+  regra de out. / mensagens) · Por caixa e por categoria · Tarifas editáveis (`ai_config.whatsapp_pricing`, padrão lido
+  na Meta em 30/09) · Como ler.
+- MEU PAINEL: 3 indicadores novos no cesto ("+ Novo indicador"): `wa_messages_sent`, `wa_cost` (R$ estimado pelas tarifas),
+  `wa_cost_meta` (R$ pela fatura). `bucketize` aceita coluna de DATA (`date: true`).
+- Testes: 17 novos (serviço, API, webhook) + 98 dos controllers CRM verdes. Demo local em tmp/seed_wa_spend.rb (não vai).
+- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (backup antes). Reversão: imagem anterior.
+- **30/09 — 303+304 SUBIRAM** no commit 9f59a9e (develop, junto com o 304) → imagem ghcr.io/guilhermecorder/chatwoot:9f59a9e; **IMPLANTADA por ele 30/09 noite (produção = :9f59a9e, reversão :1d54aa5)**.
+- DEPOIS DO DEPLOY (ele): abrir a tela e clicar "Atualizar da Meta" → "15 meses" para trazer o histórico; conferir as
+  tarifas no WhatsApp Manager em 01/10; decidir os balões do robô (3 → 1?).
+
+## 304. ✅ 🗑️ AGENDA: "Excluir" vira LIXEIRA (30/09; após os retornos do Tatuapé sumirem — Nat 10h19 — "pode construir")
+- O QUE HOUVE (30/09): 08h13 a equipe viu "duplicados" na janela do Dr. Gustavo no Tatuapé (blocos de 10 min; a consulta
+  presumida de 15 min aparecia em 2 blocos — item 297) e apagou os "duplicados"; o Excluir fazia `task.destroy!` sem
+  confirmação e sem rastro → os retornos reais sumiram; 10h19 a Nat recolocou um por um. Conferir na VPS: `docker logs`
+  do web com `"method":"DELETE"` + `/tasks/` entre 08h e 10h20.
+- AGORA: Excluir um AGENDAMENTO (consulta/cirurgia) = cancelar com rastro (`canceled_at` + `canceled_by_id` + `cancel_reason`;
+  MIGRATION `add_cancel_trace_to_tasks`). Confirmação mostra NOME e HORÁRIO ("Mover X · qua., 30/09 09:30 para a Lixeira?").
+  Cancelar pela ficha também guarda quem. Card de tarefa comum continua apagando de verdade.
+- LIXEIRA (botão no cabeçalho da Agenda, com contador): excluídos/cancelados dos últimos 60 dias — nome, dia/hora, unidade,
+  tipo, "excluído na Agenda · por Fulana · 30/09 às 16:48" (ou "paciente desmarcou", "cancelado no Oftalmofácil") e
+  **Restaurar** (volta no mesmo dia/horário). Apagar de vez: só admin, pela Lixeira (`DELETE ?force=1`); equipe recebe 403.
+- Testes: tasks_trash_spec (6) + tasks_color/origin + appointments_controller = 22 verdes; conferido ao vivo no localhost
+  (Excluir → confirmação → Lixeira → Restaurar → voltou à grade).
+- DEPLOY: WEB+SIDEKIQ **COM MIGRATION** (junto com o 303; backup antes). Reversão: imagem anterior (colunas novas não
+  atrapalham).
+- **30/09 — 304 SUBIU** no commit 9f59a9e (develop, junto com o 303) → imagem :9f59a9e; **IMPLANTADA 30/09 noite (produção = :9f59a9e, reversão :1d54aa5)**.
+
+## 305. ✅ 📋 TAREFAS: retorno marcado na Agenda não vira mais cartão de Tarefas (01/10; "elas fazem pela agenda e aparece nas tarefas")
+- CAUSA: agendamento e tarefa moram na mesma tabela (`tasks`). A Agenda grava a consulta com a atendente como responsável
+  e a tela de Tarefas mostrava TUDO o que era dela — então cada retorno/consulta/cirurgia lançado na Agenda caía em
+  "A fazer" (e no selo do menu), e ao marcar "compareceu" ia para "Feito" e nunca saía (o Renovar já pulava consultas).
+- AGORA: regra única `isAppointmentTask` (helper/cevicoAgenda.js: tipo consulta/cirurgia ou com unidade) usada pela Agenda,
+  por Tarefas e pelo selo do menu; no banco, `Task.board_cards`. Tarefas e o selo mostram só cartões do quadro; a Agenda
+  não muda. De carona: "tarefas concluídas" do Mentor semanal não conta mais consulta comparecida, e a caixa "Minhas
+  tarefas" do Meu Painel volta a mostrar cartão sem tipo (o `NOT IN` sozinho escondia tipo vazio/NULL).
+- Nada é apagado nem movido: os retornos já gravados continuam na Agenda; só deixam de aparecer em Tarefas.
+- Testes: task_board_cards_spec (2) + tasks trash/color/origin = 24 verdes; conferido no localhost (retorno de teste criado
+  como a Agenda cria: Minhas tarefas mostrou só o cartão comum; "Todas" caiu de 107 para 4).
+- DEPLOY: WEB+SIDEKIQ, **sem migration**. Reversão: imagem anterior (:9f59a9e). SEM commit — aguarda "pode subir".
+
+## 306. ✅ 🧪 PÁGINAS: teste A/B de HEADLINE em página HTML anexada (01/10; "essas 3 são as headlines que eu gostaria de usar na primeira dobra, pra testar… exatamente no lugar da H1")
+- ANTES: o Teste A/B só trocava título/subtítulo/botão em página MONTADA; na anexada (refrativa, trifocal, lentes) a
+  variação era sorteada mas a página saía igual, e o clique no WhatsApp não dizia de qual variação veio.
+- AGORA (`Cevico::HeadlineSwap`): o título da variação entra no lugar do primeiro `<h1>` do HTML anexado — etiqueta, texto
+  de apoio e botões ficam como estão. `*asteriscos*` marcam o trecho colorido (vira o `<span>` do degradê). Headline
+  comprida ganha letra menor (35–55 letras / 56+), para o botão não descer da dobra.
+- MESMA PESSOA, MESMA HEADLINE: a variação sorteada fica 30 dias num cookie só da página (`cv_ab_<id>`).
+- PLACAR POR HEADLINE: o clique no WhatsApp leva a letra (`v`) → conta em `cta_<letra>` e vai no Protocolo
+  (`source_data.variant`); Protocolo casado com contato = **lead** da variação (`ab_results[letra]['lead']`). Editor da
+  página, Central de Testes A/B e Análise de Páginas mostram "N leads". Gravação do Clarity marcada com a headline.
+- PRÉVIA: link "ver prévia" em cada variação (`/p/rascunho/<token>?v=b`) — mostra também a pausada, sem contar visita.
+- Testes: headline_swap_spec (6) + cevico_page_ab_custom_html_spec (6) + cevico_security (6) = 18 verdes; conferido no
+  localhost com o HTML real da refrativa (backup) nas 3 headlines, celular e computador: botão na mesma altura (±9 px).
+- DEPLOY: WEB (junto com o 305 = WEB+SIDEKIQ), **sem migration**. Reversão: imagem anterior (:9f59a9e). SEM commit.
+- DEPOIS DO DEPLOY (ele): Marketing → Páginas → refrativa → Teste A/B → criar B, C, D com os títulos, "ver prévia",
+  marcar "no ar" e salvar. Ler o placar por LEADS, não só por cliques. Com ~60 visitas/dia e 4 versões, leitura
+  confiável só depois de ~4–8 semanas; aos 30 dias pausar a pior.
+
+## 307. ✅ 🗂️ AGENDA: ambiente "Configurações da agenda" + FAIXA RESERVADA + regras para a IA (01/10; "todas as quartas, das 13h às 14h, só retornos de pós-operatório… deixar mais fácil e evidente abrir e fechar agendas… um ambiente para ajustar tudo sem eu precisar te pedir")
+- BOTÃO "Configurações da agenda" no cabeçalho da Agenda (ao lado do Novo agendamento) abre um lugar só, em 4 partes
+  (`AgendaSettings.vue`; substitui o popup "Janelas dos médicos"):
+  1. **Abrir e fechar** — cada médico com "agenda aberta/fechada" e o botão Fechar/Reabrir; dias fechados (lista dos
+     próximos + fechar por data: clínica toda, uma unidade ou um médico); horários com cadeado (lista + Reabrir).
+  2. **Faixas de horário** — por dia da semana: médico, unidade, início/fim, intervalo e **"Serve para"** (Tudo | só Avaliação |
+     só Retorno | só Pós-operatório). Botão **Dividir** (13h–17h → 13h–14h + 14h–17h). Cada faixa diz se "a IA oferece
+     consulta nova aqui" ou não. Barra "Salvar faixas / Desfazer"; avisa horário inválido e sobreposição.
+  3. **Regras para a IA** — texto livre da clínica (`agenda_config.ai_rules`, até 2000 letras) que entra no prompt dos
+     atendentes num bloco próprio "REGRAS DA AGENDA", + "O que a IA recebe agora" (regras + horários que ela pode oferecer).
+  4. **Conferência do dia** — o bloco que já existia.
+- **PRECISA REAGENDAR**: enquanto houver paciente já marcado fora da regra (dia fechado, médico fechado, faixa reservada
+  para outro tipo), uma faixa âmbar lista cada um com o botão **Reagendar** (abre o agendamento no dia dele).
+- FAIXA RESERVADA (`only` na janela; `Crm::AgendaSlots::RESERVABLE`): a IA marca consulta nova, então só enxerga faixa que
+  aceita Avaliação (`free_slots`, `free_slots_on`, `slot_available?` com `modality:`). Na grade a faixa mostra "só
+  Pós-operatório"; clicar nela já abre o agendamento do tipo certo; marcar outro tipo ali mostra aviso e pede confirmação.
+- PADRÃO NOVO: quarta do Dr. Henrique (Av. Paulista) = 13h–14h só pós-operatório + 14h–17h geral. Produção usa o padrão
+  (backup de 21/09 sem janelas salvas) → vale no deploy. Se houver janelas salvas, usar Dividir na tela.
+- CORREÇÃO DE CARONA: "Fechar agenda" do médico só valia na tela — a IA continuava oferecendo os horários dele
+  (`Crm::AgendaSlots.windows` não lia `closed_doctors`). Agora respeita.
+- Testes: agenda_slots_reserved_spec (6) + settings_agenda_reserved_spec (3) + agenda_slots_future/blocked_parts ajustados
+  (quarta 13h → 14h) = verdes; 2 falhas antigas do responder_agent_job_spec (adaptador de fila do ambiente) já existiam.
+  Conferido no localhost: dividir 13–17 às 14h, reservar, salvar, prévia da IA (quarta a partir das 14:00) e Reagendar.
+- **REMARCAÇÃO PELA IA** (01/10 noite; "você já ajustou aquela questão do agente de reagendamento, né?"): faltava. Agora o
+  Atendente remarca RETORNO e PÓS-OPERATÓRIO nas faixas do tipo (`slot_modality` + `windows_for`): havendo faixa dedicada
+  (quarta 13h–14h = só pós-op), a IA usa SÓ ela — pós-operatório não cai no período das consultas; sem faixa dedicada,
+  qualquer faixa que aceite. Vale para a lista de HORÁRIOS do contexto, `horarios_do_dia` e `remarcar_consulta`.
+  Sem vaga na faixa dedicada, o agente diz que não há horário e chama a equipe. responder_tools_spec +1 (verde).
+- DEPLOY: WEB+SIDEKIQ, **sem migration**. Reversão: imagem anterior (:9f59a9e). SEM commit — aguarda "pode subir".
+
+## 308. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: consulta sem paciente vinculado não some mais em silêncio (01/10 noite; "vamos precisar concluir a transição do agente de confirmação do N8N para o interno… confirme tudo antes de eu deixar subir")
+- REVISÃO da transição (itens 250, 253, 259, 288, 300 — todos já em produção na :9f59a9e): o que falta é OPERAÇÃO na produção
+  (lembrete em Sombra → comparar com o N8N → Ao vivo e desligar os 2 fluxos do N8N na mesma hora). Não consigo ler a produção.
+- ACHADO: o robô só olhava consulta COM paciente vinculado (`where.not(contact_id: nil)`). Consulta lançada na Agenda sem
+  telefone, ou com telefone que não bate com nenhum paciente, ficava fora do lembrete e fora da lista de "puladas" — no N8N
+  todo evento do Google Agenda recebia. No backup de 21/09 eram 0 de 216, mas desde o fim de setembro a equipe lança
+  retornos direto na Agenda.
+- AGORA: essas consultas entram em "puladas" com o motivo — "sem telefone" ou "telefone sem cadastro de paciente" — e
+  aparecem no card (última rodada), em Sombra e Ao vivo. Nada é enviado a mais.
+- Testes: appointment_reminder_send_job_d2_spec (+1) + followup + listener de confirmação = 34 verdes. SIDEKIQ. Sem migration.
+
+## 309. ✅ 🧹 INDICADORES: o "pico" de julho era CARGA EM MASSA, não paciente (01/10 noite; print do Meu Painel: "Entrou em Envio de Orçamento 16.675 — pico em 06/07: 10.292… nem sequer é verdade que tudo aconteceu no dia 06/07… os dados estão totalmente poluídos")
+- CAUSA (medida no backup de 21/09): o histórico de colunas grava cada mudança com a hora em que ela aconteceu — inclusive
+  importações e reorganizações em massa. 26.745 das 38.299 entradas (70%) são 4 eventos:
+  · 10/07 00:38–03:39 (madrugada da virada): importação da base — 9.140 cartões criados e movidos 2–3 vezes
+    (Envio de Orçamento 10.289 · Novos Contatos 8.183 · Agendamento 2.201 · Pós-op 78 · Cirurgia Agendada 42);
+  · 14/07 14:38–15:24: re-arrumação — Envio de Orçamento 2.627 e Agendamento de Consulta 2.046 (ida e volta);
+  · 21/07 16:55: 606 cartões para Consulta Confirmada no mesmo minuto;
+  · 14/09 15:16–15:18: 1ª carga do Oftalmofácil — 673 em Cirurgia Agendada.
+  O gráfico do ano é SEMANAL e a etiqueta é o 1º dia da semana: "06/07" = semana de 06 a 12/07 (o dia real foi 10/07).
+- REGRA (`Crm::StageLogBulk`): 30+ cartões entrando na MESMA coluna no MESMO minuto = carga em massa (o maior grupo normal
+  medido tem 23, dos robôs das 10h). A entrada muda de `entered` para `bulk`: fica no banco e na linha do tempo do paciente,
+  mas sai de todo indicador de "Entrou em…" (Meu Painel, taxa oficial, ponte de Agendamentos, funil, Dashboard CRM).
+- `rake cevico:stage_logs_bulk ACCOUNT_ID=1` — DRY=1 (padrão) lista por dia/coluna; DRY=0 aplica; UNDO=1 desfaz; MIN=30.
+- Daqui para frente: `Crm::StageLogBulkSweepJob` todo dia 04:10 (SP) varre os últimos 3 dias.
+- Texto do gráfico: em visão semanal passa a dizer "pico na semana de 06/07".
+- Depois de limpar (conferido no backup): Envio de Orçamento ~270–370 entradas por semana; Agendamento 60–90 pacientes
+  por semana; Consulta Confirmada 40–160.
+- Testes: stage_log_bulk_spec (3) + 59 dos indicadores verdes; simulação (DRY) rodada em cima do backup de produção.
+- NÃO RESOLVIDO / A OLHAR: (1) todo dia às 10:00, 10:10 e 10:38 entram 6–23 cartões de uma vez em Consulta Confirmada /
+  Envio de Orçamento / Novos Contatos — são os robôs (N8N) movendo cartão ao ENVIAR a mensagem, não o paciente agindo;
+  (2) o cartão "Novos contatos (leads)" mostrava 104 em "Este ano" enquanto a régua oficial dá ~12 mil — não investigado.
+- DEPLOY: WEB+SIDEKIQ (cron novo), **sem migration**. Depois do deploy: rodar o rake com DRY=1, conferir, DRY=0.
+
+- **02/10 00h45 — 305–309 SUBIRAM** no commit 3d3646c (develop; ele commitou --no-verify, eu dei push) → build VERDE → imagem
+  ghcr.io/guilhermecorder/chatwoot:3d3646c p/ Implantar WEB+SIDEKIQ, sem migration (reversão :9f59a9e). O "Frontend Lint & Test"
+  do GitHub falhou no eslint — falha igual em todos os commits anteriores. Depois do deploy (ele): rake cevico:stage_logs_bulk
+  DRY=1 → DRY=0; anexar refrativa-ANEXAR-titulo-novo.html; Confirmação em Sombra hoje (sexta) e virar Ao vivo + desligar N8N na
+  segunda depois das 10h.
+
+## 310. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: o lembrete sai pela CAIXA EM QUE O PACIENTE JÁ CONVERSA (02/10 madrugada; "preciso enviar a mensagem modelo tanto pela caixa do Google quanto pela caixa do Instagram… será enviada através da caixa de entrada em que a conversa já existe. e você não criou")
+- ANTES: cada lembrete tinha UMA caixa ("Caixa do WhatsApp que envia"). Paciente que conversa pelo número do Instagram
+  recebia a confirmação por outro número, em conversa nova.
+- AGORA: no lembrete, embaixo da caixa, "Também envia pela caixa em que o paciente já conversa" (marcar as outras caixas
+  de WhatsApp). O robô olha a conversa MAIS RECENTE do paciente entre a caixa de cima e as marcadas e manda por ela.
+  Sem conversa em nenhuma → caixa de cima (padrão). Modelo que não existe na outra caixa → sai pela padrão.
+  O reforço sai pela MESMA caixa do lembrete (marca `dN_inbox`). Oftalmofácil continua só pela caixa deles.
+- "Última rodada" (Sombra e Ao vivo) mostra por qual caixa cada paciente recebeu / receberia.
+- Config: `agenda_config.appointment_reminders.dN.inbox_ids` (além de `inbox_id`). Sem a chave, nada muda.
+- Testes: appointment_reminder_send_job_d2_spec (+4) + settings_reminder_inboxes_spec (2) + followup + listener = 40 verdes;
+  card conferido no localhost com 2 caixas de WhatsApp de teste.
+- Pela outra caixa o robô usa o modelo de MESMO NOME como está cadastrado naquele número (idioma/categoria de lá; as
+  variáveis são as do card). O card mostra, para cada caixa marcada, "✓ os modelos escolhidos existem neste número" ou
+  "⚠ não achei <nome>" (aí quem conversa por lá recebe pela caixa de cima). Nome diferente entre os números = precisa de
+  modelo por caixa (não construído; perguntar a ele).
+- DEPLOY: WEB+SIDEKIQ, sem migration. Reversão: :3d3646c. SEM commit.
+
+## 311. ✅ 🩺 IA gravava a consulta com o MÉDICO ERRADO (02/10; "a IA está agendando os pacientes terça-feira o dia todo com o Dr. Henrique; à tarde a agenda é da Dra. Roberta")
+- CAUSA: ao gravar a consulta, os 4 agentes (Atendente de Agendamento, Pós-agendamento/remarcação, Instagram e Ligação)
+  pegavam o médico da PRIMEIRA faixa do dia naquela unidade, sem olhar a hora. Só a terça na Av. Paulista tem dois médicos
+  na mesma unidade (manhã Henrique 08h–11h30, tarde Roberta 14h30–16h30) — por isso só ela errava. O horário oferecido
+  estava certo; o nome gravado na Agenda é que saía errado.
+- AGORA: `Crm::AgendaSlots.doctor_at` — o médico é o da faixa que cobre o horário.
+- CONSERTO DO QUE JÁ FOI GRAVADO: `rake cevico:agenda_fix_doctors ACCOUNT_ID=1` (DRY=1 padrão lista; DRY=0 corrige; ALL=1
+  inclui as passadas). Só mexe quando o nome gravado é exatamente o de um médico das faixas e a faixa do horário é de outro.
+- Testes: agenda_slots_reserved_spec (+1) + rake spec (1) verdes.
+
+## 312. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: escolher as COLUNAS do CRM que recebem (02/10; "eu preciso poder escolher a coluna em que isso será enviado")
+- No lembrete, "Colunas do CRM que recebem": marcar uma ou mais colunas → só recebe quem tem o card numa delas; os outros
+  vão para "puladas" com o motivo ("card na coluna X" / "sem card no CRM"). Nenhuma marcada = todas (como era).
+  Paciente do Oftalmofácil segue a regra do bloco dele. Config: `appointment_reminders.dN.stage_ids`.
+- Testes: appointment_reminder_send_job_d2_spec (+2) + settings_reminder_inboxes_spec (+1) verdes.
+- 310 + 311 + 312: WEB+SIDEKIQ, sem migration. Reversão: :3d3646c. SEM commit.
+
+## 313. ✅ 🎯 CONVERSÕES GOOGLE E META: eventos por ETAPA DO FUNIL, envio "amarrado × solto" e Conferência no painel (02/10; "os eventos de conversão não estão bem encaixados com o Google Ads… vamos construir de modo que funcione")
+- DIAGNÓSTICO (lido no código + documentação do Google e da Meta):
+  · o caminho é página → Protocolo → coluna do CRM → GA4 (Measurement Protocol) → Google Ads importa o EVENTO-CHAVE. Só é
+    creditada ao anúncio a conversão enviada com a identidade do navegador que clicou (cookie `_ga`). Quem não veio pela página
+    saía com identidade inventada (`crm.<id>`): aparece no GA4 e para aí;
+  · o nome do evento era texto livre: o Google responde 204 para tudo e DESCARTA em silêncio nome com espaço/acento/hífen;
+  · página MONTADA (botão `/cta`) nunca guardava a identidade do navegador (só a página anexada guardava);
+  · `gbraid`/`wbraid` (o que o Google manda no lugar do gclid em iPhone) não eram capturados; código de clique era cortado em
+    150 letras (o da Meta passa disso); o cookie de sessão novo do GA4 (`GS2.1.s…`, 2025) não era lido;
+  · "Colunas que enviam conversão" do painel lia a chave errada e mostrava `generate_lead` para todas;
+  · Meta: lead de anúncio de WhatsApp ia sem a conta do WhatsApp (obrigatória) e com nome fora da lista de mensagem; o
+    clique da página (fbclid) era guardado e nunca enviado; recusa da Meta ficava como "disparada" no histórico.
+- AGORA:
+  · `Cevico::ConversionEvents` — lista fechada por etapa: `lead_whatsapp`, `orcamento_enviado`, `agendou_consulta`,
+    `compareceu_consulta`, `fechou_cirurgia` (+ "Outro nome (avançado)" conferido na tela). Nome válido passa intacto; nome
+    inválido é corrigido no envio ("Refrativa PRK" → `Refrativa_PRK`). O PROCEDIMENTO viaja dentro do evento
+    (`procedimento` = etiqueta exigida pela automação; `cevico_page` = página de origem).
+  · Evento de fechamento sem valor digitado leva o valor do card (Google `fechou_cirurgia`/`purchase`; Meta `Purchase`).
+  · Google: `tied_log` conta as que saíram amarradas; painel Google ganhou o bloco CONFERÊNCIA (página × envio na mesma
+    propriedade · nome aceito · evento-chave no Analytics, lido pela Admin API com a mesma conta de serviço · enviadas ×
+    amarradas por evento) e o card "Conversões enviadas" mostra as amarradas.
+  · Páginas: `gbraid`/`wbraid` reconhecidos como Google Ads; códigos de clique até 500 letras; identidade do GA4 e do Pixel
+    (`_ga`, `_ga_*`, `_fbp`, `_fbc`) lida dos cookies no servidor em `/cta`, `/ref` e `/hub/ref`.
+  · Meta: anúncio de WhatsApp vai com `ctwa_clid` + `whatsapp_business_account_id` e nome da lista (Lead/Contact/Cadastro →
+    `LeadSubmitted`; Schedule → `QualifiedLead`); sem a conta do WhatsApp cai no caminho comum (telefone). Lead da página
+    leva `fbc`/`fbp`. Opção nova `QualifiedLead` e campo de valor no formulário. Para a Meta vai SÓ valor e moeda — o
+    procedimento NÃO viaja (o evento sai com o telefone embaralhado; dado de saúde ligado a pessoa não sai do sistema).
+  · Recusa do Google ou da Meta vira FALHA no histórico da automação (antes: "disparada").
+  · Integrações: selo "✓ Recebimento (Ads API)" virou "✓ Token do Ads salvo" (nenhum código usa esse token ainda).
+  · ACHADO NO TESTE (02/10 tarde): o contêiner GTM-MWDV8T35 das páginas carrega a propriedade **G-QT6Y7BJ6SB** (evento
+    `clique_whatsapp`), e as Integrações enviam para **G-3EDHXBTSBG**. Se a página não medir também na G-3EDHXBTSBG, ou se o
+    Google Ads importar da outra, NADA amarra. A Conferência agora lê o arquivo público do GTM (`Cevico::Gtm.ga4_ids`) e
+    mostra em quais propriedades a página mede × para qual o CRM envia. Decisão dele: qual das duas é a oficial.
+  · Página com mais de um Analytics: o Protocolo guarda a sessão da propriedade que recebe as conversões.
+- NÃO MUDA sozinho: automação antiga com `generate_lead` continua enviando `generate_lead` (a tela avisa que a página já
+  dispara esse nome no clique). Trocar para a lista nova é decisão dele, coluna a coluna.
+- FORA DO SISTEMA (ele faz): marcar cada evento como evento-chave no GA4; importar no Google Ads (Metas → Conversões);
+  ativar a "Google Analytics Admin API" no Google Cloud para a Conferência ler os eventos-chave; conferir que o Pixel das
+  Integrações é o conjunto de dados ligado à conta do WhatsApp.
+- PRÓXIMA FATIA (não construída): envio direto ao Google Ads pelo código do clique (gclid/gbraid) — precisa de acesso
+  OAuth à conta do Ads + Developer Token aprovado.
+- Testes: 30 exemplos novos (conversion_events 5 · traffic_source 6 · gtm_ga4_ids 2 · google_ads_conversions 5 ·
+  meta_ads_conversions 5 · google_dashboards_check 3 · crm_automation_fire_job +4); bateria com 310–312 e páginas: 112
+  verdes. Clique real testado no localhost (/cta, /ref e o script da página no navegador); telas conferidas. rubocop no
+  nível da base.
+- WEB+SIDEKIQ, sem migration. Reversão: :3d3646c (ou a imagem do commit do 310–312, que sobe no mesmo push).
+
+## 314. ✅ 📅 CONFIRMAÇÃO DE CONSULTA: cada caixa com o SEU bloco de modelos + "Atualizar da Meta" (02/10 noite; "quero ambientes mais separados para cada caixa de entrada… selecionar exatamente a mensagem modelo correta daquela caixa. Não quero que use a mensagem modelo com o mesmo nome")
+- O QUE ELE VIU: "⚠ INSTAGRAM: não achei confirmacao_consulta_paulista neste número", com o modelo cadastrado nos dois
+  números. A regra do 310 procurava na outra caixa um modelo de MESMO NOME, na cópia da lista de modelos que o sistema
+  guarda de cada número (renovada a cada ~3 h, só aprovados) — frágil e sem controle dele.
+- AGORA (a regra do "mesmo nome" foi REMOVIDA):
+  · Cada caixa marcada em "também envia por" tem o seu bloco "Modelos da caixa X": Paulista / Tatuapé / geral (+ reforço,
+    se ligado), escolhidos da lista DAQUELE número, com prévia e variáveis. A caixa de cima também ganhou o título
+    "Modelos da caixa X". Config `appointment_reminders.dN.by_inbox.<inbox_id>.{units,template_params,message_preview,followup}`.
+  · Envio (`inbox_and_template_for`): caixa da conversa mais recente → modelo escolhido para ela (unidade, senão geral);
+    sem modelo lá para a unidade da consulta → caixa padrão com o modelo padrão. Reforço idem (`followup_template_in`).
+    O bloco avisa "⚠ sem modelo para Tatuapé nesta caixa — … sai pela caixa de cima".
+  · Botão "↻ Atualizar da Meta" por caixa: pede a lista à Meta agora (`POST inboxes/:id/sync_templates`) e recarrega.
+    (`campaigns/templates?all=1` devolve todos os status; os seletores mostram só os aprovados.)
+- Testes: send_job_d2 (+2, 2 do "mesmo nome" removidos) · settings_reminder_inboxes (+1) · followup; 40 verdes. Tela
+  conferida no localhost.
+- WEB+SIDEKIQ, sem migration. Reversão: :058c7e0.
+
+## 315. ✅ 🤖 ROBÔS DE FOLLOW-UP: etapa "lembrete com a IA, contextualizado com a conversa" + caixas de entrada e colunas do CRM em que o robô atua (03/10; "para o de 24 horas, gostaria de adicionar… lembrete com a IA, contextualizado com a conversa. Além disso, poder escolher as caixas de entrada e colunas do CRM em que ele atua")
+- ETAPA "✨ IA" (terceiro tipo, ao lado de Texto e Modelo): a IA lê a conversa (últimas 24 mensagens, sem notas
+  internas) e escreve UMA cutucada curta retomando o ponto em que o paciente parou — no tom do Roteiro CEVICO, sem
+  oferecer horário, sem preço novo, sem promessa, sem nome de médico, com uma pergunta simples no fim. Campos:
+  "Orientação para a IA" (opcional, ex.: lembrar do orçamento enviado) e "Texto de reserva" (sai se a IA não
+  responder). Botão "✨ Ver exemplo numa conversa real": gera o texto para a conversa recente mais nova das caixas
+  marcadas, sem enviar nada (`POST crm/followup_bots/ai_preview`).
+  · `Crm::FollowupAiNudgeService` (agent_key `followup_ia`; Sonnet esforço baixo; roteiro em cache; gasto no painel
+    "Gasto com os agentes de IA" como "Lembrete com IA (follow-up)"). A chave é a global de Integrações → Claude; quem
+    liga/desliga é a própria etapa do robô (sem interruptor separado em Agentes de IA).
+  · No robô: o texto é escrito ANTES de marcar a etapa; sem texto (IA fora do ar/sem chave) → texto de reserva; sem
+    reserva → etapa tratada sem envio, motivo "ia_sem_texto" no registro. Cutucada da IA sai marcada
+    (`cevico_followup_ai`). Texto simples: continua valendo só dentro da janela de 24h do WhatsApp.
+- CAIXAS E COLUNAS EM QUE ATUA (fichas no formulário do robô): `inbox_ids` (nenhuma = todas, como era) e `stage_ids`
+  (nenhuma = qualquer coluna; robô de coluna continua com a dele). `inbox_id`/`stage_id` antigos continuam valendo,
+  somados às listas (`acting_inbox_ids` / `acting_stage_ids`). MIGRATION: 2 colunas jsonb em crm_followup_bots.
+- Testes: followup_bot_job_item315 (5) · followup_ai_nudge_service (2) · followup_bots_item315 (2) — 9 verdes; bateria
+  jobs/crm + models/crm verde. Tela conferida no localhost (fichas de caixas/colunas, botão IA, orientação, reserva, exemplo).
+- ⚠️ DEPLOY: WEB+SIDEKIQ COM MIGRATION → BACKUP antes (/root/backup_cevico.sh). Reversão: a imagem anterior.
+
+## 316. ✅ 🔎 VARREDURA DE BUGS: Confirmação de consulta + Robôs de follow-up (03/10; "faça uma varredura em busca de bugs nestes dois mecanismos… corrija, melhore e então suba")
+Dois revisores independentes + leitura própria. Tudo abaixo foi CORRIGIDO e coberto por teste.
+- CONFIRMAÇÃO DE CONSULTA
+  · [grave] Consulta REMARCADA nunca mais recebia o lembrete da régua já disparada (marca por consulta+régua, sem olhar a
+    data) e o "sim" da data antiga continuava valendo. Agora: a marca só vale para a mesma data/hora (`reminder_spent?`);
+    remarcou = ciclo novo (marcas antigas, reforços e confirmou/recusou zerados) e o modelo Task zera `confirmed_at`/
+    `declined_at` quando `due_at` de uma consulta muda.
+  · A marca passa a ser gravada ANTES do envio, dentro da trava (`claim_reminder!`, como o reforço): duas rodadas em
+    paralelo ou marca falhando depois do envio não mandam duas vezes; envio que não saiu libera a marca.
+  · "Última rodada" ao vivo mostrava "0 enviadas": o cron roda 4x/hora e as rodadas seguintes sobrescreviam a lista.
+    Agora a lista de quem recebeu é mantida na mesma hora.
+  · "ok, não vou conseguir ir" / "certo, preciso remarcar" eram lidos como SIM (a confirmação era testada antes da
+    recusa). Agora a recusa vence.
+  · Falta de modelo era decidida ANTES do roteamento por caixa: consulta de unidade sem modelo na caixa padrão, mas com
+    modelo na caixa do paciente, era pulada ao vivo. Agora decide depois.
+  · A caixa "em que o paciente conversa" era a de última atividade — campanha/lembrete antigo puxava a caixa. Agora é a
+    caixa em que o PACIENTE escreveu por último (última atividade só como reserva).
+  · Rodada da hora perdida (deploy, fila parada) virava dia perdido: agora a régua também sai na hora seguinte (a marca
+    por consulta impede repetição). Quem disse que NÃO vai não recebe as réguas seguintes (a equipe já tem o
+    confirmar_urgente). Reforço de uma régua não sai se uma régua mais próxima já saiu; histórico do reforço mostra a caixa.
+    Réguas rodam da mais distante (d7) para o dia (d0): na sexta com ponte, a confirmação completa sai antes da véspera.
+- ROBÔS DE FOLLOW-UP
+  · [grave] Etapa de IA: o texto era gerado ANTES de marcar a etapa; com muitas conversas a rodada passava dos 10 min da
+    trava e a seguinte cutucava a mesma conversa. Agora marca primeiro; teto de 15 chamadas à IA por rodada (o resto sai
+    na seguinte, sem marcar); cliente da IA com 30 s de limite; erro passageiro desmarca e tenta de novo até 3 vezes;
+    erro de chave não repete. `ai_tries` no estado da conversa.
+  · Nota interna (outgoing + private) contava como "atendimento falou por último": o robô cutucava quem esperava
+    resposta — e a IA tendia a RESPONDER a pergunta em vez de reabrir. Âncora agora ignora notas internas.
+  · Trava "cadência completa" contava cutucadas de QUALQUER robô contra o total DESTE: segundo robô nunca enviava.
+  · Painel lateral (previsão) ignorava caixas/colunas do 315 — mostrava "próxima cutucada" que nunca sairia.
+  · Caixa única antiga (`inbox_id`) seguia valendo escondida ao usar as fichas; zerada ao salvar com fichas (tela e
+    servidor). Robô de coluna editado pelo hub perdia a opção "desde a entrada na coluna".
+  · Prévia da IA respeita a cerca dos parceiros (paciente do Oftalmofácil nunca passa por IA) e só olha caixas de
+    WhatsApp. Transcrição lê áudio transcrito/imagem lida (como o Atendente). Prompt leva só persona + regras de forma
+    do Roteiro (tabela de preços fora; custo de cache menor). Erro específico da IA não se perde.
+  · Lista do hub mostra as caixas marcadas e a etapa "✨ IA"; a coluna do CRM lista o robô global que a marcou.
+    Previsão avisa quando a etapa de IA não tem chave nem reserva.
+- DECISÕES DELE (não mexidas): ponte de fim de semana ligada por padrão na D-1 e na D-2 (sexta manda as duas para a
+  segunda, agora na ordem certa); paciente com 2 consultas no mesmo dia recebe 2 modelos e o "sim" confirma só a 1ª;
+  "enviada" = mensagem criada (rejeição da Meta chega depois pelo webhook e não reenvia).
+- Testes: send_job_d2 (+5), listener_confirmation (2, novo), followup_bot_job_item315 (+4), followup_bots_item315 (+3),
+  followup_ai_nudge (ajustados) — bateria dos dois mecanismos 63 verdes. Sem migration nova.
+
+## 317. ✅ 🌙 Chip marcado não mudava de cor no MODO ESCURO (03/10; "o agente de confirmação não troca de cor quando aperto os botões, e seleciono as etapas do funil, no modo escuro")
+- Causa: `.dark .cv-page .cv-chip` (e `button.cv-chip:hover`) pesavam mais que `.cv-page .cv-chip-on` em `_cevico-glass.scss` → no escuro o marcado ficava igual ao desmarcado. Vale para TODAS as telas do kit (Confirmação: Quem recebe / Colunas do CRM / caixas; Robôs; Agentes…).
+- Correção: seletores extras no bloco do `.cv-chip-on` (só CSS). Testado no localhost no escuro (Avaliação e "Consulta Confirmada" ficam douradas).
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" (WEB só, sem migration). Mensagem em `tmp/commit_317.txt`.
+
+## 318. ✅ 💰 FINANCEIRO & CAC — quanto custa cada paciente que operou (03/10; "vamos construir um ambiente para entender melhor os indicadores financeiros (preciso descobrir o CAC afinal)")
+- Decisões dele: cliente = paciente com a 1ª CIRURGIA REALIZADA no período · DOIS CACs: de ANÚNCIOS (Google + Meta ÷ pacientes que vieram dos anúncios — é o que abre por canal e campanha) e TOTAL "tecnologia e anúncios" (+ WhatsApp + IA ÷ todos os pacientes novos) · período: Este mês / Mês passado / 90 dias / Este ano / Personalizado · dólar da IA pela cotação do dia (PTAX do Banco Central) + campo "Dólar manual" para projeção · Oftalmofácil (parceiros) em bloco separado, fora do CAC · ambiente novo em Análises.
+- Backend: `Crm::AcquisitionCostService` (gastos, resumo, canais, campanhas, mês a mês, lista), `Crm::AcquisitionPatients` (1ª cirurgia realizada COM DATA: CRM Cirurgia Realizada/2º olho/pós-op × Agenda com presença × Oftalmofácil ativa com data passada, só cirurgia; 2º olho não vira cliente novo; sem cadastro conta pelo CPF; carga em massa fica fora e aparece no aviso), `Crm::AcquisitionChannel` (1º carimbo: meta_ads → Meta/campanha pelo anúncio; page_ads google_ads/meta_ads; resto = orgânico/indicação), `Crm::UsdRateService` (PTAX, fim de semana herda a sexta, cache 6 h, última cotação de reserva), `Crm::GoogleMonthlyCostService` + `Crm::MetaMonthlySpendService` (gráfico mês a mês), `GET crm/acquisition_cost` (concessão Financeiro; `?usd=` = dólar manual). Meta sem resposta ao vivo → espelho diário dos anúncios (cevico_ad_insights). Preset `last90` no ResolvesPeriod.
+- Financeiro → Lucratividade: "realizada" passa a ser ativa/realizada com data passada (antes dava ZERO — lá nunca marcam realizada) e o Marketing vira o gasto REAL do Google + Meta (sem leitura → o investimento por caixa de antes). OBS: a Lucratividade soma todos os itens do espelho (exames/consultas também) — o CAC só conta cirurgia.
+- Frontend: `AcquisitionCost.vue` (Análises → Financeiro & CAC): Os dois CACs · De onde vem o gasto · Por canal · Por campanha (Lista|Cards) · Mês a mês (área) · Quem são os pacientes (filtro por canal, Lista|Cards) · Oftalmofácil à parte. PeriodRuler ganhou `extraPresets` ('90 dias'); AreaChart ganhou `axisFormat`/`axisWidth`.
+- Testes: 8 specs (serviço, API, dólar) verdes; vitest do kit 56/56; rubocop limpo nos arquivos novos; conferido no navegador (escuro, claro, celular 375 px).
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" (WEB+SIDEKIQ, SEM migration). Mensagem em `tmp/commit_318.txt`.
+
+## 319. ✅ 📅 CONFIRMAÇÃO + AGENDA: quem ficou sem lembrete em 03/10 (print dele: "0 enviada(s) · 12 pulada(s)"; "alguns pacientes foram enviados a mensagem, outras não… me parece que estão bagunçados os contatos… precisamos normalizar a forma como o telefone é compreendido… no espaço do médico, precisamos que apareçam todos os contatos, independente do horário")
+- DIAGNÓSTICO (lido no print da última rodada, D-2 de seg. 05/10): 8 puladas por "card na coluna X" = o filtro "Colunas do CRM que recebem" (item 312) — o paciente tem consulta na Agenda mas o card ficou em Envio de Orçamento / Desmarcou / Consulta Realizada / Pós-op (agendar à mão na Agenda NÃO move card que já existe); 4 por "telefone sem cadastro de paciente" = agendamento com telefone e sem paciente vinculado (o cadastro só nascia ao criar com origem + telefone com DDD; depois disso nada religava). "0 enviada(s)" às 11:45 = a lista zerava na hora seguinte (os envios foram na rodada das 10h).
+- TELEFONE/CADASTRO: `Crm::AppointmentOrigin.ensure_contact` — o lembrete acha o cadastro pelo telefone (últimos 8 dígitos; ele pode ter nascido depois do agendamento) ou CRIA (nome + telefone do agendamento), amarra ao agendamento e põe o card no funil certo (origem/sync Oftalmofácil → funil do Oftalmofácil; senão coluna de agendamento da CEVICO, só se não tem card). `normalize_phone`: com ou sem +55, com zero na frente, com máscara; 8–9 dígitos (sem DDD) ganham o DDD 11. Em sombra só procura (não cria). Editar o telefone de um agendamento sem paciente também cria o cadastro.
+- VARIÁVEIS EM BRANCO: campo `{{1}}`… vazio ia vazio para a Meta (que recusa o modelo, e a tela dizia "enviada"). Agora branco = dado da Agenda na ordem dos modelos de confirmação (1 nome, 2 data, 3 hora, 4 valor) — no lembrete e no reforço; o card mostra "em branco = {{nome}} (da Agenda)".
+- ÚLTIMA RODADA: "enviadas" soma as rodadas do dia (não zera na hora seguinte).
+- BLOCO DO MÉDICO: um balão POR PACIENTE (fim do "+2" escondido; modal "quem está neste horário" removido) + quem está marcado FORA da faixa do médico aparece no fim do bloco, com contorno tracejado.
+- PENDENTE DECISÃO DELE: filtro de colunas × Agenda (desmarcar as colunas = todo mundo da Agenda recebe; ou a Agenda passar a mover o card para "Agendamento de Consulta" ao marcar consulta).
+- Testes: appointment_reminder_send_job_d2_spec 29 verdes (+6 novos) + followup/origem/settings = 62 verdes; rubocop sem ofensa nova; Agenda e card conferidos no navegador. (registry_spec tem 2 falhas ANTIGAS: followup_ia e StageLogBulkSweepJob sem fluxo no mapa — não são desta rodada.)
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" (WEB+SIDEKIQ, SEM migration). Mensagem em `tmp/commit_319.txt`.
+
+## 320. ✅ 🖐️ CONFIRMAÇÃO DE CONSULTA: ENVIO MANUAL e REENVIO pelo card (03/10; "seria interessante criar um botão de reenviar?… a possibilidade de um envio manual, como esses casos, seria ótimo eu fazer um reenvio")
+- "Enviar agora para quem falta" (em sombra: "Simular agora"): roda o lembrete inteiro na hora, fora do horário configurado — mesmas regras, só para quem ainda não recebeu (a marca por consulta impede repetir).
+- Em cada paciente da última rodada: "Enviar mesmo assim" (pulado: sai mesmo com a coluna/tipo fora do filtro) e "Reenviar" (já recebeu: manda de novo — ex.: a Meta recusou a mensagem). Telefone e a cerca dos parceiros continuam valendo; só com o lembrete ligado e Ao vivo; consulta cancelada ou passada não recebe. A linha sai das puladas e entra nas enviadas com "envio manual".
+- Backend: `Crm::AppointmentReminderSendJob#run_manual` (+ `run_one`, `record_manual`, `force` no send_for/skip_reason/claim), `POST crm/appointment_reminders/run` (concessão Configurações). Front: botões no ConfirmationAgentCard (pede confirmação; exige salvar antes).
+- Testes: +4 no d2_spec + 3 da API = 36 verdes; rubocop limpo. Botão conferido no navegador (o envio de verdade não foi disparado no localhost).
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" junto com 317–319 (WEB+SIDEKIQ, SEM migration). Mensagem em `tmp/commit_320.txt`.
+
+## 321. ✅ 📅 A MESMA RÉGUA DE PERÍODO EM TODOS OS AMBIENTES (03/10; "eu quero que tenha pré selecionado: dia, ontem, últimos 7 dias, semana passada, mês, mês passado, 90 dias, ano, personalizado… todas as visualizações de todos os ambientes eu gostaria que fossem assim (desde CRM, dashboards, painéis, agenda, etc)")
+- LISTA ÚNICA em `helper/cevicoPeriod.js` (PERIOD_PRESETS, periodRangeFor, periodParams): Hoje | Ontem | Últimos 7 dias | Semana passada | Este mês | Mês passado | 90 dias | Este ano | Personalizado. O servidor entende as mesmas chaves (`Crm::ResolvesPeriod`, `last90` do item 318).
+- PeriodRuler (22 telas: Meu Painel, Dashboard CRM, Agendamentos, Chamadas, Campanhas, Oftalmofácil, Financeiro, Lucratividade, Financeiro & CAC, Gasto do WhatsApp, Painel dos agentes de IA, Resultados das automações, Anúncios, Criativos, Google, Agenda, Médicos, Atendentes, Ligações, Funil de tráfego, Resultados das páginas, Estúdio PRO): ganhou "90 dias" como padrão; quando não cabe, a régua QUEBRA em duas linhas. Financeiro & CAC deixou de esconder Hoje/Ontem/7 dias/Semana passada.
+- Telas que tinham seletor próprio, agora na régua: GASTO COM OS AGENTES DE IA (antes 4 caixas fixas Hoje/7/30/Desde o início + "Analisar o dia": agora a régua + total, chamadas, tokens e "Por agente" do período; as setas ◀ ▶ "dia a dia" continuam; `settings#ai_usage?preset=` devolve `period`), AUDITOR DE CONVERSAS (janela 7/14/30 → régua; `auditor_summary?preset=`; o Auditor passa a guardar 100 dias em vez de 30), KANBAN DO CRM (pílulas pela lista única, com "90 dias"), POPUPS DE INDICADOR do Meu Painel e do Dashboard CRM ("Régua de cima" + os 8 períodos).
+- Correções que os 90 dias pediam: Meu Painel — meta do período = 90 ÷ dias do mês (antes cairia na meta DIÁRIA) e 90 dias não disputa RECORDE (antes o total de 90 dias seria gravado como "recorde do dia"); Estúdio PRO abre no mesmo período da tela (antes a pílula dizia "Este mês" e o gráfico mostrava 90 dias); Agendamentos avisa quando o período passa do teto de 500 registros lidos (antes contava a menos em silêncio); cache de 10 min para 90 dias no Meu Painel/Agenda.
+- FICOU COMO ERA (outro conceito, não é filtro de período): Metas (dia/semana/mês/trimestre/ano), "Comparar meses" do Financeiro, horizonte do funil de aquisição (30/60/90/180 dias depois de chegar), link compartilhado dos criativos, calendário da Agenda (mês/semana/dia) e os relatórios nativos do Chatwoot ("Outros relatórios").
+- Testes: period_presets_spec (4) + cevicoPeriod.spec.js (3) verdes; pasta de specs dos controllers do CRM 108 verdes; vitest do kit 59 verdes; rubocop sem ofensa nova.
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" junto com 317–320 (WEB+SIDEKIQ, SEM migration). Mensagem em `tmp/commit_321.txt`.
+
+## 322. ✅ 🏷️ FONTES DE PACIENTES + CARIMBO DE ORIGEM — Fase 1 (04/10; print do Meu Painel 90 dias com os números misturados; "quero ser capaz realmente de gerenciar pacientes de diversas fontes… cada fonte de clientes tenha seu ambiente isolado… iniciando pela oftalmofacil como nosso case… o carimbo na hora de entrada é incrível")
+- DIAGNÓSTICO do print: o pico "semana de 06/07: 10.292" em Envio de Orçamento é a carga em massa de julho (item 309), não o Oftalmofácil — o `rake cevico:stage_logs_bulk` ainda não rodou em produção (o robô diário só olha 3 dias). Causa de fundo: o sistema DEDUZIA a origem na hora de mostrar (cerca com 4 pistas aplicada tela a tela; carga em massa filtrada em 10 dos 18 leitores do histórico de colunas).
+- CADASTRO DE FONTES: tabela `cevico_sources` (`Crm::Source`) — cada fonte dona do seu ambiente (funis e caixas). `cevico` (da casa) fica com o que nenhuma outra pegou; `oftalmofacil` continua lendo funil e caixas do card do OftalmoFácil (uma verdade só enquanto a cerca manda). Fonte nova = cadastro na tela, não programação. O funil principal da casa nunca muda de dono. `Crm::Sources` = um lugar só para "de que fonte é este funil / caixa / agendamento" (mapa em cache de 10 min).
+- CARIMBO NA ENTRADA: `cevico_source_id` (de quem é) + `cevico_born_via` (como nasceu: paciente | equipe | robo | sync | carga | integracao) em contacts, crm_contacts, crm_contact_stage_logs, tasks e cevico_oftalmofacil_surgeries. Os modelos carimbam ao criar (`CevicoSourceStamped` → `Crm::Stamp`); quem sabe o "como" avisa em volta (`Crm::Stamp.with(via:)`): sync do hub, planilha de cirurgias, mover em lote, etiqueta retroativa, formulário público, conversa nova, chamada com chave de acesso (N8N). Sem aviso: pessoa logada = equipe, ninguém logado = robo.
+- PACIENTE: a primeira evidência carimba e não muda mais (1ª conversa → caixa; 1º card → funil; 1º agendamento; sync do hub) — é a regra B do item 245 gravada. Paciente antigo sem carimbo segue a cerca de hoje.
+- PASSADO: `Crm::SourceBackfill` (prévia + gravar, só no que não tem carimbo; não inventa o "como" do passado, só o que dá para saber: carga em massa e hub) — pelo botão da tela, pelo `rake cevico:sources` e sozinho toda madrugada (`Crm::SourceStampSweepJob`, 04:25).
+- TELA Integrações → Fontes de pacientes (`/crm/fontes`, só admin; `PatientSources.vue` no kit): Fontes (ambiente, contagens, entradas em coluna dos 30 dias por como nasceram) · Carimbo (pendentes, prévia, gravar, conferência carimbo × cerca) · Nova fonte.
+- NADA MUDA NOS NÚMEROS NESTA FASE: as telas continuam lendo a cerca e o filtro de carga. Fase 2 = porta única de leitura + chavinha CEVICO | Oftalmofácil | Tudo (começando pelo Meu Painel); Fase 3 = Conferência dos dados + os 8 leitores que ainda não filtram carga.
+- Mapa de Fluxos: fluxo novo "Higiene dos dados" (cobre também o StageLogBulkSweepJob, que faltava — uma das 2 falhas antigas do registry_spec some; fica a do followup_ia).
+- Testes: stamp_spec 16 verdes + vizinhos (cerca, carga em massa, sync, origem do agendamento, confirmação, contato) 80 verdes; rubocop limpo nos arquivos novos; tela conferida no navegador (prévia → carimbar → "batem"; fonte nova criada e apagada). Dados locais devolvidos ao estado sem carimbo para ele apertar o botão.
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" (WEB+SIDEKIQ, COM MIGRATION → backup antes; só acrescenta tabela e colunas vazias). Mensagem em `tmp/commit_322.txt`.
+
+## 323. ✅ 🙋 CONFIRMAÇÃO DE CONSULTA: Paulista × Tatuapé à prova de engano + PRIMEIRO NOME na mensagem (04/10; "o agente de confirmação precisa diferenciar o local… tenho a impressão de que uma pessoa agendada no tatuapé recebeu confirmação da av. paulista"; "consulta sem unidade é na av. paulista hoje"; "campo do nome em branco passa a valer o primeiro nome… primeiro nome só vai pra mensagem mesmo")
+- REVISÃO: o lembrete escolhe o modelo pela UNIDADE da consulta na Agenda (`units.paulista` / `units.tatuape`). FURO ACHADO: paciente que conversa por OUTRA caixa (ex.: Instagram) cujo bloco só tinha o modelo "geral" recebia esse geral mesmo havendo o modelo do Tatuapé na caixa padrão — caminho possível para "Tatuapé recebeu o texto da Paulista".
+- CORRIGIDO: o modelo da UNIDADE vence o geral, também entre caixas (ordem: unidade na caixa da conversa → unidade na caixa padrão → geral da caixa da conversa → geral da padrão). `unit_template` + `inbox_and_template_for`.
+- DECISÃO DELE (PROVISÓRIA — "por enquanto fica como padrão, mas isso pode (e deve) mudar no futuro"; a regra mora num lugar só para trocar fácil): consulta SEM unidade na Agenda = Av. Paulista (`DEFAULT_UNIT`, `unit_key`): usa o modelo da Paulista e `{{unidade}}` escreve "Av. Paulista"; na lista da rodada aparece "Av. Paulista (sem unidade na Agenda)".
+- A lista da última rodada avisa "· modelo geral" quando a consulta saiu com o geral e não com o modelo da unidade.
+- CONTINUA SEM SEPARAR (um modelo só para as duas unidades, por desenho): o REFORÇO e o bloco do OFTALMOFÁCIL. Texto com endereço fixo neles vai errado para a outra unidade — usar `{{unidade}}` ou pedir modelo por unidade.
+- DECISÃO DELE — NOME: na mensagem, `{{nome}}` e o campo em branco passam a ser só o PRIMEIRO nome (primeira palavra do nome da Agenda, sem Sr./Sra./Dr./Dra./Dona, letra arrumada: "MARIA DA SILVA" → "Maria"). Vale para lembrete, reforço e bloco Oftalmofácil, sem mexer em cada modelo. `{{nome_completo}}` traz o nome inteiro para quem quiser. Ficha, Agenda e listas da rodada seguem com o nome completo. Legenda do card atualizada.
+- NÃO DEU PARA CONFERIR DAQUI o caso real (qual paciente, qual texto chegou): depende do banco de produção. Outras causas possíveis fora do código: N8N de confirmação ainda ligado; unidade trocada na Agenda depois do envio; a mensagem recebida ser o reforço.
+- Testes: d2_spec 36 + followup_spec 18 = 54 verdes (3 novos; 4 antigos atualizados para o primeiro nome); rubocop sem ofensa nova. (google_dashboards_check_spec falha também sem estas mudanças — é de antes.)
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" junto com o 322 (WEB+SIDEKIQ). Mensagem em `tmp/commit_323.txt`.
+
+## 324. ✅ 💰 VALOR DO AGENDAMENTO: pré-configuração por tipo + valores à mão no card + card aberto no computador (05/10; "a paciente da dra. roberta (particular) recebeu uma mensagem de confirmação com o preço errado… precisamos de pré-configuração para avaliação, avaliação particular, retorno, pós-operatório 1 e cirurgias… no cartão de agendamento, um local separado para o valor; se houver mais de um, um + para adicionar… a mensagem prioriza o valor adicionado à mão (e é importante que esteja lá qual agente adicionou)… o card, no desktop, mais aberto e expandido; deixe esse aviso em vermelho em outro lugar")
+- REGRA ÚNICA (`Crm::AppointmentPrice`): 1º valores lançados à mão no card (tasks.charges, com quem lançou e quando; vários = soma) → 2º "Valor: X" na observação (como já era) → 3º pré-configurado do tipo (particular = valor do MÉDICO; exames = soma dos exames citados; avaliação / retorno / pós-op / teleconsulta) → 4º valor padrão do lembrete (150,00). Valor pode ser número ou texto ("sem custo"). Sem nada salvo: avaliação segue o valor padrão do lembrete; retorno e pós-operatório saem "sem custo" (MUDA a mensagem deles já no deploy — antes saíam 150,00).
+- PRÉ-CONFIGURAÇÃO: Agenda → Configurações → aba nova "Valores" (só admin salva): por tipo, particular por médico, exames (nome + valor; entram na lista de sugestões do campo Exame). `agenda_config.appointment_prices`.
+- CARD: consulta marcada como Padrão | Particular (tasks.particular); seção nova "4 Valor" com o número que vai na confirmação em destaque + de onde ele vem, o pré-configurado do tipo e as linhas lançadas à mão com "+" (cada linha mostra quem lançou).
+- CARD NO COMPUTADOR: abre largo, em duas colunas (Paciente + Quando e onde · Motivo + Valor + Situação), os 6 tipos numa fileira, títulos maiores, campos com mais contraste; os avisos de horário (faixa reservada, encaixe, "ocupado por paciente do Oftalmofácil") saíram de cima do botão de salvar e ficam recolhidos dentro de "Quando e onde" (sanfona com a contagem). No celular continua em uma coluna.
+- Cirurgia: só valor lançado à mão (a tabela de preços das cirurgias continua em Preços).
+- MIGRATION: tasks.charges (jsonb) + tasks.particular (boolean) → backup antes.
+- Testes: appointment_price_spec 8 + tasks_price_spec 2 + lembrete/reforço 54 + outros da API de agendamento = verdes; card conferido no navegador (1440 px).
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" (WEB+SIDEKIQ, COM MIGRATION). Mensagem em `tmp/commit_324_326.txt`.
+
+## 325. ✅ 📵🔒 LIGAÇÃO TRAVADA: responsável por etapa do CRM + trava ao tocar + perdida travada até retornar (05/10; "lembra o agente radar de oportunidades? vamos estender a ideia para as ligações: após 5 segundos da ligação chamando, ela impeça qualquer outra ação; e se não foi atendida, fique travada até ligar de volta… o ideal seria ligar duas vezes… poder atribuir responsável por cada etapa do CRM")
+- NASCE DESLIGADA: nada muda em produção até ligar em Integrações → Ligações → "Trava e responsáveis".
+- RESPONSÁVEL (`Crm::Calls::CallbackLock`): quem responde pela coluna em que o card do paciente está (o card mexido por último); sem card = 1ª coluna do funil principal; coluna sem dono = "responsável padrão" (opcional). Config em `agenda_config.calls`: `lock {enabled, after_seconds 5, attempts 2, exclusive}`, `stage_owners`, `default_owner`.
+- TOCANDO: o responsável toca primeiro; passados N segundos, a tela dele escurece e só sobra o cartão da ligação (atender/recusar). Os outros da caixa continuam tocando depois da espera de sempre (rede de segurança); a chavinha "Tocar só para o responsável" tira isso.
+- PERDIDA: o responsável fica gravado na ligação; a tela dele trava com o cartão "Ligue de volta" (nome, telefone, etapa, tentativas) até: o paciente atender uma ligação de volta, OU as N ligações de volta serem feitas, OU alguém marcar "Já retornei por outro meio" (fica o nome). Mensagem de texto NÃO solta. Durante a ligação de volta a trava se recolhe e volta se faltar tentativa. Teto de 72 h. Se o servidor não responder, a tela fica livre.
+- O aviso de ligação perdida do Radar passa a ir no nome do responsável (antes ia para todos os não-admin); com a trava, a janela própria (`CevicoCallLock.vue`) substitui o popup do Radar para essa ligação.
+- NÃO TESTADO AO VIVO: a trava do "tocando" (precisa de uma ligação real chegando); a regra de quem trava e em quantos segundos está nos testes do servidor. Ligar de volta de verdade também não foi disparado no localhost.
+- Testes: callback_lock_spec 8 + calls existentes = 49 verdes; trava da perdida conferida no navegador (apareceu para o responsável e soltou ao marcar retornada, com o nome gravado).
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" (WEB+SIDEKIQ, sem migration própria).
+
+## 326. ✅ 🎨 MEU PAINEL: indicadores em cor cheia, sem transparência, temas por família com mais contraste (05/10; "tire aquelas cores transparentes do meu painel; deixe os temas dos indicadores mais organizados; combinações legais com dopamine colors, contraste")
+- SAIU o vidro do item 269 (card nascia transparente e enchia até as 19h): agora o card tem cor cheia o dia inteiro.
+- TEMA = família × nível (`cevicoKpiPalette.js`): 7 famílias (captação azul, agendamento verde, presença laranja, cirurgia violeta, financeiro ouro, satisfação rosa, outros grafite), cada uma com 5 tons vivos. Resultado principal = tom intenso (número branco); volume = tom vivo (número branco); apoio = tom claro e alegre (número escuro). Alerta de meta (vermelho/âmbar) continua por cima.
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" (WEB só). Conferido no navegador (tema claro).
+
+## 327. ✅ 🎯 CONFIRMAÇÃO DE CONSULTA: modelos de mensagem PERSONALIZADOS por tipo de atendimento e por médico (05/10; "vamos precisar de modelos de mensagens específicos para quando for RETORNO… e também quero poder personalizar POR MÉDICO… de forma bonita, organizada, funcional, eficiente e eficaz")
+- ANTES: o lembrete escolhia o modelo só pela unidade (Paulista / Tatuapé / geral); o tipo de atendimento era apenas filtro de quem recebe. O retorno recebia o texto da avaliação.
+- AGORA: cada bloco de modelos (o do lembrete e o de cada caixa em "também envia por") tem a lista "Modelos personalizados": cada cartão vale para um TIPO (avaliação, retorno, pós-operatório, exame, teleconsulta), para um MÉDICO, ou para os dois, com os seus modelos (Av. Paulista, Tatuapé, geral e reforço).
+- ORDEM (`Crm::ReminderModels`): médico + tipo → médico → tipo → padrão; dentro de cada um, o modelo da unidade da consulta antes do geral; conjunto sem modelo para a consulta passa a vez (personalizar só a Paulista não tira o Tatuapé do padrão). Entre a caixa da conversa e a padrão ganha o mais específico; empate = a caixa da conversa (generaliza os itens 310/314/323).
+- REFORÇO: mesma regra — o reforço personalizado do cartão vem antes do reforço padrão da caixa.
+- LISTA DA ÚLTIMA RODADA: mostra "· personalizado: Retorno · Dra. Roberta Negri" em quem recebeu um modelo personalizado.
+- TELA: `ReminderVariants.vue` dentro do card Confirmação de consulta (Automações → Agentes de IA): cartões em sanfona com a cor do médico ou do tipo, chips de tipo, seletor de médico, os modelos aprovados DAQUELE número, prévia do texto e variáveis; aviso de "repetido" e de "escolha para quem".
+- DEPENDE DELE: criar e aprovar na Meta os modelos de retorno (e os de cada médico) em cada número que envia lembrete, e escolher nos cartões. Sem cartão nenhum, tudo segue como hoje.
+- Bloco Oftalmofácil continua com um modelo só (não entrou nesta rodada).
+- Testes: reminder_models_spec 4 + d2_spec (+3) + reforço + salvar pela API (+1) = verdes dentro dos 169 da pasta; ciclo completo conferido no navegador (criar cartão → escolher modelo → salvar → o servidor escolhe o modelo de retorno).
+- Estado: CONSTRUÍDO sem commit — aguarda "pode subir" junto com 324–326. Mensagem em `tmp/commit_324_327.txt`.
+
+## 328. ✅ 🔎 FONTES DE PACIENTES — Fase 2: chavinha CEVICO | Oftalmofácil | Tudo no Meu Painel + "Tudo o que foi marcado" em três cortes (05/10; "a separação por origem tem de valer no Meu Painel… no indicador de agendamentos quero o volume total e entender quantos foram apenas mudança de coluna, ou pós-op, ou o que quer que seja, e também as origens (oftalmofácil, cevico, google, instagram, consulta particular etc.)")
+- PORTA ÚNICA DE LEITURA: `Crm::SourceLens` — a tela diz qual fonte quer ver (`cevico` | `oftalmofacil` | `all`) e a lente filtra agendamentos, pacientes, cards, entradas em coluna e conversas pelo CARIMBO (`cevico_source_id`, item 322). Registro ainda sem carimbo é lido pelas mesmas regras que carimbam o passado (parceiro escolhido ou vindo do hub; dona do funil; lista da cerca), então o número não muda no dia em que o carimbo chega. A lente só LÊ: quem recebe mensagem continua sendo decisão da cerca.
+- CHAVINHA no Meu Painel, ao lado da régua de período (kit `cv-seg`): as fontes cadastradas em Integrações → Fontes de pacientes + "Tudo". Fica salva por PESSOA (`ui_settings.cevico_home_source`). Padrão = CEVICO. Fora da CEVICO aparece a faixa "Vendo: …" e os cards deixam de ser julgados por meta/recorde (são da casa).
+- O QUE A CHAVINHA MUDA: o painel do período dos 5 painéis (Agendamento, Condução, Cirurgias, Médicos, Gestor), o cesto de indicadores (gráficos, cards do "+", fórmulas), o funil dos 30 dias e "consultas hoje". O QUE NÃO MUDA: tarefas, próximas consultas, Radar, desempenho das pessoas, gasto pela fatura da Meta (é da conta inteira) e os dois funis do Gestor (aquisição por turma / da porta pra dentro — ficam para a Fase 3).
+- CADA FONTE COM A SUA RÉGUA: leads da casa = quem chegou pelas caixas de captação; leads do Oftalmofácil = pacientes novos dele (hub ou caixa dele); "Entrou em Agendamento" = a coluna oficial da casa × "Consulta Agendada" do funil do Oftalmofácil (nunca a de cirurgia); colunas do funil das outras fontes viram indicador com o nome do funil junto.
+- EFEITO NO DEPLOY (padrão CEVICO): Agendamento e leads continuam iguais (já eram só da casa). Condução, Cirurgias e Médicos somavam CEVICO + Oftalmofácil; passam a abrir só com a CEVICO — quem quer o total clica em "Tudo" uma vez e fica salvo. As outras telas que usam o cesto (Painel do empresário etc.) não mandam a fonte e seguem exatamente como eram.
+- CARD NOVO "Tudo o que foi marcado" (Agendamento e Gestor), `Crm::BookingCuts`: agendamentos NOVOS da Agenda (consulta ou cirurgia, marcados para a frente, não cancelados) + cards que ENTRARAM na coluna de agendamento sem consulta na Agenda naqueles dias (±1 dia) = "só mudança de coluna". Popup em três cortes, cada fatia abre a lista de pacientes:
+  1. o que foi — avaliação · retorno · pós-operatório · exame · teleconsulta · cirurgia · consulta sem tipo · só mudança de coluna;
+  2. de onde veio — fonte (carimbo), caixa por onde o paciente chegou (1ª conversa) e particular × demais;
+  3. quem fez — paciente · robô · equipe · sincronização · carga · integração (`cevico_born_via`).
+  Ficam fora da conta, mostrados ao lado: consulta LANÇADA (item 217) e lançamento de HISTÓRICO (data já passada).
+- LIMITES (ditos na tela): "quem fez" só existe de 05/10 em diante — em agendamento anterior, robô × equipe é deduzido pela marca do Atendente de IA; em mudança de coluna anterior aparece "Antes do carimbo". "Particular" só existe depois do item 324.
+- 🐛 ACHADO E CORRIGIDO NO CAMINHO — RECORDES: desde o item 237 (25/09), quando o miolo do painel vinha do cache (a maior parte das visitas em produção), `records_json` recalculava o painel SEM período (= desde sempre): refazia a conta pesada a cada visita e gravava o total de todos os tempos como "recorde". Agora os recordes leem o painel que veio do cache. Os recordes já gravados em produção devem estar inflados — limpar `agenda_config['panel_records']` depende do "ok" dele.
+- NÃO ENTROU (de propósito): a CERCA dos parceiros passar a ler o carimbo. Condição dele: conferir em Integrações → Fontes de pacientes se "carimbo × cerca" diz "batem". Sem essa resposta, a cerca segue nas 4 pistas.
+- Testes: source_lens_spec 13 + home_source_spec 3 (chavinha, cesto e o recorde com cache — o do recorde falha sem a correção) dentro dos 155 verdes da vizinhança (carimbo, cerca, carga em massa, taxa de agendamento, telas do CRM); rubocop limpo nos arquivos novos; navegador: chavinha nas 3 posições, popup dos três cortes, lista de pacientes por fatia, escolha lembrada ao recarregar, 5 painéis × 3 fontes respondendo.
+- Estado: SUBIU 06/10 no commit 9ec59e5 (develop) → imagem `ghcr.io/guilhermecorder/chatwoot:9ec59e5` p/ Implantar WEB+SIDEKIQ SEM migration (reversão `:40d7b0f`); build VERDE; IMPLANTADA 06/10 (produção = :9ec59e5, reversão :40d7b0f).
+
+## 329. ✅ 📈 RESULTADOS DE TRÁFEGO: painel novo — funil com taxas, gráficos de área, visual de vidro e ambiente de OTIMIZAÇÃO com coleção de insights (05/10; "precisamos aprimorar o painel. coloque as taxas de conversão ao longo das etapas do funil. remodele o design com a nossa visão apple glass… gráficos em linha… precisamos inclusive poder otimizar a página. um ambiente com coleta de insights")
+- TELA REFEITA no kit (`TrafficResults.vue`: CevicoHero, blocos `.cv-block` com paleta por bloco — escopo `report:traffic` —, régua única, respiro e títulos grandes). Duas abas: RESULTADOS e OTIMIZAR. Mesmo endereço e mesma concessão (Marketing).
+- ABA RESULTADOS, em 4 blocos, tudo respeitando o filtro de ORIGEM (chips: Todas, Google Ads, Google orgânico/SEO, Meta…):
+  1. O FUNIL — visita → clique no WhatsApp → lead na caixa → agendou → cirurgia, com a % que passou de uma etapa para a outra e a % das visitas que chegou até ali (`FunnelSteps`; no celular o mesmo funil em pé). Frase "de cada 100 visitas…" + o ponto mais apertado do funil (a cirurgia fica fora dessa frase: leva semanas). 4 cartões com a taxa de cada passagem, a conta escrita e o "antes" do período anterior de mesmo tamanho.
+  2. EVOLUÇÃO — gráfico de ÁREA (`AreaChart`) por dia/semana/mês conforme o período: Volume (visitas, cliques, leads) · Taxas de conversão (de cada 100 visitas do dia) · Visitas por origem.
+  3. ORIGENS — Cards | Lista: visitas e fatia do total, % que clica, % que vira lead, % dos leads que agenda; tocar na origem filtra a tela inteira.
+  4. PÁGINAS — Lista | Cards: taxas de cada página, linha fininha das visitas, até onde leram (metade / fim), origens e campanhas no detalhe, e a lâmpada com quantos pontos a melhorar.
+- ABA OTIMIZAR, em 3 blocos:
+  1. DIAGNÓSTICOS automáticos (`Cevico::PageInsights`, regras simples, sem IA): muita visita e pouco clique (com a conta do ganho até a média) · sai antes da metade · lê até o fim e não clica · clica e não chega na caixa · leads que agendam pouco · anúncio pago sem lead · origem que converte muito mais · publicada sem visita · SEO (título, descrição, palavras-chave, nenhuma visita do Google orgânico) · página campeã. A régua é a MÉDIA DAS PRÓPRIAS PÁGINAS no período e só fala com volume mínimo (30 visitas / 8 cliques / 5 leads). Cada um: o que os números mostram + o que fazer + Guardar · Aplicar na montagem (copia o pedido e abre o ambiente de montagem da página) · Ver.
+  2. SUGESTÕES DA IA (`Crm::PageOptimizerService`, só quando alguém aperta o botão; usa a config e o interruptor do Construtor de Páginas): lê os textos da página como estão no ar + números + diagnósticos e devolve leitura curta e até 5 mudanças com o pedido pronto para a montagem. Travas no prompt: não inventar dado nem depoimento, não sugerir preço na página, não citar nome de médico. Nada muda na página sozinho.
+  3. COLEÇÃO DE INSIGHTS (`Cevico::InsightLog`, em `agenda_config['page_insights']`, sem tabela nova): o que a equipe guardou (diagnóstico, IA ou escrito à mão), em A fazer · Aplicados · Descartados. Ao marcar como aplicado guarda a data e mostra ANTES × DEPOIS da página (taxa de clique, leads e visitas no mesmo número de dias de cada lado, até 30), com o aviso "ainda cedo" quando há pouca visita.
+- SERVIDOR: a conta saiu do controlador para `Cevico::TrafficReport` (mesmos números de antes + série, leitura da página e SEO); o controlador devolve também `totals`, `previous`, `series`, `insights`, `collection`, `pages`. Rotas novas: `pages_report/save_insight`, `remove_insight`, `ai_suggestions`.
+- LIMITES: agendou e cirurgia são dos leads do período (sobem com o tempo); o período anterior só aparece com "Todas" as origens; SEO aqui é o que a página informa + a visita que veio do Google orgânico — posição no Google e termos buscados (Search Console) não estão ligados; a chamada REAL à IA não foi exercitada no local (Construtor pausado lá) — testada com a IA simulada.
+- Testes: page_insights_spec 7 + pages_report_spec 5 + page_optimizer_service_spec 2, dentro dos 171 verdes da vizinhança; rubocop limpo; navegador com dados de demonstração (apagados depois): funil, 3 modos do gráfico, origens, páginas, guardar → aplicar → antes × depois, celular e modo escuro sem vazar para o lado.
+- Estado: SUBIU 06/10 no commit 9ec59e5 (develop) → imagem `ghcr.io/guilhermecorder/chatwoot:9ec59e5` p/ Implantar WEB+SIDEKIQ SEM migration (reversão `:40d7b0f`); build VERDE; IMPLANTADA 06/10 (produção = :9ec59e5, reversão :40d7b0f).
+
+## 330. ✅ 🔪 AGENDA: cirurgia é agenda INDEPENDENTE — não ocupa o bloco do médico; exame só na agenda de exames; retorno/pós-op com balão "flexível" (06/10; print do bloco do Dr. Henrique cheio de pacientes de cirurgia: "as cirurgias não devem ocupar a agenda dos médicos. agenda cirúrgica é uma agenda independente dos nossos médicos… neste ambiente precisa ficar liberado apenas para consultas")
+- CAUSA: desde o item 255 o agendamento vindo do Oftalmofácil ocupava QUALQUER janela da unidade dele (consulta, exame ou sala cirúrgica) — as cirurgias do hub (Elias, Maria Eulina, Magno em 06/10) entravam no bloco do Dr. Henrique e, pelo item 319, apareciam no fim do bloco como "fora da faixa".
+- REGRA NOVA (tela `occupiesWindow` + servidor `Crm::AgendaSlots.hub_overlap?` / `occupied`): cada agendamento ocupa SÓ a agenda do seu tipo — cirurgia na sala cirúrgica (trilho Cirurgias), exame na agenda de exames, consulta (avaliação, retorno, pós-op, tele) na janela do médico. Vale para o que vem do hub também. Efeito: a IA volta a oferecer os horários que a cirurgia e o exame "tomavam"; o bloco do médico mostra só consultas; o "81%" de ocupação cai para o real.
+- RETORNO / PÓS-OP ("consultas menos prioritárias… espaço mais flexível", respostas dele 06/10): continuam no bloco do médico, com balão mais leve e fio pontilhado (`.cv-ag-slot-soft`) e a dica "pode receber encaixe de avaliação"; o botão de encaixe (+) já existia.
+- 330b — REGRA DA IA (decisão dele 06/10: "deixar a IA agendar consulta de avaliação encaixada no mesmo horário de retorno, pós-op ou exame — 1 a mais por horário; só uma por enquanto"): retorno e pós-op NÃO travam o horário para a IA (`Crm::AgendaSlots::SOFT_MODALITIES`); exame já não trava (agenda própria). O horário fecha quando há uma avaliação (ou consulta sem tipo) nele — por isso cabe exatamente UMA avaliação encaixada. Vale para o que vem do hub também (`hub_kind` 'flexivel'). Teste: horário com retorno/pós-op livre; com avaliação, fechado (17 verdes na pasta).
+- Testes: agenda_slots_future_spec reescrito (cirurgia e exame do hub não tomam o horário do médico; consulta do hub ocupa o bloco em que começa) + vizinhas = 65 verdes; cevicoAgendaOccupies.spec.js 4 verdes; navegador com 5 agendamentos de demonstração em 06/10 (apagados depois): bloco do médico só com retorno (leve) e avaliação; cirurgias e exame fora; 09:00 livre.
+- Estado: SUBIU 06/10 no commit 9ec59e5 (develop) → imagem `ghcr.io/guilhermecorder/chatwoot:9ec59e5` p/ Implantar WEB+SIDEKIQ SEM migration (reversão `:40d7b0f`); build VERDE; IMPLANTADA 06/10 (produção = :9ec59e5, reversão :40d7b0f).
+
+## 331. ✅ 🎂 ANIVERSÁRIOS DA EQUIPE no Meu Painel (06/10; "crie uma notificação para todos os agentes adicionarem suas datas de aniversário… quando for aniversário, avisar o meu painel de todos, no topo, com 'aniversariante do dia', e também 'aniversariantes do mês'")
+- CONVITE: quem ainda não informou vê, logo abaixo do banner do Meu Painel, "Qual é o dia do seu aniversário?" com dia, mês e ano (opcional) — some ao guardar; "depois" esconde só naquela visita. Admin vê "ainda não informaram: N" (nomes no balão) e pode informar por alguém.
+- NO DIA: faixa rosa/dourada no topo para TODO MUNDO — "Aniversariante do dia · Hoje é aniversário de Fulano!" (+ idade quando o ano foi informado) com chuva de 🎂🎉 uma vez por carga. Linha "Aniversariantes do mês" com nome e dia (o de hoje destacado).
+- SERVIDOR: `Crm::Birthdays` (em `agenda_config['birthdays']`, sem tabela nova; grava sob trava), `POST crm/home/birthday` (próprio; admin com user_id; `clear` apaga), payload `birthdays` no `home#show`. Data inexistente (31/02) é recusada; 29/02 sem ano vale.
+- Testes: birthdays_spec 3 (serviço + API) verdes; navegador: convite → guardar → faixa do dia + lista do mês + confete; posição logo abaixo do banner.
+- Estado: SUBIU 06/10 no commit 9ec59e5 (develop) → imagem `ghcr.io/guilhermecorder/chatwoot:9ec59e5` p/ Implantar WEB+SIDEKIQ SEM migration (reversão `:40d7b0f`); build VERDE; IMPLANTADA 06/10 (produção = :9ec59e5, reversão :40d7b0f).
+
+## 332. ✅ 🏷️ MEU PAINEL: card "Consultas marcadas" com descrição maior das FONTES (06/10; "gostaria de uma descrição maior sobre as fontes e etc")
+- LINHA DO CARD: "16 de leads novos · 5 da base · CEVICO 20 · Oftalmofácil 1 · WhatsApp 8 · Instagram 5" — a fonte pelo carimbo (só quando há mais de uma) e as 2 caixas por onde mais pacientes chegaram.
+- POPUP: seção nova "Fonte de pacientes (carimbo de origem)" (CEVICO × Oftalmofácil…) e "Quem marcou" virou "Quem fez" pelo carimbo (paciente, robô, equipe, sincronização); para consulta anterior a 05/10 a tela avisa quantos foram deduzidos pela marca do Atendente de IA. As demais seções (quem é o paciente, caixa, unidade, procedimento, médico, onde foi marcada) seguem.
+- Servidor: `by_stamp`, `by_via`, `via_deduced` em `booked_breakdown_json` (home_controller). Sem migration. Conferido no navegador (90 dias).
+- Estado: SUBIU 06/10 no commit 9ec59e5 (develop) → imagem `ghcr.io/guilhermecorder/chatwoot:9ec59e5` p/ Implantar WEB+SIDEKIQ SEM migration (reversão `:40d7b0f`); build VERDE; IMPLANTADA 06/10 (produção = :9ec59e5, reversão :40d7b0f).
+
+## 333. ✅ 🎙️ AGENTE DE LIGAÇÃO — rodada de acabamento: atende E liga com roteiros próprios, "Guilherme", confirma presença, chama a equipe de verdade, move o card e discador seguro (08/10; "pode mandar ver na rodada… capriche"; depois de testar por voz no painel da ElevenLabs: "ficou ótimo… o nome dos médicos ele falou com sotaque inglês… vale dar um nome ao assistente (guilherme está bom)… a voz ficou levemente robótica")
+- DOIS ROTEIROS: ao ATENDER (etapa nova `voice_inbound` = o prompt do agente na ElevenLabs) e ao LIGAR (etapa `voice`, mandada pelo discador em CADA ligação via `conversation_config_override`). Antes a ligação recebida lia "foi a CEVICO que ligou". Os dois editáveis em Integrações → Agente de Ligação (o de ligar também no card do hub).
+- PERSONA: "Nome que ela fala" + "Fala como" (o/a) → `{{EU_SOU}}` ("o Guilherme, assistente virtual da CEVICO") e `{{UM_ASSISTENTE}}` trocados no roteiro, na trava e nas frases padrão. Continua dizendo que é assistente virtual se perguntarem.
+- FRASES POR CASO: 1ª frase ao ATENDER, 1ª frase ao LIGAR (leads parados e campanhas sem frase própria — a campanha automática não grava mais a frase: vale a da Integração na hora), frase fixa para paciente de PARCEIRO. Campo vazio = a padrão, que acompanha o nome.
+- VOZ: seletor de "Motor de voz" (Flash 2.5 padrão, Turbo 2.5, v4 Turbo, v4, Multilingual v2, v3 Conversacional — lista da OpenAPI de 08/10). PRONÚNCIA: lista "nome → como soa" (bloco no prompt + aplicada no texto "falado" das ferramentas). Sotaque inglês nos nomes = voz padrão em inglês: escolher voz brasileira.
+- VALOR DA AVALIAÇÃO: `{{VALOR_AVALIACAO}}` = o pré-configurado da Agenda (item 324), falado ("cento e cinquenta reais"); vence o do Roteiro na voz. `spoken_price`/`spoken_integer` até 999.999. "R$ [valor]" do Roteiro também vira fala (era a falha conhecida do script_spec).
+- FERRAMENTAS NOVAS (8 no total; o Sincronizar cria): `confirmar_presenca` (confirmou → mesmo caminho do SIM ao lembrete, card → Consulta Confirmada; nao_vai → etiqueta confirmar_urgente + aviso "disse na ligação que NÃO vai" no Meu Painel, sem cancelar) — extraído do CrmListener para `Crm::AppointmentConfirmation` (o WhatsApp usa o mesmo); `chamar_equipe` (tarefa "📞 Ligação · Nome — motivo" pelo `Crm::HandoffTask`; urgência alta = aviso vermelho) — fim do "a equipe já foi avisada" vazio.
+- AGENDA: marcar pela ligação agora MOVE O CARD e etiqueta (`Crm::BookingSideEffects`, mesma coluna do WhatsApp — antes não movia); `para_outra_pessoa` cria consulta nova sem mexer na de quem ligou (`AppointmentRecorder.record(new_only:)`; a consulta nova fica no telefone de quem marcou, o lembrete chega nele).
+- DEPOIS DA LIGAÇÃO (bloco 6 novo): coluna por RESULTADO (sem interesse, prefere WhatsApp, recado, não atendeu, passou para a equipe, pediu para desmarcar, outro) — `Crm::VoiceAgent::OutcomeStage` no pós-chamada; só para a frente, não mexe em quem tem consulta futura (exceto desmarcar), nunca em parceiro; dispara as automações da coluna.
+- REGRA DE OURO NA VOZ (auditoria 07/10): paciente de parceiro → todas as ferramentas recusam (só registrar_resultado passa); ligação RECEBIDA de parceiro → frase fixa + roteiro trocado para só encerrar + tarefa para a equipe falar pela caixa dos parceiros; discador pula.
+- REGRA 2: `enviar_whatsapp` sai pela caixa em que o paciente já conversa (não dos parceiros); sem conversa, a caixa da assistente.
+- DISCADOR (achados alta da auditoria): só com CEVICO_RESPONDERS_LIVE; campanhas só nos DIAS escolhidos (Limites, padrão seg–sex); leads parados só com o card AO VIVO e dentro da janela (antes seguia ligando em sombra) e a fila de dia anterior é descartada; reconfere NA HORA: nao_perturbe/perda_*, parceiro, recusou o pedido de ligação (30 dias, também fora da lista "ligaria hoje"), respondeu depois de entrar na fila, já tem consulta. `PermissionRequests.remember!` e o `persist!/persist_state!` da voz agora gravam sob trava (padrão de julho).
+- CAMPANHA "Agendar para…": nasce AGENDADA (antes ficava rascunho e nunca discava) e a hora digitada é de São Paulo; data inválida/no passado → 422 (antes começava na hora).
+- Testes: tools_service_spec +7, script_spec reescrito (9), campaign_dialer_job_spec NOVO (7), outcome_stage_spec NOVO (5), call campaigns agendamento NOVO (3), webhook +1 (parceiro) → 64 verdes na pasta da voz + listeners (confirmação refatorada) verdes; rubocop limpo nas linhas mexidas; navegador local: persona/frases ao vivo, motor de voz, pronúncia, dias, bloco 6 e salvar conferidos no banco.
+- Estado: SUBIU 08/10 ("pode subir a rodada 333") no commit 81323c3 (develop) → build VERDE → imagem `ghcr.io/guilhermecorder/chatwoot:81323c3` p/ Implantar WEB+SIDEKIQ, SEM migration (reversão `:9ec59e5`). Pós-deploy: Integrações → Agente de Ligação → nome/gênero/voz brasileira → Salvar → SINCRONIZAR (cria as 2 ferramentas novas e sobe o roteiro de atender).
+
+## 334. ✅ 🔐🏢 ACESSOS EM ÁRVORE (ver × editar, papéis, unidades) + SUA ÓTICA como 2ª empresa no mesmo sistema (12/10; "permissões por agente… itens pais e filhos… permitir visualização e permitir edição… Sua Ótica… ter a empresa de que estamos tratando no clique do usuário… vamos fazer tudo isso nessa rodada, capriche")
+- FUNDAMENTO: catálogo ÚNICO em árvore (`config/cevico/access_catalog.yml`, 70 nós: inicio, conversas, chamadas, crm{funis, campanhas, jornada, formularios, agendamentos, fontes}, agenda{exames, cirurgias, bloqueios, lixeira, imprimir, configuracao}, pacientes{notas_clinicas, oftalmofacil}, tarefas, metas{ferramentas}, respostas, pessoas, academia, relatorios{12}, automacoes{6}, marketing{4}, financeiro{3}, estrategia, empresario, configuracoes{8}). Cada nó: níveis (só ver | ver/editar), padrão do atendente, `admin` (só administrador), `segment: clinica` (some em ótica). Editar inclui ver; marcação no PAI vale para os filhos sem marcação própria.
+- SERVIDOR: `Cevico::AccessCatalog` (lê o YAML + mapa controller→nó) · `Cevico::Access` (nível efetivo: admin → marcação própria → papel → herança → padrão; converte na hora grants/menu/report_keys antigos — NINGUÉM perde acesso) · `Crm::AccessControl` reescrito e incluído no `Api::V1::Accounts::BaseController`: trava AUTOMÁTICA em ~55 controllers CEVICO (leitura pede VER, escrita pede EDITAR; 403 "Você só pode ver X. Peça a um administrador para liberar a edição."); `require_capability` antigo continua valendo como atalho. Funis e colunas ganharam trava (crm.funis). Tarefas × Agenda pela mesma API (consulta cobra `agenda`, cirurgia `agenda.cirurgias`). Unidades: pessoa presa a lojas só vê/marca consultas delas (tasks#index, appointments#feed, create/update 403). `agent_permissions` não entra mais pelo `update` genérico.
+- ENDPOINTS (só admin): `GET settings/access_admin`, `POST update_agent_access {user_id, tree, role_id, units, reset}`, `POST update_access_roles {roles}`, `POST update_company`. `GET crm/settings` traz `access` (me resolvido + catálogo com vocabulário) e `company`. Gravado em `crm_settings.agent_permissions` (`tree`, `roles`, `role_by_user`, `units`) — SEM migration.
+- FRONT MOTOR: `useCevicoAccess()` (canView/canEdit/units/word/fill), `helper/cevicoAccess.js` (ROUTE_NODES/MENU_NODES), guard de rota por nó (fail-closed p/ atendente; admin perde nó fora do ramo), Sidebar por nó (sem canSee/report_keys/DAY_MENU), pílula "Só visualização" + botões de criar/salvar/apagar/mover escondidos em CRM, Agenda (60 trocas pontuais, sem prettier), Tarefas, Financeiro/Estoque, Campanhas, Jornada, Formulários, Automações (abas por nó), Metas/Ferramentas, Estratégia, Páginas/Planejamento/Funis, Espaço do Paciente, Pessoas, Tabela de preços, Criativos; 403 do servidor vira alerta global (`helper/cevico403.js` no APIHelper).
+- TELA Configurações → ACESSOS E PAPÉIS (`settings/acessos`): Papéis (cards; criar/editar/duplicar/apagar; unidades), Pessoas (Lista|Cards; papel inline; selos administrador / convertido do modelo antigo / marcação própria; "Abrir árvore"; "Voltar ao padrão"), Mapa do sistema (só leitura). Editor `AccessTreeEditor` (components-next/cevico/access): [Herda | Nada | Ver | Editar] por nó, "Herda (Ver)" mostra o que vai valer, cadeado nos nós de admin, busca, Ver tudo/Editar tudo/Limpar, "limpar os filhos". Escudo em Configurações → Equipe abre o mesmo editor; pílula do papel na lista. Legado aparece convertido como marcação própria (salvar não perde nada).
+- EMPRESA: `Cevico::Company` (`agenda_config['company']`: nome, ramo clínica/ótica/outro, vocabulário paciente→cliente etc., unidades, assistente, módulos, domínio/hub/rastreio próprios; sem config = CEVICO de hoje, byte a byte). Tela Configurações → IDENTIDADE DA EMPRESA (6 blocos). Prompts dos agentes de IA, mentor, objeções, coach, copywriter, NPS, lembretes e Agente de Ligação leem a empresa (`Crm::CompanyPrompts`); roteiro genérico `Crm::CompanyScript` fora da clínica (a tela mostra o padrão certo por ramo). Páginas públicas por empresa (`PublicSite.host_for/account_for_host`, hub/pixel/GA4 por conta; slug continua único no sistema). Menu do avatar ganhou a seção "Empresa" (troca de conta com ✓). Rake `cevico:company:create NAME= SEGMENT= ADMINS=` (nasce em pt_BR). Rótulos: "Jornada do cliente", "Academia <empresa>"; Oftalmofácil/Médicos/Cirurgias somem na ótica.
+- LOCAL: conta "Sua Ótica" (id 6517, ramo ótica) criada; admin@admin.com e teste-claude têm as 2 empresas.
+- Testes: rspec 297 verdes (RAILS_ENV=test no docker; em dev 3 specs de ActiveJob falham por ambiente, não pela rodada); vitest 49 verdes (7 arquivos); rubocop/eslint sem erro novo. Navegador: Acessos, Identidade, troca de empresa, menu da ótica sem clínica, atendente em "só visualização" no CRM.
+- FORA DESTA RODADA (dito): textos das telas antigas (Meu Painel "consultas hoje", painéis Cirurgias/Médicos) ainda em vocabulário de clínica; `custom_roles` do Chatwoot (premium) continua fora das rotas CEVICO; botões secundários dentro de modais ficam com o 403 do servidor.
+- Estado: SUBIU 12/10 ("ok pode subir") no commit 85ece38 (develop) → imagem `ghcr.io/guilhermecorder/chatwoot:85ece38` p/ Implantar WEB+SIDEKIQ, SEM migration (reversão `:81323c3`); build VERDE 12/10 19h33, IMPLANTADA 12/10 = PRODUÇÃO (o GitHub tinha desligado os workflows do fork por inatividade — ele religou em Actions e eu disparei pelo workflow_dispatch). Em produção, depois de subir: Configurações → Acessos e papéis (conferir as pessoas convertidas) e criar a Sua Ótica pelo rake ou pelo Console de Super Admin + Identidade da empresa.
+
+## 335. 🏷️ TÍTULO DA ABA = nome da instalação "CEVICO S.Un" + segue a EMPRESA da conta (12/10 noite; "o TÍTULO da aba ainda está como Chatwoot… vamos deixar CEVICO S.Un")
+- `config/brands/cevico.yml` nome → "CEVICO S.Un"; `config/initializers/marca.rb`: a marca padrão agora troca o INSTALLATION_NAME do banco quando ele ainda é um nome antigo ('', Chatwoot, Sistema CEVICO, CEVICO S.I) — sem painel, sem migration; logos/cores continuam vindo do banco.
+- `Dashboard.vue`: `document.title` segue `crm/getCompany` (empresa configurada → nome dela; senão o nome da instalação). Testado local: login "CEVICO S.Un" · conta 3 "CEVICO S.Un" · conta 6517 "Sua Ótica" · volta ao trocar.
+- Estado: no working tree (sem commit), junto do 336.
+
+## 336. 🧭 GUIA CEVICO AREJADO — fundação no kit + Acessos e papéis refeita (12/10 noite; "mais objetivo, mais clean, mais espaçado… mais espaço em branco e respiro")
+- GUIA (fonte da verdade, aprovado por ele): https://claude.ai/artifact/M7af1huY3VB8XEbt5gr7Jt — 3 cores por ambiente em 60-30-10 pela COMPLEMENTAR DIVIDIDA (60% cor do dia · 30% apoio claro · 10% destaque = botão principal + número que manda), escala de texto (nada abaixo de 12px; herói 44px), espaços 4–64, raios 10/14/20, as 4 perguntas da visão geral, painel lateral para expandir, vitrine giratória (frases + equipe).
+- KIT: `assets/scss/_cevico-guia.scss` (tokens `--g-*` claro/escuro + classes `.cvg-*`: cab, bloco, fila, ind, chave, lista/linha, cards, chip, btn, campo, vitrine, painel) importado no app.scss depois do cevico-glass; `helper/cevicoPalettes.js`: `paletteHarmony()` + `paletteVars()` passam `--cv-apoio(-fundo)`, `--cv-destaque(-ink)` e os tons `-escuro` (7 dias à mão = tokens do guia; frutas calculadas a +150°/+210°). O kit antigo `.cv-*` continua intacto nas telas não migradas.
+- COMPONENTES `components-next/cevico/guia/`: `CvCabecalho` (60%, chip do dia + paleta, slot acoes), `CvBloco` (tom dia|apoio|neutro), `CvIndicador` (rótulo → número → comparação com estado → contexto → área; emite `abrir`), `CvVitrine` (gira 8 s, lembra o último, pausa no mouse, reduced-motion), `CvPainelLateral` (teleport, Esc/fora/X, foco no título).
+- TELA MIGRADA: Configurações → Acessos e papéis: cabeçalho + 3 blocos (Papéis = dia, Pessoas = apoio, Mapa = neutro); resumo "Edita 12 · Vê 8" em texto no lugar das 3 pílulas; linhas de 52px; chips só para admin/marcação própria/modelo antigo; botão principal "Novo papel" no cabeçalho. Modais mantidos (cv-modal) com campos/botões do guia. Lógica intacta. Verificado local claro e escuro (valores das variáveis conferidos).
+- MEU PAINEL (etapa A, mesma noite): cabeçalho CHAPADO na cor do dia (sem degradê/luzes; olho continua), saudação em 28px sem emoji, rótulos do pulso 13px, fundo arejado (`.cvg-arejado`) e a **CvVitrine** logo abaixo do cabeçalho (some no modo edição): frase do dia de `helper/cevicoFrases.js` (60 frases: motivacionais, bíblicas positivas, estoicas e CEVICO — mesma para todos pelo dia do ano; lista inicial p/ ele revisar) + painel Equipe (aniversário de hoje ou o próximo do mês, via item 331). Verificado local (paleta Laranja → harmonia calculada).
+- FORA (etapa B): os cards de indicadores do Meu Painel no formato CvIndicador (número grande, comparação, contexto, área) — têm modo edição, metas, tendência, recorde; AccessTreeEditor ainda com pílulas de 10,5px (dentro do Mapa e dos modais); lint: bare-strings em PT-BR como nas telas antigas (commit com --no-verify, como sempre).
+- Estado: no working tree (sem commit) — aguarda "pode subir".
+
+## 337. 🧭 VISÃO GERAL do Meu Painel — as 14 perguntas (12/10 noite; "ultimamente temos nos resumido às seguintes informações…"; 1–10 p/ todos, 11–14 só admin)
+- ESPEC: `~/Desktop/CLAUDE CODE/CEVICO/docs/MEU_PAINEL_14_PERGUNTAS.md` (funil+origem, tempo até agendar, agenda/mix, confirmação, comparecimento, indicação/fechamento, jornada, CAC/ticket/custos, conversões de cirurgia, médicos).
+- SERVIDOR: `Crm::OverviewService` (compõe LeadsUniverse, coluna de orçamento, BookingRate (item 233), AcquisitionChannel, PatientKind, FunnelService (jornada), AcquisitionCostService (CAC), ranking de médicos) + NOVO: coortes hoje/7/30 dias (dos que chegaram, quantos já agendaram), MÉDIA e mediana do tempo até agendar, OCUPAÇÃO da agenda no servidor (janelas × consultas, por médico), mix avaliação/exames/particular/Oftalmofácil, motivos de cancelamento, conversões de cirurgia por lead/agendamento/comparecimento/indicação, ticket por canal e por médico. `GET crm/home/overview` (cache curto; dinheiro+médicos só p/ admin). ~1,3 s local. Rubocop limpo.
+- TELA: `components-next/cevico/guia/VisaoGeral.vue` no topo do Meu Painel (abaixo da vitrine; some no modo edição): régua de período única + 5 blocos do guia (Quanto entrou e quanto virou · Agenda · Cirurgia e jornada · Quanto gasto e quanto ganho · Médicos), um herói por bloco, comparação com o período anterior (seta só em variação), frase de contexto, e PAINEL LATERAL com origem por caixa, por canal (Google/Meta/orgânico), tempo até agendar, mix e ocupação por médico, confirmação/reagendamento/cancelamento + motivos, etapa por etapa da turma, CAC por canal + ticket por médico, gastos mês a mês, e a lista de pessoas (abre o contato).
+- V2 "MAIS COR E MAIS VIDA" (mesma noite; ele achou a v1 "feia, chata, sem graça" e "carnaval"): blocos em VIDRO na cor do dia (como o kit), cartões na FAMÍLIA da cor do dia (herói em degradê `--cv-grad` com número branco; os outros em tinta leve), luz do dia de volta no fundo da página, e cada bloco com MINI-GRÁFICOS à direita (reaproveitando o kit): funil em degraus (FunnelSteps) + área dia a dia (AreaChart) na Entrada; anel de ocupação + barras do mix (HBars) + área consultas×compareceram na Agenda; funil consulta→indicação→fechou + barras etapa por etapa na Cirurgia; barras mês a mês (MiniBars) + onde foi o dinheiro no Dinheiro; HBars de 2 séries (agenda × presença) nos Médicos. Backend ganhou `series` (novos/agendaram/consultas/compareceram por dia, ou por mês acima de 95 dias).
+- V3 ENQUADRAMENTO (mesma noite; "enquadrar melhor os blocos… não tem gráficos o suficiente"): cada bloco virou PILHA — fileira de números em cima (herói 1,5 coluna) e FILEIRA DE TRÊS GRÁFICOS da mesma altura embaixo (`.cvg-graficos`, min 220px). Gráficos novos: "Por onde chegaram" (caixa × agendaram, 2 séries), "Confirmação e presença" (6 barras), anéis de indicação e fechamento, "Tempo até agendar" (quando não há jornada), "Gasto × faturamento por canal", Médicos com 2 painéis (agenda×presença, indicações×cirurgias). Total: 14 mini-gráficos + 13 cartões.
+- Verificado local (conta 3, admin): 5 blocos, 13 indicadores, painel lateral abre/fecha (Esc), lente da fonte respeitada; claro e escuro conferidos por valores (ele ainda vai olhar e mandar prints). Dados locais quase vazios — validar números em produção na janela calma.
+- FORA (próxima): esconder/retirar os blocos antigos que ele disse não usar (Tarefas, Meu desempenho, Dashboard da Agenda, Saúde da Agenda) depois que ele validar a Visão geral; Pós-operatório como etapa própria da jornada; histórico do Google só ao vivo (GA4).
+- Estado: no working tree (sem commit), junto de 335/336 — aguarda "pode subir".
+
+## 338. 🔀 DUAS VERSÕES do Meu Painel — Clássico × Novo, escolha por pessoa (12/10 noite; "vamos separar 2 versões… testar o que gostamos mais")
+- Chavinha no cabeçalho do Meu Painel (chip `Clássico | Novo`), salva por pessoa em `ui_settings.cevico_home_estilo`. PADRÃO = clássico: ninguém muda de tela sem escolher.
+- CLÁSSICO = a tela de sempre, intacta: hero em degradê com luzes e 👋 em 40px, salada de frutas, seletor de painel, régua, indicador do gestor, Construtor, blocos de conteúdo, Tarefas e notas.
+- NOVO = guia arejado: hero chapado na cor do dia (28px), fundo com a luz do dia, CvVitrine (frases de filósofos, pensadores e cinema — bíblicas saíram a pedido dele — + aniversários), VISÃO GERAL (item 337, v3 com 14 mini-gráficos) e SEM os blocos antigos de conteúdo nem Tarefas. Os avisos (WhatsApp, briefing, Radar, Mentor) ficam nas duas.
+- Verificado local: padrão clássico idêntico ao anterior; troca ao vivo sem reload; escolha persiste após recarregar.
+- Estado: no working tree (sem commit) com 335/336/337 — aguarda "pode subir".
+
+## 🔐 AUDITORIA 12/10 — Rodada 2 "Portas fechadas", grupo R2-G4: crm/settings por papel + OftalmoFácil só admin + token/chave fora do log (#295 #337 #171 #366 #427 #193 #338 #176)
+- `GET crm/settings` continua UMA rota, mas o JSON é montado POR PAPEL no servidor (`team_settings_json`): sem a área "settings" saem concessões dos colegas, Roteiro/prompts/rascunhos, eventos dos atendentes de IA, insights, estado do gestor, papéis, registros com nome de paciente (lembretes, NPS, Secretário), dados de conexão (hub, Meta, Google, planilha, N8N) e a lista de médicos do cadeado (fica só "eu"). Fica o que o dia a dia usa (presets, cores, modo limpo, calls, access.me, kpi_layout, janelas, empresa, radar). Store/API do front intactos.
+- DECISÃO REGISTRADA (cabe ao Guilherme mudar): a TABELA DE PREÇOS vai para quem pode VER "Tabela de preços" OU EDITAR o Espaço do Paciente (padrão da equipe) — sem ela o orçamento do paciente usaria os preços FIXOS do código (PRK 4900, Trifocal 8490, Galaxy 14990…) e um valor errado iria ao paciente sem ninguém perceber. Alternativas: (b) mudar o padrão de `configuracoes.precos` para ver no catálogo; (c) conceder "Tabela de preços: ver" por pessoa e tirar a regra do "pacientes".
+- Quem tem o nó "Lembretes, confirmação e pesquisa" (configuracoes.modelos) continua vendo `appointment_reminders_state`/`nps_survey_state` (mesmo nó do envio manual).
+- `ai_usage`, `test_oftalmofacil`, `sync_oftalmofacil` só com a área "settings"; `public_domain` pelo nó "Domínio público" (só admin). "Sincronizar agora" e "Trazer para a Agenda" recusam com a integração DESLIGADA (`Crm::OftalmofacilSyncJob::OFF_MESSAGE`); no job, `account_id` é só filtro — desligada, nem cron nem botão rodam.
+- #338: o rascunho de um agente nunca guarda token/chave (limpo no que chega, antes do merge — vale para agente nunca salvo); `ai_json` devolve o rascunho sem o token (só `draft_token_set`); a tela não manda o token no rascunho e avisa para colar de novo ao Publicar.
+- #176: `service_account_json`, `service_account` e qualquer parâmetro terminado em `json` viram [FILTERED] no log.
+- ACEITO (anotar): o modal de automações da coluna monta a lista do N8N a partir de `settings.n8n_workflows`, que agora só vem para quem tem a área "settings" — quem só tem "crm.funis" editar vê a opção N8N vazia (N8N migrado para o agente próprio em 22/09). Se voltar a usar N8N: manter `n8n_workflows` (id/nome/webhook) no JSON da equipe.
+- FORA (outra rodada): o `show` ainda monta o JSON completo para a equipe e depois enxuga — custo evitável (flag `lean:` em settings_json).
+- Specs: `spec/controllers/api/v1/accounts/crm/settings_show_by_role_spec.rb` (novo) + `spec/requests/cevico_security_spec.rb` (403 em TODAS as rotas de settings menos show/update_blocked_days; show enxuto).
+
+## 🔐 AUDITORIA 12/10 — Rodada 4 "Dados que não se perdem", grupo R4-G1: controllers pelo SettingMerge + quadro do Empresário com versão (#351 #413 #414)
+- Controllers de Configurações, Estratégia, Jornada, Metas, Páginas, Fechamento, Médicos e Meu Painel gravam `agenda_config`/`ai_config` só pelo `Cevico::SettingMerge` (trava + releitura + só a chave mexida). `update_agenda` mescla `kpi_layout`/`block_layout`/`panel_palettes` PAINEL A PAINEL (a tela manda só o painel editado; `null` apaga só aquele painel).
+- Cards do "+" (`custom_kpis`): a tela nova manda só o que mudou (`custom_kpis_patch: {upsert, remove, remove_prefix}`) e o servidor junta pelo id em cima da lista do banco — dois admins criando/apagando cards ao mesmo tempo não se apagam. A lista inteira (`custom_kpis`) continua aceita para a aba antiga.
+- Meu Painel (Modo edição): os saves de layout saem UM DE CADA VEZ e o próximo ajuste parte do que já foi mandado (rascunho local) — clicar ✕ em dois cards seguidos não faz o primeiro voltar.
+- Painel do Empresário: a tela manda a versão (`updated_at`) e o servidor responde 409 com o quadro atual se alguém salvou depois; um save de cada vez (o 2º espera o 1º voltar com a versão nova); versão vazia × quadro já versionado também é conflito (só a aba de antes do deploy, sem a chave `version`, grava sem conferir).
+- Recorde do painel: dois painéis batendo o mesmo recorde juntos → fica o MAIOR.
+- RISCO ACEITO (cabe ao Guilherme decidir se entra): `panel_variants`/`panel_assignments` (Configurações → Painéis, só admin) e `process_designs` (Desenho do Processo) e o mapa da Jornada continuam trocando a LISTA inteira, sem versão — duas abas editando a mesma tela ao mesmo tempo ainda podem apagar o trabalho uma da outra (as chaves irmãs já não se perdem). Se quiser: mesmo esquema de versão/409 do Empresário.
+- DEPLOY: pedir para RECARREGAR a página depois de implantar — numa aba aberta antes, o "restaurar padrão" dos blocos e o "tirar paleta" antigos mandavam todos os painéis sem aquele, e com a mescla por painel parecem não funcionar até recarregar.
+- Specs: `spec/controllers/api/v1/accounts/crm/rodada4_setting_merge_controllers_spec.rb` + `app/javascript/dashboard/routes/dashboard/business/specs/useBusinessBoard.spec.js`.
+
+## 🔢 AUDITORIA 13/10 — Rodada 5 "Números certos", grupo R5-G2: faturamento sem carga em massa + "realizada" do Oftalmofácil + Dashboard de Campanhas (#198 #151 #173 #385)
+- FATURAMENTO FECHADO (#198): Meu Painel (KpiBag), PRO MAX do Dashboard CRM e, depois da revisão, também as METAS e o GERENTE AUTOMÁTICO (`revenue_closed` do `Crm::GoalPeriodHistoryService`) usam a mesma régua: só entrada de verdade em "Cirurgia Realizada" (sem carga em massa) e 1 valor por card em cada período/janela (a 1ª entrada). Card que sai e volta na mesma janela conta 1x; numa janela seguinte conta de novo (ex.: 2º olho no mês seguinte).
+- REALIZADA DO OFTALMOFÁCIL (#151/#173): scope `concluidas` (ativa/realizada com a data já passada, "hoje" de São Paulo) no Painel do Empresário e no Hub (resumo, meses, clínicas, procedimentos). Revisão: no Hub, a visão Mês, a lista, a ficha e o chip "Realizada" também seguem essa régua (o servidor manda `status_view`); o chip "Agendada" mostra só de hoje em diante. O "Status lá" continua mostrando o rótulo cru do hub.
+- PARA DEPOIS (com aval): o Financeiro (`finance_controller#profitability`) e o funil por anúncio (`Crm::AdFunnelSteps`) ainda usam o "hoje" do servidor (UTC) — entre 21h e 0h a cirurgia do dia já conta como realizada lá e ainda não no Painel do Empresário/Hub. Conserto: usar `Crm::OftalmofacilSurgery.concluidas`/`concluida?`.
+- DA CASA × PARCEIRO: o Painel do Empresário usa a mesma régua do `PartnerGuard` (nome do fornecedor CONTÉM o nome configurado). Um parceiro cujo nome contenha o nome da casa conta como da casa em TODAS as telas — se acontecer, trocar a régua em um lugar só (PartnerGuard) e nos LIKE em SQL.
+
+## 339. 🧠 FOLLOW-UP INTELIGENTE — o robô só cutuca quem tem a conversa ABERTA (13/10; "o ponto fraco… é que ele ainda está meio burrinho, não consegue entender que a conversa acabou… se ele ficar enviando 3 mensagens de follow-up pra quem encerrou, ele vai receber spam"; decisão B: "ativaremos a pessoa com mensagem modelo"; + 7 sugestões do Sonnet incorporadas)
+- CASO REAL: Adriano (Instagram, 13/10) — "Ainda não" → a IA se despediu ("qualquer dia é só me chamar aqui") → 25 min depois o robô mandou "Oi, pode falar?". Causa: o robô só olhava QUEM falou por último; o Atendente de IA já dizia "encerramento/pausar" no JSON, mas no modo ao vivo isso era jogado fora.
+- LEITOR DO FOLLOW-UP (`Crm::FollowupConversationReader`, agent_key `followup_leitor`, Haiku, trava operacional): antes da 1ª cutucada de cada silêncio lê as últimas 16 mensagens → aberta / encerrada / adiada / recusou, com ordem de prioridade (recusa e adiamento do paciente vencem a despedida da clínica) + rede de segurança pela regra de frases. Sem chave/IA fora → regra de frases. UMA leitura por silêncio, guardada em `conversations.additional_attributes.cevico_conversa_leitura` (`Crm::FollowupClosure`, key = última fala real da clínica; equipe falou de novo → lê de novo). Teto 25 leituras/rodada. Testado com a IA real no local: 5/5 (Adriano=adiada, orçamento com pergunta=aberta, "já fiz em outra clínica"=recusou, consulta marcada=encerrada, parou no meio=aberta).
+- CARIMBO DO ATENDENTE (custo zero): `Crm::ResponderAgentJob.farewell?` (etapa encerramento ou pausar, sem chamar humano) → balões saem com `cevico_encerrou`; vale no WhatsApp e no Instagram. Vence um "aberta" da leitura.
+- RECUSOU → etiqueta `perda_sem_interesse` no contato (criada na conta se faltar) + nota "foi engano? remova" — convenção perda_* = nenhuma automação ativa reativa.
+- ADIOU (decisão B) → UMA mensagem modelo N dias depois (padrão 7; 3/5/7/10/15/30), modelo escolhido POR CAIXA (regra do 314), só dia útil e no horário de envio, se não voltou a escrever, sem consulta futura, sem etiqueta de parada/pausa/parceiro, a equipe não falou depois; trava antes de enviar; passou 3 dias do dia → "perdida". Texto na conversa sai preenchido ({{1}} → nome). Instagram não tem modelo → não sai. Motivo gravado em `leitura.reativacao` (enviada, sem_modelo, paciente_voltou, tem_consulta…).
+- LEAD FRIO (nunca escreveu, em nenhuma conversa do contato): só a 1ª etapa, e só se ≤ 24h. FIM DE SEMANA: sábado/domingo só cutuca quem escreveu no mesmo dia; senão a etapa espera a segunda (não é descartada). ENTREGA FALHOU: última cutucada do silêncio "falhou" (possível bloqueio) → para.
+- Etapa de IA (item 315) recebe as etiquetas do paciente e a regra "faça sentido sozinha: cite o que ele procurou + 1 pergunta".
+- TELA: Automações → Robôs → 3 blocos novos (`FollowupSmartCard.vue`): Follow-up inteligente (3 chavinhas, padrão ligadas) · Quem adiou volta depois (liga/desliga, dias, modelo por caixa) · Resultado do follow-up (régua padrão; Lista|Cards; por coluna do CRM: cutucados, responderam ≤48h, pararam, não entregues, seguradas pela leitura, reativações + frase-ponte). Config em `agenda_config.followup_smart` (PUT próprio com trava, só a chave). Cada cutucada nova guarda `cevico_followup_stage_id`. Previsão do painel da conversa explica o motivo.
+- Fluxos: `followup_bots` atualizado + fluxos novos `followup_leitor` e `followup_ia` (resolveu a falha antiga "agentes sem fluxograma: followup_ia"). Gasto: "Leitor do follow-up" em Agentes de IA.
+- SEM migration. Specs: `spec/jobs/crm/followup_bot_job_smart_spec.rb` (16) + baterias de follow-up/atendentes/fluxos verdes.
+- ANTES DE USAR EM PRODUÇÃO: escolher o modelo de reativação em cada caixa de WhatsApp (sem modelo = ninguém é reativado; a reativação é mensagem modelo = cobrada pela Meta).
+- Estado: no working tree (sem commit), junto das rodadas da auditoria — aguarda "pode subir".
+
+## 340. 🎙️💰 ÁUDIO de volta + VALOR certo na confirmação (13/10 noite; Vaneide: "a IA não está mais respondendo aos pacientes que enviam áudio" · "confirmação enviada com R$ 150,00, mas na agenda o valor estava correto, R$ 350,00" — caso Alessandro Pires, 15/10, "CONSULTA | JÁ PAC | R$350")
+- ÁUDIO: a leitura começava antes do arquivo subir (fila `ai` nova, mais rápida) → "falhou" para sempre + roteiro "peça uma vez só" = silêncio no 2º áudio. Agora: `Crm::MediaReadingJob` tenta de novo (3/6/12 s) em falha passageira, máx. 6 tentativas; o Atendente espera até 25 s a leitura da mensagem que vai responder (e lê na hora se precisar); `Crm::GeminiModels` (novo) troca sozinho de modelo se o Google tirar o 2.5 Flash do ar (`ai_config['gemini_media_model']`); roteiros (v1, v2, company_script) = "responda SEMPRE"; Instagram passa a ler áudio/imagem.
+- VALOR: ordem nova (servidor = tela da Agenda): lançado à mão → "Valor: X" da equipe → **R$ escrito no tipo de consulta** → pré-configurado → outro R$ da observação → padrão. Linhas antigas da IA ("Valor da consulta: R$ 150", blocos "Reagendada pela IA") não contam. Lista de Enviados mostra "R$ 350,00 · escrito no tipo de consulta". Rake `cevico:limpar_valor_ia ACCOUNT_ID=1 DRY=1` (DRY=0 apaga só a linha antiga nas consultas futuras).
+- Fora do código: o modelo da Meta diz "Valor da avaliação" (errado para já-paciente) — editar na Meta.
+
+## 341. 🧭 AMBIENTES DO CRM — cada número de WhatsApp em um ambiente só (13/10 noite; "quero um ambiente de configuração… em que eu seleciono qual número fica dentro de qual ambiente de CRM… essa caixa de entrada não pode acessar o CRM da cevico")
+- A tela CRM → Fontes de pacientes (item 322) virou **Ambientes do CRM** e passou a MANDAR: `Crm::Environments` (novo), `Crm::CardRouter` (trava no próprio card: nenhum caminho cria card CEVICO para paciente do Oftalmofácil — desvia para o funil dele, log "[cerca ambiente]"), listener abre o card da caixa 12 no funil OFTALMOFÁCIL (coluna nova "Novo Contato"; também "Cirurgia Realizada"), board e filtro de conversas do funil CEVICO escondem a caixa 12; "a caixa conta" no PartnerGuard/Stamp (regra B mantida). Card do OftalmoFácil em Integrações: caixas da cerca só leitura (escolha mora na tela nova).
+- Migração: `cevico:ambientes_migrar ACCOUNT_ID=1 MODO=resumo` → `DRY=1` (MOVER/MANTER/REVISAR com motivo) → `DRY=0` (backup antes; move card + histórico, recarimba, limpa caches).
+- Pendente: bloqueio de IA para ambientes parceiros NOVOS (hoje só Oftalmofácil); "Consulta Realizada/Indicação/Não fechou" viram "Consulta Confirmada" no funil OF.
+
+## 342. 📊 INDICADOR DE AGENDAMENTO DESCONTAMINADO (13/10 noite; "preciso saber quantos dos que chegaram hoje agendou (de cada caixa de entrada), e qual o período médio que as outras pessoas agendaram… volume de novos agendamentos, reagendamentos, cancelamentos, confirmações, comparecimentos, indicações, fechamentos, cirurgias realizadas de fato")
+- "Agendaram consulta" = só NOVOS (+ N da base embaixo); taxa = novos ÷ novos (no print de 13/10: 5/77, não 34/77); funil e gráfico em pessoas. Painéis novos: "Quem chegou agendou?" por caixa · "Quando chegaram os que agendaram" (período, fora das portas de entrada, 1–7, 8–30, 31–90, +90, semanas) · bloco "Volume do período" (9 números com fórmula). Cirurgia realizada = entrou numa coluna "Cirurgia Realizada". Lente CEVICO exclui quem é do Oftalmofácil (carimbo ou só conversou pela caixa do parceiro). Popups do Clássico: pessoas primeiro; "Fonte de pacientes" deixa de dar 100% por construção.
+
+## 343. 🔁 RETORNOS PARA A EQUIPE DOS RETORNOS (13/10 noite; Vaneide: "vários pacientes de retorno estão sendo atribuídos a mim"; decisão: Natália e Elizangela, "as duas veem tudo")
+- Agenda → Configurações → Conferência do dia → **Equipe dos retornos** (`agenda_config.retorno_team_user_ids`). Retorno (Agenda, IA, Oftalmofácil) nasce sem dono e visível às duas; tarefas de IA/lembrete recusado de retorno e avisos ("disse NÃO") vão para a equipe. Seletor "Responsável pelas tarefas" nos Atendentes de Agendamento/Pós/Pós-op e na Confirmação. Tarefa de IA fora do pós-op usa o responsável de CONSULTA (era o de cirurgia). Rake `cevico:retornos_equipe ACCOUNT_ID=1 DRY=1` (DRY=0 tira o dono dos retornos futuros de fora da equipe).
+- Pendente (decisão dele): Oftalmofácil transforma "Retorno" puro em cirurgia; tarefa-resumo de muitos lembretes recusados ainda vai ao responsável de cirurgia; "tarefas esperando você" do Meu Painel só conta tarefas com dono.
+- (pendente "Retorno" do Oftalmofácil → RESOLVIDO no item 344)
+
+## 344. 🧩 FUNIL DO OFTALMOFÁCIL ACERTADO + PRÉ-DEFINIÇÃO DE COLUNAS (13/10 noite; "retorno vindo do oftalmofácil é consulta de retorno… veja quais colunas precisam haver no CRM para que fique tudo acertado… pode construir inclusive uma pré definição, para agilizar e facilitar")
+- PRÉ-DEFINIÇÃO = 12 colunas da jornada no funil do parceiro (a da CEVICO sem Envio de Orçamento): Novo Contato → Consulta Agendada → Desmarcou a Consulta → Consulta Confirmada → Não Foi à Consulta → Consulta Realizada → Indicação de Cirurgia → Sem Indicação Cirúrgica → Não Fechou Ainda → Cirurgia Agendada → Cirurgia Realizada → Pós Operatório. `Crm::PartnerFunnel::STAGES` acha a coluna pelo PAPEL (nome sem acento; nomes de produção valem: "Novo paciente", "Cirurgia", "2º Olho", "Consulta Pós Op"). Tela Ambientes do CRM → card Oftalmofácil → "Colunas da jornada" + botão "Criar as N que faltam e organizar" (`apply_preset!`: cria as que faltam e põe a jornada na frente; colunas fora dela — Exame, Consulta, Lente Rígida, Retornos, Intravítrea — vão para o fim com os cards; nada apagado). Salvar o ambiente NÃO cria colunas.
+- PRODUÇÃO 13/10 (diagnóstico na VPS): funil OF (id 2) = Consulta Agendada (14) > Consulta Confirmada (21) > Cirurgia (0) > Exame (11) > Consulta > Lente Rígida > Retornos > Intravítrea > Novo paciente; cerca = [12]. O sync procurava "cirurgia agendada" pelo nome e não achava "Cirurgia" → cirurgia de parceiro ficava sem card (agora pelo papel). Alessandro Pires: procedimento "CONSULTA ESPECIALISTA EM CÓRNEA | R$ 350 | SITE | 1ª VEZ", particular=false → regra antiga caía na avaliação (150); regra nova (340) = 350,00 "escrito no tipo de consulta" (conferido com os dados reais).
+- CardRouter: cada coluna CEVICO vai para a de MESMO papel (antes consulta realizada/indicação/não fechou caíam em Consulta Confirmada).
+- SYNC: "Retorno" do hub = consulta de retorno (`Crm::OftalmofacilSyncService.kind_for`; "retorno p…" segue pós-op). BUG achado: todo item "agendada" do hub (consulta, exame, retorno) ia para "Cirurgia Agendada" e todo "realizada" para "Cirurgia Realizada" → agora consulta vai para Consulta Agendada / Não Foi / Consulta Realizada / Pós Operatório (só no funil do parceiro; no da CEVICO consulta do sync não move card).
+- Rake `cevico:of_colunas ACCOUNT_ID=1 DRY=1`: (1) colunas que faltam, (2) agendamentos do hub gravados como cirurgia que são consulta → viram consulta, (3) cards em coluna de cirurgia só por consulta → coluna de consulta certa, entradas erradas viram 'bulk'. DRY=0 depois do backup.
+- DECISÃO 13/10 ~22h ("as colunas ficaram assim para as meninas se organizarem melhor… tem outras questões, como cirurgia realizada, retorno, pós op"): **ETAPAS + TIPO NO CARTÃO**. Colunas = jornada (13: + "Retorno" no fim; a coluna "Retornos" de produção vira esta). O TIPO (Consulta, Exame, Cirurgia, Lente Rígida, Retorno, Pós-op, Intravítrea) virou etiqueta colorida no card + botões de filtro no topo do CRM, sozinhos pela Agenda (`Crm::AppointmentKind`: próximo agendamento não cancelado; sem próximo, o último; `appointment_kind` no payload do board; ContactCard + CrmBoard `filters.kind`). Sync: adaptação de lente rígida = consulta (LIO de catarata não confunde). Rake `cevico:of_colunas` passo 4: cards nas colunas por tipo (Exame, Consulta, Lente Rígida, Intravítrea) → etapa lida da Agenda (futura: Agendada/Confirmada; passada: Realizada/Retorno/Pós-op/Não foi; cirurgia: Agendada/Realizada); colunas vazias ele apaga à mão. Specs: appointment_kind_spec (2) + environments/sync/controllers (358, 1 falha de relógio SP×UTC conhecida no google_dashboards_check).
+- Estado 340–344: working tree sem commit, SEM migration — aguarda "pode subir".
+
+## 345. 🚧 AGENDAMENTO FALSO + META POR CAIXA + FOLLOW-UP ESPAÇADO (14/10; "algumas pessoas já nasceram em agendamento de consulta… o follow-up do inicio de dia fica todo acumulado para o mesmo horário, isso pode estar configurando SPAM… precisaremos ajustar TUDO isso que vc pontuou hoje")
+- DIAGNÓSTICO (scripts na VPS, docs/DIAGNOSTICO_2026-10-14_agendamento.sh no projeto CEVICO): a automação #2 "Ag. Consulta – Google" (Envio de Orçamento, gatilho etiqueta adicionada, SEM filtro = qualquer etiqueta, move → Agendamento) vinha muda desde julho porque só etiqueta posta pela tela disparava; a Rodada 5 (#17, :880627b) fez TODA etiqueta do sistema disparar → refrativa/att_encerrado empurravam o lead para Agendamento (86 disparos, 75 entradas sem consulta, taxa 81,5%, 38 conversões "Consulta" FALSAS no Google, vídeo "Como será a consulta?" para quem não marcou). Ele pôs `consulta_google` no filtro em 14/10 à tarde.
+- TRAVA: `CrmAutomationTriggerService` — automação de etiqueta SEM filtro só dispara com etiqueta posta por PESSOA (Current.user); robô só dispara a que pediu a etiqueta pelo nome.
+- LIMPEZA: `Crm::FalseBookingCleanup` + rake `cevico:agendamento_falso ACCOUNT_ID=1 AUTOMACAO=2 DESDE=2026-10-13 DRY=1` → backup → DRY=0. Entrada sem consulta (2 dias antes a 30 min depois) vira `automacao_errada` (sai dos indicadores, fica no histórico); card ainda parado por causa dela e sem consulta futura volta quieto para Envio de Orçamento (volta = `corrigido`). Lista as conversões Google/Meta que saíram junto.
+- INDICADOR: "Entrou em <coluna>" do KpiBag conta PESSOAS (card distinto por dia), não passagens.
+- CONVERSÕES: Google/Meta saem 1× por paciente a cada 7 dias por automação (pulo = 'cancelled' no histórico; falha não segura a próxima). Automação na coluna de agendamento SEM valor digitado leva o valor da consulta marcada (Crm::AppointmentPrice, igual à confirmação) — ele deve apagar o "150" da #8 e o "4500" da #9 (fechamento sem valor = valor do card).
+- META: o pixel_id era o conjunto OFFLINE "teste" 4481631012048328 (#21018 em 273 tentativas; antes do 313 a recusa era gravada como "fired" → nada chegava há meses). Trocado por ele para o CatarataSP Site 1224988929327329. Evento de anúncio de WhatsApp exige conjunto LIGADO à conta do WhatsApp (subcode 2804132): cada caixa é uma WABA; conjuntos criados 14/10 por POST /<waba>/dataset (cx1 2558488874664988 · cx2 1418535907156095 · cx5 1489951702959697 · cx6 1149861397466047 · cx7 1492030559419678 · cx12 OF 1741480230260107). `Crm::MetaWabaDatasets`: evento de mensagem vai ao conjunto da WABA do paciente (GET/POST /dataset, guardado em meta_ads_config['waba_datasets']), token do sistema → se recusar por permissão, token da caixa (o que funcionou fica 12h); sem conjunto = vai ao site como evento comum (fallback, perde o ctwa_clid). Cerca do parceiro mantida. Erro mostra error_user_msg + subcode.
+- "TESTAR ENVIO" (`Crm::MetaAdsTestService`): antes mandava PageView vazio → "Invalid parameter". Agora evento de TESTE (código configurado ou TEST_CEVICO) no site e em cada caixa, lista ✅/❌ com o motivo da Meta + linha "Conjuntos do WhatsApp".
+- FOLLOW-UP ESPAÇADO (`Crm::FollowupBotJob`): até N cutucadas a cada M min POR NÚMERO (padrão 5/5; agenda_config.followup_pace; 0 = sem limite; tela Robôs → "Ritmo de envio"), contando robôs + reativações; fila da rodada inteira por prioridade = janela de 24h que fecha primeiro (última mensagem do paciente mais antiga), sem janela por último; segurado pelo ritmo não é marcado (motivo 'ritmo') e não vira "perdeu o momento" (lembrete no Redis 24h); previsão do painel diz "na fila do ritmo de envio".
+- VARREDURA das 12 automações (14/10): nenhuma outra "qualquer etiqueta"; conversões disparavam a cada entrada (resolvido); valores fixos 150/4500 (ele apaga na tela); #7 Lead Google só 4/30d (limitação gclid — estudar).
+- Specs: 241 exemplos verdes (etiquetas, fire job, limpeza, KPI, follow-up 41, Meta 48, settings). SEM migration. Estado: working tree sem commit — aguarda "pode subir".
+- 345b (14/10 noite, depois do deploy :92f1150 + limpeza DRY=0 = 74 entradas fora · 37 cards de volta): prova real da Meta (Marlene, QualifiedLead → conjunto 1418535907156095 da caixa 2, token do sistema, events_received 1). "Testar envio" acusava ❌ falso em todas as caixas ("ctwa_clid inválido", subcode 2804087) porque usava clique inventado → agora usa o CLIQUE REAL do lead de anúncio mais recente da caixa (7 dias, telefone dele embaralhado, código de teste); caixa sem lead de anúncio na semana = ⚪ "conjunto pronto". Nome da aba: Dashboard.vue nunca usa "Chatwoot" como título + manifest.json "CEVICO S.Un" (banco/GlobalConfig estavam certos em 14/10 — causa da volta não achada). Caixa 7 renomeada por ele para "INSTAGRAM 2" (recebe a campanha SP). Sem migration.
+- 345b também: VISÃO GERAL ganhou o 5º cartão "Agendamentos ÷ novos" (rendimento: todos que agendaram no período, novos + base, ÷ contatos novos; ex. 14/10: 17/80 = 21,3%; 7 dias 87/584 = 14,9%) ao lado da "Taxa novo → consulta" (5/80 = 6,3%, a mesma turma). Crm::OverviewService `taxa_geral(_anterior/_formula)`; SCSS `.cvg-fila--5`. Achado da tela: Instagram 455 chegaram × 19 agendaram (4,2%) contra Google 128 × 22 (17,2%) nos 7 dias.
+
+- 345c (14/10 noite, Testar envio depois da :7ed47c5): Site ✅ · cx2 ✅ · cx7 ✅ com clique real; cx1 GOOGLE e cx5 CONFIRMAÇÃO ❌ subcode 2804117 ("ctwa_clid gerado para uma Página diferente da vinculada à WABA") — o teste pegava o clique do CONTATO (anúncio que levou a outra caixa) em conversa desta caixa. Conserto: teste usa o clique carimbado NA CONVERSA desta caixa (sem = ⚪); e o envio real (MetaAdsConversionsService#ctwa_clid) pega o clique da MESMA conversa de anúncio de onde sai a conta do WhatsApp (fallback: o do contato). Specs 73 verdes.
+
+## 346. 👤 PACIENTE ÚNICO — duplicados pelo 9 do celular, "agendado por" e limpeza (15/10; "temos o mesmo contato duplicado… precisamos que tudo o que acontecer sobre o paciente seja unificado")
+- Causa (caso Francislene): o WhatsApp guarda +55 35 8701-7046 (sem o 9) e o OftalmoFácil +55 35 98701-7046. A regra `same_phone_line?` não casava os dois, então a sincronia criava outro contato. Além disso, a consulta da Alice estava na ficha da Francislene, porque o robô gravava consulta de outra pessoa no contato de quem conversava.
+- Robô do WhatsApp agendando para outra pessoa:
+  - Regra fixa no contexto (`OTHER_PERSON_RULE`): pede o nome completo e o telefone com DDD de quem vai passar na consulta. Fica no contexto para valer mesmo com os passos editados na tela.
+  - Campo novo `agendamento.para_outra_pessoa`.
+  - `Crm::PatientLink`: acha ou cria o paciente (sem telefone próprio, a consulta leva o telefone de quem agendou) e amarra os dois (`agendado_por` / `agendou_para`), com uma linha 👪 na observação dos cards e botões no Espaço do Paciente.
+  - Ligação e Instagram continuam como estavam (decisão dele).
+- Etapa 1, trava na origem:
+  - Celular com e sem o 9 = a mesma linha (`AppointmentRecorder.mobile_key`).
+  - Sincronia OF (CATARATA_SP, cadastro achado, 1º nome compatível): nome e e-mail do OF mandam, o CPF completa e o cadastro não ganha a etiqueta oftalmofacil.
+  - Nome diferente, CPF diferente ou duas pessoas no cadastro: não mexe em nada e vira alerta.
+  - `Crm::PatientReview` (alertas em `additional_attributes.cevico_conferir`, mostrados no Espaço do Paciente).
+  - `Crm::DuplicateWatchJob` em todo contato que nasce: mesmo celular com/sem 9, ou mesmo nome com `strong_name?` (3+ palavras, ou 2 palavras com agendamento nos dois).
+  - Telefone obrigatório para paciente novo na Agenda, no CRM e na Nova conversa.
+- Levantamento em produção (só leitura, `script/cevico/levantamento_duplicados.rb`): 27.276 contatos; ALTA 36 grupos/72 · CONFERIR_9 5 · MESMO_CPF 3 · MESMO_NOME 307/759 · DUAS_PESSOAS 46 · cevico+oftalmofacil 98.
+- Etapa 2, limpeza: `rake cevico:paciente_unico ACCOUNT_ID=1 DRY=1` (simula) → `DRY=0` (aplica), BACKUP antes.
+  - Junta os casos ALTA. Fica o cadastro que conversa (número do WhatsApp), com nome, e-mail e CPF do OF, e o card na etapa atual.
+  - Tira a etiqueta oftalmofacil de quem tem cevico.
+  - O resto vira alerta de conferência.
+- Próximas etapas:
+  - Ambiente "Notificações sobre agendamentos", lendo os alertas, com botões Juntar / São pessoas diferentes / Separar.
+  - Busca que puxa o contato em todas as barras, com o nome travado e aviso de "telefone já é de X".
+- Sem migration. WEB+SIDEKIQ. Reversão: imagem :46b3766.
+- 346b (16/10, depois da :99ac5ec + limpeza DRY=0 aplicada em produção: 31 juntados, oftalmofacil saiu de 96, 6 números com +1 corrigidos para +55). Pedido dele: "antes de subirmos, quero que vc tenha concluído todas as coisas que te solicitei ontem".
+  - **Busca que puxa o paciente:** `Crm::PatientSearch` + `GET crm/patients/search|phone_owner`. Busca por nome sem acento (todas as palavras) e por telefone com ou sem 9. Mostra etapa, próxima/última consulta, CEVICO × Oftalmofácil e alerta de conferência. Componente `PatientSuggest.vue`.
+  - Onde a busca entrou:
+    - Agenda: o nome puxa o paciente, o nome trava ("trocar") e telefone e origem vêm junto. A consulta grava `contact_id`. Aviso "este telefone já é de X — usar este paciente".
+    - Barras do CRM, Agendamentos, Chamadas e Hub OF (o clique abre o Espaço do Paciente).
+  - **Notificações sobre agendamentos** (menu Atendimento, contador âmbar; nó de acesso `agenda.notificacoes`): `Crm::AppointmentAlerts` + `Crm::AppointmentAlertActions` + `crm/appointment_alerts`.
+    - O que entra: cadastros com alerta (possível duplicado / nome diferente / CPF diferente / duas pessoas), consulta no cadastro de outra pessoa e consulta sem cadastro.
+    - Botões: Juntar (fica este; os dados do OF mandam), São pessoas diferentes (não volta a alertar), Mover a consulta (para alguém do cadastro ou paciente novo; quem estava com ela vira "agendou para"), Corrigir o nome, Conferido.
+    - Admin vê tudo; o atendente vê o que é dele (responsável pelo card ou pela consulta).
+  - Limpeza: número fora do +55 perde para o +55 do grupo; nome vazio cai no nome do grupo.
+  - Sem migration (os conferidos das consultas ficam em `agenda_config.agendamentos_conferidos`).
+
+## 347. 🚦 SAÚDE DO WHATSAPP — quem não quer mais receber (CERTO × SUSPEITA) + nota dos números e modelos (16/10; "eu quero sim ter mais visualmente os indicadores e encontrar formas de 'taguear pessoas', que demonstram sinais de que não querem mais receber as mensagens… bem desenvolvida e com precisão")
+- A Meta NÃO informa quem bloqueou. O sistema separa o que é CERTO do que é SUSPEITA, e a etiqueta diz qual é:
+  - `nao_perturbe` (certo, já existia): o paciente escreveu pedindo para parar.
+  - `certo_sem_marketing` (certo, novo): a Meta devolveu o erro 131050 (a pessoa desligou o marketing desta empresa). Sai sozinha se um marketing voltar a ser entregue.
+  - `suspeita_bloqueio` (novo): `Crm::BlockSuspicionScan`, de hora em hora, por número. Vale quando as últimas 2 mensagens nossas ficaram só em "enviado" há 48h+; ela já recebia antes por esse número; não escreveu depois; e o número estava entregando para os outros na mesma época (se a caixa caiu, ninguém é marcado). Sai sozinha quando volta a entregar ou a pessoa escreve. 2 e 48h são editáveis na tela.
+  - `suspeita_nao_quer` (novo): frase no meio da conversa ("vou bloquear", "isso é spam", "me tira da lista").
+- Detector de frases refeito (`Crm::OptOut.classify`): CERTO só quando a mensagem INTEIRA é o pedido. Teste na cópia real até 21/09: o detector antigo marcaria 32 pessoas e 26 eram erro ("Cancelar" a consulta, "Parar de usar óculos"); o novo marca 6, todas pedidos reais.
+- O MOTIVO de cada marcação fica no contato (`additional_attributes.cevico_stop_signals`): texto, erro da Meta, mensagens presas e a última mensagem nossa que chegou (quem mandou, modelo, caixa). Quem tira à mão fica no histórico, e a varredura não remarca pelo mesmo sinal.
+- Robôs (`agenda_config.stop_signals.robos`, chavinhas na tela): `certo_sem_marketing` ligado; as duas suspeitas desligadas. Ligado = fora de follow-up, campanhas, jornada, NPS, Colheitadeira e agente de ligação (`Crm::OptOut.quiet_titles` + `Crm::StopSignals.robot_stop_labels`). Confirmação e lembrete da consulta continuam sempre.
+- Tela Relatórios → Saúde do WhatsApp em 4 blocos:
+  - Seus números: nota, linha do tempo da nota (`agenda_config.wa_health_log`, só quando muda), limite, entregues/lidas, só "enviado" há 48h+, erros da Meta por dia.
+  - Modelos: situação + nota de cada modelo (busca a Meta com `quality_score`, guarda 30 min) + envios e entrega.
+  - Quem não quer mais receber: Certo | Suspeita, Lista | Cards, por quê, botões "é pedido de parar" e "não é isso".
+  - O que veio antes do silêncio: por quem mandou e por modelo.
+- Nó de acesso `relatorios.whatsapp_saude` passa a ter ver + editar.
+- Cópia real até 21/09: 109 suspeitas de bloqueio em 60 dias (caixa 1: 54, caixa 2: 55); casos com 13 e 17 mensagens seguidas sem chegar.
+- Pós-deploy: `rake cevico:sinais_parar:motivos_antigos ACCOUNT_ID=1 DRY=1` → `DRY=0`. Só grava o motivo das marcações antigas de nao_perturbe e aponta "revisar" onde o detector novo não marcaria. Não tira etiqueta.
+- Sem migration. WEB+SIDEKIQ (job novo `crm_whatsapp_health_job`, de hora em hora no minuto 25). Reversão: imagem anterior (:90cfd38).
+- Fase 2 (não feita): receber na hora os avisos da Meta por conta (nota do número / modelo pausado). Hoje o sistema os descarta porque chegam sem telefone. Precisa ler `entry.id` = WABA e marcar os campos no app da Meta.
+
+## 348. 🔁 UMA CONVERSA POR PACIENTE EM CADA CAIXA — "resolver" não abre conversa nova (16/10; "quando as meninas 'resolvem a conversa', é como se uma nova conversa fosse iniciada… quanto mais unificadas as conversas fiquem, melhor")
+- Causa: o ajuste nativo da caixa "Roteamento de Conversa" está em "Criar novas conversas" (`inboxes.lock_to_single_conversation = false`). Paciente que escreve depois do "resolver" ganha conversa nova (`Whatsapp::IncomingMessageBaseService#set_conversation`). Os robôs (modelos, lembretes, confirmação, ligação) JÁ reaproveitam a última conversa, mesmo resolvida (`Crm::SendTemplateService#existing_conversation`, `Crm::Calls::ConversationFinder`).
+- Solução: ligar "Reabrir a mesma conversa" em cada caixa (tela, sem deploy). ANTES disso, o ajuste de código abaixo precisa estar no ar.
+- Efeito colateral corrigido (`Crm::ReopenReset`, chamado em `Message#reopen_conversation`): a pausa do Atendente IA (`cevico_atendente_wa` / `cevico_atendente_ia`) mora na CONVERSA. Antes ela sumia com a conversa nova; com a conversa única ficaria para sempre. Agora, quando o PACIENTE reabre uma conversa resolvida, as pausas zeram e a equipe vê uma nota "🔁". Reabrir pela tela não zera.
+- Ficam como estão de propósito: etiquetas (att_encerrado já sobe ao contato e vale para todas as conversas, então o follow-up se comporta igual a antes); leitura do follow-up (`cevico_conversa_leitura`, refeita a cada nova fala da clínica); cadência (zera quando o paciente responde).
+- Conversa reaberta continua com a MESMA atendente de antes (a atribuição automática só age em conversa sem dono).
+- Conversas antigas já divididas NÃO são juntadas (ficam como histórico resolvido). Daqui em diante tudo cai na mais recente.
+- Spec `spec/services/crm/reopen_reset_spec.rb` (5). Teste local ponta a ponta na conta 3 (caixa 3): mensagem caiu na mesma conversa, reabriu, pausa zerada, nota criada. Desfeito depois.
+- Sem migration. Vai junto com o 347. Reversão: voltar a caixa para "Criar novas conversas" (na hora, sem deploy).
+
+## 349. 🔎 SEARCH CONSOLE DENTRO DOS RESULTADOS DE TRÁFEGO (16/10 noite; "ter controle do ranqueamento" das 10 páginas de SEO da clinica.cevico.com.br)
+- **O que entrou (sem commit, sem migration):** bloco "No Google" no topo da aba Otimizar (Resultados de tráfego): aparições, cliques, CTR e posição média do domínio (sc-domain:cevico.com.br) nos últimos 28 dias que o Google já fechou × 28 anteriores; gráfico dia a dia (56 dias); por página (Lista|Cards) o que o Google conta ao lado do que o sistema mediu das visitas do Google orgânico na MESMA janela (visitas → cliques no WhatsApp → leads → agendaram → cirurgias) + termos buscados de cada página com posição antes→agora; termos do domínio com filtro por faixa de posição; endereços que não são páginas do sistema (WordPress, raiz) à parte.
+- **Diagnósticos novos (Cevico::PageInsights, filtro "Google (SEO)"):** `gsc_ctr_baixo` (≥100 aparições, na 1ª página, CTR < 60% da média das próprias páginas na 1ª página → reescrever título/descrição com o termo mais buscado), `gsc_quase_topo` (posição 8–20 com ≥30 aparições → reforçar conteúdo + links internos/WordPress), `gsc_termo_sem_pagina` (termo com ≥3 cliques, sem a palavra "cevico", que nenhuma página publicada "possui" → sugerir página nova, conferindo canibalização com a /refrativa).
+- **Como funciona:** `Cevico::SearchConsole` (searchanalytics.query: totais, page, page+query, date) grava a foto em `google_ads_config['search_console_cache']` (teto 300 páginas / 600 termos) via SettingMerge; `Cevico::SearchConsoleReport` lê a foto e casa URL → CevicoPage; cron `crm_search_console_sync_job` 08:10 UTC (05:10 SP); botão "Atualizar agora" (POST pages_report/search_console_refresh). Credencial = a MESMA conta de serviço do custo do GA4 (Integrações → Google, `service_account_json`), via `Cevico::GoogleServiceAccount` (escopo webmasters.readonly); propriedade em `search_console_site` (padrão sc-domain:cevico.com.br); Integrações mostra o e-mail da conta para copiar + "Testar Search Console".
+- **Local:** `ACCOUNT_ID=3 rake cevico:search_console_demo` (dados de exemplo, recusa em produção; CLEAR=1 apaga). Produção: `ACCOUNT_ID=1 rake cevico:search_console_sync`.
+- **Pós-deploy (Guilherme):** ativar "Google Search Console API" no projeto do Google Cloud; criar/usar a conta de serviço; adicioná-la como usuário Restrito na propriedade cevico.com.br; colar o JSON (se ainda não estiver) e Testar. Cron novo = implantar SIDEKIQ junto (como sempre).
+- **Reversão:** voltar a imagem anterior (nada no banco muda além da chave de cache, que fica inerte).
+
+## 350. 📊 ANÁLISE DE PÁGINAS NO FORMATO DO MEU PAINEL — indicadores primários, secundários e terciários (16/10 noite; "deixar bem completo, estilo o ambiente atualizado do meu painel… organize indicadores primários, secundários e terciários, pra gente analisar")
+- **Tela refeita** (`pages/PagesAnalytics.vue`, rota /pages/analise) com as peças do Meu Painel novo: CvCabecalho (cor do dia + paleta, escopo `report:paginas`), CvVitrine (os 3 pontos a melhorar mais importantes do período, botão "Ver o que fazer" → Resultados de tráfego já na aba Otimizar via `?aba=otimizar`), CvBloco + CvIndicador (número-herói, comparação com o período anterior, linha) e CvPainelLateral (a história de cada número). Régua de período única fora do cabeçalho.
+- **Primários (bloco na cor do dia):** leads na caixa (herói), agendaram, cirurgias, receita, visita → lead · gráficos: caminho inteiro (5 degraus; em pé no celular), leads × agendaram no tempo, de onde vieram os leads.
+- **Secundários (bloco de apoio):** visitas, clicam no WhatsApp, chegam na caixa (+ Protocolos), agendam, leram até o fim · gráficos: taxas no tempo, até onde leram, clique por página.
+- **Terciários (neutro):** aparições e posição no Google (Search Console, item 349), páginas no ar × paradas, testes A/B, funis montados · gráficos: cliques no Google, visitas por origem, pontos a melhorar por tipo.
+- **Página por página** (Lista | Cards, ordenar por leads/visitas/taxa/Google): os mesmos 3 níveis de cada página; clique abre a história (números do período, 30 dias, origens, vindas de outra página, Google com termos, A/B, pontos a melhorar, Ver a página / Abrir a montagem).
+- **Mantido:** filtros por categoria da jornada e palavra-chave (agora valem para TODOS os números — `page_ids[]` no `pages_report`, `Cevico::TrafficReport.new(..., page_ids:)`), teste A/B, montador de funis (reapontar elo / páginas soltas).
+- Sem migration, sem backend novo além do filtro. Spec `pages_report_spec` (+1). Reversão = imagem anterior.
+
+## 352. 🎯 AGENTE DE CAMPANHAS — Análises → Campanhas (19/10; "um sistema/dispositivo pra verificar resultados de campanha, indicadores primários (ROAS, CAC, CPL), secundários e terciários… uma ferramenta que sobe campanhas e otimiza campanhas… faça tudo e depois revise")
+Decisões dele (18/10): a régua é o NOSSO histórico (média de 7/30/90/180/360 dias — "jogamos nosso próprio jogo"); estrela-guia = custo por agendamento de consulta (modo custo por cirurgia para testes); ~R$ 15 mil por canal/mês; autonomia = análise → sugestão → aprovação → aplica → aprende (depois automatiza); liberações das APIs ficam para depois; tudo centralizado no sistema e no Meu Painel.
+- **Migration** (BACKUP antes): `cevico_campaign_days` (foto diária do Google por campanha, via GA4 — a Meta já tem a dela por anúncio) e `cevico_campaign_actions` (a fila de recomendações: sugerida → aprovada → aplicada → aprendizado; ou descartada/expirada).
+- **Serviços `Cevico::CampaignAgent::*`**: `Params` (parâmetros em meta_ads_config['campaign_agent']: estrela-guia, verba por canal, janela 7d, régua 30d, volumes mínimos, ±20 % de verba, teto diário, dias de aprendizado/respeito, chavinhas executar pela API / fim de semana / resumo IA); `GoogleSync` (GA4 por dia e campanha: custo, cliques, impressões; 1ª carga 365 dias; simulação local); `Row` (uma linha com as 3 camadas de indicadores); `Reader` (leitura unificada Meta → campanha/conjunto/anúncio + Google → campanha, com a jornada do CRM por Crm::AdFunnelSteps; leads de página da Meta ligados ao anúncio pelo utm_content; Google pelo utm_id/nome; "sem rastreio" à parte; tempo até agendar = mediana); `Baselines` (nossa média nas 5 janelas, cache 1 h); `Rules` (custo_alto → reduz 20 % / 2× pausa; sem_resultado → pausa; campea → +20 % com teto e ritmo do mês; fadiga; ctr_baixo; cpm_alto; pagina_nao_converte; lead_nao_agenda; verba_parada/verba_acima; em_aprendizado; guardas: item mexido há < 7 dias e regra "em observação"); `Learning` (antes × depois com veredito melhorou/piorou/igual/economizou/cedo + placar por regra → regra que erra mais do que acerta só avisa); `Executor` (Meta pela API com a chavinha ligada — pausar/verba; senão passo a passo + "fiz à mão"; Google sempre à mão até a API do Google Ads); `Launcher` (ficha de subir campanha → plano com nomes CV, sufixo UTM e roteiro; cria PAUSADA na Meta pela API quando ligada); `Daily` (rodada diária: foto do Google, nossa média, expira velhas, regras sem repetir, aprendizado, estado para o Meu Painel, tarefa para o admin, resumo IA opcional).
+- **Job** `Crm::CampaignAgentJob` 07:55 UTC (04:55 SP), depois da carga da Meta; botão "Ler agora" roda na hora. `Crm::MetaGraph#post_object/create_object` (escrita; simulador devolve ids) e conjuntos fictícios com verba no simulador.
+- **API** `crm/campaign_agent` (show, params, decide, apply, manual, run, brief, launch, remove_brief); nó novo `marketing.campanhas` (ver = lê; editar = aprova/aplica/parâmetros/sobe).
+- **Tela** Análises → Campanhas (`reports/CampaignAgent.vue`, kit .cv-*, raiz rola até o fim): Leitura (estrela-guia com 8 KPIs vs nossa média + antes; indicadores secundários e terciários por canal; campanhas → conjuntos → anúncios em Lista|Cards com selo vs média; barra do custo por campanha), Recomendações (fila esperando ok / aprovadas / aplicadas-aprendendo / descartadas, com aprovar, descartar, aplicar na Meta ou passo a passo, fiz à mão, antes × depois; placar do aprendizado), Nossa média (5 janelas × 12 indicadores por canal), Parâmetros, Subir campanha (ficha + fichas guardadas + criar pausada).
+- **Meu Painel**: bloco "Agente de Campanhas" (estrela-guia vs nossa média, gasto/leads/agendamentos/cirurgias, resumo, 3 recomendações, botão para o ambiente) — só para quem vê marketing.campanhas.
+- Testes: 5 specs novos (23 exemplos) + 71 antigos relacionados verdes + cevicoAccess.spec.js; rubocop limpo nos arquivos novos; eslint limpo na tela nova.
+- **Depende dele depois**: liberar na Meta um token com `ads_management` e ligar "Aplicar na Meta pela API"; Google Ads API (developer token + OAuth) para o Google deixar de ser "à mão" e ganhar conjunto/anúncio; conferir que os anúncios da Meta com página mandam `utm_content={{ad.name}}`.
+
+## 353. 📄 ANÁLISE DE PÁGINAS v2 + AGENTE DE PÁGINAS — a tecnologia dos criativos nas páginas, história estilo Apple em cima (19/10 noite; "quero que a análise do tráfego nas páginas seja aprimorada, algo mais parecido com a análise de criativos… vamos investir seriamente na produção de páginas, SEO, tráfego orgânico, narrativa… modelar essa tela no layout da página do iPhone")
+Decisão (dele, 19/10): desenho HÍBRIDO — a gramática da página do iPhone (uma ideia por seção, número herói + uma frase, respiro, índice fixo) para a HISTÓRIA em cima; os blocos operacionais do kit embaixo. Tom de decisão, não de venda.
+- **Serviços `Cevico::PageAgent::*`** (sem migration: reusa a fila `cevico_campaign_actions` com canal `pages`): `Rates` (a página lida como gancho/corpo/CTA: Google = clique por aparição, Leitura = leram até a metade, Convite = clique no WhatsApp por visita, Chegada = lead por clique, Agenda = agendou por lead, Resultado = lead por visita; nil abaixo do volume mínimo), `Records` (média da casa + recorde de cada taxa entre as páginas em 90 dias, cache 1 h), `Scorecard` (mesmo formato do CreativeScorecard: três números por taxa, veredito, quanto falta para o recorde, teia com o recorde na borda, leitura em frases), `Podium` (título que mais atrai / corpo que mais segura / convite que mais converte), `Timeline` (visitas, cliques e leads por dia com as MARCAS: insights aplicados + última alteração da página), `Daily` (lê 7 dias com as regras da aba Otimizar = Cevico::PageInsights, grava recomendações sem repetir, expira, aprende, estado + série de 14 dias + campeã, tarefa para o admin), `Learning` (antes × depois pela visita → clique → lead da própria página), `Executor` (passo a passo: montagem/SEO/página nova/atendimento; "Fiz à mão" liga o antes × depois).
+- **Job** `Crm::PageAgentJob` 08:25 UTC (05:25 SP), depois do Search Console. `Crm::CampaignAction` ganhou kinds seo/content/traffic, severidade seo e scopes pages/ads; `Learning.scoreboard(account, channels:)`.
+- **API** `crm/page_agent` (show, timeline, steps, decide, manual, run) no nó `marketing.resultados`.
+- **Tela** Análise de Páginas (`pages/PagesAnalytics.vue`): componente novo `PagesStory.vue` (história estilo Apple: Resultado · Campeã · Onde o funil vaza · O agente recomenda, com índice fixo que pula para cada seção e para os blocos) + blocos novos: Placar por página (ScoreRadar + VerdictBars dos criativos, leitura em frases, Ver a página / Abrir a montagem), Pódio (3 colunas com medalha e moldura dourada na campeã), Linha do tempo (30/90/180 dias, AreaChart + marcas), Recomendações do agente (fila esperando ok / aprovadas / feitas-aprendendo / descartadas, aprovar, passo a passo, abrir a montagem, fiz à mão, antes × depois, placar do aprendizado, Ler agora).
+- **Meu Painel**: bloco "Agente de Páginas" (visita → lead vs média das páginas em 90 dias, linha de 14 dias, campeã da semana, 3 pontos a melhorar) + o bloco "Agente de Campanhas" ganhou a linha de 14 dias (gasto × leads).
+- Testes: 3 specs novos (8 exemplos) verdes; eslint sem erro novo além das bare strings (estilo do arquivo); rubocop limpo.
+- Pendente: a leitura dos indicadores do Google no placar depende do Search Console ligado; a explicação de como funciona a otimização e a gestão de tráfego fica para a conversa de amanhã (pedido dele).
+
+## ITEM 357 — Meus negócios: lançador do dono com entrada por SSO (21/10/2026)
+- **Pedido dele:** no sistema LIFE, um botão só dele com os ícones CEVICO · LIFE · Sua Ótica; clicar = entrar no sistema daquele negócio, "integrado e isolado", VPS independentes. Decisão do dia: 1 código, 1 imagem, 1 instalação por grupo de sócios (CEVICO+Sua Ótica juntas; LIFE na VPS dela).
+- **O que entrou:** `Cevico::Negocios` (lê `MEUS_NEGOCIOS` JSON + `MEUS_NEGOCIOS_DONOS` do ambiente; gera o link pela API de plataforma do destino `GET /platform/api/v1/users/:id/login` + `sso_account_id`), API `crm/negocios` (index/login), rake `cevico:negocios:autorizar[email]` (cria o app de plataforma "Meus negócios (lançador)" e autoriza o usuário — roda no sistema de DESTINO) e `cevico:negocios:conferir`, tela `/app/accounts/:id/negocios` (cartões em gradiente, abre em aba nova; `local: true` = este sistema) + item "Meus negócios" no menu (só dono). Manuais: docs/MEUS_NEGOCIOS.md, docs/ATUALIZACAO_LIFE_2026-10.md, docs/WHATSAPP_OFICIAL_LIFE.md.
+- **Testado local:** spec negocios_spec (7 verdes); no navegador, com um 2º servidor fazendo o papel do outro sistema, o clique caiu logado na conta 3 e depois na 6517 (Sua Ótica). Em desenvolvimento o servidor chamando a si mesmo TRAVA (interlock do reloader) — por isso o 2º processo.
+- **Atenção:** cada entrada por SSO cria uma sessão nova no destino; o fork tem limite de sessões ativas por usuário (a tela "Active session limit reached" apareceu no usuário de teste local, que já tinha 25). Se o dono bater no limite, encerrar sessões antigas — ou, numa próxima rodada, reaproveitar a sessão.
+- Sem migration. Reversão = imagem anterior.

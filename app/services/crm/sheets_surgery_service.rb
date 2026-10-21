@@ -134,17 +134,10 @@ class Crm::SheetsSurgeryService
 
   # "R$ 5.000,00" / "5000" / "5.000" / "1.234.567" → número correto.
   # BUG antigo: "5.000" (milhar sem centavos) virava 5.0 — receita 1000× menor.
+  # Rodada 5 (#192): a regra mora no Cevico::Money (a mesma do .xlsx de
+  # fechamento e da colagem de telefones); loose mantém a tolerância de
+  # sempre a texto em volta ("R$ 5.000,00 à vista").
   def parse_money(raw)
-    return 0.0 if raw.blank?
-
-    cleaned = raw.gsub(/[^\d,.-]/, '')
-    if cleaned.include?(',')
-      # padrão BR: vírgula = decimal, ponto = separador de milhar
-      cleaned = cleaned.tr('.', '').tr(',', '.')
-    elsif cleaned.count('.') > 1 || cleaned.match?(/\.\d{3}(?:\D|\z)/)
-      # só pontos em posição de MILHAR ("5.000", "1.234.567") → não é decimal
-      cleaned = cleaned.delete('.')
-    end
-    cleaned.to_f
+    Cevico::Money.parse(raw, loose: true) || 0.0
   end
 end

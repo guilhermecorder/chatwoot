@@ -8,7 +8,7 @@
 # - só oferece horários LIVRES da Agenda interna (Crm::AgendaSlots)
 # - agenda sozinho SÓ na Agenda interna (Crm::AppointmentRecorder);
 #   confirmações oficiais são sempre pelo WhatsApp (equipe/robôs de lá)
-class Crm::InstagramAgentService
+class Crm::InstagramAgentService # rubocop:disable Metrics/ClassLength
   include Crm::AiAgentConfig
 
   AGENT_KEY = 'instagram'.freeze
@@ -20,8 +20,6 @@ class Crm::InstagramAgentService
     properties: {
       mensagens: {
         type: 'array',
-        minItems: 1,
-        maxItems: 3,
         items: { type: 'string' },
         description: 'Mensagens curtas a enviar ao paciente, em ordem (máx 3, até ~200 caracteres cada)'
       },
@@ -56,10 +54,12 @@ class Crm::InstagramAgentService
   # Instagram: a agenda vem VIVA do sistema (nada de grade hardcoded) e as
   # confirmações oficiais migram para o WhatsApp.
   SYSTEM_PROMPT = <<~PROMPT.freeze
-    Você é o Guilherme, atendente da CEVICO – Centro da Visão e Cuidados
+    Você é a assistente virtual da CEVICO – Centro da Visão e Cuidados
     Oculares, respondendo pacientes no DIRECT DO INSTAGRAM. Tom natural,
-    acolhedor e consultivo, como um amigo que trabalha na área. Nunca diga
-    que é uma IA.
+    acolhedor e consultivo, como alguém que trabalha na área. Você é uma
+    assistente virtual (IA) da clínica: se perguntarem se é robô ou pessoa,
+    responda com honestidade que é a assistente virtual da CEVICO e que a
+    equipe humana assume quando precisar. Não use nome de pessoa real.
 
     FORMATO DAS MENSAGENS:
     - No máximo 3 mensagens curtas por vez (até ~200 caracteres cada).
@@ -72,6 +72,11 @@ class Crm::InstagramAgentService
     - Não repita perguntas já respondidas; não reinicie a conversa se a
       pessoa disser "oi" no meio dela; apresente-se só no primeiro contato.
     - Não pergunte mais de 2 vezes se a pessoa quer agendar.
+    - Áudio e imagem: o sistema entrega o conteúdo entre colchetes
+      ("[áudio transcrito: …]", "[imagem (receita): …]"). Trate como se a
+      pessoa tivesse escrito. Se vier "[áudio sem transcrição …]", RESPONDA
+      SEMPRE pedindo com gentileza para escrever; em outro áudio assim, peça
+      de novo com outras palavras.
 
     FLUXO (paciente novo): recepção → sondagem (para quem é? qual
     procedimento? quando quer resolver? UMA pergunta por vez) → autoridade →
@@ -81,7 +86,7 @@ class Crm::InstagramAgentService
     AUTORIDADE (usar quando fizer sentido, resumido):
     - Médicos: Dr. Henrique Gemelli, Dra. Roberta Negri e Dr. Gustavo Bittar
       (refrativa: Dr. Gustavo Bittar, especialista em córnea).
-    - Catarata: cirurgia com Dr. Jorge Haddad, +30.000 cirurgias realizadas.
+    - Catarata: cirurgia com o Dr. Ricardo ou o Dr. Renato (mais de 30.000 cirurgias cada), com a estrutura de alta tecnologia da CEVICO: equipamentos de última geração e lentes importadas Rayner (cite só os médicos deste prompt; nunca invente números).
     - Refrativa: Excimer Laser Schwind Amaris 1050RS, considerado o padrão
       ouro mundial (1050 pulsos/segundo, ~1,3s por dioptria).
     - A CEVICO atua dentro do IOP – Instituto Oftalmológico Paulista.
@@ -97,6 +102,9 @@ class Crm::InstagramAgentService
     VALORES OFICIAIS (nunca invente outros; nunca dê desconto):
     - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
       microscopia, fundo do olho e pentacam). Glaucoma: R$ 300.
+    - Exame adicional NÃO incluso (só se perguntarem; nunca prometa "sem
+      cobrança extra"): ciclotorsão R$ 300 por olho, quando o médico
+      julgar necessário, avisado antes.
     {{TABELA_DE_PRECOS}}
     - A técnica de refrativa é definida pelo médico nos exames.
     - Pagamento: PIX à vista, ou até 10x sem juros no cartão.
@@ -139,6 +147,11 @@ class Crm::InstagramAgentService
       pergunta, pausar=true.
   PROMPT
 
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :instagram)
+  end
+
   def initialize(conversation:)
     @conversation = conversation
     @account = conversation.account
@@ -161,8 +174,8 @@ class Crm::InstagramAgentService
     message = client.messages.create(
       model: model,
       max_tokens: 2048,
-      system_: system_prompt,
-      output_config: output_config_for({ type: 'json_schema', schema: output_schema }),
+      system_: cached_system,
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(OUTPUT_SCHEMA) }),
       messages: [{ role: 'user', content: context_block + transcript }]
     )
     record_usage(message)
@@ -180,6 +193,12 @@ class Crm::InstagramAgentService
 
   private
 
+  # (#100) mesmo cliente dos respondedores do WhatsApp: 90 s por chamada e só
+  # 1 nova tentativa — quem responde paciente não segura a conversa por meia hora
+  def client
+    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 90, max_retries: 1)
+  end
+
   # contexto vivo: data/hora de agora + vagas REAIS da agenda interna
   def context_block
     now = Crm::AgendaSlots::TZ.now
@@ -192,27 +211,40 @@ class Crm::InstagramAgentService
       HORÁRIOS DISPONÍVEIS (próximos dias — ofereça no máx. 2 por vez):
       #{Crm::AgendaSlots.free_slots_text(@account)}
 
+      #{Crm::AgendaSlots.rules_block(@account)}
       CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe):
 
     CTX
   end
 
-  def build_transcript
+  # 👂 item 340: áudio/imagem do direct entram como texto lido pelo Gemini
+  # (Crm::MediaReadingService, o mesmo do WhatsApp) — antes a mensagem só com
+  # anexo (content vazio) sumia da conversa e o áudio ficava sem resposta
+  def build_transcript # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     # reorder: o default_scope do Message (created_at ASC) vence um .order
     # comum, então pegava as N mensagens mais ANTIGAS e a IA nunca via as novas
     messages = @conversation.messages
                             .where(message_type: [:incoming, :outgoing])
                             .where(private: false)
-                            .where.not(content: [nil, ''])
+                            .where("COALESCE(messages.content, '') <> '' OR EXISTS (SELECT 1 FROM attachments " \
+                                   'WHERE attachments.message_id = messages.id AND attachments.file_type IN (?))',
+                                   Attachment.file_types.values_at(*Crm::MediaReadingService::KINDS))
+                            .includes(:attachments)
                             .reorder(created_at: :desc)
                             .limit(MAX_MESSAGES)
                             .reverse
 
-    return nil if messages.empty?
+    lines = messages.filter_map do |m|
+      # só áudio e imagem DO PACIENTE (story, post, reel e anexo da clínica seguem fora, como antes)
+      media = m.incoming? ? m.attachments.select { |a| Crm::MediaReadingService::KINDS.include?(a.file_type.to_s) } : []
+      marks = media.map { |a| Crm::MediaReadingService.transcript_label(a) }
+      body = m.content.to_s.strip.truncate(500)
+      text = [body.presence, marks.presence&.join(' ')].compact.join(' ')
+      next if text.blank?
 
-    messages.map do |m|
       author = m.incoming? ? 'PACIENTE' : 'CLÍNICA'
-      "[#{m.created_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}] #{author}: #{m.content.to_s.strip.truncate(500)}"
-    end.join("\n")
+      "[#{m.created_at.in_time_zone('America/Sao_Paulo').strftime('%d/%m %H:%M')}] #{author}: #{text.truncate(marks.any? ? 2400 : 500)}"
+    end
+    lines.empty? ? nil : lines.join("\n")
   end
 end

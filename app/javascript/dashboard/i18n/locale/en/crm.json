@@ -34,6 +34,7 @@
     "STAGE_AUTOMATIONS_SOON": "Configure triggers and automatic actions for this stage. Coming soon.",
     "COMING_SOON": "Coming soon",
     "DELETE_STAGE_HAS_CARDS": "This stage has {count} card(s). Select a destination stage before deleting.",
+    "DELETE_STAGE_COUNT_UNKNOWN": "With a search or filter active the real count is unknown. Choose the stage that receives the cards.",
     "DELETE_MOVE_TO": "Move cards to",
     "DELETE_MOVE_AND_DELETE": "Move cards and delete stage",
     "SETTINGS_ALLOW_DRAG": "Allow dragging cards into this stage",
@@ -118,6 +119,7 @@
       "HISTORY_CURRENT": "Current stage",
       "HISTORY_IN_PROGRESS": "In progress",
       "REMOVE": "Remove from pipeline",
+      "REMOVE_WARNING": "The card leaves the pipeline and the per-stage dashboards; its stage history stays in the database but leaves this screen. Who removed it is recorded.",
       "SAVE": "Save",
       "SAVING": "Saving...",
       "STATUS": {

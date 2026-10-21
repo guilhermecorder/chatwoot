@@ -1,0 +1,401 @@
+# 🔐 CATÁLOGO DE ACESSOS (rodada 334, 12/10) — a ÚNICA lista do que existe
+# no sistema, em árvore pai/filho. Alimenta o servidor (trava de verdade),
+# as rotas, o menu lateral e a tela Acessos.
+#
+# Cada nó:
+#   key       chave curta; a chave completa é o caminho com ponto (crm.funis)
+#   label     nome que o admin lê; {{paciente}} e afins seguem o vocabulário
+#             da empresa (Identidade da empresa)
+#   hint      o que abre / o que "editar" significa ali
+#   levels    [view] = só dá para VER; [view, edit] = ver OU editar
+#   default   o que um atendente SEM configuração tem: none | view | edit |
+#             inherit (segue o pai)
+#   admin     true = só administrador (não dá para conceder)
+#   explicit  true = NÃO herda do pai: só vale com marcação própria no nó
+#             (portas perigosas, que "CRM = editar" não deve abrir por tabela)
+#   segment   clinica = só aparece em empresa do ramo clínica
+#   children  os filhos
+#
+# Regra de herança: o que o admin marca num nó vale para os filhos, a não
+# ser que o filho tenha marcação própria — ou seja um nó `explicit`.
+# Editar sempre inclui ver.
+- key: inicio
+  label: Meu Painel
+  hint: a tela de abertura, com os indicadores e avisos de cada pessoa
+  levels: [view]
+  default: view
+
+- key: conversas
+  label: Conversas
+  hint: "ver = lê as conversas das caixas em que está; editar = responde {{paciente_plural}}"
+  levels: [view, edit]
+  default: edit
+
+- key: chamadas
+  label: Chamadas (ligações pelo WhatsApp)
+  hint: "ver = acompanha as ligações; editar = atende, liga e devolve ligação"
+  levels: [view, edit]
+  default: edit
+
+- key: crm
+  label: CRM (funil de atendimento)
+  hint: "ver = enxerga o quadro; editar = cria {{paciente}}, move cartões e etiqueta"
+  levels: [view, edit]
+  default: edit
+  children:
+    - key: funis
+      label: Funis e colunas (estrutura)
+      hint: "criar, renomear, reordenar e apagar funis e colunas (não herda de CRM: marque aqui de propósito)"
+      levels: [edit]
+      default: none
+      # auditoria 12/10 (#19/#245/#299): apagar um funil leva colunas, cards e
+      # histórico junto — "CRM = editar" (próprio, do papel ou do modelo antigo)
+      # NÃO abre esta porta; só marcação própria neste nó
+      explicit: true
+    - key: campanhas
+      label: Campanha WhatsApp
+      hint: "ver = painel e histórico (o time todo, por padrão); editar = cria e dispara campanhas e ligações em massa"
+      levels: [view, edit]
+      default: view
+    - key: jornada
+      label: Jornada do {{paciente}}
+      hint: "ver = o mapa e a fila do dia (o time todo, por padrão); editar = mensagens da jornada, aprovar envios"
+      levels: [view, edit]
+      default: view
+    - key: formularios
+      label: Formulários
+      hint: "ver = respostas; editar = cria e altera formulários"
+      levels: [view, edit]
+      default: none
+    - key: agendamentos
+      label: Agendamentos (monitor do time)
+      hint: a lista do que foi marcado, remarcado e confirmado
+      levels: [view]
+      default: view
+    - key: fontes
+      label: Ambientes do CRM (fontes de {{paciente_plural}})
+      hint: qual número e qual funil ficam em qual ambiente; carimbo de origem
+      levels: [view, edit]
+      admin: true
+
+- key: agenda
+  label: Agenda
+  hint: "ver = consulta a agenda; editar = marca, remarca, confirma e cancela"
+  levels: [view, edit]
+  default: edit
+  children:
+    - key: notificacoes
+      label: Notificações sobre agendamentos
+      hint: "ver = os alertas de cadastro e consulta para conferir (atendente vê os seus); editar = juntar, separar, mover consulta"
+      levels: [view, edit]
+      default: inherit
+    - key: exames
+      label: Agenda de exames
+      hint: a janela própria dos exames
+      levels: [view, edit]
+      default: inherit
+    - key: cirurgias
+      label: Agenda cirúrgica
+      hint: a agenda independente das cirurgias
+      levels: [view, edit]
+      default: inherit
+      segment: clinica
+    - key: bloqueios
+      label: Fechar e reabrir dias
+      hint: bloquear um dia, uma unidade ou um profissional
+      levels: [edit]
+      default: edit
+    - key: lixeira
+      label: Lixeira da Agenda
+      hint: restaurar ou apagar de vez o que foi excluído
+      levels: [view, edit]
+      default: none
+    - key: imprimir
+      label: Imprimir folha do dia
+      hint: a folha de atendimento impressa
+      levels: [view]
+      default: view
+    - key: configuracao
+      label: Horários e regras da Agenda
+      hint: janelas de atendimento, valores, modelos de confirmação
+      levels: [edit]
+      default: none
+
+- key: pacientes
+  label: "{{Paciente_plural}} (Espaço do {{paciente}})"
+  hint: "ver = abre a ficha; editar = altera dados, notas e orçamento"
+  levels: [view, edit]
+  default: edit
+  children:
+    - key: notas_clinicas
+      label: Notas clínicas
+      hint: anotações clínicas dos profissionais (o cadeado do acesso clínico continua valendo)
+      levels: [view, edit]
+      default: view
+      segment: clinica
+    - key: oftalmofacil
+      label: Oftalmofácil (cirurgias do sistema parceiro)
+      hint: o espelho das cirurgias carregadas do Oftalmofácil
+      levels: [view]
+      default: view
+      segment: clinica
+
+- key: tarefas
+  label: Tarefas
+  hint: "ver = acompanha as tarefas; editar = cria, conclui e comenta"
+  levels: [view, edit]
+  default: none
+
+- key: metas
+  label: Metas
+  hint: "ver = acompanha o mês; editar = altera o plano e as metas"
+  levels: [view, edit]
+  default: view
+  children:
+    - key: ferramentas
+      label: Ferramentas de fechamento
+      hint: roteiro de vendas, mapa de objeções e ferramentas do time
+      levels: [view, edit]
+      default: view
+
+- key: respostas
+  label: Respostas prontas
+  hint: "ver = usa as respostas; editar = cria e altera"
+  levels: [view, edit]
+  default: view
+
+- key: pessoas
+  label: Pessoas (DISC e desenvolvimento)
+  hint: "ver = perfis do time; editar = responde testes e altera o próprio perfil"
+  levels: [view, edit]
+  default: none
+
+- key: academia
+  label: Academia
+  hint: treinamentos e conteúdos de formação
+  levels: [view]
+  default: none
+
+- key: relatorios
+  label: Relatórios
+  hint: os painéis de números; marque só os que a pessoa deve ver
+  levels: [view]
+  default: none
+  children:
+    - key: crm
+      label: Dashboard CRM
+      hint: funil, conversão, ROI e CAC por caixa
+      levels: [view]
+      default: inherit
+    - key: campanhas
+      label: Dashboard Campanhas
+      hint: resultado das campanhas de WhatsApp
+      levels: [view]
+      default: inherit
+    - key: funil_trafego
+      label: Funil de Tráfego
+      hint: do anúncio ao {{paciente}} atendido
+      levels: [view]
+      default: inherit
+    - key: medicos
+      label: Dashboard dos Médicos
+      hint: consultas, indicações e fechamento por médico
+      levels: [view]
+      default: inherit
+      segment: clinica
+    - key: agentes
+      label: Dashboard dos Agentes
+      hint: desempenho de cada pessoa do atendimento
+      levels: [view]
+      default: inherit
+    - key: agenda
+      label: Dashboard da Agenda
+      hint: marcados, confirmados, compareceram
+      levels: [view]
+      default: inherit
+    - key: ligacoes
+      label: Dashboard de Ligações
+      hint: as chamadas do WhatsApp e do agente de ligação
+      levels: [view]
+      default: inherit
+    - key: anuncios
+      label: Anúncios (Meta)
+      hint: investimento e resultado dos anúncios da Meta
+      levels: [view]
+      default: inherit
+    - key: google
+      label: Google (Ads + GA4)
+      hint: investimento e resultado do Google
+      levels: [view]
+      default: inherit
+    - key: whatsapp_saude
+      label: Saúde do WhatsApp
+      hint: qualidade dos números e modelos + quem não quer mais receber
+      levels: [view, edit]
+      default: inherit
+    - key: gasto_whatsapp
+      label: Gasto do WhatsApp
+      hint: quanto a Meta cobra por mês
+      levels: [view]
+      admin: true
+    - key: core
+      label: Relatórios do Chatwoot
+      hint: os relatórios originais do sistema (só administradores)
+      levels: [view]
+      admin: true
+
+- key: automacoes
+  label: Automações
+  hint: o que trabalha sozinho
+  levels: [view, edit]
+  default: none
+  children:
+    - key: robos
+      label: Robôs de follow-up
+      hint: "ver = acompanha; editar = cria e altera os robôs"
+      levels: [view, edit]
+      default: inherit
+    - key: fluxos
+      label: Mapa de fluxos
+      hint: as automações desenhadas como fluxograma
+      levels: [view]
+      default: inherit
+    - key: agentes_ia
+      label: Agentes de IA
+      hint: "ver = painel dos agentes; editar = roteiros, orientações e ligar/desligar"
+      levels: [view, edit]
+      default: none
+    - key: regras
+      label: Regras da caixa
+      hint: as regras automáticas originais do sistema
+      levels: [view, edit]
+      admin: true
+    - key: resultados
+      label: Resultados das automações
+      hint: o que cada automação produziu
+      levels: [view]
+      default: inherit
+    - key: tratamento
+      label: Tratamento de dados
+      hint: etiquetas retroativas, mover em lote, unificar cadastros, importar planilhas
+      levels: [view, edit]
+      default: none
+
+- key: marketing
+  label: Marketing
+  hint: atrair e criar
+  levels: [view, edit]
+  default: none
+  children:
+    - key: criativos
+      label: Central de Criativos
+      hint: "ver = os anúncios e vídeos; editar = sincroniza, transcreve e compartilha"
+      levels: [view, edit]
+      default: inherit
+    - key: paginas
+      label: Páginas e conteúdos
+      hint: "ver = lista e planejamento; editar = cria e altera páginas e rascunhos (o time todo, por padrão)"
+      levels: [view, edit]
+      default: edit
+    - key: funis
+      label: Montador de funis e testes A/B
+      hint: ligar páginas em funis e testar variações
+      levels: [view, edit]
+      default: inherit
+    - key: resultados
+      label: Resultados de tráfego
+      hint: "ver = visitas, cliques e conversão por página; editar = guardar insights e pedir sugestões da IA"
+      levels: [view, edit]
+      default: inherit
+    - key: campanhas
+      label: Agente de Campanhas (Meta + Google)
+      hint: "ver = resultados, nossa média e recomendações; editar = aprova e aplica recomendações, muda parâmetros e sobe campanha"
+      levels: [view, edit]
+      default: inherit
+
+- key: financeiro
+  label: Financeiro
+  hint: dinheiro da empresa
+  levels: [view, edit]
+  default: none
+  children:
+    - key: lancamentos
+      label: Livro caixa
+      hint: "ver = receitas, custos e margem; editar = lança e altera"
+      levels: [view, edit]
+      default: inherit
+    - key: estoque
+      label: Estoque
+      hint: "ver = itens e pedidos; editar = entradas, saídas e pedidos"
+      levels: [view, edit]
+      default: inherit
+    - key: cac
+      label: Financeiro & CAC
+      hint: quanto custa cada {{paciente}} conquistado
+      levels: [view]
+      default: inherit
+
+- key: estrategia
+  label: Estratégia
+  hint: "ver = o painel por pilares; editar = altera pilares, itens e processos"
+  levels: [view, edit]
+  default: none
+
+- key: empresario
+  label: Painel do empresário
+  hint: a mesa do dono
+  levels: [view]
+  admin: true
+
+- key: saude
+  label: Saúde (HUB)
+  hint: "mundo pessoal de treino, dieta e corpo — cada pessoa vê só os próprios registros; editar = usa o mundo Saúde"
+  levels: [view, edit]
+  default: none
+
+- key: configuracoes
+  label: Configurações
+  hint: como o sistema funciona por dentro
+  levels: [view, edit]
+  default: none
+  children:
+    - key: empresa
+      label: Identidade da empresa
+      hint: nome, ramo, unidades, vocabulário e assistente
+      levels: [view, edit]
+      admin: true
+    - key: acessos
+      label: Acessos e papéis
+      hint: quem vê e quem edita o quê
+      levels: [view, edit]
+      admin: true
+    - key: integracoes
+      label: Integrações
+      hint: Meta, Google, planilhas, ligações, agentes de IA e configurações sensíveis
+      levels: [view, edit]
+      default: none
+    - key: modelos
+      label: Lembretes, confirmação e pesquisa
+      hint: os modelos de mensagem que saem sozinhos
+      levels: [view, edit]
+      default: none
+    - key: precos
+      label: Tabela de preços
+      hint: "ver = consulta; editar = altera os preços oficiais"
+      levels: [view, edit]
+      default: none
+    - key: paineis
+      label: Painéis por pessoa
+      hint: qual painel cada login enxerga e quem responde por cada tema
+      levels: [view, edit]
+      admin: true
+    - key: equipe
+      label: Equipe, caixas e etiquetas
+      hint: pessoas do sistema, caixas de entrada, etiquetas e demais ajustes originais
+      levels: [view, edit]
+      admin: true
+    - key: dominio
+      label: Domínio público
+      hint: endereço das páginas, hub e rastreamento
+      levels: [view, edit]
+      admin: true

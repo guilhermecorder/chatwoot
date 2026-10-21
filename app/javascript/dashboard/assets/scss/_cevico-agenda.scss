@@ -1,0 +1,1171 @@
+// ══════════════════════════════════════════════════════════════════════
+// 🍎📅 AGENDA no design Apple (item 210, 23/09) — peças da Agenda de
+// Consultas | Teleconsultas | Exames | Cirurgias por cima do kit "iMac G3 +
+// vidro" (_cevico-glass.scss). Tudo vive sob .cv-page e lê as --cv* do
+// TRILHO ativo (kindVars do cevicoAgenda.js). Os "balões" (eventos) seguem o
+// Calendário da Apple: fundo tingido da cor do evento, fio à esquerda,
+// texto na cor escura, cantos de 8px.
+// ══════════════════════════════════════════════════════════════════════
+
+/* ── cabeçalho grudado da Agenda: vidro claro com desfoque ── */
+.cv-page .cv-ag-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.72);
+  border-bottom: 1px solid rgb(var(--cv-rgb) / 0.16);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+.dark .cv-page .cv-ag-top {
+  background: rgba(17, 18, 21, 0.78);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+/* seletor dos 4 TIPOS: pílulas em vidro; cada tipo acende NA SUA cor */
+.cv-page .cv-ag-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px 0 9px;
+  border-radius: 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--k-deep, #0b1220);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-page .cv-ag-kind:hover { background: rgb(var(--k-rgb) / 0.1); }
+.cv-page .cv-ag-kind .cv-ag-kind-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  background: var(--k-grad);
+  box-shadow: 0 0 0 2px rgb(var(--k-rgb) / 0.2);
+  flex-shrink: 0;
+}
+.cv-page .cv-ag-kind .cv-ag-kind-n {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgb(var(--k-rgb) / 0.12);
+  color: var(--k-deep);
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+/* 25/09 (item 243, "cores mais amigáveis e transparentes"): LIGADO = vidro
+   leve na cor do tipo (fundo translúcido, letra na cor escura, bolinha cheia);
+   DESLIGADO = neutro, bolinha vazada. Antes o ligado era o degradê cheio — com
+   "Geral" todas acendiam juntas e a barra ficava agressiva. */
+.cv-page .cv-ag-kind-on,
+.cv-page .cv-ag-kind-on:hover {
+  color: var(--k-deep);
+  background: rgb(var(--k-rgb) / 0.13);
+  box-shadow: inset 0 0 0 1px rgb(var(--k-rgb) / 0.34);
+}
+.cv-page .cv-ag-kind-on:hover { background: rgb(var(--k-rgb) / 0.19); }
+.cv-page .cv-ag-kind:not(.cv-ag-kind-on) .cv-ag-kind-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px rgb(var(--k-rgb) / 0.65);
+}
+.cv-page .cv-ag-kind-on .cv-ag-kind-n { background: rgb(var(--k-rgb) / 0.2); color: var(--k-deep); }
+.dark .cv-page .cv-ag-kind { color: rgba(255, 255, 255, 0.86); }
+.dark .cv-page .cv-ag-kind-on,
+.dark .cv-page .cv-ag-kind-on:hover { color: #fff; background: rgb(var(--k-rgb) / 0.26); }
+.dark .cv-page .cv-ag-kind .cv-ag-kind-n { color: #fff; background: rgb(var(--k-rgb) / 0.3); }
+
+/* botão redondo de navegação (‹ ›) */
+.cv-page .cv-ag-nav {
+  width: 32px;
+  height: 32px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cv-deep);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgb(var(--cv-rgb) / 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.cv-page .cv-ag-nav:hover { background: rgb(var(--cv-rgb) / 0.12); }
+.cv-page .cv-ag-nav:active { transform: scale(0.94); }
+.dark .cv-page .cv-ag-nav { color: #fff; background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+
+/* título do período (clica → calendário) */
+.cv-page .cv-ag-period {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #0b1220;
+  transition: background 0.15s ease;
+}
+.cv-page .cv-ag-period:hover { background: rgb(var(--cv-rgb) / 0.1); }
+.dark .cv-page .cv-ag-period { color: #fff; }
+
+/* ── número do dia (círculo cheio = hoje) ── */
+.cv-page .cv-ag-daynum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0b1220;
+  font-variant-numeric: tabular-nums;
+}
+.dark .cv-page .cv-ag-daynum { color: #fff; }
+.cv-page .cv-ag-daynum-today {
+  color: #fff;
+  font-weight: 800;
+  background: var(--cv-grad);
+  box-shadow: 0 6px 14px -6px rgb(var(--cv-deep-rgb) / 0.8);
+}
+.cv-page .cv-ag-daynum-muted { color: #9ca3af; }
+.dark .cv-page .cv-ag-daynum-muted { color: rgba(255, 255, 255, 0.35); }
+.cv-page .cv-ag-daynum-lg { width: 36px; height: 36px; font-size: 17px; }
+
+/* ── MÊS: grade de vidro, células limpas ── */
+.cv-page .cv-ag-month {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  background: rgb(var(--cv-rgb) / 0.12);
+  border: 1px solid rgb(var(--cv-rgb) / 0.16);
+  border-radius: 18px;
+  overflow: hidden;
+}
+.dark .cv-page .cv-ag-month { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.1); }
+.cv-page .cv-ag-month-head {
+  padding: 8px 0 7px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.7);
+}
+.dark .cv-page .cv-ag-month-head { background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-ag-cell {
+  position: relative;
+  min-height: 112px;
+  padding: 6px 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.78);
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+.cv-page .cv-ag-cell:hover { background: rgb(var(--cv-rgb) / 0.06); }
+.cv-page .cv-ag-cell-out { background: rgba(255, 255, 255, 0.42); }
+.cv-page .cv-ag-cell-off {
+  background:
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.035) 0 6px, transparent 6px 12px),
+    rgba(255, 255, 255, 0.55);
+}
+.dark .cv-page .cv-ag-cell { background: rgba(255, 255, 255, 0.035); }
+.dark .cv-page .cv-ag-cell:hover { background: rgb(var(--cv-rgb) / 0.14); }
+.dark .cv-page .cv-ag-cell-out { background: rgba(255, 255, 255, 0.015); }
+.dark .cv-page .cv-ag-cell-off {
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.04) 0 6px, transparent 6px 12px),
+    rgba(255, 255, 255, 0.02);
+}
+.cv-page .cv-ag-cell-today { box-shadow: inset 0 0 0 1.5px rgb(var(--cv-rgb) / 0.55); }
+.cv-page .cv-ag-more {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--cv-deep);
+  padding-left: 6px;
+}
+.dark .cv-page .cv-ag-more { color: #fff; }
+
+/* ── BALÃO do evento (todas as visões) — o Calendário da Apple ── */
+.cv-page .cv-ag-ev {
+  --ev: var(--cv);
+  --ev-rgb: var(--cv-rgb);
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 7px 3px 8px;
+  border-radius: 7px;
+  font-size: 11px;
+  line-height: 1.25;
+  text-align: left;
+  color: color-mix(in srgb, var(--ev) 72%, #0b1220);
+  background: rgb(var(--ev-rgb) / 0.13);
+  border: 1px solid rgb(var(--ev-rgb) / 0.08);
+  box-shadow: inset 3px 0 0 var(--ev);
+  overflow: hidden;
+  transition: background 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
+  cursor: pointer;
+}
+.cv-page .cv-ag-ev:hover {
+  background: rgb(var(--ev-rgb) / 0.22);
+  box-shadow: inset 3px 0 0 var(--ev), 0 4px 10px -6px rgb(var(--ev-rgb) / 0.6);
+}
+.dark .cv-page .cv-ag-ev {
+  color: #fff;
+  background: rgb(var(--ev-rgb) / 0.28);
+  border-color: rgb(var(--ev-rgb) / 0.2);
+}
+.dark .cv-page .cv-ag-ev:hover { background: rgb(var(--ev-rgb) / 0.4); }
+.cv-page .cv-ag-ev-time {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  opacity: 0.95;
+}
+.cv-page .cv-ag-ev-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cv-page .cv-ag-ev-done .cv-ag-ev-name { text-decoration: line-through; opacity: 0.7; }
+.cv-page .cv-ag-ev-missed { opacity: 0.55; }
+.cv-page .cv-ag-ev-missed .cv-ag-ev-name { text-decoration: line-through; }
+/* na grade de horas o balão vira bloco absoluto (altura = duração) */
+.cv-page .cv-ag-ev-block {
+  position: absolute;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px 3px 8px;
+  border-radius: 8px;
+  cursor: grab;
+}
+.cv-page .cv-ag-ev-block:active { cursor: grabbing; }
+.cv-page .cv-ag-ev-block .cv-ag-ev-name { width: 100%; }
+.cv-page .cv-ag-ev-block.cv-ag-ev-short { flex-direction: row; align-items: center; gap: 5px; padding-top: 1px; padding-bottom: 1px; }
+.cv-page .cv-ag-ev-badges {
+  display: inline-flex;
+  gap: 3px;
+  font-size: 9px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* item 290: SELO DE PRESENÇA no canto do balão — ✓ verde (foi), ✕ vermelho
+   (faltou), ! âmbar (veio e não fez). Fica nítido mesmo no balão apagado. */
+.cv-page .cv-ag-ev-mark {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.95);
+}
+.dark .cv-page .cv-ag-ev-mark { box-shadow: 0 0 0 1.5px rgba(23, 25, 28, 0.9); }
+.cv-page .cv-ag-ev-mark-ok { background: #059669; }
+.cv-page .cv-ag-ev-mark-no { background: #dc2626; }
+.cv-page .cv-ag-ev-mark-warn { background: #d97706; }
+/* o balão de quem faltou fica apagado, mas o selo não */
+.cv-page .cv-ag-ev-missed { opacity: 1; background: rgb(var(--ev-rgb) / 0.06); }
+.cv-page .cv-ag-ev-missed > :not(.cv-ag-ev-mark) { opacity: 0.55; }
+/* espaço para o selo não cobrir o nome */
+.cv-page .cv-ag-ev:has(.cv-ag-ev-mark) { padding-right: 19px; }
+
+/* item 290: presença rápida no cartão da lista "Itens do dia" */
+.cv-page .cv-ag-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cv-page .cv-ag-quick .cv-ag-act-sm { height: 26px; padding: 0 9px; }
+
+/* ── GRADE DE HORAS (semana e dia) ── */
+.cv-page .cv-ag-grid {
+  border: 1px solid rgb(var(--cv-rgb) / 0.16);
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.7);
+}
+.dark .cv-page .cv-ag-grid { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.1); }
+.cv-page .cv-ag-grid-head {
+  display: grid;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: rgba(255, 255, 255, 0.86);
+  border-bottom: 1px solid rgb(var(--cv-rgb) / 0.14);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.dark .cv-page .cv-ag-grid-head { background: rgba(20, 21, 24, 0.9); border-bottom-color: rgba(255, 255, 255, 0.08); }
+.cv-page .cv-ag-grid-body { display: grid; position: relative; }
+.cv-page .cv-ag-dayhead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 4px 7px;
+  border-left: 1px solid rgb(var(--cv-rgb) / 0.1);
+  transition: background 0.15s ease;
+}
+.cv-page .cv-ag-dayhead:hover { background: rgb(var(--cv-rgb) / 0.06); }
+/* 28/09: cadeado de fechar/reabrir o dia na coluna da semana — aparece ao passar
+   o mouse; dia fechado fica com o cadeado vermelho sempre à vista */
+.cv-page .cv-ag-daylock {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #b91c1c;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.cv-page .relative:hover > .cv-ag-daylock,
+.cv-page .cv-ag-daylock:focus-visible,
+.cv-page .cv-ag-daylock-on { opacity: 1; }
+.cv-page .cv-ag-daylock:hover { background: rgba(220, 38, 38, 0.12); }
+.cv-page .cv-ag-daylock-on { color: #fff; background: #dc2626; border-color: #dc2626; }
+.cv-page .cv-ag-daylock-on:hover { background: #b91c1c; }
+.dark .cv-page .cv-ag-daylock { background: rgba(20, 21, 23, 0.9); color: #fca5a5; }
+.dark .cv-page .cv-ag-daylock-on { background: #dc2626; color: #fff; }
+@media (hover: none) { .cv-page .cv-ag-daylock { opacity: 0.85; } }
+/* item 267: menu fechar/reabrir (dia inteiro · unidade · médico) */
+.cv-page .cv-ag-blockmenu-title { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; padding: 4px 8px 6px; }
+.cv-page .cv-ag-blockmenu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; color: var(--cv-deep, #0f172a); }
+.cv-page .cv-ag-blockmenu-item:hover { background: rgb(var(--cv-rgb) / 0.08); }
+.cv-page .cv-ag-blockmenu-item.on { color: #b91c1c; background: rgba(220, 38, 38, 0.08); }
+.cv-page .cv-ag-blockmenu-state { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.7; }
+.dark .cv-page .cv-ag-blockmenu-item { color: #fff; }
+.dark .cv-page .cv-ag-blockmenu-item.on { color: #fca5a5; }
+/* botão "Reabrir dia" do bloco Período quando o dia está fechado */
+.cv-page .cv-ag-dayclosed { background: #dc2626; border-color: #dc2626; color: #fff; }
+.cv-page .cv-ag-dayclosed:hover { background: #b91c1c; }
+.cv-page .cv-ag-dayhead-wd {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.dark .cv-page .cv-ag-dayhead-wd { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-ag-dayhead-today .cv-ag-dayhead-wd { color: var(--cv); }
+.cv-page .cv-ag-dayhead-off { opacity: 0.55; }
+/* pastilhas das janelas (médico / sala) debaixo do dia */
+.cv-page .cv-ag-win {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--w, var(--cv));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+/* calha das horas */
+.cv-page .cv-ag-gutter {
+  position: relative;
+  border-right: 1px solid rgb(var(--cv-rgb) / 0.12);
+}
+.cv-page .cv-ag-hour {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+}
+.dark .cv-page .cv-ag-hour { color: rgba(255, 255, 255, 0.55); }
+/* coluna de um dia */
+.cv-page .cv-ag-col {
+  position: relative;
+  border-left: 1px solid rgb(var(--cv-rgb) / 0.1);
+  background-image:
+    linear-gradient(to bottom, rgb(var(--cv-rgb) / 0.13) 1px, transparent 1px),
+    linear-gradient(to bottom, transparent calc(50% - 0.5px), rgb(var(--cv-rgb) / 0.06) calc(50% - 0.5px), rgb(var(--cv-rgb) / 0.06) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+  background-size: 100% var(--hour-px, 64px), 100% var(--hour-px, 64px);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.cv-page .cv-ag-col:hover { background-color: rgb(var(--cv-rgb) / 0.03); }
+.cv-page .cv-ag-col-off {
+  cursor: default;
+  background-color: rgba(15, 23, 42, 0.03);
+  background-image:
+    linear-gradient(to bottom, rgb(var(--cv-rgb) / 0.1) 1px, transparent 1px),
+    repeating-linear-gradient(135deg, rgba(15, 23, 42, 0.03) 0 6px, transparent 6px 12px);
+  background-size: 100% var(--hour-px, 64px), auto;
+}
+.cv-page .cv-ag-col-off:hover { background-color: rgba(15, 23, 42, 0.03); }
+.cv-page .cv-ag-col-today { background-color: rgb(var(--cv-rgb) / 0.035); }
+.cv-page .cv-ag-col-drop { background-color: rgba(251, 191, 36, 0.14) !important; }
+.dark .cv-page .cv-ag-col-off { background-color: rgba(255, 255, 255, 0.02); }
+/* faixa da janela do médico / sala (horário de atendimento) */
+.cv-page .cv-ag-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  background: rgb(var(--w-rgb) / 0.07);
+  border-left: 2px solid rgb(var(--w-rgb) / 0.55);
+}
+.cv-page .cv-ag-band-label {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 8.5px;
+  font-weight: 700;
+  color: rgb(var(--w-rgb) / 0.9);
+  letter-spacing: 0.02em;
+}
+/* a linha vermelha de AGORA */
+.cv-page .cv-ag-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ff3b30;
+  pointer-events: none;
+  z-index: 8;
+}
+.cv-page .cv-ag-now::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: #ff3b30;
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.22);
+}
+
+/* ── DIA: blocos de horário das janelas (livre / ocupado / cadeado) ── */
+.cv-page .cv-ag-slot {
+  height: 34px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  transition: background 0.12s ease, transform 0.12s ease, border-color 0.12s ease;
+}
+.cv-page .cv-ag-slot-free {
+  color: var(--w-deep, var(--cv-deep));
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px dashed rgb(var(--w-rgb) / 0.5);
+}
+.cv-page .cv-ag-slot-free:hover { background: rgb(var(--w-rgb) / 0.1); border-style: solid; }
+.cv-page .cv-ag-slot-taken {
+  color: #fff;
+  background: var(--w, var(--cv));
+  justify-content: flex-start;
+  padding: 0 9px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 4px 10px -6px rgb(var(--w-rgb) / 0.9);
+}
+.cv-page .cv-ag-slot-taken:hover { filter: brightness(1.06); }
+/* item 330: retorno / pós-op — consulta "menos prioritária": balão mais leve, com fio pontilhado por dentro */
+.cv-page .cv-ag-slot-soft {
+  background: linear-gradient(135deg, rgb(var(--w-rgb) / 0.78), rgb(var(--w-rgb) / 0.6));
+  outline: 2px dotted rgba(255, 255, 255, 0.65);
+  outline-offset: -3px;
+}
+/* item 319: paciente marcado FORA da faixa do médico — mesmo balão, contorno tracejado */
+.cv-page .cv-ag-slot-out { outline: 2px dashed rgb(var(--w-rgb) / 0.55); outline-offset: 1px; opacity: 0.92; }
+.cv-page .cv-ag-slot-locked {
+  color: #9ca3af;
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+.dark .cv-page .cv-ag-slot-free { background: rgba(255, 255, 255, 0.04); color: #fff; }
+.dark .cv-page .cv-ag-slot-locked { background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.4); border-color: transparent; }
+/* botãozinho que aparece no canto (encaixe / cadeado) */
+.cv-page .cv-ag-corner {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: #374151;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  z-index: 2;
+}
+.cv-page .group:hover > .cv-ag-corner { display: inline-flex; }
+
+/* ── cartão de conferência do dia ── */
+.cv-page .cv-ag-card {
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgb(var(--ev-rgb, var(--cv-rgb)) / 0.22);
+  box-shadow: inset 4px 0 0 var(--ev, var(--cv)), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  cursor: pointer;
+}
+.cv-page .cv-ag-card:hover {
+  box-shadow: inset 4px 0 0 var(--ev, var(--cv)), 0 10px 22px -14px rgb(var(--ev-rgb, var(--cv-rgb)) / 0.6);
+}
+.dark .cv-page .cv-ag-card { background: rgba(255, 255, 255, 0.04); }
+/* botão de escolha da conferência (compareceu / faltou / …) */
+.cv-page .cv-ag-act {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--a, #374151);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid color-mix(in srgb, var(--a, #94a3b8) 40%, transparent);
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+.cv-page .cv-ag-act:hover { background: color-mix(in srgb, var(--a, #94a3b8) 12%, #fff); }
+.cv-page .cv-ag-act:disabled { opacity: 0.5; }
+.cv-page .cv-ag-act-on,
+.cv-page .cv-ag-act-on:hover { color: #fff; background: var(--a, #374151); border-color: transparent; }
+.dark .cv-page .cv-ag-act { background: rgba(255, 255, 255, 0.05); color: #fff; }
+
+/* ── botão + flutuante ── */
+.cv-page .cv-ag-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 30;
+  width: 54px;
+  height: 54px;
+  border-radius: 9999px;
+  color: #fff;
+  background: var(--cv-grad);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 14px 30px -10px rgb(var(--cv-deep-rgb) / 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease;
+}
+.cv-page .cv-ag-fab:hover { transform: translateY(-2px) scale(1.04); }
+.cv-page .cv-ag-fab:active { transform: scale(0.96); }
+
+/* ── o modal salta na tela ── */
+.cv-page .cv-ag-pop { animation: cv-ag-pop 0.24s cubic-bezier(0.34, 1.4, 0.64, 1); }
+@keyframes cv-ag-pop {
+  from { opacity: 0; transform: scale(0.94) translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-page .cv-ag-pop { animation: none; }
+}
+
+/* ── seletor dos 4 tipos DENTRO do banner (Agendamentos, item 211): barra de
+   vidro fumê sobre a cor; o tipo escolhido acende em BRANCO com a sua cor
+   escura na letra (contraste com o fundo, que já é da cor dele) ── */
+.cv-page .cv-ag-kindbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border-radius: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: rgba(15, 23, 42, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.cv-page .cv-ag-kind-hero {
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #fff;
+}
+.cv-page .cv-ag-kind-hero:hover { background: rgba(255, 255, 255, 0.14); }
+.cv-page .cv-ag-kind-hero.cv-ag-kind-on,
+.cv-page .cv-ag-kind-hero.cv-ag-kind-on:hover {
+  color: var(--k-deep);
+  background: #fff;
+  box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.45);
+}
+
+/* ── 24/09: modal de consulta com SEÇÕES numeradas (leitura em F / Gutenberg:
+   quem e quando no canto superior esquerdo, ação principal no inferior
+   direito) e mais contraste nos rótulos; lista "quem está neste horário" ── */
+.cv-page .cv-ag-form .cv-label { font-size: 11px; letter-spacing: 0.04em; color: #1f2937; opacity: 1; }
+.dark .cv-page .cv-ag-form .cv-label { color: #fff; opacity: 0.85; }
+.cv-page .cv-ag-form .cv-input { background: #fff; border-color: rgb(var(--cv-rgb) / 0.35); }
+.dark .cv-page .cv-ag-form .cv-input { background: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-ag-sec {
+  border-radius: 16px;
+  padding: 12px 14px 14px;
+  background: rgb(var(--cv-rgb) / 0.05);
+  border: 1px solid rgb(var(--cv-rgb) / 0.18);
+  border-left: 4px solid var(--cv);
+}
+.dark .cv-page .cv-ag-sec { background: rgba(255, 255, 255, 0.04); border-color: rgb(var(--cv-rgb) / 0.3); border-left-color: var(--cv); }
+.cv-page .cv-ag-sec-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.cv-page .cv-ag-sec-head h3 { font-size: 13px; font-weight: 800; line-height: 1.1; color: var(--cv-deep); }
+.dark .cv-page .cv-ag-sec-head h3 { color: #fff; }
+.cv-page .cv-ag-sec-head p { font-size: 11px; line-height: 1.2; color: #64748b; margin-top: 1px; }
+.dark .cv-page .cv-ag-sec-head p { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-ag-num {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--cv-grad);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px -2px rgb(var(--cv-deep-rgb) / 0.6);
+}
+.cv-page .cv-ag-slotrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--cv-rgb) / 0.2);
+  background: rgb(var(--cv-rgb) / 0.05);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.cv-page .cv-ag-slotrow:hover { border-color: var(--cv); background: rgb(var(--cv-rgb) / 0.1); }
+.dark .cv-page .cv-ag-slotrow { background: rgba(255, 255, 255, 0.04); }
+
+/* ── 24/09: painel direito da visão Dia recolhível (como a barra lateral) ── */
+.cv-page .cv-ag-side { flex-shrink: 0; transition: width 0.28s ease; }
+@media (min-width: 1024px) { .cv-page .cv-ag-side { width: var(--side, 58%); } }
+.cv-page .cv-ag-side-dragging { transition: none; }
+/* o puxador entre as duas metades */
+.cv-page .cv-ag-splitter {
+  flex: 0 0 14px;
+  margin: 0 -5px;
+  align-self: stretch;
+  min-height: 240px;
+  cursor: col-resize;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  touch-action: none;
+}
+.cv-page .cv-ag-splitter-pill {
+  width: 4px;
+  height: 48px;
+  border-radius: 9999px;
+  background: rgb(var(--cv-rgb) / 0.35);
+  transition: background 0.15s ease, height 0.15s ease;
+}
+.cv-page .cv-ag-splitter:hover .cv-ag-splitter-pill, .cv-page .cv-ag-splitter:active .cv-ag-splitter-pill {
+  background: var(--cv);
+  height: 72px;
+}
+.cv-page .cv-ag-side-rail {
+  border-radius: 16px;
+  background: rgb(var(--cv-rgb) / 0.06);
+  border: 1px dashed rgb(var(--cv-rgb) / 0.3);
+  position: sticky;
+  top: 8px;
+}
+.dark .cv-page .cv-ag-side-rail { background: rgba(255, 255, 255, 0.04); }
+.cv-page .cv-ag-rail-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: var(--cv-grad);
+  box-shadow: 0 6px 14px -8px rgb(var(--cv-deep-rgb) / 0.7);
+}
+.cv-page .cv-ag-rail-btn:hover { filter: brightness(1.06); }
+@media (min-width: 1024px) { .cv-page .cv-ag-rail-vert { writing-mode: vertical-rl; margin-top: 6px; } }
+@media (prefers-reduced-motion: reduce) { .cv-page .cv-ag-side { transition: none; } }
+
+/* ── 24/09: caixinhas do painel "Imprimir" (colunas da folha) ── */
+.cv-page .cv-ag-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.cv-page .cv-ag-check:hover { background: rgb(var(--cv-rgb) / 0.08); border-color: rgb(var(--cv-rgb) / 0.25); }
+.cv-page .cv-ag-check input { width: 16px; height: 16px; accent-color: var(--cv); flex-shrink: 0; }
+.dark .cv-page .cv-ag-check { color: #fff; }
+
+/* ── 24/09 item 228: selo de ORIGEM no balão (veio do Oftalmofácil) ── */
+.cv-page .cv-ag-ev-src {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1px dashed rgba(255, 255, 255, 0.7);
+  line-height: 1.3;
+  margin-top: 1px;
+}
+
+/* ── 🎨 item 234: etiqueta da UNIDADE no balão (a cor do balão agora é do TIPO) ── */
+.cv-page .cv-ag-ev-tag {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.55);
+  color: var(--ev, #1e293b);
+  line-height: 1.3;
+  margin-top: 1px;
+  margin-left: 2px;
+}
+.dark .cv-page .cv-ag-ev-tag { background: rgba(0, 0, 0, 0.35); color: #fff; }
+/* botão "Agenda geral" (todas as camadas) */
+.cv-page .cv-ag-kind-all { --k-grad: linear-gradient(135deg, #1e293b, #475569); --k-deep: #1e293b; --k-rgb: 71 85 105; --k-deep-rgb: 30 41 59; }
+
+/* ── 🏥 item 229: ambiente Oftalmofácil — tabelas, semana e tutorial ── */
+.cv-page .cv-of-tablewrap { overflow-x: auto; border-radius: 14px; border: 1px solid rgb(var(--cv-rgb) / 0.18); background: rgba(255, 255, 255, 0.7); }
+.dark .cv-page .cv-of-tablewrap { background: rgba(255, 255, 255, 0.03); }
+.cv-page .cv-of-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.cv-page .cv-of-table th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; padding: 9px 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+  color: #334155; background: rgb(var(--cv-rgb) / 0.09); border-bottom: 1px solid rgb(var(--cv-rgb) / 0.2); white-space: nowrap;
+}
+.dark .cv-page .cv-of-table th { color: rgba(255, 255, 255, 0.75); background: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-of-table td { padding: 8px 10px; border-bottom: 1px solid rgb(var(--cv-rgb) / 0.1); color: #1f2937; vertical-align: middle; }
+.dark .cv-page .cv-of-table td { color: rgba(255, 255, 255, 0.85); border-bottom-color: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-of-table tbody tr { cursor: pointer; transition: background 0.12s ease; }
+.cv-page .cv-of-table tbody tr:nth-child(even) td { background: rgb(var(--cv-rgb) / 0.025); }
+.cv-page .cv-of-table tbody tr:hover td { background: rgb(var(--cv-rgb) / 0.1); }
+.cv-page .cv-of-table tbody tr:last-child td { border-bottom: 0; }
+.cv-page .cv-of-ico { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 9px; color: #475569; }
+.cv-page .cv-of-ico:hover { background: rgb(var(--cv-rgb) / 0.15); color: var(--cv-deep); }
+.dark .cv-page .cv-of-ico { color: rgba(255, 255, 255, 0.7); }
+.cv-page .cv-of-dot { display: inline-block; width: 7px; height: 7px; border-radius: 9999px; margin-left: 6px; vertical-align: middle; }
+.cv-page .cv-of-dot-red { background: #EF4444; }
+
+/* semana do hub */
+.cv-page .cv-of-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 1023px) { .cv-page .cv-of-week { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cv-page .cv-of-day { border-radius: 14px; border: 1px solid rgb(var(--cv-rgb) / 0.18); background: rgba(255, 255, 255, 0.6); min-height: 220px; display: flex; flex-direction: column; overflow: hidden; }
+.dark .cv-page .cv-of-day { background: rgba(255, 255, 255, 0.03); }
+.cv-page .cv-of-day-today { border-color: var(--cv); box-shadow: 0 0 0 3px rgb(var(--cv-rgb) / 0.15); }
+.cv-page .cv-of-day-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid rgb(var(--cv-rgb) / 0.12); background: rgb(var(--cv-rgb) / 0.06); }
+.cv-page .cv-of-day-wd { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+.cv-page .cv-of-day-num { font-size: 15px; font-weight: 800; color: #0f172a; }
+.dark .cv-page .cv-of-day-num { color: #fff; }
+.cv-page .cv-of-day-today .cv-of-day-num { color: var(--cv-deep); }
+.cv-page .cv-of-day-body { padding: 6px; display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.cv-page .cv-of-ev {
+  position: relative; text-align: left; border-radius: 10px; padding: 5px 8px 5px 10px; font-size: 11px; line-height: 1.25;
+  background: #EFF6FF; border-left: 3px solid #3B82F6; color: #1e293b; display: flex; flex-direction: column; gap: 1px;
+}
+.cv-page .cv-of-ev:hover { filter: brightness(0.97); }
+.cv-page .cv-of-ev-aguardando_pagamento { background: #FFFBEB; border-left-color: #F59E0B; }
+.cv-page .cv-of-ev-realizada { background: #ECFDF5; border-left-color: #10B981; }
+.cv-page .cv-of-ev-cancelada { background: #FEF2F2; border-left-color: #EF4444; text-decoration: line-through; opacity: 0.75; }
+.cv-page .cv-of-ev-ausente { background: #FDF2F8; border-left-color: #EC4899; }
+.dark .cv-page .cv-of-ev { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.cv-page .cv-of-ev-time { font-weight: 800; font-size: 10px; font-variant-numeric: tabular-nums; }
+.cv-page .cv-of-ev-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-page .cv-of-ev-sub { font-size: 10px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dark .cv-page .cv-of-ev-sub { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-of-ev-flag { position: absolute; top: 4px; right: 5px; font-size: 10px; color: #047857; }
+
+/* tutorial de primeiro uso */
+.cv-page .cv-of-tour { position: fixed; inset: 0; z-index: 60; }
+.cv-page .cv-of-tour-spot {
+  position: fixed; border-radius: 16px; pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.55), 0 0 0 3px rgb(var(--cv-rgb) / 0.9);
+  transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+.cv-page .cv-of-tour-pop {
+  position: fixed; width: 360px; max-width: calc(100vw - 32px); padding: 14px 16px; border-radius: 16px;
+  background: #fff; border: 1px solid rgb(var(--cv-rgb) / 0.3); box-shadow: 0 24px 48px -16px rgba(2, 6, 23, 0.5);
+}
+.dark .cv-page .cv-of-tour-pop { background: #17191c; }
+
+/* ── item 229, 3ª passada: mês, tabela agrupada com sanfona, cards de indicadores ── */
+.cv-page .cv-of-month-head { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
+.cv-page .cv-of-month-head span { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; padding: 0 8px; }
+.cv-page .cv-of-month { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cv-page .cv-of-mcell {
+  min-height: 108px; border-radius: 12px; padding: 6px; cursor: pointer;
+  border: 1px solid rgb(var(--cv-rgb) / 0.16); background: rgba(255, 255, 255, 0.6); transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-page .cv-of-mcell:hover { border-color: var(--cv); box-shadow: 0 6px 16px -10px rgb(var(--cv-deep-rgb) / 0.5); }
+.dark .cv-page .cv-of-mcell { background: rgba(255, 255, 255, 0.03); }
+.cv-page .cv-of-mcell-out { opacity: 0.45; }
+.cv-page .cv-of-mcell-today { border-color: var(--cv); box-shadow: 0 0 0 3px rgb(var(--cv-rgb) / 0.15); }
+.cv-page .cv-of-mnum { font-size: 12px; font-weight: 800; color: #0f172a; }
+.dark .cv-page .cv-of-mnum { color: #fff; }
+.cv-page .cv-of-mcell-today .cv-of-mnum { color: var(--cv-deep); }
+.cv-page .cv-of-mcount { font-size: 10px; font-weight: 800; color: #fff; background: var(--cv-grad); border-radius: 9999px; padding: 0 6px; line-height: 16px; }
+.cv-page .cv-of-mchip {
+  display: block; width: 100%; text-align: left; font-size: 10px; line-height: 1.25; padding: 2px 5px 2px 6px; margin-bottom: 2px;
+  border-radius: 6px; border-left: 3px solid #3B82F6; background: #EFF6FF; color: #1e293b;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cv-page .cv-of-mchip-time { font-weight: 800; font-variant-numeric: tabular-nums; }
+.dark .cv-page .cv-of-mchip { background: rgba(255, 255, 255, 0.06); color: #fff; }
+@media (max-width: 767px) { .cv-page .cv-of-month { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cv-page .cv-of-month-head { display: none; } .cv-page .cv-of-mcell-out { display: none; } }
+
+/* tabela agrupada: cabeçalho de grupos + separadores verticais entre grupos */
+.cv-page .cv-of-table-grouped th.cv-of-sep, .cv-page .cv-of-table-grouped td.cv-of-sep { border-left: 2px solid rgb(var(--cv-rgb) / 0.22); }
+.cv-page .cv-of-table-grouped tr.cv-of-grp th { top: 0; text-align: center; font-size: 10px; letter-spacing: 0.08em; background: rgb(var(--cv-rgb) / 0.16); color: var(--cv-deep); border-bottom: 1px solid rgb(var(--cv-rgb) / 0.25); }
+.dark .cv-page .cv-of-table-grouped tr.cv-of-grp th { color: #fff; }
+.cv-page .cv-of-table-grouped thead tr:nth-child(2) th { top: 31px; }
+.cv-page .cv-of-table tr.cv-of-row-open td { background: rgb(var(--cv-rgb) / 0.12) !important; }
+.cv-page .cv-of-table tr.cv-of-expand td { background: rgb(var(--cv-rgb) / 0.05); cursor: default; padding: 12px 14px 14px; border-bottom: 2px solid rgb(var(--cv-rgb) / 0.22); }
+.cv-page .cv-of-table tr.cv-of-expand:hover td { background: rgb(var(--cv-rgb) / 0.05); }
+.cv-page .cv-of-ico.rotate-180 { transform: rotate(180deg); }
+
+/* cards de indicadores (parceiros, clínicas) */
+.cv-page .cv-of-card { border-radius: 16px; padding: 16px; background: rgba(255, 255, 255, 0.72); border: 1px solid rgb(var(--cv-rgb) / 0.18); }
+.dark .cv-page .cv-of-card { background: rgba(255, 255, 255, 0.04); }
+.cv-page .cv-of-stat { border-radius: 12px; padding: 8px 6px; text-align: center; background: rgb(var(--cv-rgb) / 0.07); }
+.cv-page .cv-of-stat b { display: block; font-size: 16px; font-weight: 800; color: #0f172a; line-height: 1.1; }
+.dark .cv-page .cv-of-stat b { color: #fff; }
+.cv-page .cv-of-stat span { display: block; font-size: 10px; color: #64748b; margin-top: 2px; }
+
+/* tabela que CABE na largura (pedido dele: sem barra de rolagem nos itens) */
+.cv-page .cv-of-table-fit { table-layout: fixed; }
+.cv-page .cv-of-table-fit td { vertical-align: top; overflow-wrap: anywhere; }
+.cv-page .cv-of-table-fit td.cv-of-sep, .cv-page .cv-of-table-fit th.cv-of-sep { border-left: 2px solid rgb(var(--cv-rgb) / 0.22); }
+.cv-page .cv-of-main { display: block; font-weight: 700; color: #0f172a; line-height: 1.25; }
+.dark .cv-page .cv-of-main { color: #fff; }
+.cv-page .cv-of-sub { display: block; font-size: 11px; color: #64748b; margin-top: 2px; line-height: 1.25; }
+.dark .cv-page .cv-of-sub { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-of-tablewrap:has(.cv-of-table-fit) { overflow-x: visible; }
+
+/* ── item 243 (25/09): cartão do DIA em grade — hora | quem e o quê | selos.
+   A coluna de selos tem largura fixa e os selos a mesma largura: de um cartão
+   para o outro tudo cai na mesma vertical (Agenda geral e Agenda do hub) ── */
+.cv-page .cv-ag-card-grid {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 176px;
+  column-gap: 14px;
+  align-items: start;
+}
+.cv-page .cv-ag-card-time {
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+.cv-page .cv-ag-card-proc {
+  margin-top: 2px;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #0f172a;
+}
+.dark .cv-page .cv-ag-card-proc { color: #fff; }
+.cv-page .cv-ag-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #64748b;
+}
+.cv-page .cv-ag-card-meta > * { display: inline-flex; align-items: center; gap: 4px; }
+.cv-page .cv-ag-card-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.cv-page .cv-ag-card-pills .cv-chip {
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+@media (max-width: 640px) {
+  .cv-page .cv-ag-card-grid { grid-template-columns: 44px minmax(0, 1fr); row-gap: 8px; }
+  .cv-page .cv-ag-card-pills { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; }
+  .cv-page .cv-ag-card-pills .cv-chip { width: auto; }
+}
+
+/* ── item 244 (25/09): cabeçalho da Agenda em BLOCOS — Calendário (mini mês
+   sempre aberto) · Período (título grande) · Filtros. Vale para a Agenda geral
+   e para a Agenda do hub Oftalmofácil. ── */
+.cv-page .cv-ag-block {
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgb(var(--cv-rgb) / 0.16);
+  box-shadow: 0 10px 28px -18px rgb(var(--cv-deep-rgb, 15 23 42) / 0.35);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+}
+.dark .cv-page .cv-ag-block { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.1); }
+.cv-page .cv-ag-block-title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: #0f172a;
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+/* 27/09 (pedido dele): mais RESPIRO entre as seções da mesma caixa e uma
+   divisória de verdade — "a falta de espaçamento deixa tudo embaralhado" */
+.cv-page .cv-ag-divider {
+  height: 1px;
+  margin: 28px 0 24px;
+  background: linear-gradient(90deg, transparent, rgb(var(--cv-rgb) / 0.35) 20%, rgb(var(--cv-rgb) / 0.35) 80%, transparent);
+}
+.dark .cv-page .cv-ag-divider { background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18) 20%, rgba(255, 255, 255, 0.18) 80%, transparent); }
+.cv-page .cv-ag-block > .cv-ag-block-title + .cv-ag-block-sub { display: block; margin-top: -2px; }
+.cv-page .cv-ag-block .cv-ag-block-title:not(:first-child) { margin-top: 18px; }
+.dark .cv-page .cv-ag-block-title { color: #fff; }
+.cv-page .cv-ag-block-sub { font-size: 12px; font-weight: 500; color: #94a3b8; letter-spacing: 0; line-height: 1.45; }
+.cv-page .cv-ag-row-label {
+  flex-shrink: 0;
+  width: 96px;
+  padding-top: 8px;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+@media (max-width: 640px) { .cv-page .cv-ag-row-label { display: none; } }
+/* 28/09 (item 266): dentro de Situação/Onde as pílulas respiram (gap maior) e
+   cada linha tem o seu espaço; o rótulo alinha com a 1ª pílula */
+.cv-page .cv-ag-filters > .flex { gap: 16px; }
+.cv-page .cv-ag-filters > .flex > .flex { gap: 8px 10px; }
+.cv-page .cv-ag-filters .cv-ag-row-label { padding-top: 9px; width: 104px; }
+/* semana em vista no mini calendário: faixa na cor do dia */
+.cv-page .cv-ag-mini-week { border-radius: 10px; }
+.cv-page .cv-ag-mini-week-on { background: rgb(var(--cv-rgb) / 0.13); box-shadow: inset 0 0 0 1px rgb(var(--cv-rgb) / 0.25); }
+.cv-page .cv-ag-mini-week-on .cv-ag-daynum { font-weight: 700; color: var(--cv-deep, #0f172a); }
+/* camadas mais compactas dentro do bloco Filtros (cabem numa linha) */
+.cv-page .cv-ag-block .cv-ag-kind { height: 29px; padding: 0 9px 0 7px; gap: 5px; font-size: 12px; border-radius: 10px; }
+.cv-page .cv-ag-block .cv-ag-kind .cv-ag-kind-n { font-size: 10.5px; padding: 0 5px; }
+
+/* ── item 247 (25/09): balão da grade não ESPREME as linhas (o nome ficava por
+   baixo dos selos): cada linha mantém a altura e o que não cabe é cortado; em
+   balão baixo os selos de parceiro/unidade saem (ficam na dica e no cartão) ── */
+.cv-page .cv-ag-ev-block > * { flex-shrink: 0; max-width: 100%; }
+.cv-page .cv-ag-ev-block.cv-ag-ev-tight .cv-ag-ev-src,
+.cv-page .cv-ag-ev-block.cv-ag-ev-tight .cv-ag-ev-tag { display: none; }
+
+/* ── item 300 (30/09): selo "paciente confirmou" + origem CEVICO × Oftalmofácil ── */
+.cv-page .cv-ag-conf {
+  display: inline-block;
+  width: 1.15em;
+  height: 1.15em;
+  margin-right: 3px;
+  vertical-align: -0.2em;
+  flex-shrink: 0;
+  color: #16a34a;
+}
+.cv-page .cv-ag-conf-no { color: #dc2626; }
+.dark .cv-page .cv-ag-conf { color: #4ade80; }
+.dark .cv-page .cv-ag-conf-no { color: #f87171; }
+/* no bloco cheio do médico o fundo já é a cor: selo branco */
+.cv-page .cv-ag-slot-taken .cv-ag-conf,
+.dark .cv-page .cv-ag-slot-taken .cv-ag-conf { color: #fff; margin-right: 0; }
+.cv-page .cv-ag-slot-taken .cv-ag-conf-no { opacity: 0.85; }
+
+/* formulário: os 6 tipos em grade (nada cortado) */
+.cv-page .cv-ag-kind-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.cv-page .cv-ag-kind-grid .cv-ag-kind {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  justify-content: flex-start;
+  font-size: 12px;
+  border: 1px solid rgb(var(--k-rgb) / 0.16);
+}
+.cv-page .cv-ag-kind-grid .cv-ag-kind:not(.cv-ag-kind-on) { background: rgb(var(--k-rgb) / 0.07); }
+.cv-page .cv-ag-kind-grid .cv-ag-kind:not(.cv-ag-kind-on):hover { background: rgb(var(--k-rgb) / 0.14); }
+.cv-page .cv-ag-kind-grid .cv-ag-kind-on { border-color: rgb(var(--k-rgb) / 0.6); box-shadow: 0 0 0 1.5px rgb(var(--k-rgb) / 0.55); }
+@media (max-width: 420px) {
+  .cv-page .cv-ag-kind-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* formulário: CEVICO × Oftalmofácil */
+.cv-page .cv-ag-origin {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.cv-page .cv-ag-origin-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  min-width: 0;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--o);
+  background: rgb(var(--o-rgb) / 0.06);
+  border: 1.5px solid rgb(var(--o-rgb) / 0.22);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-page .cv-ag-origin-opt:hover { background: rgb(var(--o-rgb) / 0.13); }
+.cv-page .cv-ag-origin-need .cv-ag-origin-opt { border-style: dashed; border-color: rgb(217 119 6 / 0.7); }
+.cv-page .cv-ag-origin-on,
+.cv-page .cv-ag-origin-on:hover {
+  color: #fff;
+  background: var(--o);
+  border-color: var(--o);
+  box-shadow: 0 6px 14px -8px rgb(var(--o-rgb) / 0.9);
+}
+.dark .cv-page .cv-ag-origin-opt:not(.cv-ag-origin-on) { color: #fff; background: rgb(var(--o-rgb) / 0.22); }
+.cv-page .cv-ag-head-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* ── 💰 item 324 (05/10): card de agendamento ABERTO no computador — duas
+   colunas (quem/quando · motivo/valor/situação), títulos maiores, mais
+   contraste no que importa, avisos de horário recolhidos dentro de
+   "Quando e onde" e a seção VALOR ── */
+.cv-page .cv-ag-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 1024px) {
+  .cv-page .cv-ag-pop-wide { max-width: 68rem; }
+  .cv-page .cv-ag-pop-wide .cv-ag-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+  .cv-page .cv-ag-pop-wide .cv-ag-kind-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec { padding: 18px 20px 20px; border-radius: 20px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec-head { margin-bottom: 14px; gap: 12px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec-head h3 { font-size: 17px; letter-spacing: -0.01em; }
+  .cv-page .cv-ag-pop-wide .cv-ag-sec-head p { font-size: 12px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-num { width: 28px; height: 28px; font-size: 13px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-form .cv-label { font-size: 11.5px; }
+  .cv-page .cv-ag-pop-wide .cv-ag-form .cv-input { font-size: 14.5px; padding-top: 9px; padding-bottom: 9px; }
+  .cv-page .cv-ag-pop-wide .cv-modal-head h2 { font-size: 1.3rem; }
+}
+/* o que mais importa lê mais forte: nome, dia e horário */
+.cv-page .cv-ag-form .cv-input { color: #0f172a; font-weight: 600; }
+.dark .cv-page .cv-ag-form .cv-input { color: #fff; }
+.cv-page .cv-ag-form .cv-input::placeholder { font-weight: 400; }
+.cv-page .cv-ag-sec { transition: box-shadow 0.18s ease, border-color 0.18s ease; }
+.cv-page .cv-ag-sec:focus-within { border-color: rgb(var(--cv-rgb) / 0.55); box-shadow: 0 10px 28px -18px rgb(var(--cv-deep-rgb) / 0.7); }
+
+/* avisos de horário: uma linha discreta, abre ao clicar */
+.cv-page .cv-ag-note { border-radius: 12px; padding: 8px 10px; font-size: 12px; line-height: 1.35; }
+.cv-page .cv-ag-note-head { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.cv-page .cv-ag-note-count { min-width: 20px; padding: 0 6px; border-radius: 9999px; font-size: 11px; font-weight: 800; text-align: center; background: rgba(0, 0, 0, 0.1); }
+.cv-page .cv-ag-note-amber { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.cv-page .cv-ag-note-red { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.dark .cv-page .cv-ag-note-amber { background: rgba(217, 119, 6, 0.14); color: #fcd34d; border-color: rgba(217, 119, 6, 0.4); }
+.dark .cv-page .cv-ag-note-red { background: rgba(220, 38, 38, 0.14); color: #fca5a5; border-color: rgba(220, 38, 38, 0.4); }
+.dark .cv-page .cv-ag-note-count { background: rgba(255, 255, 255, 0.16); }
+
+/* VALOR: o número que vai na confirmação em destaque + linhas lançadas à mão */
+.cv-page .cv-ag-price {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid rgb(var(--cv-rgb) / 0.3);
+}
+.dark .cv-page .cv-ag-price { background: rgba(255, 255, 255, 0.06); }
+.cv-page .cv-ag-price-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #475569; }
+.dark .cv-page .cv-ag-price-label { color: rgba(255, 255, 255, 0.7); }
+.cv-page .cv-ag-price-value { font-size: 22px; font-weight: 800; line-height: 1; color: var(--cv-deep); white-space: nowrap; }
+.dark .cv-page .cv-ag-price-value { color: #fff; }
+.cv-page .cv-ag-price-source { grid-column: 1 / -1; font-size: 11px; color: #64748b; }
+.dark .cv-page .cv-ag-price-source { color: rgba(255, 255, 255, 0.6); }
+.cv-page .cv-ag-charge { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.cv-page .cv-ag-charge-amount { width: 8.5rem; flex: none; text-align: right; }
+.cv-page .cv-ag-charge-by { flex-basis: 100%; font-size: 10.5px; color: #64748b; margin-top: -2px; }
+.dark .cv-page .cv-ag-charge-by { color: rgba(255, 255, 255, 0.55); }

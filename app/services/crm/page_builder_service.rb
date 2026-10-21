@@ -60,7 +60,7 @@ class Crm::PageBuilderService
       # saía vazia (caso real 23/07, landing de catarata trifocal).
       # Construtor PRO: o admin pode escolher o teto na tela do agente.
       max_tokens: max_tokens_config || 30_000,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: build_input }]
     )

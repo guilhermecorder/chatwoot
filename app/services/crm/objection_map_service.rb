@@ -60,6 +60,11 @@ class Crm::ObjectionMapService
     argumento novo); nunca prometa resultado cirúrgico.
   PROMPT
 
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :objection_map)
+  end
+
   def initialize(account)
     @account = account
   end
@@ -107,8 +112,8 @@ class Crm::ObjectionMapService
     message = client.messages.create(
       model: model,
       max_tokens: 2048,
-      system_: SYSTEM_PROMPT,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      system_: cached_system(default_system_prompt),
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(OUTPUT_SCHEMA) }),
       messages: [{ role: 'user',
                    content: "Estágio: #{stage[:label]}. Extraia o mapa de objeções destas #{convs.size} conversas:\n\n#{corpus.truncate(90_000)}" }]
     )
@@ -127,12 +132,14 @@ class Crm::ObjectionMapService
                 .join("\n")
   end
 
+  # 🔒 Rodada 4 da auditoria (#102): sob a trava da linha, relendo a config
+  # fresca (Cevico::SettingMerge) — o mapa não apaga o que outro gravou
   def save_map(map)
-    settings = CrmSetting.find_or_create_by!(account: @account)
-    cfg = settings.ai_config || {}
-    cfg['agents'] ||= {}
-    cfg['agents']['sales'] ||= {}
-    cfg['agents']['sales']['objection_map'] = map
-    settings.update!(ai_config: cfg)
+    Cevico::SettingMerge.merge!(@account, :ai_config) do |cfg|
+      cfg['agents'] ||= {}
+      cfg['agents']['sales'] ||= {}
+      cfg['agents']['sales']['objection_map'] = map
+      cfg
+    end
   end
 end

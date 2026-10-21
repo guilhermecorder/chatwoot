@@ -13,12 +13,16 @@ class Crm::LabelRemoveService
     }
   end
 
+  # 🏷️ Rodada 5 (#17): remoção em massa NÃO dispara as automações "Etiqueta
+  # removida" (uma por paciente atingido seria mensagem/conversão em massa).
   def apply!
     removed = 0
-    target_contacts.find_each do |contact|
-      strip_label(contact)
-      contact.conversations.tagged_with(clean_label).find_each { |conv| strip_label(conv) }
-      removed += 1
+    Contact.without_label_triggers do
+      target_contacts.find_each do |contact|
+        strip_label(contact)
+        contact.conversations.tagged_with(clean_label).find_each { |conv| strip_label(conv) }
+        removed += 1
+      end
     end
     { contacts: removed }
   end

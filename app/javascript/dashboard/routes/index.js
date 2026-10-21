@@ -7,49 +7,38 @@ import { validateLoggedInRoutes } from '../helper/routeHelpers';
 import { isOnOnboardingView } from 'v3/helpers/RouteHelper';
 import AnalyticsHelper from '../helper/AnalyticsHelper';
 import { segmentoId } from '../helper/segmento';
+import { routeAllowed, routeNodesFor } from '../helper/cevicoAccess';
 
-const ONBOARDING_STEPS = ['account_details', 'enrichment'];
+const ONBOARDING_STEPS = ['account_details', 'enrichment', 'inbox_setup'];
 const routes = [...dashboard.routes];
 
-// CEVICO (modelo de CONCESSÃO, 17/07): rotas de áreas administrativas que
-// abrem para atendente COM a área concedida pelo admin em
-// crm_settings.agent_permissions['grants']. A tranca de verdade é o
-// backend (require_capability) — aqui é só para a navegação fazer sentido.
-// Fail-closed: sem concessão confirmada, volta para o painel.
-const CEVICO_GRANTED_ROUTES = {
-  crm_dashboard_reports: ['reports'],
-  traffic_funnel_reports: ['reports'],
-  doctors_reports: ['reports'],
-  agents_dashboard_reports: ['reports'],
-  agenda_dashboard_reports: ['reports'],
-  ads_reports: ['reports'],
-  google_dashboard_reports: ['reports'],
-  whatsapp_health_reports: ['reports'],
-  crm_campaigns: ['campaigns'],
-  crm_campaigns_dashboard: ['campaigns', 'reports'],
-  cevico_automations: ['automations', 'data_tools'],
-  crm_integrations: ['settings'],
-  cevico_finance: ['finance'],
-  cevico_strategy: ['strategy'],
-  cevico_pages_analytics: ['pages'],
-  cevico_ab_center: ['pages'],
-};
+const onboardingPath = step =>
+  step === 'inbox_setup' ? 'onboarding/inbox-setup' : 'onboarding';
 
+// 🔐 CEVICO rodada 334 — acessos em ÁRVORE (ver × editar): a rota mapeada em
+// ROUTE_NODES abre se `access.me[nó]` for pelo menos VER (qualquer nó da
+// lista). A tranca de verdade é o backend (403) — aqui é só para a navegação
+// fazer sentido.
+//   - admin: passa SEMPRE enquanto as settings não chegaram; depois de
+//     carregadas, também perde o que não está em `me` (módulo de clínica
+//     numa ótica some para todo mundo)
+//   - atendente: fail-closed — espera `crm/fetchSettings` para decidir
+//   - rota sem nó no mapa: segue como sempre foi
 const cevicoRouteAllowed = async (to, isAdminRole) => {
-  const needed = CEVICO_GRANTED_ROUTES[to.name];
-  if (!needed || isAdminRole) return true;
-  let settings = store.getters['crm/getSettings'];
-  if (!settings?.agent_permissions) {
-    // primeira navegação por URL direta: espera as settings para decidir
+  if (!routeNodesFor(to.name).length) return true;
+  let me = store.getters['crm/getAccess']?.me;
+  if (!me) {
+    // admin na primeira navegação: não espera, tem tudo mesmo
+    if (isAdminRole) return true;
+    // atendente por URL direta: espera as settings para decidir
     try {
-      settings = await store.dispatch('crm/fetchSettings');
+      const settings = await store.dispatch('crm/fetchSettings');
+      me = settings?.access?.me;
     } catch {
       return false;
     }
   }
-  const userId = String(store.getters.getCurrentUserID);
-  const grants = settings?.agent_permissions?.grants?.[userId] ?? [];
-  return needed.some(capability => grants.includes(capability));
+  return routeAllowed(to.name, me, isAdminRole);
 };
 
 // HUB (rodada 34): módulos da Saúde por pessoa — rota de módulo não
@@ -118,12 +107,18 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
     isActive;
 
   if (to.name === 'no_accounts' || !to.name) {
-    const target = needsOnboarding ? 'onboarding' : 'dashboard';
+    const target = needsOnboarding
+      ? onboardingPath(userAccount?.onboarding_step)
+      : 'dashboard';
     return next(frontendURL(`accounts/${routeAccountId}/${target}`));
   }
 
   if (needsOnboarding && !isOnOnboardingView(to)) {
-    return next(frontendURL(`accounts/${routeAccountId}/onboarding`));
+    return next(
+      frontendURL(
+        `accounts/${routeAccountId}/${onboardingPath(userAccount?.onboarding_step)}`
+      )
+    );
   }
   if (!needsOnboarding && isOnOnboardingView(to)) {
     return next(frontendURL(`accounts/${routeAccountId}/dashboard`));

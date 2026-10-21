@@ -2,7 +2,6 @@ class Api::V1::Accounts::Crm::RetroLabelsController < Api::V1::Accounts::BaseCon
   include Crm::AccessControl
 
   # etiquetagem retroativa em massa = área concedível (padrão: só admin)
-  before_action -> { require_capability(:data_tools) }
 
   # POST preview — quantas conversas/contatos seriam etiquetados
   def preview

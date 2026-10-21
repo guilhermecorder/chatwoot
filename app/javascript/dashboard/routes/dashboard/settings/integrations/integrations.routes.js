@@ -12,6 +12,8 @@ import Shopify from './Shopify.vue';
 import MetaAds from './MetaAds.vue';
 import GoogleAds from './GoogleAds.vue';
 import N8n from './N8n.vue';
+import CevicoCalls from './CevicoCalls.vue';
+import CevicoVoiceAgent from './CevicoVoiceAgent.vue';
 
 export default {
   routes: [
@@ -119,6 +121,18 @@ export default {
           path: 'google-ads',
           name: 'settings_integrations_google_ads',
           component: GoogleAds,
+          meta: { permissions: ['administrator'] },
+        },
+        {
+          path: 'calls',
+          name: 'crm_integrations_calls',
+          component: CevicoCalls,
+          meta: { permissions: ['administrator'] },
+        },
+        {
+          path: 'voice-agent',
+          name: 'crm_integrations_voice_agent',
+          component: CevicoVoiceAgent,
           meta: { permissions: ['administrator'] },
         },
       ],

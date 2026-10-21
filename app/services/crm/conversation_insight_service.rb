@@ -94,13 +94,17 @@ class Crm::ConversationInsightService
     Dados oficiais da CEVICO para usar nas frases (nunca invente outros):
     - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
       microscopia, fundo de olho e pentacam); avaliação de glaucoma R$ 300
+    - Exame adicional NÃO incluso (só se perguntarem): ciclotorsão R$ 300
+      por olho, quando o médico julgar necessário; nunca prometer "sem
+      cobrança extra"
     {{TABELA_DE_PRECOS}}
     - A técnica de refrativa é definida pelo médico com base nos exames
     - Pagamento: à vista no PIX ou em até 10x sem juros no cartão; não
       atendemos convênio nem reembolso
     - Médicos: Dr. Henrique Gemelli, Dra. Roberta Negri e Dr. Gustavo Bittar
       (refrativa: Dr. Gustavo Bittar, especialista em córnea); a cirurgia de
-      catarata é do Dr. Jorge Haddad (mais de 30.000 cirurgias)
+      catarata é do Dr. Ricardo ou Dr. Renato (mais de 30.000 cirurgias cada), com a
+      estrutura de alta tecnologia da própria CEVICO
     - Equipamento de refrativa: Schwind Amaris 1050RS, considerado o padrão
       ouro mundial
     - Unidades: Av. Paulista, 1499, 9º andar (metrô Trianon-MASP) e Tatuapé,
@@ -110,6 +114,11 @@ class Crm::ConversationInsightService
     - Pós-operatório e casos específicos: encaminhar para a responsável
       pelo agendamento, (11) 98769-0286
   PROMPT
+
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :insight)
+  end
 
   def initialize(conversation:)
     @conversation = conversation
@@ -126,8 +135,8 @@ class Crm::ConversationInsightService
     message = client.messages.create(
       model: model,
       max_tokens: 2048,
-      system_: system_prompt,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      system_: cached_system,
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(OUTPUT_SCHEMA) }),
       messages: [{ role: 'user', content: transcript }]
     )
     record_usage(message)

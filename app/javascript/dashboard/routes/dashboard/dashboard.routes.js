@@ -1,9 +1,9 @@
 import settings from './settings/settings.routes';
 import conversation from './conversation/conversation.routes';
 import { routes as searchRoutes } from '../../modules/search/search.routes';
+import { routes as callRoutes } from './calls/routes';
 import { routes as contactRoutes } from './contacts/routes';
 import { routes as companyRoutes } from './companies/routes';
-import { routes as notificationRoutes } from './notifications/routes';
 import { routes as inboxRoutes } from './inbox/routes';
 import { frontendURL } from '../../helper/URLHelper';
 import helpcenterRoutes from './helpcenter/helpcenter.routes';
@@ -16,6 +16,7 @@ import agendaRoutes from './agenda/routes';
 import patientRoutes from './patient/routes';
 import cevicoPagesRoutes from './pages/routes';
 import cevicoStrategyRoutes from './strategy/routes';
+import cevicoBusinessRoutes from './business/routes';
 import cevicoPeopleRoutes from './people/routes';
 import cevicoGoalsRoutes from './goals/routes';
 import cevicoBuilderRoutes from './builder/routes';
@@ -23,11 +24,13 @@ import cevicoFinanceRoutes from './finance/routes';
 import hubHealthRoutes from './health/routes';
 import hubHomeRoutes from './hub/routes';
 import inicioRoutes from './inicio/routes';
+import negociosRoutes from './negocios/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
 import AppContainer from './Dashboard.vue';
 import Suspended from './suspended/Index.vue';
 import NoAccounts from './noAccounts/Index.vue';
 import OnboardingAccountDetails from './onboarding/Index.vue';
+import OnboardingInboxSetup from './onboarding/InboxSetup.vue';
 
 export default {
   routes: [
@@ -39,10 +42,10 @@ export default {
         ...inboxRoutes,
         ...conversation.routes,
         ...settings.routes,
+        ...callRoutes,
         ...contactRoutes,
         ...companyRoutes,
         ...searchRoutes,
-        ...notificationRoutes,
         ...helpcenterRoutes.routes,
         ...campaignsRoutes.routes,
         ...crmRoutes.routes,
@@ -52,6 +55,7 @@ export default {
         ...patientRoutes.routes,
         ...cevicoPagesRoutes.routes,
         ...cevicoStrategyRoutes.routes,
+        ...cevicoBusinessRoutes.routes,
         ...cevicoPeopleRoutes.routes,
         ...cevicoGoalsRoutes.routes,
         ...cevicoBuilderRoutes.routes,
@@ -59,6 +63,7 @@ export default {
         ...hubHealthRoutes.routes,
         ...hubHomeRoutes.routes,
         ...inicioRoutes.routes,
+        ...negociosRoutes.routes,
         ...cevicoAutomationsRoutes.routes,
       ],
     },
@@ -69,6 +74,14 @@ export default {
         permissions: ['administrator', 'agent', 'custom_role'],
       },
       component: OnboardingAccountDetails,
+    },
+    {
+      path: frontendURL('accounts/:accountId/onboarding/inbox-setup'),
+      name: 'onboarding_inbox_setup',
+      meta: {
+        permissions: ['administrator', 'agent', 'custom_role'],
+      },
+      component: OnboardingInboxSetup,
     },
     {
       path: frontendURL('accounts/:accountId/suspended'),

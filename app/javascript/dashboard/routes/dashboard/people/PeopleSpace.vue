@@ -7,6 +7,8 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import TestsTab from './TestsTab.vue';
@@ -31,7 +33,11 @@ const load = async () => {
 
 const person = computed(() => data.value.people.find(p => p.user_id === selectedUserId.value) || null);
 const isMe = computed(() => person.value?.user_id === data.value.me);
-const canEditGoals = computed(() => isMe.value || data.value.admin);
+// 🔐 rodada 334: a árvore (pessoas) entra por cima da regra "é meu ou sou admin"
+const { canEdit } = useCevicoAccess();
+const canEditGoals = computed(
+  () => canEdit('pessoas') && (isMe.value || data.value.admin)
+);
 const firstName = name => (name || '').split(' ')[0];
 
 // ── abas do espaço da pessoa (Vida é privada: só no próprio espaço) ──
@@ -165,7 +171,7 @@ onMounted(load);
           <span class="i-lucide-heart-handshake text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Pessoas</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Pessoas <CevicoViewOnlyPill v-if="!canEdit('pessoas')" /></h1>
           <p class="text-xs text-n-slate-10">perfil, desenvolvimento e feedbacks — para crescer e montar times fortes e entrosados</p>
         </div>
       </div>

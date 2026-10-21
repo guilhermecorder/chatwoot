@@ -48,7 +48,15 @@ class Crm::Campaign < ApplicationRecord
   validate :inbox_must_be_whatsapp_cloud
   validate :inbox_belongs_to_account
 
-  enum status: { draft: 0, processing: 1, completed: 2, failed: 3, scheduled: 4 }
+  # ⏸ R3 da auditoria (#415): "paused" = a equipe pediu para parar (campanha
+  # em envio ou agendada). Quem já recebeu fica registrado; "Enviar agora"
+  # retoma de onde parou sem repetir ninguém.
+  enum status: { draft: 0, processing: 1, completed: 2, failed: 3, scheduled: 4, paused: 5 }
+
+  # 🕐 R3 da auditoria (CONTRATO-0/#411): o Rails deste sistema roda em UTC e
+  # as datas digitadas pela equipe são de São Paulo — mesmo fuso que o resto
+  # do CEVICO usa (Crm::AgendaSlots, Crm::NpsSurvey...).
+  TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   scope :due, -> { scheduled.where('scheduled_at <= ?', Time.current) }
 
@@ -75,18 +83,35 @@ class Crm::Campaign < ApplicationRecord
   def resolve_audience
     contacts = included_contacts
     contacts = contacts.where.not(id: excluded_contact_ids) if excluded_contact_ids.any?
+    # opt-out fixo (conformidade 20/09): nao_perturbe / perda_* nunca entram
+    quiet_ids = Crm::OptOut.excluded_contact_ids(account)
+    contacts = contacts.where.not(id: quiet_ids) if quiet_ids.any?
+    # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub nunca entra
+    partner_ids = Crm::PartnerGuard.excluded_contact_ids(account)
+    contacts = contacts.where.not(id: partner_ids) if partner_ids.any?
     contacts = apply_period_filter(contacts)
     contacts.where.not(phone_number: [nil, '']).distinct
   end
 
   private
 
+  # 🕐 R3 da auditoria (#411): "de 01/10 a 01/10" é o DIA de São Paulo
+  # inteiro (00:00 até 23:59:59 no fuso da clínica), não o dia em UTC —
+  # senão o lead das 21h–0h do último dia ficava de fora e o das 21h+ do dia
+  # anterior entrava.
   def period_range
-    from = audience['period_from'].presence && Date.parse(audience['period_from']).beginning_of_day
-    to   = audience['period_to'].presence && Date.parse(audience['period_to']).end_of_day
+    from = parse_period_day(audience['period_from'])&.beginning_of_day
+    to   = parse_period_day(audience['period_to'])&.end_of_day
     return nil if from.blank? && to.blank?
 
     (from || 100.years.ago)..(to || Time.current)
+  end
+
+  # "2026-10-01" → meia-noite desse dia em São Paulo; vazio/inválido → nil
+  def parse_period_day(raw)
+    return nil if raw.blank?
+
+    TZ.parse(raw.to_s)
   rescue ArgumentError
     nil
   end

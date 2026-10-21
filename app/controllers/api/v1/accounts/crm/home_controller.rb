@@ -20,34 +20,78 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
 
   def show
     since, until_at = resolve_range
+    # ⚡ item 237 (25/09): o MIOLO pesado (painel do período + desempenho +
+    # meta de resposta) fica guardado por pessoa+painel+período: 1 min nos
+    # períodos curtos, 10 min em mês/ano/personalizado (a tela atualiza a
+    # cada 2 min e refazia tudo; "este ano" passava do limite de 15 s)
+    heavy = Rails.cache.fetch(heavy_cache_key(since, until_at), expires_in: heavy_ttl) do
+      JSON.parse({ panel_data: panel_data(since, until_at),
+                   response_goal: response_goal_json(since, until_at),
+                   my_performance: my_performance_json(since, until_at) }.to_json)
+    end
 
+    # 🐛 item 328: quando o miolo vem do cache, os RECORDES leem dele. Sem isto
+    # records_json recalculava o painel sem período (= desde sempre) a cada
+    # visita: lento, e gravava o total de todos os tempos como "recorde".
+    @panel_data ||= heavy['panel_data']
+
+    funnel_30d = funnel_30d_json
     render json: {
       period: params[:preset].presence || 'today',
       panel: panel_key,
-      panel_data: panel_data(since, until_at),
+      # 🔎 item 328: a fonte que a tela está vendo + as fontes que existem (chavinha)
+      source: lens.key,
+      sources: Crm::Sources.list(account).map { |s| { key: s.key, name: s.name, color: s.color, own: s.own? } },
+      panel_data: heavy['panel_data'],
       # termômetros de agora (independem do período)
       open_conversations: account.conversations.open.count,
       unanswered: account.conversations.open.where.not(waiting_since: nil).count,
       appointments_today: active_consultas.where(due_at: TZ.now.all_day).count,
       new_contacts_30d: leads_count(30.days.ago, Time.current),
-      appointments_30d: reached_stage_count(/agendamento/i, 30.days.ago, Time.current),
+      # item 267: numerador e denominador na MESMA régua — só leads novos dos
+      # 30 dias que entraram em Agendamento (antes: qualquer card que entrou na coluna)
+      appointments_30d: funnel_30d[:booked],
+      # as 3 colunas do funil de leads novos (30 dias) + caixa de entrada
+      funnel_30d: funnel_30d,
       next_appointments: next_appointments_json,
       opportunity_alerts: opportunity_alerts_json,
       # meta de tempo de atendimento (relatório pessoal por atendente)
-      response_goal: response_goal_json(since, until_at),
+      response_goal: heavy['response_goal'],
       # bloco "Meu desempenho" (item 138): a pessoa + o Atendimento IA
-      my_performance: my_performance_json(since, until_at),
+      my_performance: heavy['my_performance'],
       # Mentor do Time: feedback semanal individual (admin vê o time)
       weekly_feedback: weekly_feedback_json,
       my_tasks: my_tasks_json,
+      # 📝 notas dos pacientes (item 211): as últimas da clínica no bloco de tarefas
+      patient_notes: patient_notes_json,
       bug_reports: bug_reports_json,
       # status dos números de WhatsApp (item 88 — só o gestor vê)
       whatsapp_status: whatsapp_status_json,
+      # 🚨 #217: robôs parados/com erro, lidos direto do Redis pelo WEB — aparece
+      # mesmo se o Sidekiq morreu inteiro (aí o vigia não roda) — só o admin vê
+      robot_problems: robot_problems_json,
+      # 🎂 item 331: aniversariantes do dia e do mês + convite para quem ainda não informou
+      birthdays: Crm::Birthdays.new(account).payload(Current.user, admin: Current.account_user.administrator?),
       # 📊 Gestor Autônomo (item 128): briefing do dia + desvios (gestão)
       manager_brief: manager_brief_json,
+      # 🎯 Agente de Campanhas (item 352): resumo da leitura do dia + recomendações esperando ok (gestão)
+      campaign_agent: campaign_agent_json,
+      # 📄 Agente de Páginas (item 353): a leitura do dia das páginas + pontos a melhorar esperando ok
+      page_agent: page_agent_json,
       # metas do painel + fator do período + recordes (cards vivos)
       goals: goals_json
-    }.merge(panel_key == 'agendamento' ? panel_data(since, until_at) : {}) # compat: campos antigos no topo
+    }.merge(panel_key == 'agendamento' ? heavy['panel_data'] : {}) # compat: campos antigos no topo
+  end
+
+  HEAVY_PRESETS = %w[month last_month last90 year custom].freeze
+
+  def heavy_cache_key(since, until_at)
+    ['cevico:home', account.id, Current.user.id, panel_key, lens.key, params[:doctor].to_s, params[:preset].to_s, since.to_i,
+     until_at.to_i].join(':')
+  end
+
+  def heavy_ttl
+    HEAVY_PRESETS.include?(params[:preset].to_s) ? 10.minutes : 1.minute
   end
 
   # briefing diário do Gestor Autônomo — admin vê tudo; atendente comum não
@@ -64,6 +108,63 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       findings: Array(state['findings']).first(3),
       tasks_opened: state['tasks_opened']
     }
+  end
+
+  # 🎯 item 352: o resumo do Agente de Campanhas no Meu Painel — quem pode VER
+  # o ambiente (admin ou concessão marketing.campanhas) recebe o bloco
+  def campaign_agent_json # rubocop:disable Metrics/AbcSize
+    return nil unless can_see_campaign_agent?
+
+    state = Cevico::CampaignAgent::Daily.state(account)
+    return nil if state.blank? || state['last_run_at'].blank?
+
+    # só os anúncios (Meta/Google): as páginas têm o bloco delas (item 353)
+    scope = Crm::CampaignAction.ads.where(account_id: account.id)
+    open = scope.where(status: 'suggested').recent.limit(3)
+    state.slice('last_run_at', 'summary', 'brief', 'new', 'learned', 'series').merge(
+      'open' => scope.where(status: 'suggested').count,
+      'approved' => scope.where(status: 'approved').count,
+      'top' => open.map { |a| a.as_json.slice(:id, :title, :severity, :ref_name, :channel, :kind) },
+      'goal_label' => Cevico::CampaignAgent::Params.goal_label(Cevico::CampaignAgent::Params.for(account))
+    )
+  end
+
+  # 📄 item 353: quem vê Resultados de tráfego (admin ou concessão marketing.resultados) recebe o bloco
+  def page_agent_json # rubocop:disable Metrics/AbcSize
+    return nil unless can_see_node?('marketing.resultados')
+
+    state = Cevico::PageAgent::Daily.state(account)
+    return nil if state.blank? || state['last_run_at'].blank?
+
+    scope = Crm::CampaignAction.where(account_id: account.id, channel: 'pages')
+    state.slice('last_run_at', 'summary', 'series', 'champion', 'new', 'learned').merge(
+      'open' => scope.where(status: 'suggested').count,
+      'approved' => scope.where(status: 'approved').count,
+      'top' => scope.where(status: 'suggested').recent.limit(3).map { |a| a.as_json.slice(:id, :title, :severity, :ref_name, :kind) }
+    )
+  end
+
+  def can_see_campaign_agent?
+    can_see_node?('marketing.campanhas')
+  end
+
+  def can_see_node?(node)
+    return true if Current.account_user.administrator?
+
+    Cevico::Access.for(account, Current.user, account_user: Current.account_user).can?(node, :view)
+  end
+
+  def robot_problems_json
+    return [] unless Current.account_user.administrator?
+
+    Crm::CronHealth.problems.values.map do |p|
+      p.slice(:job, :label, :kind).merge(message: p[:message].to_s.gsub(/conta (\d+) · /) do
+        Regexp.last_match(1).to_i == account.id ? '' : 'outra conta · '
+      end)
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO saúde dos robôs] Meu Painel: #{e.message}"
+    []
   end
 
   # item 88: cada número de WhatsApp com o estado evidente — precisa
@@ -116,16 +217,20 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def radar_ping # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     settings = CrmSetting.find_by(account: account)
     cfg = settings&.ai_config || {}
-    return render json: { alert: nil, radar: radar_status(cfg) } unless cfg.dig('agents', 'opportunity', 'enabled') == true
-
     alerts = Array(cfg.dig('opportunity_state', 'alerts')).reverse
+    # Radar desligado: só os avisos extras (ligação perdida 167, "não vou" 168) aparecem
+    alerts = alerts.select { |a| Crm::RadarExtraAlerts.extra?(a) } unless cfg.dig('agents', 'opportunity', 'enabled') == true
     # o popup é da tela do atendente ESPECÍFICO: aviso direcionado a mim,
     # ou aviso geral (sem destino) quando não sou admin
     alerts = alerts.select do |a|
       a['user_id'].present? ? a['user_id'].to_i == Current.user.id : !Current.account_user.administrator?
     end
+    # 🔒 item 325: ligação travada tem a sua própria janela (CevicoCallLock) — aqui não repete
+    alerts = alerts.reject { |a| a['lock'] == true }
 
     live = alerts.lazy.filter_map do |a|
+      next extra_alert(a) if Crm::RadarExtraAlerts.extra?(a)
+
       conversation = account.conversations.find_by(display_id: a['conversation_id'])
       next unless conversation&.open? && conversation.waiting_since.present?
 
@@ -144,30 +249,91 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     return render json: { error: 'Só administradores pausam o Radar.' }, status: :forbidden unless Current.account_user.administrator?
 
     settings = CrmSetting.find_by(account: account) || CrmSetting.create!(account: account)
-    cfg = settings.ai_config || {}
-    cfg['agents'] ||= {}
-    cfg['agents']['opportunity'] ||= {}
-    enabled = cfg['agents']['opportunity']['enabled'] == true
-    cfg['agents']['opportunity']['enabled'] = !enabled
-    state = cfg['opportunity_state'] ||= {}
-    log = Array(state['manual_log'])
-    log << { 'action' => enabled ? 'desativado' : 'ativado', 'user' => Current.user.name, 'at' => Time.current.iso8601 }
-    state['manual_log'] = log.last(20)
-    settings.update!(ai_config: cfg)
+    # Rodada 4 (#413): vira o interruptor em cima da foto FRESCA, sob trava —
+    # o Radar grava alertas em ai_config o tempo todo e não pode ser apagado
+    cfg = Cevico::SettingMerge.merge!(settings, :ai_config) do |fresh|
+      fresh['agents'] ||= {}
+      fresh['agents']['opportunity'] ||= {}
+      enabled = fresh['agents']['opportunity']['enabled'] == true
+      fresh['agents']['opportunity']['enabled'] = !enabled
+      state = fresh['opportunity_state'] ||= {}
+      log = Array(state['manual_log'])
+      log << { 'action' => enabled ? 'desativado' : 'ativado', 'user' => Current.user.name, 'at' => Time.current.iso8601 }
+      state['manual_log'] = log.last(20)
+      fresh
+    end
     render json: { radar: radar_status(cfg) }
+  end
+
+  # 🎂 item 331: a pessoa informa o próprio aniversário (admin pode informar por alguém)
+  def birthday
+    target = Current.account_user.administrator? && params[:user_id].present? ? params[:user_id] : Current.user.id
+    service = Crm::Birthdays.new(account)
+    if params[:clear].present?
+      service.clear!(target)
+    else
+      service.set!(target, day: params[:day], month: params[:month], year: params[:year])
+    end
+    render json: { birthdays: service.payload(Current.user, admin: Current.account_user.administrator?) }
+  rescue ArgumentError, Date::Error
+    render json: { error: 'Essa data não existe. Confira o dia e o mês.' }, status: :unprocessable_entity
   end
 
   # Cesto de indicadores (item 141): números-base do período com série e
   # período anterior — gráficos dos popups, cards do "+" e fórmulas
+  # 🧭 item 337: a VISÃO GERAL do Meu Painel (14 perguntas) — cache curto por
+  # conta/lente/período; dinheiro e médicos só entram para administradores
+  def overview
+    since, until_at = resolve_range
+    admin = Current.account_user.administrator?
+    key = ['cevico:overview:v342', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i]
+    payload = Rails.cache.fetch(key, expires_in: heavy_ttl) do
+      Crm::OverviewService.new(account: account, since: since, until_at: until_at, lens: lens, admin: admin).call
+    end
+    render json: payload
+  end
+
   def kpis
     since, until_at = resolve_range
     # granularity opcional (item 144): a mini-régua do popup pode pedir o
     # balde (dia/semana/mês) em vez do automático pelo tamanho do período
-    render json: Crm::KpiBagService.new(account: account, since: since, until_at: until_at,
-                                        granularity: params[:granularity]).call
+    # item 328: o Meu Painel manda a fonte da chavinha (?source=); as outras
+    # telas que usam o cesto não mandam e seguem na régua de sempre
+    render json: Crm::KpiBagService.new(account: account, since: since, until_at: until_at, granularity: params[:granularity],
+                                        lens: params[:source].present? ? lens : nil).call(hide: hidden_money_keys)
   end
 
   private
+
+  # 🔒 auditoria R2 (#33/#350): o cesto entregava faturamento e gasto do
+  # WhatsApp a qualquer atendente. Faturamento = administrador ou quem tem a
+  # área Financeiro em EDITAR (a mesma régua da concessão antiga 'finance');
+  # gasto do WhatsApp = o nó "Gasto do WhatsApp" (só administrador hoje).
+  # Admin sempre passa pelo catálogo.
+  # DECISÃO PENDENTE (Guilherme, 12/10): quem só VÊ o Financeiro também deve
+  # ver o faturamento no Meu Painel? Ficou o lado mais fechado (editar) até
+  # ele decidir — para abrir, trocar :edit por :view em can_see_revenue? e
+  # em InicioPage.vue (canSeeRevenue).
+  def hidden_money_keys
+    hidden = []
+    hidden += Crm::KpiBagService::REVENUE_KEYS unless can_see_revenue?
+    hidden += Crm::KpiBagService::WA_COST_KEYS unless cevico_can?('relatorios.gasto_whatsapp', :view)
+    hidden
+  end
+
+  # quem pode ver dinheiro no Meu Painel (faturamento do cesto e o R$ das
+  # cirurgias fechadas do "Meu desempenho")
+  def can_see_revenue?
+    cevico_can?('financeiro', :edit)
+  end
+
+  # ligação perdida / "não vou": aparece na hora e some quando alguém retornou
+  def extra_alert(alert)
+    return nil unless Crm::RadarExtraAlerts.still_open?(account, alert)
+
+    created = Time.zone.parse(alert['created_at'].to_s)
+    alert.merge('waiting_minutes' => ((Time.current - created) / 60).floor)
+  end
 
   def radar_status(cfg)
     last = Array(cfg.dig('opportunity_state', 'manual_log')).last
@@ -181,6 +347,15 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     Current.account
   end
 
+  # 🔎 item 328 (Fase 2 das Fontes): a LENTE da fonte escolhida na chavinha do
+  # Meu Painel (?source=cevico | oftalmofacil | all). Sem escolha = a casa.
+  # Vale para os indicadores (painel do período, cesto, funil dos 30 dias);
+  # as listas de trabalho (próximas consultas, tarefas, Radar) e o desempenho
+  # das pessoas continuam mostrando tudo.
+  def lens
+    @lens ||= Crm::SourceLens.for(account, params[:source])
+  end
+
   BUILTIN_PANELS = %w[agendamento conducao cirurgia medico gestor].freeze
 
   # painéis salvos no Construtor ('custom:<id>') — valem como painel do Meu
@@ -189,18 +364,49 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     Array(crm_settings&.agenda_config&.dig('custom_panels')).map { |p| "custom:#{p['id']}" }
   end
 
+  # painéis POR PESSOA (rodada 160, 'variant:<id>'): mesmo miolo do painel-base
+  # (dados, metas, recordes) com layout próprio — valem como painel e como
+  # atribuição do time
+  def panel_variants
+    Array(crm_settings&.agenda_config&.dig('panel_variants'))
+  end
+
+  def variant_keys
+    panel_variants.map { |v| "variant:#{v['id']}" }
+  end
+
+  # 'variant:<id>' → painel-base (agendamento/conducao/...) — é dele que saem
+  # os números, as metas e os recordes
+  def resolve_variant(key)
+    return key unless key.to_s.start_with?('variant:')
+
+    variant = panel_variants.find { |v| "variant:#{v['id']}" == key }
+    base = variant&.dig('base').to_s
+    BUILTIN_PANELS.include?(base) ? base : 'agendamento'
+  end
+
+  # chaves aceitas: fixos + Construtor + variantes por pessoa
+  def valid_panel_keys
+    @valid_panel_keys ||= BUILTIN_PANELS + custom_panel_keys + variant_keys
+  end
+
+  # painel PRINCIPAL da conta (main_panel) quando é válido; senão agendamento
+  def default_panel_key
+    key = crm_settings&.agenda_config&.dig('main_panel').presence || 'agendamento'
+    valid_panel_keys.include?(key) ? key : 'agendamento'
+  end
+
+  # agente com painel ATRIBUÍDO pelo admin fica travado nele
+  def assigned_panel_key
+    return nil if Current.account_user.administrator?
+
+    crm_settings&.agenda_config&.dig('panel_assignments', Current.user.id.to_s).presence
+  end
+
   def panel_key
     @panel_key ||= begin
-      valid = BUILTIN_PANELS + custom_panel_keys
-      default_key = crm_settings&.agenda_config&.dig('main_panel').presence || 'agendamento'
-      default_key = 'agendamento' unless valid.include?(default_key)
-      key = params[:panel].presence || default_key
-      # agente com painel ATRIBUÍDO pelo admin fica travado nele
-      unless Current.account_user.administrator?
-        assigned = crm_settings&.agenda_config&.dig('panel_assignments', Current.user.id.to_s)
-        key = assigned if assigned.present?
-      end
-      valid.include?(key) ? key : default_key
+      key = assigned_panel_key || params[:panel].presence || default_panel_key
+      resolve_variant(valid_panel_keys.include?(key) ? key : default_panel_key)
     end
   end
 
@@ -230,15 +436,24 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     compareceu = periodo.where(attendance: 'attended').count
     faltou = periodo.where(attendance: 'missed').count
     indicacoes = periodo.where(surgery_indication: 'indicated').count
-    agendadas = cirurgias.where(created_at: since..until_at).count
+    # item 267: fechamento = cirurgias marcadas de quem teve INDICAÇÃO (não todas
+    # as cirurgias: as da base e do Oftalmofácil inflavam para mais de 100%)
+    agendadas = surgeries_after_indication(since, until_at).count
+    agendadas_todas = cirurgias.where(created_at: since..until_at).count
     realizadas_scope = cirurgias.where(due_at: since..full_until)
     ag.merge(
       show_rate: pct(compareceu, compareceu + faltou),
       indications: indicacoes,
       surgeries_booked: agendadas,
+      surgeries_booked_all: agendadas_todas,
       closing_rate: pct(agendadas, indicacoes),
       surgeries_done: realizadas_scope.where(attendance: 'attended').or(realizadas_scope.where(status: :done)).count,
-      nps: nps_summary
+      surgery_breakdown: surgery_breakdown_json(since, full_until),
+      booked_breakdown: booked_breakdown_for(since, until_at),
+      booking_people: booking_people_json(since, until_at),
+      nps: nps_summary,
+      # item 146: comparecimento por unidade também no painel do gestor
+      by_unit: unit_breakdown(periodo)
     )
   end
 
@@ -264,7 +479,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     when 'week'  then now.end_of_week.end_of_day
     when 'month' then now.end_of_month.end_of_day
     when 'year'  then now.end_of_year.end_of_day
-    when 'yesterday', 'last_week', 'last_month' then until_at
+    when 'yesterday', 'last_week', 'last_month', 'custom' then until_at # item 237: custom não estica até hoje
     else now.end_of_day # hoje
     end
   end
@@ -273,7 +488,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def agendamento_metrics(since, until_at)
     universe = leads_scope(since, until_at)
     leads = universe.count
-    agendadas = reached_stage_count(/agendamento/i, since, until_at, universe: universe)
+    # 📊 item 233: taxa OFICIAL = quem ENTROU na coluna "Agendamento de Consulta"
+    # no período (mudança de coluna no CRM), não a coluna atual nem a Agenda
+    agendadas = Crm::BookingRate.count(account, since, until_at, lens: lens)
     {
       new_leads: leads,
       appointments_created: agendadas,
@@ -284,6 +501,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       # (Preencher histórico / disparo retroativo) — fica FORA do contador
       # (foi o "88 agendadas" fantasma de 15/07).
       appointments_booked: booked_scope(account, since, until_at).count,
+      # item 238: de quais caixas vieram as "Marcadas na Agenda" (mesma regra
+      # do ambiente Agendamentos: conversa citada na consulta ou a mais recente)
+      appointments_booked_by_inbox: Crm::TaskConversations.count_by_inbox(account, booked_scope(account, since, until_at).to_a),
       # e destes, quantos CHEGARAM E AGENDARAM no mesmo período (lead novo
       # que já saiu com consulta — o atendimento no timing perfeito)
       appointments_same_day: booked_scope(account, since, until_at)
@@ -295,6 +515,17 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       decision_time: decision_time_json(since, until_at),
       booked_today: booked_scope(account, TZ.now.beginning_of_day, TZ.now.end_of_day).count,
       booking_cohorts: booking_cohorts_json,
+      # item 267: o que importa em cada consulta marcada — de qual caixa o
+      # paciente chegou, unidade, procedimento, robô × equipe, lead novo × base
+      booked_breakdown: booked_breakdown_for(since, until_at),
+      booked_today_breakdown: booked_breakdown_for(TZ.now.beginning_of_day, TZ.now.end_of_day),
+      # 🧹 item 342: quem ENTROU na coluna (pessoas) com a quebra que soma o mesmo número
+      booking_people: booking_people_json(since, until_at),
+      # 🧭 item 328: TUDO o que foi marcado no período em três cortes — o que
+      # foi, de onde veio e quem fez (com a lista de pacientes atrás)
+      booking_cuts: Crm::BookingCuts.new(account, lens: lens).call(since, until_at),
+      # item 267: cirurgias do período — procedimentos, unidades, faltas, origem
+      surgery_breakdown: surgery_breakdown_json(since, until_at),
       surgeries_closed: reached_stage_count(/cirurgia/i, since, until_at, exclude: /pós|indica/i, universe: universe),
       surgery_indications: reached_stage_count(/indica/i, since, until_at, universe: universe)
     }
@@ -312,14 +543,38 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       show_rate: pct(compareceu, compareceu + faltou),
       indications: periodo.where(surgery_indication: 'indicated').count,
       # consultas que já passaram e ninguém marcou Compareceu/Faltou
-      unconfirmed: periodo.where(attendance: nil).where('due_at < ?', Time.current).count
+      unconfirmed: periodo.where(attendance: nil).where('due_at < ?', Time.current).count,
+      # item 146: Paulista × Tatuapé lado a lado (consultas + comparecimento)
+      by_unit: unit_breakdown(periodo)
     }
+  end
+
+  # rótulos oficiais das unidades (mesmos do Crm::AgendaSlots)
+  UNIT_LABELS = { 'paulista' => 'Av. Paulista', 'tatuape' => 'Tatuapé' }.freeze
+
+  # item 146: consultas do período POR UNIDADE (tasks.unit) com o
+  # comparecimento de cada uma — a quebra que mostra onde a taxa vaza
+  def unit_breakdown(periodo)
+    rows = periodo.group(:unit, :attendance).count
+    rows.keys.map(&:first).uniq.map do |unit|
+      total = rows.sum { |(u, _), v| u == unit ? v : 0 }
+      attended = rows[[unit, 'attended']] || 0
+      missed = rows[[unit, 'missed']] || 0
+      {
+        unit: unit,
+        label: UNIT_LABELS[unit.to_s] || (unit.presence || 'Sem unidade'),
+        consultations: total,
+        attended: attended,
+        missed: missed,
+        show_rate: pct(attended, attended + missed)
+      }
+    end.sort_by { |r| -r[:consultations] }
   end
 
   # ── Painel Cirurgias — fechamento e pós-operatório ──
   def cirurgia_metrics(since, until_at)
     indicacoes = consultas.where(canceled_at: nil, due_at: since..until_at, surgery_indication: 'indicated').count
-    agendadas = cirurgias.where(created_at: since..until_at).count
+    agendadas = surgeries_after_indication(since, until_at).count # item 267
     realizadas_scope = cirurgias.where(due_at: since..until_at)
     {
       indications: indicacoes,
@@ -381,7 +636,11 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     digits = phone.to_s.gsub(/\D/, '')
     return false if digits.length < 8
 
-    cirurgias.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}").exists?
+    # auditoria 10/2026 (#239): o final de 8 dígitos só acha candidatos; a
+    # MESMA linha (DDD confere) é decidida pelo mesmo critério do recorder
+    cirurgias.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+             .pluck(:phone)
+             .any? { |task_phone| Crm::AppointmentRecorder.same_phone_line?(digits, task_phone) }
   end
 
   # notas de NPS dos pacientes dessas consultas: 1 query pelos contact_ids
@@ -394,7 +653,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   end
 
   def cirurgias
-    account.tasks.where(task_type: 'cirurgia', canceled_at: nil)
+    lens.tasks(account.tasks).where(task_type: 'cirurgia', canceled_at: nil)
   end
 
   def resolve_range
@@ -415,7 +674,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # Se a conta não tiver caixas com esses nomes (ex.: ambiente local),
   # conta todos os contatos novos para o painel não ficar zerado.
   def leads_scope(since, until_at)
-    Crm::LeadsUniverse.scope(account, since, until_at)
+    @leads_scopes ||= {}
+    @leads_scopes[[since.to_i, until_at.to_i]] ||= Crm::LeadsUniverse.scope(account, since, until_at, lens: lens) # item 237: 1x por período
   end
 
   def leads_count(since, until_at)
@@ -432,19 +692,33 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # leads do período POR CAIXA de captação + CONVERSÃO de cada caixa
   # (dos que chegaram por ela, quantos avançaram até "Agendamento")
   def leads_by_inbox_json(since, until_at)
-    inbox_ids = Crm::LeadsUniverse.capture_inbox_ids(account)
+    inbox_ids = lens_capture_inbox_ids
     return [] if inbox_ids.empty?
 
-    counts = account.contacts.where(created_at: since..until_at)
-                    .joins(:conversations).where(conversations: { inbox_id: inbox_ids })
-                    .group('conversations.inbox_id').count('DISTINCT contacts.id')
+    counts = lens.contacts(account.contacts).where(created_at: since..until_at)
+                 .joins(:conversations).where(conversations: { inbox_id: inbox_ids })
+                 .group('conversations.inbox_id').count('DISTINCT contacts.id')
     names = account.inboxes.where(id: counts.keys).pluck(:id, :name).to_h
+    # item 233 + 237: "agendaram" = entraram na coluna de agendamento no período
+    # (taxa oficial), numa query só para todas as caixas (antes: 3+ por caixa)
+    booked_by_inbox = Crm::BookingRate.entries(account, since, until_at, lens: lens)
+                                      .joins(crm_contact: { contact: :conversations })
+                                      .where(contacts: { created_at: since..until_at }, conversations: { inbox_id: inbox_ids })
+                                      .group('conversations.inbox_id').count('DISTINCT crm_contacts.contact_id')
     counts.map do |id, c|
-      universe = account.contacts.where(created_at: since..until_at)
-                        .joins(:conversations).where(conversations: { inbox_id: id }).distinct
-      booked = reached_stage_count(/agendamento/i, since, until_at, universe: universe)
+      booked = booked_by_inbox[id].to_i
       { name: names[id].to_s, count: c, booked: booked, rate: pct(booked, c) }
     end.sort_by { |h| -h[:count] }
+  end
+
+  # item 328: as portas de entrada que a lente enxerga — casa = caixas de
+  # captação (sem as das outras fontes); outra fonte = as caixas dela; tudo = as duas
+  def lens_capture_inbox_ids
+    capture = Crm::LeadsUniverse.capture_inbox_ids(account)
+    return capture - lens.foreign_inbox_ids if lens.own?
+    return lens.source.inbox_ids unless lens.all?
+
+    (capture + lens.foreign_inbox_ids).uniq
   end
 
   # TEMPO DE DECISÃO: das consultas registradas no período, quantos dias
@@ -489,7 +763,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     commercial = response_goal_rows(since, until_at, response_goal_minutes || 15, user_ids: ids)
                  .index_by { |r| r[:user_id] }
     off = off_hours_days(ids, since, until_at)
-    surgeries = surgeries_by_user(ids, since, until_at)
+    surgeries = my_surgeries(ids, since, until_at)
     metric_cfg = crm_settings&.agenda_config&.dig('performance_metrics') || {}
     build = lambda do |uid|
       row = rows[uid]
@@ -499,7 +773,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       row.merge(
         commercial: commercial[uid],
         off_hours: off[uid] || { count: 0, days: [] },
-        surgeries: surgeries[uid] || { count: 0, revenue: 0.0 },
+        surgeries: surgeries[uid],
         # métricas propostas pelo admin p/ esta pessoa (item 139)
         metrics: picked.presence || Crm::AgentPerformance::DEFAULT_METRICS
       )
@@ -541,7 +815,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # comparecimento da clínica no período — o resultado do trabalho de quem
   # confirma consulta (Natália): consultas do período com presença marcada
   def clinic_attendance_json(since, until_at)
-    periodo = consultas.where(canceled_at: nil, due_at: since..until_at)
+    periodo = every_consulta.where(canceled_at: nil, due_at: since..until_at) # desempenho de quem confirma: todas as fontes
     attended = periodo.where(attendance: 'attended').count
     missed = periodo.where(attendance: 'missed').count
     { attended: attended, missed: missed, rate: pct(attended, attended + missed) }
@@ -562,6 +836,17 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       per_user[uid][t.to_date] ||= "#{Crm::AgentPerformance::WEEKDAYS_PT[t.wday]} #{t.strftime('%d/%m')}"
     end
     per_user.transform_values { |days| { count: days.size, days: days.values.first(6) } }
+  end
+
+  # cirurgias fechadas do "Meu desempenho" (eu + o robô), uma linha por id.
+  # 🔒 auditoria R2 (#33/#350): o R$ só vai para quem pode ver dinheiro; o
+  # resto recebe só a contagem (sem `revenue`, a tela não monta o "· R$").
+  # O miolo é guardado por PESSOA (heavy_cache_key), então o corte aqui não
+  # vaza para o cache de outra pessoa.
+  def my_surgeries(user_ids, since, until_at)
+    rows = surgeries_by_user(user_ids, since, until_at)
+    rows = user_ids.index_with { |uid| rows[uid] || { count: 0, revenue: 0.0 } }
+    can_see_revenue? ? rows : rows.transform_values { |h| h.except(:revenue) }
   end
 
   # cirurgias fechadas atribuídas à pessoa (card em "Cirurgia Realizada"
@@ -602,8 +887,12 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     }
   end
 
+  def pipelines_with_stages
+    @pipelines_with_stages ||= account.crm_pipelines.includes(:stages).to_a # item 237: 1x por request
+  end
+
   def reached_stage_count(pattern, since, until_at, exclude: /pós/i, universe: nil)
-    account.crm_pipelines.includes(:stages).sum do |pipeline|
+    pipelines_with_stages.sum do |pipeline|
       stage_ids = reached_stage_ids(pipeline, pattern, exclude)
       next 0 if stage_ids.empty?
 
@@ -624,7 +913,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     ordered.select { |s| s.position >= target.position }.map(&:id)
   end
 
+  # consultas pela lente da fonte (item 328) — é daqui que saem os indicadores
   def consultas
+    lens.tasks(account.tasks).where(task_type: 'consulta')
+  end
+
+  # todas as consultas, de qualquer fonte: listas de trabalho e desempenho das pessoas
+  def every_consulta
     account.tasks.where(task_type: 'consulta')
   end
 
@@ -632,8 +927,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     consultas.where(canceled_at: nil).where.not(status: :done)
   end
 
+  # lista de trabalho: as próximas consultas de TODAS as fontes
+  def every_open_consulta
+    every_consulta.where(canceled_at: nil).where.not(status: :done)
+  end
+
   def next_appointments_json
-    active_consultas
+    every_open_consulta
       .where('due_at >= ?', Time.current)
       .order(:due_at)
       .limit(6)
@@ -654,13 +954,14 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # Cada aviso pode ter um painel de destino (user_id): o admin vê todos
   # (com o nome de quem vai atender); a atendente só vê os dela + os gerais.
   # tarefas esperando VOCÊ (aviso dourado no painel — criador atribuiu)
+  # item 211: a caixa do painel mostra até 40 (antes 5) — organizada para
+  # ter mais de 10 tarefas com clareza (lista rolável, duas colunas)
   def my_tasks_json
-    open_tasks = account.tasks.where(assignee_id: Current.user.id, status: %w[todo doing])
-                        .where.not(task_type: %w[consulta cirurgia])
+    open_tasks = account.tasks.board_cards.where(assignee_id: Current.user.id, status: %w[todo doing])
                         .order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
     {
       count: open_tasks.count,
-      items: open_tasks.limit(5).map do |t|
+      items: open_tasks.limit(40).map do |t|
         {
           id: t.id,
           title: t.title,
@@ -672,6 +973,20 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
         }
       end
     }
+  end
+
+  # 📝 notas dos pacientes (item 211): as 12 mais recentes da clínica
+  def patient_notes_json
+    account.notes.includes(:user, :contact).order(created_at: :desc).limit(12).map do |n|
+      {
+        id: n.id,
+        content: n.content.to_s.truncate(220),
+        created_at: n.created_at,
+        author_name: n.user&.name,
+        mine: n.user_id == Current.user.id,
+        contact: n.contact && { id: n.contact.id, name: n.contact.name }
+      }
+    end
   end
 
   # reports 🐞 de quem está logado: abertos + resolvidos na última semana
@@ -721,11 +1036,23 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     state = settings&.ai_config&.dig('opportunity_state') || {}
     alerts = Array(state['alerts']).reverse
     alerts = alerts.select { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id } unless Current.account_user.administrator?
+    alerts = visible_robot_alerts(alerts)
     {
       last_run_at: state['last_run_at'],
       alerts: with_conversation_info(alerts.first(10)),
       efficacy: radar_efficacy_json(state)
     }
+  end
+
+  # 🚨 #217: aviso de robô só para o admin, e só enquanto o robô continua com
+  # problema (não espera o Radar de Oportunidades rodar para sumir)
+  def visible_robot_alerts(alerts)
+    admin = Current.account_user.administrator?
+    alerts.select do |a|
+      a['kind'] != Crm::AgentAlert::ROBOT_KIND || (admin && Crm::AgentAlert.robot_still_open?(a))
+    end
+  rescue StandardError
+    alerts.reject { |a| a['kind'] == Crm::AgentAlert::ROBOT_KIND }
   end
 
   # o balão de conversa do card do Radar (mesmo do CRM) precisa da caixa,
@@ -795,7 +1122,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def goals_json
     cfg = crm_settings&.agenda_config || {}
     {
-      targets: (cfg['panel_goals'] || {})[panel_key] || {},
+      # item 328: as metas são da casa — vendo outra fonte (ou tudo) o card não é julgado por elas
+      targets: lens.own? ? (cfg['panel_goals'] || {})[panel_key] || {} : {},
       factor: goal_factor,
       records: records_json
     }
@@ -808,6 +1136,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     when 'week', 'last7', 'last_week' then 7 / days_in_month
     when 'month' then now.day / days_in_month
     when 'last_month' then 1.0
+    when 'last90' then 90 / days_in_month # item 321: 90 dias corridos ≈ 3 metas mensais
     when 'year' then (now.month - 1) + (now.day / days_in_month)
     when 'custom'
       from, to = custom_period_range
@@ -835,7 +1164,10 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   end
 
   def records_json # rubocop:disable Metrics/AbcSize
-    return {} if params[:preset] == 'custom' # intervalo livre não compete com recorde
+    # intervalo livre e os 90 dias corridos não competem com recorde (item 321:
+    # sem isto o total de 90 dias era gravado como "recorde do dia")
+    return {} if %w[custom last90].include?(params[:preset])
+    return {} unless lens.own? # item 328: recorde é da casa; outra fonte ou "tudo" não compete
 
     keys = RECORD_KEYS[panel_key] || []
     return {} if keys.empty?
@@ -846,7 +1178,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     # registro "sujo" e o with_lock logo abaixo estourava (500 no painel
     # na primeira vez que uma métrica batia recorde) — hotfix 20/07
     all = ((settings.agenda_config || {})['panel_records'] || {}).deep_dup
-    changed = false
+    new_slots = {} # Rodada 4: só os recordes batidos AGORA vão para o banco
     period = record_period_key
 
     result = keys.index_with do |key|
@@ -858,17 +1190,19 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       if value.positive? && value > slot['best'].to_f
         slot = { 'best' => value, 'period' => period }
         all[slot_key] = slot
-        changed = true
+        new_slots[slot_key] = slot
       end
       { best: slot['best'].to_f, is_record: slot['period'] == period && slot['best'].to_f.positive? }
     end
     # esta é uma requisição GET (carga do painel): só grava quando bate um
     # recorde, e sob trava relendo o agenda_config fresco — assim não atropela
-    # uma config que o admin tenha salvo em paralelo (só a chave panel_records muda)
-    if changed
-      settings.with_lock do
-        fresh = settings.reload.agenda_config || {}
-        settings.update!(agenda_config: fresh.merge('panel_records' => all))
+    # uma config que o admin tenha salvo em paralelo (só a chave panel_records muda).
+    # Rodada 4 (#351): pelo gravador único, e só os recordes novos entram —
+    # o recorde que outro painel gravou neste meio-tempo fica como está; e se
+    # dois painéis batem o MESMO recorde juntos, fica o maior (nunca baixa)
+    if new_slots.any?
+      Cevico::SettingMerge.merge_key!(settings, :agenda_config, 'panel_records') do |records|
+        records.merge(new_slots) { |_slot, old, new| old.is_a?(Hash) && old['best'].to_f >= new['best'].to_f ? old : new }
       end
     end
     result
@@ -877,12 +1211,168 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   # consultas AGENDADAS de verdade no período: criadas no período e marcadas
   # para a frente (due_at >= criação). Registro retroativo de histórico
   # (consulta que já tinha acontecido) não é agendamento novo.
-  def booked_scope(account, since, until_at)
-    account.tasks.where(task_type: 'consulta', created_at: since..until_at)
-           .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
+  # item 217: consulta LANÇADA (já estava marcada fora do sistema) não é agendamento
+  # all: true (item 342) = a mesma régua SEM a lente — só para comparar as fontes
+  def booked_scope(account, since, until_at, all: false)
+    # item 233: "Marcadas na Agenda" = consulta nova de verdade — sem exame,
+    # teleconsulta ou cancelada. item 328: de QUEM é (casa × Oftalmofácil × tudo)
+    # quem decide é a lente da fonte, pelo carimbo
+    base = all ? account.tasks : lens.tasks(account.tasks)
+    base.bookings.where(task_type: 'consulta', created_at: since..until_at)
+        .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
+        .where(canceled_at: nil)
+        .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
   end
 
   def pct(part, total)
     total.positive? ? (part.to_f / total * 100).round(1) : 0.0
+  end
+
+  # ── item 267: o que importa em cada consulta marcada ────────────────────
+  NEW_LEAD_DAYS = 30
+
+  def surgeries_after_indication(since, until_at)
+    cirurgias.where(created_at: since..until_at)
+             .where('EXISTS (SELECT 1 FROM tasks i WHERE i.account_id = tasks.account_id AND i.contact_id = tasks.contact_id ' \
+                    "AND i.task_type = 'consulta' AND i.surgery_indication = 'indicated' AND i.due_at <= tasks.created_at)")
+  end
+
+  # caixa de ORIGEM do paciente = a da PRIMEIRA conversa dele (por onde chegou),
+  # não a da conversa mais recente — a caixa de confirmação não rouba o crédito
+  def origin_inbox_by_contact(contact_ids)
+    return {} if contact_ids.empty?
+
+    first = Conversation.where(account_id: account.id, contact_id: contact_ids)
+                        .select('DISTINCT ON (contact_id) contact_id, inbox_id').order('contact_id, created_at ASC')
+                        .to_h { |c| [c.contact_id, c.inbox_id] }
+    names = account.inboxes.where(id: first.values.uniq).pluck(:id, :name).to_h
+    first.transform_values { |id| names[id] || 'sem conversa' }
+  end
+
+  def rows_json(counts)
+    counts.map { |label, n| { label: label.to_s, count: n } }.sort_by { |h| -h[:count] }
+  end
+
+  # 🧹 item 342: a quebra das consultas marcadas + a fonte contada SEM a lente
+  # (com a lente, "Fonte de pacientes" dava CEVICO 100% por construção)
+  def booked_breakdown_for(since, until_at)
+    booked_breakdown_json(booked_scope(account, since, until_at),
+                          stamp_scope: lens.all? ? nil : booked_scope(account, since, until_at, all: true))
+  end
+
+  # 🧹 item 342 (13/10): "Entrou em Agendamento" conta PESSOAS (mudança de
+  # coluna); a quebra das consultas da Agenda conta CONSULTAS — eram dois
+  # números diferentes no mesmo popup (34 em cima, 45 nas quebras). Esta é a
+  # quebra das PESSOAS, que soma exatamente o número de cima.
+  def booking_people_json(since, until_at)
+    rows = Crm::BookingRate.entries(account, since, until_at, lens: lens).joins(:crm_contact)
+                           .distinct.pluck('crm_contacts.contact_id')
+    novos = Crm::BookingRate.entries(account, since, until_at, lens: lens).joins(:crm_contact)
+                            .where(crm_contacts: { contact_id: leads_scope(since, until_at).select(:id) })
+                            .distinct.pluck('crm_contacts.contact_id')
+    origin = origin_inbox_by_contact(rows)
+    {
+      total: rows.size,
+      new_leads: novos.size,
+      base: rows.size - novos.size,
+      by_origin_inbox: rows_json(rows.group_by { |id| origin[id] || 'sem conversa' }.transform_values(&:size))
+    }
+  end
+
+  def booked_breakdown_json(scope, stamp_scope: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    tasks = scope.includes(:contact).to_a
+    return nil if tasks.empty?
+
+    stamp_tasks = stamp_scope ? stamp_scope.to_a : tasks
+
+    origin = origin_inbox_by_contact(tasks.filter_map(&:contact_id).uniq)
+    cohort = tasks.map { |t| Crm::LeadCohort.of(t.contact, t) }
+    new_leads = cohort.count { |c| %w[mesmo_dia semana mes].include?(c) }
+    {
+      total: tasks.size,
+      # item 342: o total é de CONSULTAS; quantas PESSOAS são (sem repetir)
+      people: tasks.filter_map(&:contact_id).uniq.size + tasks.count { |t| t.contact_id.nil? },
+      new_leads: new_leads,
+      base: tasks.size - new_leads,
+      by_origin_inbox: rows_json(tasks.group_by { |t| t.contact_id ? origin[t.contact_id] || 'sem conversa' : 'sem cadastro' }.transform_values(&:size)),
+      by_unit: rows_json(tasks.group_by { |t| Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit.presence || 'sem unidade' }.transform_values(&:size)),
+      by_procedure: rows_json(tasks.group_by { |t| t.procedure.presence || t.indicated_procedure.presence || (t.modality.presence && t.modality.humanize) || 'Consulta' }.transform_values(&:size)),
+      by_doctor: rows_json(tasks.group_by { |t| t.doctor.presence || 'sem médico' }.transform_values(&:size)),
+      by_source: { ia: tasks.count { |t| Crm::BookingSource.of(t) == 'ia' }, equipe: tasks.count { |t| Crm::BookingSource.of(t) == 'equipe' } },
+      # 🏷️ item 332 (06/10, pedido dele: "descrição maior sobre as fontes"): a FONTE pelo carimbo
+      # (CEVICO × Oftalmofácil…) e QUEM FEZ pelo carimbo (paciente, robô, equipe, sincronização)
+      # item 342: contada SEM a lente (todas as fontes), para comparar — com a lente era 100% por construção
+      by_stamp: rows_json(stamp_tasks.group_by { |t| stamp_source_name(t) }.transform_values(&:size)),
+      by_stamp_all_sources: stamp_scope.present?,
+      by_via: rows_json(tasks.group_by { |t| Crm::BookingCuts::VIAS[stamp_via(t)] }.transform_values(&:size)),
+      via_deduced: tasks.count { |t| !Crm::BookingCuts::VIAS.key?(t.cevico_born_via) && t.source != 'oftalmofacil' },
+      # 28/09 (prints dele: 44 marcadas, 36 "pela caixa de confirmação"): a maioria é marcada pela
+      # equipe DENTRO do Oftalmofácil e chega pela Agenda unificada — vale mostrar onde foi marcada
+      by_channel: { oftalmofacil: tasks.count { |t| t.external_ref.present? }, cevico: tasks.count { |t| t.external_ref.blank? } },
+      cohorts: (Crm::LeadCohort::KEYS + ['sem_cadastro']).index_with { |k| cohort.count(k) }
+    }
+  end
+
+  # item 332: nome da fonte carimbada no agendamento (sem carimbo: a regra que carimba o passado)
+  def stamp_source_name(task) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    sources_by_id = (@sources_by_id ||= Crm::Sources.list(account).index_by(&:id))
+    id = task.cevico_source_id || (Crm::PartnerGuard.partner_task?(task) ? Crm::Sources.id_for_key(account, Crm::Source::PARTNER_KEY) : nil)
+    sources_by_id[id]&.name || sources_by_id.values.find(&:own?)&.name || 'CEVICO'
+  end
+
+  # item 332: quem fez — carimbo; antes do carimbo, hub = sincronização e a marca do Atendente de IA
+  def stamp_via(task)
+    return task.cevico_born_via if Crm::BookingCuts::VIAS.key?(task.cevico_born_via)
+    return 'sync' if task.source == 'oftalmofacil'
+
+    Crm::BookingSource.of(task) == 'ia' ? 'robo' : 'equipe'
+  end
+
+  # cirurgias do período (pela data): procedimentos, unidades, faltas, origem
+  def surgery_breakdown_json(since, until_at) # rubocop:disable Metrics/AbcSize
+    tasks = lens.tasks(account.tasks).where(task_type: 'cirurgia', due_at: since..until_at).to_a
+    return nil if tasks.empty?
+
+    active = tasks.reject(&:canceled_at)
+    done = active.select { |t| t.attendance == 'attended' || t.status.to_s == 'done' }
+    {
+      total: active.size,
+      done: done.size,
+      missed: active.count { |t| t.attendance == 'missed' },
+      canceled: tasks.size - active.size,
+      pending: active.count { |t| t.attendance.blank? && t.status.to_s != 'done' && t.due_at < Time.current },
+      from_oftalmofacil: active.count { |t| t.source_detail.present? || t.external_ref.present? },
+      by_procedure: rows_json(done.group_by { |t| t.procedure.presence || t.title.to_s.sub(/\ACirurgia:\s*/i, '').split(' - ').first.presence || 'sem procedimento' }.transform_values(&:size)),
+      by_unit: rows_json(done.group_by { |t| Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit.presence || 'sem unidade' }.transform_values(&:size)),
+      by_doctor: rows_json(done.group_by { |t| t.doctor.presence || 'sem médico' }.transform_values(&:size))
+    }
+  end
+
+  # funil dos LEADS NOVOS dos últimos 30 dias: chegaram → receberam orçamento →
+  # entraram em Agendamento (mudança de coluna), com a caixa por onde chegaram
+  def funnel_30d_json
+    since = 30.days.ago
+    now = Time.current
+    universe = leads_scope(since, now)
+    quote_stage = quote_stage_for(account)
+    quotes = if quote_stage
+               Crm::StageLog.joins(:crm_contact).where(stage_id: quote_stage.id, event_type: 'entered', entered_at: since..now)
+                            .where(crm_contacts: { contact_id: universe.select(:id) }).distinct.count(:crm_contact_id)
+             end
+    booked = Crm::BookingRate.entries(account, since, now, lens: lens).joins(:crm_contact)
+                             .where(crm_contacts: { contact_id: universe.select(:id) }).distinct.count(:crm_contact_id)
+    {
+      leads: universe.count,
+      quotes: quotes,
+      quote_stage: quote_stage&.name,
+      booked: booked,
+      booking_stage: Crm::BookingRate.stage(account)&.name,
+      by_inbox: leads_by_inbox_json(since, now)
+    }
+  end
+
+  def quote_stage_for(account)
+    pipeline = account.crm_pipelines.order(:position).first
+    pipeline&.stages&.order(:position)&.detect { |st| st.name.match?(/or[cç]amento/i) }
   end
 end

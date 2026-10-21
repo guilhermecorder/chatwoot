@@ -7,6 +7,7 @@
 #  id                    :integer          not null, primary key
 #  additional_attributes :jsonb
 #  blocked               :boolean          default(FALSE), not null
+#  cevico_born_via       :string
 #  contact_type          :integer          default("visitor")
 #  country_code          :string           default("")
 #  custom_attributes     :jsonb
@@ -21,10 +22,12 @@
 #  created_at            :datetime         not null
 #  updated_at            :datetime         not null
 #  account_id            :integer          not null
+#  cevico_source_id      :bigint
 #  company_id            :bigint
 #
 # Indexes
 #
+#  index_contacts_on_account_and_created_at              (account_id,created_at)
 #  index_contacts_on_account_id                          (account_id)
 #  index_contacts_on_account_id_and_contact_type         (account_id,contact_type)
 #  index_contacts_on_account_id_and_last_activity_at     (account_id,last_activity_at DESC NULLS LAST)
@@ -41,11 +44,14 @@
 
 # rubocop:enable Layout/LineLength
 
-class Contact < ApplicationRecord
+class Contact < ApplicationRecord # rubocop:disable Metrics/ClassLength -- includes CEVICO (Rodadas 5 e 6)
   include Avatarable
   include AvailabilityStatusable
   include Labelable
   include LlmFormattable
+  include CevicoSourceStamped # 🏷️ item 322 (CEVICO): de que fonte é o paciente + como nasceu
+  include CevicoLabelTriggers # 🏷️ Rodada 5 (#17): etiqueta mudou → automações "Etiqueta adicionada/removida"
+  include CevicoContactData # 🔒 Rodada 6: card, consultas, anotações... e o que acontece ao apagar o paciente
 
   validates :account_id, presence: true
   validates :email, allow_blank: true, uniqueness: { scope: [:account_id], case_sensitive: false },
@@ -53,7 +59,7 @@ class Contact < ApplicationRecord
   validates :identifier, allow_blank: true, uniqueness: { scope: [:account_id] }
   validates :phone_number,
             allow_blank: true, uniqueness: { scope: [:account_id] },
-            format: { with: /\+[1-9]\d{1,14}\z/, message: I18n.t('errors.contacts.phone_number.invalid') }
+            format: { with: /\A\+[1-9]\d{1,14}\z/, message: I18n.t('errors.contacts.phone_number.invalid') }
 
   belongs_to :account
   has_many :conversations, dependent: :destroy_async
@@ -62,8 +68,6 @@ class Contact < ApplicationRecord
   has_many :inboxes, through: :contact_inboxes
   has_many :messages, as: :sender, dependent: :destroy_async
   has_many :notes, dependent: :destroy_async
-  # cards do CRM CEVICO deste contato (1 por funil, na prática 1)
-  has_many :crm_contacts, class_name: 'Crm::Contact', dependent: :destroy_async
   before_validation :prepare_contact_attributes
   after_create_commit :dispatch_create_event, :ip_lookup
   after_update_commit :dispatch_update_event
@@ -208,7 +212,7 @@ class Contact < ApplicationRecord
   def phone_number_format
     return if phone_number.blank?
 
-    self.phone_number = phone_number_was unless phone_number.match?(/\+[1-9]\d{1,14}\z/)
+    self.phone_number = phone_number_was unless phone_number.match?(/\A\+[1-9]\d{1,14}\z/)
   end
 
   def email_format

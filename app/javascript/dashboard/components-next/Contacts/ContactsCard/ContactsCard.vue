@@ -10,6 +10,9 @@ import Flag from 'dashboard/components-next/flag/Flag.vue';
 import ContactDeleteSection from 'dashboard/components-next/Contacts/ContactsCard/ContactDeleteSection.vue';
 import Checkbox from 'dashboard/components-next/checkbox/Checkbox.vue';
 import countries from 'shared/constants/countries';
+// CEVICO (pedido 22/09): atalhos "Nova conversa" e "Ligar" na própria linha
+import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
+import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 
 const props = defineProps({
   id: { type: Number, required: true },
@@ -193,6 +196,19 @@ const handleAvatarHover = isHovered => {
         </div>
       </div>
 
+      <!-- 💬📞 atalhos CEVICO: começar conversa / ligar, sem abrir a linha nem a ficha -->
+      <span class="inline-flex items-center gap-1 shrink-0" @click.stop>
+        <Button
+          v-tooltip.top="'Nova conversa'"
+          icon="i-lucide-message-square-plus"
+          variant="ghost"
+          color="slate"
+          size="xs"
+          class="hidden sm:inline-flex"
+          @click.stop="openNovaConversa({ contactId: id })"
+        />
+        <CevicoCallButton :contact-id="id" :phone="phoneNumber" size="sm" />
+      </span>
       <Button
         icon="i-lucide-chevron-down"
         variant="ghost"

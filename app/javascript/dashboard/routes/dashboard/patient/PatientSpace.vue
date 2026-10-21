@@ -3,6 +3,7 @@
 // o ambiente inteiro se veste com a cor do paciente (sexo + idade),
 // a jornada do funil vira uma pilha de estágios com tempos e etiquetas,
 // e o Espaço do Médico é o protagonista (tudo-à-vista + anotações).
+import { openPatientChat } from 'dashboard/composables/useCevicoPatientChat';
 import { ref, computed, onMounted, watch } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -10,10 +11,15 @@ import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { frontendURL } from 'dashboard/helper/URLHelper';
-import { resolveDoctors, resolveUnitLabels, MODALITIES } from 'dashboard/helper/cevicoAgenda';
-import { termo, termoCap, frase } from 'dashboard/helper/segmento';
 import PatientSpaceIcon from './PatientSpaceIcon.vue';
+import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
+import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
+import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
+import { hexToRgbSpaced } from 'dashboard/helper/cevicoAgenda';
+import { PRICE_UNITS } from 'dashboard/routes/dashboard/settings/precos/priceRows';
 
 const route = useRoute();
 const router = useRouter();
@@ -29,6 +35,10 @@ const accountId = computed(() => route.params.accountId);
 const currentRole = useMapGetter('getCurrentRole');
 const currentUser = useMapGetter('getCurrentUser');
 const isAdmin = computed(() => currentRole.value === 'administrator');
+// 🔐 rodada 334: pacientes (dados/notas/orçamento) e pacientes.notas_clinicas —
+// a árvore entra POR CIMA do cadeado clínico que já existia (clinical_access)
+const { canEdit } = useCevicoAccess();
+const canEditPatient = computed(() => canEdit('pacientes'));
 
 // ── Dados do paciente ──────────────────────────────────────────────
 const fetchPatient = async () => {
@@ -45,6 +55,12 @@ const fetchPatient = async () => {
 
 const identity = computed(() => data.value?.identity || {});
 const indicators = computed(() => data.value?.indicators || {});
+// 🏥 ficha cirúrgica do OftalmoFácil (item 157) — o servidor só manda p/ admin
+const surgeries = computed(() => data.value?.surgeries || []);
+const surgeryStatusClass = kind =>
+  ({ realizada: 'bg-emerald-500/15 text-emerald-700', agendada: 'bg-sky-500/15 text-sky-700',
+    aguardando_pagamento: 'bg-amber-500/15 text-amber-700', cancelada: 'bg-red-500/15 text-red-600',
+    ausente: 'bg-orange-500/15 text-orange-700' }[kind] || 'bg-n-alpha-2 text-n-slate-11');
 const timeline = computed(() => data.value?.timeline || []);
 const labelEvents = computed(() => data.value?.label_events || []);
 const automations = computed(() => data.value?.automations || {});
@@ -207,11 +223,14 @@ const fmtDuration = minutes => {
   return `${Math.round(minutes / 60 / 24)} dia(s)`;
 };
 
-// modalidades e unidades do segmento (preset clínica = os de sempre);
-// unidades respeitam a Personalização da conta (computed lê crmSettings,
-// declarado mais abaixo — avaliação preguiçosa)
-const MODALITY_LABELS = Object.fromEntries(MODALITIES.map(m => [m.key, m.label]));
-const UNIT_LABELS = computed(() => resolveUnitLabels(crmSettings.value));
+const MODALITY_LABELS = {
+  avaliacao: 'Avaliação',
+  retorno: 'Retorno',
+  pos_op: 'Pós-operatório',
+  exames: 'Exame',
+  teleconsulta: 'Teleconsulta',
+};
+const UNIT_LABELS = { tatuape: 'Tatuapé', paulista: 'Av. Paulista', online: 'Online' };
 const CHANNEL_LABELS = {
   Whatsapp: 'WhatsApp',
   FacebookPage: 'Instagram/Facebook',
@@ -247,6 +266,20 @@ const toggleForm = key => {
 const openConversation = id => {
   router.push(frontendURL(`accounts/${accountId.value}/conversations/${id}`));
 };
+
+// 💬📞 "Chamar o paciente" daqui mesmo (pedido 22/09): pílulas no cabeçalho.
+// "Abrir conversa" leva à conversa mais recente (última atividade); o payload
+// já traz cada conversa na linha do tempo, com display_id e last_activity_at.
+// (a pílula "Ligar" só aparece com as ligações ligadas: cevicoCallsOn, abaixo)
+const lastConversationId = computed(() => {
+  const convs = timeline.value.filter(
+    e => e.type === 'conversa' && e.conversation_id
+  );
+  if (!convs.length) return null;
+  const when = e => new Date(e.last_activity_at || e.at || 0).getTime() || 0;
+  return convs.reduce((best, e) => (when(e) > when(best) ? e : best))
+    .conversation_id;
+});
 
 // ── JORNADA EMPILHADA: estágios do funil, do primeiro ao atual ─────
 // Cada bloco = um estágio; à esquerda a data de entrada e o salto de dias;
@@ -298,6 +331,17 @@ const funnelJourney = computed(() => {
 const consultEvents = computed(() =>
   timeline.value.filter(e => e.type === 'consulta').reverse()
 );
+// variáveis do kit: a cor do paciente é a cor da página
+const pageVars = computed(() => ({
+  '--cv': theme.value.accent,
+  '--cv-rgb': hexToRgbSpaced(theme.value.accent),
+  '--cv-deep': theme.value.accent,
+  '--cv-deep-rgb': hexToRgbSpaced(theme.value.accent),
+  '--cv-grad': theme.value.accentGrad,
+  '--cv-grad-2': theme.value.accentGrad,
+  '--cv-grad-3': theme.value.accentGrad,
+  '--cv-hero': theme.value.grad,
+}));
 const surgeryEvents = computed(() =>
   timeline.value.filter(e => e.type === 'cirurgia').reverse()
 );
@@ -420,24 +464,43 @@ const PROCEDURE_GROUPS = [
     ],
   },
 ];
-// preço vigente por nome (promocional vence) vindo da tabela oficial
+// 🔢 Rodada 5 (#401): o preço sempre aparece com a unidade (por olho × dois
+// olhos). Plano B (sem tabela carregada): refrativa é dos dois olhos; catarata
+// e lente fácica são por olho.
+const DEFAULT_UNIT_BY_GROUP = {
+  refrativa: 'dois_olhos',
+  catarata: 'por_olho',
+  faco_refrativa: 'por_olho',
+  artisan: 'por_olho',
+};
+const priceUnitLabel = unit =>
+  PRICE_UNITS.find(u => u.value === unit)?.label || '';
+// preço vigente por nome (promocional vence) + unidade, da tabela oficial
 const officialPriceByName = computed(() => {
   const items = crmSettings.value?.price_table?.items || [];
   const map = {};
   items.forEach(item => {
-    map[item.name.toLowerCase().trim()] =
-      Number(item.promo_price || item.price) || undefined;
+    map[item.name.toLowerCase().trim()] = {
+      price: Number(item.promo_price || item.price) || undefined,
+      unit: item.unit,
+    };
   });
   return map;
 });
-const withOfficialPrice = option => {
+const withOfficialPrice = (option, groupKey) => {
   const official = officialPriceByName.value[option.name?.toLowerCase().trim()];
-  return official ? { ...option, price: official } : option;
+  const fallbackUnit = option.price ? DEFAULT_UNIT_BY_GROUP[groupKey] : null;
+  if (!official?.price) return { ...option, unit: fallbackUnit };
+  return {
+    ...option,
+    price: official.price,
+    unit: official.unit || fallbackUnit,
+  };
 };
 const PROCEDURES = computed(() =>
   PROCEDURE_GROUPS.map(group => ({
-    ...withOfficialPrice(group),
-    options: group.options.map(withOfficialPrice),
+    ...withOfficialPrice(group, group.key),
+    options: group.options.map(option => withOfficialPrice(option, group.key)),
   }))
 );
 const selectedProcedure = computed(() =>
@@ -445,8 +508,11 @@ const selectedProcedure = computed(() =>
 );
 
 const EYES = ['OD', 'OE', 'AO'];
-// nomes oficiais: conta (Personalização) > segmento (antes: lista duplicada)
-const DOCTORS = computed(() => resolveDoctors(crmSettings.value).map(d => d.name));
+const DOCTORS = [
+  'Dr. Gustavo Bittar',
+  'Dr. Henrique Gemelli',
+  'Dra. Roberta Negri',
+];
 
 // formulário de anotação (campos rápidos — a vida do médico fácil)
 const showNoteForm = ref(false);
@@ -582,6 +648,14 @@ const goToAgendaForSurgery = () => {
   );
   if (!ok) return;
   router.push(frontendURL(`accounts/${accountId.value}/agenda`));
+};
+
+// 👪 item 346: painel da pessoa amarrada (quem agendou / para quem agendou)
+const openLinkedPatient = link => {
+  if (!link?.contact_id) return;
+  router.push(
+    frontendURL(`accounts/${accountId.value}/patient/${link.contact_id}`)
+  );
 };
 
 const openNewNote = () => {
@@ -723,6 +797,7 @@ const deleteNote = async note => {
 
 const canTouchNote = note =>
   canEditNotes.value &&
+  canEdit('pacientes.notas_clinicas') &&
   (isAdmin.value || note.author?.id === currentUser.value?.id);
 
 // consultas da linha do tempo (para ligar a anotação a uma consulta)
@@ -760,6 +835,10 @@ const doctorUserIds = ref([]);
 const teamView = ref(false);
 const agents = useMapGetter('agents/getAgents');
 const crmSettings = useMapGetter('crm/getSettings');
+// 📞 ligações do CEVICO ligadas na conta? (gate da pílula "Ligar" do cabeçalho)
+const cevicoCallsOn = computed(
+  () => crmSettings.value?.calls?.enabled === true
+);
 
 const loadAccessConfig = () => {
   const access = crmSettings.value?.clinical_access || {};
@@ -804,7 +883,13 @@ watch(contactId, () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
+  <!-- 🍎 item 210 (23/09): o Espaço do Paciente veste o kit "iMac G3 + vidro"
+       — a cor do paciente (sexo + idade) vira a paleta --cv* da página, e os
+       cartões passam a ser vidro (cv-block / cv-sub), no design Apple -->
+  <div
+    class="cv-page flex flex-col h-full w-full overflow-y-auto bg-n-surface-1"
+    :style="pageVars"
+  >
     <div class="max-w-6xl mx-auto w-full p-4 sm:p-8">
       <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
@@ -817,13 +902,15 @@ watch(contactId, () => {
       <template v-else>
         <!-- ══ Cabeçalho dopamine (a cor segue o paciente) ══ -->
         <div
-          class="relative rounded-2xl p-5 mb-5 text-white shadow-lg overflow-hidden"
+          class="cevico-hero relative rounded-3xl p-5 sm:p-6 mb-5 text-white shadow-lg"
           :class="isLightTheme ? 'cevico-ink-dark' : ''"
           :style="{ background: theme.grad }"
         >
+          <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
+          <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
           <div
             v-if="theme.stars"
-            class="absolute inset-0 pointer-events-none"
+            class="absolute inset-0 rounded-3xl pointer-events-none"
             :style="{ backgroundImage: STAR_FIELD }"
           />
           <div class="relative flex items-start gap-4 flex-wrap">
@@ -843,6 +930,7 @@ watch(contactId, () => {
                 <h1 class="text-xl font-bold leading-tight">
                   {{ identity.name || 'Paciente' }}
                 </h1>
+                <CevicoViewOnlyPill v-if="!canEditPatient" />
                 <span
                   v-if="identity.age"
                   class="px-2 py-0.5 rounded-full bg-white/20 text-[11px] font-semibold"
@@ -889,6 +977,47 @@ watch(contactId, () => {
                   paciente desde {{ fmtDate(identity.created_at) }}
                 </span>
               </div>
+              <!-- 💬📞 chamar o paciente daqui mesmo: conversa nova, ligar, abrir a última conversa -->
+              <div class="flex items-center gap-1.5 flex-wrap mt-2">
+                <button
+                  class="cevico-hero-btn"
+                  title="Começar uma conversa com este paciente por qualquer caixa"
+                  @click="openNovaConversa({ contactId: Number(contactId) })"
+                >
+                  <span class="i-lucide-message-square-plus text-[13px]" />
+                  Conversa
+                </button>
+                <span
+                  v-if="identity.phone_number && cevicoCallsOn"
+                  class="cevico-call-pill cevico-hero-btn !pl-1"
+                  title="Ligar para o paciente pelo WhatsApp"
+                >
+                  <CevicoCallButton
+                    :contact-id="Number(contactId)"
+                    :phone="identity.phone_number"
+                    :ghost="false"
+                    faded
+                  />
+                  Ligar
+                </span>
+                <button
+                  class="cevico-hero-btn"
+                  title="Abrir a conversa mais recente aqui mesmo, sem sair do Espaço do Paciente"
+                  @click="openPatientChat({ contactId: Number(contactId) })"
+                >
+                  <span class="i-lucide-messages-square text-[13px]" />
+                  Abrir conversa
+                </button>
+                <button
+                  v-if="lastConversationId"
+                  class="cevico-hero-btn"
+                  :title="`Ir para a tela de Conversas (#${lastConversationId})`"
+                  @click="openConversation(lastConversationId)"
+                >
+                  <span class="i-lucide-external-link text-[13px]" />
+                  Tela cheia
+                </button>
+              </div>
               <div
                 v-if="(identity.labels || []).length"
                 class="flex items-center gap-1.5 flex-wrap mt-2"
@@ -900,6 +1029,64 @@ watch(contactId, () => {
                 >
                   {{ label }}
                 </span>
+              </div>
+              <!-- 👪 item 346: quem agendou para quem — clica e abre o painel da outra pessoa -->
+              <div
+                v-if="
+                  identity.scheduled_by || (identity.scheduled_for || []).length
+                "
+                class="flex items-center gap-1.5 flex-wrap mt-2"
+              >
+                <button
+                  v-if="identity.scheduled_by"
+                  class="cevico-hero-btn"
+                  title="Abrir o painel de quem agendou esta consulta"
+                  @click="openLinkedPatient(identity.scheduled_by)"
+                >
+                  <span class="i-lucide-user-round-check text-[13px]" />
+                  Agendado por {{ identity.scheduled_by.name }}
+                  <span v-if="identity.scheduled_by.phone" class="opacity-75">
+                    · {{ identity.scheduled_by.phone }}
+                  </span>
+                </button>
+                <button
+                  v-for="link in identity.scheduled_for || []"
+                  :key="link.contact_id"
+                  class="cevico-hero-btn"
+                  title="Abrir o painel da pessoa para quem este contato agendou"
+                  @click="openLinkedPatient(link)"
+                >
+                  <span class="i-lucide-users-round text-[13px]" />
+                  Agendou para {{ link.name }}
+                  <span v-if="link.phone" class="opacity-75">
+                    · {{ link.phone }}
+                  </span>
+                </button>
+              </div>
+              <!-- ⚠️ item 346: cadastro para conferir (possível duplicado, nome diferente…) -->
+              <div
+                v-if="(identity.review || []).length"
+                class="mt-2.5 rounded-xl px-3 py-2 w-fit max-w-full text-[12px] bg-amber-500/20 border-[1.5px] border-solid border-amber-500/70"
+              >
+                <div
+                  v-for="item in identity.review"
+                  :key="`${item.tipo}-${item.outro_contact_id}`"
+                  class="flex items-center gap-1.5 flex-wrap"
+                >
+                  <span class="i-lucide-triangle-alert text-[13px]" />
+                  <strong>{{ item.titulo }}</strong>
+                  <span class="opacity-90">{{ item.detalhe }}</span>
+                  <button
+                    v-if="item.outro_contact_id"
+                    class="underline font-semibold"
+                    title="Abrir o outro cadastro para comparar"
+                    @click="
+                      openLinkedPatient({ contact_id: item.outro_contact_id })
+                    "
+                  >
+                    ver o outro
+                  </button>
+                </div>
               </div>
               <!-- anúncio de origem: a PLACA DOURADA do primeiro contato -->
               <div
@@ -925,7 +1112,7 @@ watch(contactId, () => {
               <div
                 v-for="card in identity.cards"
                 :key="card.id"
-                class="bg-white/12 backdrop-blur rounded-xl px-3.5 py-2.5"
+                class="cv-glass px-3.5 py-2.5"
               >
                 <p class="text-[10px] uppercase tracking-wide text-white/60">
                   {{ card.pipeline }}
@@ -938,7 +1125,10 @@ watch(contactId, () => {
                   {{ card.stage || '—' }}
                 </p>
                 <p class="text-[11px] text-white/70">
-                  {{ fmtMoney(card.value) || 'sem valor'
+                  <!-- 🔐 achado #307: sem o Financeiro o valor vem em branco de propósito -->
+                  {{
+                    fmtMoney(card.value) ||
+                    (identity.money_restricted ? '🔒 valor' : 'sem valor')
                   }}<span v-if="card.assignee"> · {{ card.assignee }}</span>
                 </p>
               </div>
@@ -989,7 +1179,7 @@ watch(contactId, () => {
         <!-- ══ Cards de informação ══ -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           <!-- Consultas -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1027,8 +1217,42 @@ watch(contactId, () => {
             </div>
           </div>
 
+          <!-- 📞 Ligações nativas de WhatsApp (item 167) -->
+          <CevicoCallsCard
+            :contact-id="contactId"
+            :accent="theme.accent"
+            variant="space"
+          />
+
+          <!-- 🏥 Cirurgias no OftalmoFácil (item 157) — só admin recebe -->
+          <div v-if="isAdmin && surgeries.length" class="cv-sub px-4 py-3.5">
+            <p class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-2">
+              <span class="i-lucide-hospital text-xs" :style="{ color: theme.accent }" />
+              Cirurgias no OftalmoFácil · {{ surgeries.length }}
+              <span class="ml-auto text-[10px] font-normal text-n-slate-9">só admin</span>
+            </p>
+            <div v-for="sg in surgeries" :key="sg.id" class="rounded-lg bg-n-alpha-1 px-3 py-2 mb-1.5 last:mb-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" :class="surgeryStatusClass(sg.status)">{{ sg.status_label }}</span>
+                <span class="text-[12px] font-bold text-n-slate-12">{{ sg.procedure || 'Procedimento' }}</span>
+                <span v-if="sg.eye" class="text-[10px] text-n-slate-10">· {{ sg.eye }}</span>
+                <span class="ml-auto text-[11px] text-n-slate-11 tabular-nums">{{ sg.date ? new Date(sg.date + 'T12:00:00').toLocaleDateString('pt-BR') : '—' }}<template v-if="sg.hour"> · {{ sg.hour }}</template></span>
+              </div>
+              <div class="mt-1.5 grid grid-cols-1 gap-y-0.5 text-[10px] text-n-slate-10">
+                <span>🏥 {{ sg.clinic || '—' }}</span>
+                <span>🩺 {{ sg.doctor || '—' }}</span>
+                <span>Valor: <b class="text-n-slate-12">{{ fmtMoney(sg.amount) }}</b></span>
+                <span>Resultado: <b :class="sg.resultado >= 0 ? 'text-emerald-600' : 'text-red-500'">{{ fmtMoney(sg.resultado) }}</b></span>
+                <span>Custo prestador: {{ fmtMoney(sg.clinic_price) }}</span>
+                <span>Taxa plataforma: {{ fmtMoney(sg.profit) }}</span>
+                <span>{{ sg.paid ? '✅ pago' : sg.paid_amount ? `💳 pago ${fmtMoney(sg.paid_amount)}` : '⏳ pagamento pendente' }}</span>
+                <span v-if="sg.cpf">CPF ···{{ String(sg.cpf).slice(-4) }}</span>
+              </div>
+            </div>
+          </div>
+
           <!-- Procedimento & investimento -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1074,7 +1298,7 @@ watch(contactId, () => {
           </div>
 
           <!-- NPS & pesquisas -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1113,7 +1337,7 @@ watch(contactId, () => {
           </div>
 
           <!-- Automações no contato -->
-          <div class="rounded-xl px-4 py-3 bg-n-solid-1 border border-n-weak">
+          <div class="cv-sub px-4 py-3.5">
             <p
               class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-1.5"
             >
@@ -1186,19 +1410,16 @@ watch(contactId, () => {
         <div class="grid grid-cols-1 lg:grid-cols-5 gap-5">
           <!-- ══ Jornada no funil (pilha de estágios) ══ -->
           <div class="lg:col-span-2 space-y-5">
-            <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
+            <div class="cv-block p-5 sm:p-6">
               <div class="flex items-center justify-between mb-1">
                 <h2
                   class="text-sm font-bold text-n-slate-12 flex items-center gap-2"
                 >
-                  <span
-                    class="i-lucide-layers text-base"
-                    :style="{ color: theme.accent }"
-                  />
+                  <span class="cv-icon cv-icon-sm"><span class="i-lucide-layers text-xs" /></span>
                   Jornada no funil
                 </h2>
                 <button
-                  class="text-[11px] text-n-slate-10 hover:text-n-slate-12"
+                  class="cv-chip"
                   @click="showDetailed = !showDetailed"
                 >
                   {{ showDetailed ? 'ver jornada' : 'eventos detalhados' }}
@@ -1295,7 +1516,7 @@ watch(contactId, () => {
 
                   <!-- resumo da jornada -->
                   <div
-                    class="mt-3 rounded-xl px-3.5 py-2.5 text-white"
+                    class="mt-3 rounded-2xl px-4 py-3 text-white cv-tile relative overflow-hidden"
                     :style="{ background: theme.accentGrad }"
                   >
                     <div
@@ -1471,12 +1692,27 @@ watch(contactId, () => {
                         >
                           “{{ event.comment }}”
                         </p>
+                        <!-- 🔐 achado #307: comentário livre só com acesso clínico -->
+                        <p
+                          v-else-if="event.comment_restricted"
+                          class="text-[10px] text-n-slate-9 mt-0.5"
+                        >
+                          🔒 comentário só com acesso clínico
+                        </p>
                       </template>
 
                       <template v-else-if="event.type === 'formulario'">
                         <p class="text-[13px] text-n-slate-12">
                           📋 Respondeu
                           <strong>{{ event.form || 'formulário' }}</strong>
+                          <!-- 🔐 achado #118: link limpo em cadastro existente = não confirmada -->
+                          <span
+                            v-if="event.verified === false"
+                            class="ml-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800"
+                            :title="`Quem respondeu se identificou só com nome e WhatsApp${event.informed_name ? ` (digitou: ${event.informed_name})` : ''} — ninguém provou que é o dono do telefone`"
+                          >
+                            ⚠️ não confirmada
+                          </span>
                           <button
                             v-if="(event.answers || []).length"
                             class="ml-1.5 text-[11px] text-n-blue-text hover:underline"
@@ -1488,6 +1724,14 @@ watch(contactId, () => {
                                 : 'ver respostas'
                             }}
                           </button>
+                          <!-- 🔐 achado #307: respostas só com acesso clínico (LGPD) -->
+                          <span
+                            v-else-if="event.restricted && event.completed"
+                            class="ml-1.5 text-[10px] text-n-slate-9"
+                            title="As respostas do paciente são dado de saúde — só médicos, administradores ou a equipe com o acesso clínico liberado"
+                          >
+                            🔒 respostas só com acesso clínico
+                          </span>
                         </p>
                         <div
                           v-if="expandedForms.has(eventKey(event, idx))"
@@ -1532,22 +1776,19 @@ watch(contactId, () => {
           <div class="lg:col-span-3 space-y-5">
             <div
               v-if="notesAllowed"
-              class="bg-n-solid-2 border border-n-weak rounded-2xl p-5"
+              class="cv-block p-5 sm:p-6"
             >
               <div class="flex items-center justify-between mb-1">
                 <h2
                   class="text-sm font-bold text-n-slate-12 flex items-center gap-2"
                 >
-                  <span
-                    class="i-lucide-notebook-pen text-base"
-                    style="color: #b8860b"
-                  />
-                  {{ frase('espaco_profissional', 'Espaço do Médico') }}
+                  <span class="cv-icon cv-icon-sm cv-gold"><span class="i-lucide-notebook-pen text-xs" /></span>
+                  Espaço do Médico
                 </h2>
                 <div class="flex items-center gap-1.5">
                   <button
                     v-if="isAdmin"
-                    class="w-7 h-7 rounded-lg hover:bg-n-alpha-1 flex items-center justify-center text-n-slate-10"
+                    class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn"
                     title="Quem pode ver e anotar"
                     @click="showAccessConfig = !showAccessConfig"
                   >
@@ -1555,8 +1796,7 @@ watch(contactId, () => {
                   </button>
                   <button
                     v-if="canEditNotes"
-                    class="px-2.5 h-7 rounded-lg text-[11px] font-semibold text-white flex items-center gap-1 shadow-sm"
-                    :style="{ background: theme.accentGrad }"
+                    class="cv-btn cv-btn-sm"
                     @click="openNewNote"
                   >
                     <span class="i-lucide-plus text-xs" /> Nova anotação
@@ -1564,7 +1804,7 @@ watch(contactId, () => {
                 </div>
               </div>
               <p class="text-[10px] text-n-slate-9 mb-3">
-                Anotações internas da {{ termo('empresa') }} · dado sensível (LGPD) · acesso
+                Anotações internas da clínica · dado sensível (LGPD) · acesso
                 restrito
               </p>
 
@@ -1574,7 +1814,7 @@ watch(contactId, () => {
                 class="mb-4 bg-n-alpha-1 rounded-xl p-3"
               >
                 <p class="text-[11px] font-semibold text-n-slate-12 mb-2">
-                  {{ termoCap('profissionais') }} (podem anotar):
+                  Médicos (podem anotar):
                 </p>
                 <label
                   v-for="agent in agents"
@@ -1607,7 +1847,7 @@ watch(contactId, () => {
               <!-- "à uma vista": o resumo que o time bate o olho e entende -->
               <div
                 v-if="latestNote"
-                class="mb-4 rounded-xl p-3.5 text-white shadow-sm"
+                class="mb-4 rounded-2xl p-4 text-white shadow-sm cv-tile relative overflow-hidden"
                 :style="{ background: theme.accentGrad }"
               >
                 <p
@@ -1667,7 +1907,7 @@ watch(contactId, () => {
                 <div
                   v-for="note in notes"
                   :key="note.id"
-                  class="border border-n-weak rounded-xl p-3"
+                  class="cv-sub p-3.5"
                 >
                   <div class="flex items-start justify-between gap-2">
                     <div>
@@ -1836,14 +2076,11 @@ watch(contactId, () => {
             </div>
 
             <!-- ══ Atualizações do paciente ══ -->
-            <div class="bg-n-solid-2 border border-n-weak rounded-2xl p-5">
+            <div class="cv-block p-5 sm:p-6">
               <h2
                 class="text-sm font-bold text-n-slate-12 flex items-center gap-2 mb-3"
               >
-                <span
-                  class="i-lucide-bell-ring text-base"
-                  :style="{ color: theme.accent }"
-                />
+                <span class="cv-icon cv-icon-sm"><span class="i-lucide-bell-ring text-xs" /></span>
                 Atualizações do paciente
               </h2>
 
@@ -1942,7 +2179,7 @@ watch(contactId, () => {
       @click.self="showNoteForm = false"
     >
       <div
-        class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5"
+        class="cv-modal w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5"
       >
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
@@ -2019,7 +2256,9 @@ watch(contactId, () => {
               {{ proc.label }}
               <span v-if="proc.price"
 class="opacity-70"
-                >· {{ fmtMoney(proc.price) }}</span>
+                >· {{ fmtMoney(proc.price) }}
+                {{ priceUnitLabel(proc.unit) }}
+              </span>
             </button>
           </div>
           <div
@@ -2046,7 +2285,9 @@ class="opacity-70"
               {{ option.name }}
               <span v-if="option.price"
 class="opacity-70"
-                >· {{ fmtMoney(option.price) }}</span>
+                >· {{ fmtMoney(option.price) }}
+                {{ priceUnitLabel(option.unit) }}
+              </span>
             </button>
           </div>
           <div class="flex items-center gap-2 flex-wrap mt-2">
@@ -2343,6 +2584,7 @@ class="opacity-70"
             Cancelar
           </button>
           <button
+            v-if="canEdit('pacientes.notas_clinicas')"
             class="px-4 h-9 rounded-lg text-[12px] font-semibold text-white disabled:opacity-60 shadow-sm"
             :style="{ background: theme.accentGrad }"
             :disabled="noteSaving"
@@ -2366,4 +2608,23 @@ class="opacity-70"
 .cevico-ink-dark { color: #0b2239 !important; }
 .cevico-ink-dark [class*='text-white'] { color: rgba(11,34,57,.85) !important; }
 .cevico-ink-dark [class*='bg-white/'] { background: rgba(11,34,57,.10) !important; }
+/* pílula "Ligar" do cabeçalho: o botão do módulo de ligações herda a tinta
+   do cabeçalho (branca ou escura), some o fundo próprio e fica do tamanho
+   das outras pílulas; o balão da permissão abre alinhado à esquerda e
+   mantém as próprias cores */
+.cevico-call-pill :deep(.relative > button) {
+  color: inherit;
+  background: transparent;
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  padding: 0;
+}
+.cevico-call-pill :deep(.absolute) {
+  left: 0;
+  right: auto;
+}
+.cevico-call-pill :deep(.absolute [class*='text-white']) {
+  color: #fff !important;
+}
 </style>

@@ -44,14 +44,26 @@ class Crm::AppointmentExtractionService
         type: 'boolean',
         description: 'true se esta confirmação é um REAGENDAMENTO (o paciente já tinha consulta e mudou dia/horário)'
       },
+      cancelamento: {
+        type: 'boolean',
+        description: 'true se o paciente CANCELOU/desmarcou a consulta SEM combinar novo horário ' \
+                     '("não vou poder ir", "cancela pra mim", "desmarca"). Se remarcou para outro ' \
+                     'dia/hora confirmados, é reagendamento (não cancelamento).'
+      },
       sexo: {
         type: 'string',
         enum: %w[masculino feminino desconhecido],
         description: 'Sexo do PACIENTE da consulta, deduzido do nome ou do contexto ' \
                      '("minha mãe", "meu pai", "ele/ela"). Na dúvida, desconhecido.'
+      },
+      confirmacao: {
+        type: 'boolean',
+        description: 'true se esta conversa é a CONFIRMAÇÃO de uma consulta que JÁ ESTAVA marcada ' \
+                     '(a clínica manda "Confirmamos a avaliação… Você confirma a consulta?" / lembrete da ' \
+                     'véspera e o paciente responde SIM ou NÃO) — e NÃO um agendamento novo combinado aqui.'
       }
     },
-    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento sexo],
+    required: %w[encontrado nome telefone data hora unidade problema medico observacoes valor_consulta reagendamento cancelamento sexo confirmacao],
     additionalProperties: false
   }.freeze
 
@@ -81,10 +93,20 @@ class Crm::AppointmentExtractionService
       R$ 300 para glaucoma), registre; senão deixe vazio.
     - reagendamento=true quando a conversa mostra que o paciente JÁ TINHA uma
       consulta e trocou o dia/horário ("preciso remarcar", "mudar o horário").
+    - cancelamento=true SÓ quando o paciente desistiu/desmarcou SEM novo
+      horário combinado ("não vou poder ir", "cancela", "desmarca pra mim").
+      Se ele remarcou para um novo dia/hora CONFIRMADOS, isso é reagendamento
+      (encontrado=true com a nova data), NÃO cancelamento. Vale o estado MAIS
+      RECENTE da conversa: cancelou e depois marcou de novo = agendamento.
     - sexo: deduza o sexo do PACIENTE da consulta pelo nome (Maria → feminino,
       João → masculino) ou pelo contexto ("minha mãe", "meu avô", "ela"). Atenção:
       quem conversa pode estar marcando para OUTRA pessoa — o que vale é o
       paciente. Nome ambíguo e sem pistas no texto → desconhecido.
+    - confirmacao=true quando a conversa é só a CONFIRMAÇÃO de uma consulta que já
+      estava marcada (mensagem da clínica "Confirmamos a avaliação do(a) paciente…
+      Você confirma a consulta?" ou lembrete da véspera, com o paciente respondendo
+      SIM/NÃO). Nesse caso preencha data/hora da consulta confirmada normalmente,
+      mas o sistema NÃO conta como agendamento novo.
     - Não invente dados: campo não confirmado fica vazio.
   PROMPT
 
@@ -112,8 +134,8 @@ class Crm::AppointmentExtractionService
     message = client.messages.create(
       model: model,
       max_tokens: 1024,
-      system_: system_prompt,
-      output_config: output_config_for({ type: 'json_schema', schema: output_schema }),
+      system_: cached_system,
+      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: transcript }]
     )
     record_usage(message)
@@ -133,7 +155,9 @@ class Crm::AppointmentExtractionService
       notes: parsed['observacoes'].to_s.strip,
       price: parsed['valor_consulta'].to_s.strip,
       reschedule: parsed['reagendamento'] == true,
+      cancel: parsed['cancelamento'] == true,
       gender: %w[masculino feminino].include?(parsed['sexo']) ? parsed['sexo'] : nil,
+      confirmation: parsed['confirmacao'] == true,
       model: model
     }
   rescue Anthropic::Errors::AuthenticationError

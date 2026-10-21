@@ -1,6 +1,12 @@
 import Auth from '../api/auth';
+import { notifyCevicoForbidden } from './cevico403';
 
-const parseErrorCode = error => Promise.reject(error);
+// 🔐 rodada 334: 403 de endpoint CEVICO mostra a mensagem do servidor
+// ("Você só pode ver X…") uma vez, antes de devolver o erro para a tela
+const parseErrorCode = error => {
+  notifyCevicoForbidden(error);
+  return Promise.reject(error);
+};
 
 export default axios => {
   const { apiHost = '' } = window.chatwootConfig || {};

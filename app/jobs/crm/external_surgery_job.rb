@@ -14,6 +14,8 @@
 # Etiqueta no contato: modo LEVE, direto em taggings (como o RetroLabelJob).
 class Crm::ExternalSurgeryJob < ApplicationJob
   queue_as :low
+  # 🏷️ item 322: cirurgias trazidas de fora (planilha) = sincronização, não paciente entrando na coluna agora
+  around_perform { |_job, block| Crm::Stamp.with(via: 'sync', &block) }
 
   def perform(account_id, matched_pairs, stage_id, label_title, options = {})
     account = Account.find_by(id: account_id)
@@ -69,8 +71,15 @@ class Crm::ExternalSurgeryJob < ApplicationJob
         name = row['name'].to_s.strip
         next if name.blank?
 
+        # telefone da planilha (quando a coluna existir) entra no cadastro —
+        # o paciente criado já nasce alcançável no WhatsApp
+        digits = row['phone'].to_s.gsub(/\D/, '')
+        e164 = if digits.length >= 10
+                 digits.start_with?('55') && digits.length >= 12 ? "+#{digits}" : "+55#{digits}"
+               end
         contact = account.contacts.create!(
           name: name,
+          phone_number: e164,
           additional_attributes: { 'origem' => 'planilha_fechamento' }
         )
         entry = place_in_stage(stage, contact, row['value'], set_value, overwrite_value, row['date'], row['procedure'])

@@ -101,6 +101,15 @@ class Crm::SalesCoachService
     não invente números; proteja os pacientes citando só primeiro nome.
   PROMPT
 
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :sales_coach)
+  end
+
+  def default_insights_prompt
+    Crm::CompanyPrompts.pick(@account, INSIGHTS_PROMPT, :sales_insights)
+  end
+
   def initialize(conversation: nil, account: nil)
     @conversation = conversation
     @account = account || conversation&.account
@@ -117,8 +126,8 @@ class Crm::SalesCoachService
     message = client.messages.create(
       model: model,
       max_tokens: 1024,
-      system_: system_prompt,
-      output_config: output_config_for({ type: 'json_schema', schema: COACH_SCHEMA }),
+      system_: cached_system,
+      output_config: output_config_for({ type: 'json_schema', schema: company_schema(COACH_SCHEMA) }),
       messages: [{ role: 'user', content: "Identifique a objeção e sugira respostas para a vendedora:\n\n#{transcript}" }]
     )
     record_usage(message)
@@ -156,7 +165,7 @@ class Crm::SalesCoachService
     message = client.messages.create(
       model: model,
       max_tokens: 3000,
-      system_: custom_prompt.presence || Segmento.prompt('sales_coach_insights') || INSIGHTS_PROMPT,
+      system_: cached_system(custom_prompt.presence || default_insights_prompt),
       messages: [{ role: 'user', content: "Analise estas #{convs.size} conversas que geraram fechamento de cirurgia:\n\n#{corpus.truncate(120_000)}" }]
     )
     record_usage(message)

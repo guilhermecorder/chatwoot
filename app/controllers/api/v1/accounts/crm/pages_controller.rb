@@ -2,9 +2,25 @@
 # da clínica (nutrição de leads, quebra de objeções, procedimentos) por
 # estágio da jornada. Equipe visualiza a lista; só admin mexe.
 class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
+  # 🔐 Quem entra aqui: o nó 'marketing.paginas' do catálogo de acessos
+  # (rodada 334; Crm::AccessControl já vem do Base) — index/generate_status e
+  # comentar (add/delete_comment) pedem VER, todo o resto pede EDITAR. Sem a concessão = 403 antes de chegar
+  # em qualquer ação. Nunca inventar outro mecanismo.
+  #
   # o TIME inteiro cria e edita RASCUNHOS (inclusive com IA);
-  # publicar/despublicar e excluir continuam com o admin
+  # publicar/despublicar, trocar o endereço (slug) e excluir continuam com o admin
   before_action :check_admin, only: [:destroy]
+  # auditoria rodada 2 (#20/#150/#399/#428): página NO AR só o admin altera —
+  # antes a mudança de um atendente ia direto para o site público
+  before_action :lock_published_page, only: [:update]
+
+  # limites por pessoa por dia (geração paga com IA e imagens no storage);
+  # o admin também tem teto (3×) — segura sessão vazada e clique repetido
+  GENERATE_PER_DAY = 40
+  UPLOAD_PER_DAY = 100
+  ADMIN_QUOTA_MULTIPLIER = 3
+  QUOTA_MESSAGE = 'Você chegou ao limite de hoje para esta ação. Tente amanhã ou peça a um administrador.'.freeze
+  ADMIN_QUOTA_MESSAGE = 'Você chegou ao limite de hoje para esta ação (teto do administrador). Tente amanhã.'.freeze
 
   def index
     # a lista NÃO carrega o HTML anexado (100+ páginas × arquivos grandes);
@@ -37,6 +53,8 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
   # - copy pronta → agente CONSTRUTOR monta a página sem reescrever o texto
   # O resultado volta para o editor: a pessoa revisa e salva (publicar = admin)
   def generate
+    return render json: { error: quota_message }, status: :too_many_requests unless quota_ok?(:page_generate, GENERATE_PER_DAY)
+
     result = params[:copy].present? ? generate_from_copy : generate_from_briefing
     return render json: { error: result[:error] }, status: :unprocessable_entity if result[:error]
 
@@ -51,20 +69,24 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
   # item 111 — geração em SEGUNDO PLANO: o clique agenda o trabalho e o
   # editor consulta o status a cada poucos segundos (sem conexão aberta
   # esperando a IA — era isso que dava "internet error" no proxy)
-  def generate_start
-    job_id = SecureRandom.hex(10)
-    Redis::Alfred.setex(Crm::PageGenerateJob.result_key(job_id), { status: 'running' }.to_json, 15.minutes)
+  def generate_start # rubocop:disable Metrics/AbcSize
     # modo "ambiente de montagem": com page_id, o resultado vai DIRETO pra
     # página e a aba do rascunho acompanha pelo status por página
-    if params[:page_id].present?
-      page = Current.account.cevico_pages.find(params[:page_id])
-      Redis::Alfred.setex(Crm::PageGenerateJob.page_key(page.id), { status: 'running' }.to_json, 15.minutes)
-    end
+    page = params[:page_id].present? ? Current.account.cevico_pages.find(params[:page_id]) : nil
+    # página no ar: a IA reescreveria o site público — só o admin
+    return render json: { error: published_lock_message }, status: :forbidden if page&.published? && !Current.account_user.administrator?
+    return render json: { error: quota_message }, status: :too_many_requests unless quota_ok?(:page_generate, GENERATE_PER_DAY)
+
+    job_id = SecureRandom.hex(10)
+    Redis::Alfred.setex(Crm::PageGenerateJob.result_key(job_id), { status: 'running' }.to_json, 15.minutes)
+    Redis::Alfred.setex(Crm::PageGenerateJob.page_key(page.id), { status: 'running' }.to_json, 15.minutes) if page
     Crm::PageGenerateJob.perform_later(
       Current.account.id, job_id,
       'copy' => params[:copy].presence, 'briefing' => params[:briefing].presence,
       'category' => params[:category].presence, 'form_id' => params[:form_id].presence,
-      'page_id' => params[:page_id].presence
+      'page_id' => params[:page_id].presence,
+      # só chega aqui com página publicada quem é admin — o job confere de novo
+      'allow_published' => page&.published? == true
     )
     render json: { job_id: job_id }
   end
@@ -83,6 +105,7 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     return render json: { error: 'Envie uma imagem.' }, status: :unprocessable_entity if file.blank? || !file.respond_to?(:content_type)
     return render json: { error: 'Só imagens (JPG, PNG, WebP).' }, status: :unprocessable_entity unless file.content_type.to_s.start_with?('image/')
     return render json: { error: 'Imagem muito grande (máx. 8 MB).' }, status: :unprocessable_entity if file.size > 8.megabytes
+    return render json: { error: quota_message }, status: :too_many_requests unless quota_ok?(:page_upload, UPLOAD_PER_DAY)
 
     blob = ActiveStorage::Blob.create_and_upload!(
       io: file.tempfile, filename: file.original_filename, content_type: file.content_type
@@ -142,6 +165,30 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     render json: { error: 'Só administradores editam páginas.' }, status: :forbidden unless Current.account_user.administrator?
   end
 
+  # página publicada = site público; atendente não altera nada nela
+  # (comentar continua liberado — é outra ação). Admin passa sempre.
+  def lock_published_page
+    return if Current.account_user.administrator?
+
+    page = Current.account.cevico_pages.find(params[:id])
+    render json: { error: published_lock_message }, status: :forbidden if page.published?
+  end
+
+  def published_lock_message
+    'Esta página está no ar: só um administrador altera. Peça para ele despublicar ou fazer a mudança.'
+  end
+
+  # contador por pessoa por dia (Cevico::DailyQuota); true = ainda cabe.
+  # Admin: mesmo contador, teto 3× maior (ninguém fica sem limite)
+  def quota_ok?(kind, limit)
+    limit *= ADMIN_QUOTA_MULTIPLIER if Current.account_user.administrator?
+    Cevico::DailyQuota.hit!(kind, account: Current.account, user: Current.user, limit: limit)
+  end
+
+  def quota_message
+    Current.account_user.administrator? ? ADMIN_QUOTA_MESSAGE : QUOTA_MESSAGE
+  end
+
   def page_params
     permitted = params.permit(:title, :slug, :category, :status, :emoji, :color, :subtitle,
                               :body, :meta_title, :meta_description, :seo_keywords,
@@ -154,8 +201,12 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     sanitize_variants!(permitted)
     sanitize_custom_html!(permitted)
     # quem não é admin não muda status: cria como rascunho e nunca
-    # publica/despublica (o default da coluna já é draft)
-    permitted.delete(:status) unless Current.account_user.administrator?
+    # publica/despublica (o default da coluna já é draft). Também não troca
+    # o endereço (slug) — quebraria links já divulgados em anúncios
+    unless Current.account_user.administrator?
+      permitted.delete(:status)
+      permitted.delete(:slug)
+    end
     permitted
   end
 
@@ -234,10 +285,16 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       # prévia do rascunho: link secreto que mostra a página antes de publicar
       preview_url: "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}",
       # ambiente de montagem: prévia + token de RETOQUE (edição inline) —
-      # só o time logado recebe este link
-      builder_url: "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}?edit=#{page.edit_token}",
+      # só quem EDITA páginas recebe este link (quem só vê fica sem o token)
+      builder_url: builder_url_for(page),
       updated_at: page.updated_at
     }.merge(page_stats_json(page))
+  end
+
+  def builder_url_for(page)
+    return nil unless cevico_can?('marketing.paginas', :edit)
+
+    "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}?edit=#{page.edit_token}"
   end
 
   # no index a coluna nem foi carregada — usa a flag do SELECT

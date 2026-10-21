@@ -14,6 +14,7 @@ import auditlogs from './auditlogs/audit.routes';
 import billing from './billing/billing.routes';
 import canned from './canned/canned.routes';
 import inbox from './inbox/inbox.routes';
+import templates from './templates/templates.routes';
 import integrations from './integrations/integrations.routes';
 import labels from './labels/labels.routes';
 import macros from './macros/macros.routes';
@@ -25,12 +26,14 @@ import customRoles from './customRoles/customRole.routes';
 import dominio from './dominio/dominio.routes';
 import paineis from './paineis/paineis.routes';
 import precos from './precos/precos.routes';
-import personalizacao from './personalizacao/personalizacao.routes';
 import hub from './hub/hub.routes';
+import acessos from './acessos/acessos.routes';
+import empresa from './empresa/empresa.routes';
 import profile from './profile/profile.routes';
 import security from './security/security.routes';
 import conversationWorkflow from './conversationWorkflow/conversationWorkflow.routes';
 import captain from './captain/captain.routes';
+import data from './data/data.routes';
 
 export default {
   routes: [
@@ -61,7 +64,9 @@ export default {
     ...billing.routes,
     ...canned.routes,
     ...inbox.routes,
+    ...templates.routes,
     ...integrations.routes,
+    ...data.routes,
     ...labels.routes,
     ...macros.routes,
     ...reports.routes,
@@ -71,8 +76,9 @@ export default {
     ...dominio.routes,
     ...paineis.routes,
     ...precos.routes,
-    ...personalizacao.routes,
     ...hub.routes,
+    ...acessos.routes,
+    ...empresa.routes,
     ...profile.routes,
     ...security.routes,
     ...conversationWorkflow.routes,

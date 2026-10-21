@@ -24,6 +24,8 @@ const { isLoaded, hasError, loadWithRetry } = useLoadWithRetry();
 
 const showGallery = ref(false);
 const isDownloading = ref(false);
+// CEVICO item 204: leitura da imagem pela IA (o que a foto mostra + texto legível)
+const showFullReading = ref(false);
 
 onMounted(() => {
   if (attachment.value?.dataUrl) {
@@ -84,6 +86,17 @@ const handleImageError = () => {
         />
       </div>
     </div>
+    <p
+      v-if="attachment.transcribedText"
+      class="mt-2 mb-0 text-xs leading-snug text-n-slate-11 break-words cursor-text"
+      :class="showFullReading ? '' : 'line-clamp-3'"
+      :title="attachment.transcribedText"
+      @click.stop="showFullReading = !showFullReading"
+    >
+      <span
+        class="i-lucide-sparkles inline-block align-[-2px] mr-1 text-[11px]"
+      />{{ attachment.transcribedText }}
+    </p>
   </BaseBubble>
   <GalleryView
     v-if="showGallery"

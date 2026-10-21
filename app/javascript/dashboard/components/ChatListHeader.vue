@@ -78,12 +78,39 @@ const toggleConversationLayout = () => {
       >
         {{ formattedAllCount }}
       </span>
-      <span
+      <!-- CEVICO 24/09 (pedido dele): chavinha Abertas | Todas visível para
+           as atendentes se organizarem; o menu ao lado continua com
+           Resolvidas/Pendentes/Adiadas. Fora desses dois, mostra o nome do
+           status escolhido. -->
+      <div
         v-if="!hasAppliedFiltersOrActiveFolders"
-        class="px-2 py-1 my-0.5 mx-1 rounded-md capitalize bg-n-slate-3 text-xxs text-n-slate-12 shrink-0"
+        class="cv-status-seg mx-2 shrink-0"
+        role="group"
+        aria-label="Abertas ou todas as conversas"
       >
-        {{ $t(`CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.${activeStatus}.TEXT`) }}
-      </span>
+        <button
+          type="button"
+          class="cv-status-seg-item"
+          :class="{ 'cv-status-seg-on': activeStatus === 'open' }"
+          @click="onBasicFilterChange('open', 'status')"
+        >
+          {{ $t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.open.TEXT') }}
+        </button>
+        <button
+          type="button"
+          class="cv-status-seg-item"
+          :class="{ 'cv-status-seg-on': activeStatus === 'all' }"
+          @click="onBasicFilterChange('all', 'status')"
+        >
+          {{ $t('CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.all.TEXT') }}
+        </button>
+        <span
+          v-if="activeStatus !== 'open' && activeStatus !== 'all'"
+          class="cv-status-seg-item cv-status-seg-on"
+        >
+          {{ $t(`CHAT_LIST.CHAT_STATUS_FILTER_ITEMS.${activeStatus}.TEXT`) }}
+        </span>
+      </div>
     </div>
     <div class="flex items-center gap-1">
       <template v-if="hasAppliedFilters && !hasActiveFolders">

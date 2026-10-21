@@ -1876,3 +1876,10 @@ AgendaDashboardCore.vue).
 - NUNCA commit/push/merge sem "pode subir" (mesma regra CEVICO).
 - Telas novas reusam o kit (DashKpi, MiniBars, PeriodRuler, pílulas).
 - Nada aqui encosta nas branches/deploys da CEVICO e da LIFE.
+
+## RODADA 45 — Sistema Unificado: linha de produção inteira dentro do HUB + Meus negócios (21/10/2026)
+- **Nome:** a instalação da Life é o **Sistema Unificado** (não "CEVICO"): mundo Saúde + mundo Negócios completo + lançador Meus negócios.
+- **O que aconteceu:** a imagem `57b83e2` (develop) foi implantada na VPS da Life por engano → virou "CEVICO S.Un" sem Saúde; revertido com `74b4d8b`. Lição em docs/SISTEMA_UNIFICADO.md: a imagem da Life nasce SEMPRE da `feat/hub-saude`.
+- **Merge:** `develop` 57b83e2 (itens 172→357 da linha de produção) dentro da `feat/hub-saude`; 30 conflitos resolvidos com o lado novo como base e as peças do HUB reinseridas (HEALTH_MODULES, nó `saude` no catálogo de acessos, rotas health, Sidebar com mundos/hub_mode/tiles, hub-glass, manifest/favicons do HUB, schema). Tela "Personalização" (coringa fase B) saiu — a Identidade da empresa assume.
+- **Meus negócios** (ITEM 357 do BACKLOG_CEVICO.md): tela + API + rake `cevico:negocios:autorizar`; configuração por ambiente (`MEUS_NEGOCIOS_DONOS`, `MEUS_NEGOCIOS`), manual em docs/MEUS_NEGOCIOS.md.
+- **Migrations:** 50 da linha de produção (BACKUP antes; comando migrate.sh).

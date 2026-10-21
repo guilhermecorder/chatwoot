@@ -32,8 +32,10 @@
 #  index_messages_on_content                            (content) USING gin
 #  index_messages_on_conversation_account_type_created  (conversation_id,account_id,message_type,created_at)
 #  index_messages_on_conversation_id                    (conversation_id)
+#  index_messages_on_conversation_type_created          (conversation_id,message_type,created_at)
 #  index_messages_on_created_at                         (created_at)
 #  index_messages_on_inbox_id                           (inbox_id)
+#  index_messages_on_sender_and_created                 (sender_type,sender_id,created_at)
 #  index_messages_on_sender_type_and_sender_id          (sender_type,sender_id)
 #  index_messages_on_source_id                          (source_id)
 #
@@ -55,6 +57,7 @@ class Message < ApplicationRecord
           'category': { 'type': 'string' },
           'language': { 'type': 'string' },
           'namespace': { 'type': 'string' },
+          'content_mode': { 'type': 'string', 'enum': %w[raw_template rendered] },
           'processed_params': { 'type': 'object' }
         },
         'required': %w[name]
@@ -406,7 +409,11 @@ class Message < ApplicationRecord
 
     conversation.open! if conversation.snoozed?
 
-    reopen_resolved_conversation if conversation.resolved?
+    return unless conversation.resolved?
+
+    reopen_resolved_conversation
+    # 🔁 item 348: conversa única por caixa — o paciente reabriu = pausas da IA zeradas
+    Crm::ReopenReset.after_patient_reopen!(conversation)
   end
 
   def mark_pending_conversation_as_open_for_human_response
@@ -457,6 +464,8 @@ class Message < ApplicationRecord
   end
 
   def reindex_for_search
+    return unless respond_to?(:reindex)
+
     reindex(mode: :async)
   end
 end

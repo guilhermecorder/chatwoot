@@ -59,12 +59,25 @@ export default {
     labelStyle() {
       if (this.bgColor) {
         return {
+          '--lb': this.bgColor,
           background: this.bgColor,
           color: this.textColor,
           border: `1px solid ${this.bgColor}`,
         };
       }
+      // CEVICO 212: a cor da etiqueta vira a TINTA da pílula (fundo claro na
+      // cor, letra na cor escurecida) — sem quadradinho colorido
+      if (this.color) return { '--lb': this.color };
       return {};
+    },
+    // com tinta (smooth/dashed + cor), a bolinha some: a cor já está na pílula
+    showDot() {
+      return (
+        ['smooth', 'dashed'].includes(this.variant) &&
+        this.title &&
+        !this.icon &&
+        !this.color
+      );
     },
     anchorStyle() {
       if (this.bgColor) {
@@ -92,7 +105,7 @@ export default {
       <fluent-icon :icon="icon" size="12" class="label--icon cursor-pointer" />
     </span>
     <span
-      v-if="['smooth', 'dashed'].includes(variant) && title && !icon"
+      v-if="showDot"
       :style="{ background: color }"
       class="label-color-dot flex-shrink-0"
     />
@@ -112,11 +125,20 @@ export default {
 </template>
 
 <style scoped lang="scss">
+/* CEVICO item 212 (23/09): etiquetas no design Apple — pílula, tinta da
+   própria cor (fundo bem claro na cor, letra na cor escurecida), sem
+   quadradinho. Vale para o sistema inteiro (cartões, painel, contatos,
+   relatórios): tudo passa por este componente. */
 .label {
-  @apply items-center font-medium text-xs rounded-[4px] gap-1 p-1 bg-n-slate-3 text-n-slate-12 border border-solid border-n-strong h-6;
+  --lb: #64748b;
+  @apply items-center font-semibold text-[11px] rounded-full gap-1.5 px-2.5 h-6 leading-none whitespace-nowrap;
+  letter-spacing: -0.005em;
+  background: color-mix(in srgb, var(--lb) 13%, #fff);
+  color: color-mix(in srgb, var(--lb) 78%, #111);
+  border: 1px solid color-mix(in srgb, var(--lb) 28%, transparent);
 
   &.small {
-    @apply text-xs py-0.5 px-1 leading-tight h-5;
+    @apply text-[10.5px] px-2 h-5 leading-none;
   }
 
   &.small .label--icon,
@@ -184,19 +206,39 @@ export default {
   }
 
   &.smooth {
-    @apply bg-transparent text-n-slate-11 dark:text-n-slate-12 border border-solid border-n-strong;
+    background: color-mix(in srgb, var(--lb) 13%, #fff);
+    color: color-mix(in srgb, var(--lb) 78%, #111);
+    border: 1px solid color-mix(in srgb, var(--lb) 28%, transparent);
   }
 
   &.dashed {
-    @apply bg-transparent text-n-slate-11 dark:text-n-slate-12 border border-dashed border-n-strong;
+    background: transparent;
+    color: color-mix(in srgb, var(--lb) 70%, #111);
+    border: 1px dashed color-mix(in srgb, var(--lb) 45%, transparent);
   }
+}
+.dark .label,
+.dark .label.smooth {
+  background: color-mix(in srgb, var(--lb) 26%, #0f1115);
+  color: color-mix(in srgb, var(--lb) 62%, #fff);
+  border-color: color-mix(in srgb, var(--lb) 42%, transparent);
+}
+.dark .label.dashed {
+  background: transparent;
+  color: color-mix(in srgb, var(--lb) 65%, #fff);
 }
 
 .label-close--button {
-  @apply text-n-slate-11 -mb-0.5 rounded-sm cursor-pointer flex items-center justify-center hover:bg-n-slate-3;
+  @apply -mr-1 rounded-full cursor-pointer flex items-center justify-center w-4 h-4;
+  color: inherit;
+  opacity: 0.7;
+  &:hover {
+    opacity: 1;
+    background: color-mix(in srgb, var(--lb) 22%, transparent);
+  }
 
   svg {
-    @apply text-n-slate-11;
+    color: inherit;
   }
 }
 
@@ -205,9 +247,9 @@ export default {
 }
 
 .label-color-dot {
-  @apply inline-block w-3 h-3 rounded-sm shadow-sm;
+  @apply inline-block w-2 h-2 rounded-full;
 }
 .label.small .label-color-dot {
-  @apply w-2 h-2 rounded-sm shadow-sm;
+  @apply w-1.5 h-1.5 rounded-full;
 }
 </style>

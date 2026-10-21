@@ -37,18 +37,29 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
 
   # POST /crm/conversation_summary/move_stage — move o card do contato de
   # coluna DIRETO da conversa (mesmos disparos de automação do board)
-  def move_stage
+  def move_stage # rubocop:disable Metrics/AbcSize
     card = find_card
     return render json: { error: 'Contato ainda não tem card no CRM.' }, status: :unprocessable_entity if card.blank?
 
     new_stage = Crm::Stage.joins(:pipeline)
                           .where(crm_pipelines: { account_id: Current.account.id })
                           .find(params[:stage_id])
+    # 🧭 Rodada 5 da auditoria (#196): o card NUNCA troca de funil por aqui
+    # (trocar o pipeline_id transformava paciente da CEVICO em "parceiro" —
+    # sem IA nem automação — ou estourava o índice único contato+funil).
+    # A coluna vale para o card do contato NAQUELE funil (padrão do
+    # Crm::AttendanceReflector); sem card lá, recusa — como o board recusa
+    # coluna de outro funil.
+    card = Crm::Contact.find_by(contact_id: card.contact_id, pipeline_id: new_stage.pipeline_id) if card.pipeline_id != new_stage.pipeline_id
+    if card.blank?
+      return render json: { error: 'Esta coluna é de outro funil, onde o contato não tem card.' },
+                    status: :unprocessable_entity
+    end
+
     previous_stage = card.stage
 
     if new_stage.id != card.stage_id
-      # card muda de funil junto, se a coluna for de outro funil
-      card.update!(stage_id: new_stage.id, pipeline_id: new_stage.pipeline_id)
+      card.update!(stage_id: new_stage.id)
 
       CrmAutomationTriggerService.new(crm_contact: card, new_stage: new_stage,
                                       previous_stage: previous_stage, event_type: 'card_entered').call
@@ -81,6 +92,32 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     render json: { followup: followup_json }
   end
 
+  # GET /crm/conversation_summary/responder — item 212 (23/09): só o estado
+  # do Atendente IA nesta conversa, leve (sem previsões nem métricas), para a
+  # chavinha no topo da conversa.
+  def responder
+    render json: { responder: responder_json }
+  end
+
+  # POST /crm/conversation_summary/toggle_responder — 🤖 item 207 (23/09):
+  # botão "ligar/desligar a IA para esta pessoa" dentro da conversa. Mesmo
+  # estado que o 👍/mensagem humana usam (cevico_atendente_wa), com nota
+  # interna dizendo quem foi. Assim a equipe conversa com o paciente e religa
+  # o Atendente sem mandar emoji para ele.
+  def toggle_responder
+    paused = ActiveModel::Type::Boolean.new.cast(params[:paused])
+    value = paused ? { 'paused' => true, 'reason' => 'botao', 'by' => Current.user.name, 'at' => Time.current.iso8601 } : {}
+    Cevico::AttributeMerge.merge!(@conversation) { |attrs| attrs.merge(Crm::ResponderAgentJob::STATE_KEY => value) }
+    note = if paused
+             "⏸ Atendente IA do WhatsApp DESLIGADO nesta conversa por #{Current.user.name} (chavinha da conversa)."
+           else
+             "▶️ Atendente IA do WhatsApp LIGADO nesta conversa por #{Current.user.name} (chavinha da conversa)."
+           end
+    @conversation.messages.create!(account_id: @conversation.account_id, inbox_id: @conversation.inbox_id,
+                                   message_type: :activity, private: true, content: note)
+    render json: { responder: responder_json }
+  end
+
   private
 
   def conversation
@@ -94,28 +131,75 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
       metrics: metrics_json,
       ai: @conversation.additional_attributes&.[]('ai_insight'),
       ai_configured: ai_configured?,
-      followup: followup_json
+      followup: followup_json,
+      responder: responder_json
     }
   end
 
   # estado do follow-up para ESTA conversa: pausado para o paciente? e quais
   # robôs alcançam esta conversa (por coluna do card ou por caixa)
-  def followup_json
-    contact = @conversation.contact
-    paused = contact&.additional_attributes&.[]('cevico_followup_paused')
-    card = find_card
+  # 🤖 estado do Atendente IA do WhatsApp NESTA conversa (item 207)
+  REASON_TEXT = {
+    'humano_assumiu' => 'pausou sozinho quando o atendimento humano respondeu',
+    'chamar_humano' => 'o agente pediu atendimento humano',
+    'botao' => 'desligado pelo botão'
+  }.freeze
 
-    bots = Current.account.crm_followup_bots.order(:id).select do |bot|
-      inbox_ok = bot.inbox_id.blank? || bot.inbox_id == @conversation.inbox_id
-      stage_ok = !bot.stage_scoped? || (card && bot.stage_id == card.stage_id)
-      inbox_ok && stage_ok
+  def responder_json # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    cfg = CrmSetting.find_by(account: Current.account)&.ai_config || {}
+    agents = (cfg['agents'] || {}).slice(*CrmListener::RESPONDER_KEYS).select do |_k, a|
+      a['enabled'] == true && Array(a['inbox_ids']).map(&:to_i).include?(@conversation.inbox_id)
     end
+    state = @conversation.additional_attributes&.[](Crm::ResponderAgentJob::STATE_KEY) || {}
+    {
+      available: agents.any?,
+      live: agents.values.any? { |a| Crm::ResponderAgentJob.live_mode?(a) },
+      paused: state['paused'] == true,
+      reason: state['reason'],
+      reason_text: REASON_TEXT[state['reason'].to_s] || state['reason'],
+      by: state['by'],
+      at: state['at']
+    }
+  end
 
+  def followup_json
+    paused = @conversation.contact&.additional_attributes&.[]('cevico_followup_paused')
     {
       paused: paused.present?,
       paused_by: paused.is_a?(Hash) ? paused['by'] : nil,
-      bots: bots.map { |b| { id: b.id, name: b.name, active: b.active } }
+      bots: followup_bots_json
     }
+  end
+
+  # robôs que alcançam ESTA conversa (por coluna do card ou por caixa), cada
+  # um com a PREVISÃO (rodada 158): a mesma decisão do robô, sem enviar nada —
+  # o que já saiu, o que foi pulado, quando sai a próxima e por quê
+  def followup_bots_json
+    card = find_card
+    job = Crm::FollowupBotJob.new
+    Current.account.crm_followup_bots.order(:id).filter_map do |bot|
+      next unless bot_reaches?(bot, card)
+
+      { id: bot.id, name: bot.name, active: bot.active, forecast: safe_forecast(job, bot) }
+    end
+  end
+
+  # item 315: caixas e colunas em que o robô atua (listas; vazio = todas) —
+  # a mesma seleção de Crm::FollowupBotJob#conversations
+  def bot_reaches?(bot, card)
+    inbox_ids = bot.acting_inbox_ids
+    return false unless inbox_ids.empty? || inbox_ids.include?(@conversation.inbox_id)
+    return card.present? && bot.stage_id == card.stage_id if bot.stage_scoped?
+
+    stage_ids = bot.acting_stage_ids
+    stage_ids.empty? || Crm::Contact.exists?(contact_id: @conversation.contact_id, stage_id: stage_ids)
+  end
+
+  def safe_forecast(job, bot)
+    job.forecast(bot, @conversation)
+  rescue StandardError => e
+    Rails.logger.warn("[CEVICO followup] previsão conversa #{@conversation.id}: #{e.message}")
+    nil
   end
 
   def find_card

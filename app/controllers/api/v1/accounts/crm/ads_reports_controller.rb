@@ -5,7 +5,6 @@
 class Api::V1::Accounts::Crm::AdsReportsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
-  before_action -> { require_capability(:reports) }
 
   # GET /api/v1/accounts/:account_id/crm/ads_report?preset=month (régua padrão)
   # ou ?since=YYYY-MM-DD&until=YYYY-MM-DD (legado)

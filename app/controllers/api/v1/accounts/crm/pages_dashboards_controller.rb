@@ -4,7 +4,6 @@
 # (página → página → WhatsApp) com a conversão de cada elo.
 class Api::V1::Accounts::Crm::PagesDashboardsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action -> { require_capability(:pages) }
 
   SERIES_DAYS = 30
 
@@ -23,19 +22,21 @@ class Api::V1::Accounts::Crm::PagesDashboardsController < Api::V1::Accounts::Bas
   # {'<id da página-cabeça>' => ['meta', 'indicacao', ...]} + catálogo
   # editável (médicos parceiros, indicação, tráfego pago...)
   def save_funnel_sources # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    cfg = agenda_cfg
-    if params.key?(:funnel_sources)
-      cfg['funnel_sources'] = params.require(:funnel_sources).permit!.to_h
-                                    .transform_values { |v| Array(v).map(&:to_s).first(10) }
-    end
-    if params.key?(:source_catalog)
-      cfg['funnel_source_catalog'] = Array(params[:source_catalog]).first(20).filter_map do |s|
-        next if s[:label].blank?
-
-        { 'key' => s[:key].presence || SecureRandom.hex(3), 'label' => s[:label].to_s[0, 60], 'emoji' => s[:emoji].to_s[0, 8].presence || '📥' }
+    # Rodada 4 (#413): mexe só nas chaves recebidas, sob trava e em cima da foto fresca
+    cfg = Cevico::SettingMerge.merge!(crm_settings, :agenda_config) do |fresh|
+      if params.key?(:funnel_sources)
+        fresh['funnel_sources'] = params.require(:funnel_sources).permit!.to_h
+                                        .transform_values { |v| Array(v).map(&:to_s).first(10) }
       end
+      if params.key?(:source_catalog)
+        fresh['funnel_source_catalog'] = Array(params[:source_catalog]).first(20).filter_map do |s|
+          next if s[:label].blank?
+
+          { 'key' => s[:key].presence || SecureRandom.hex(3), 'label' => s[:label].to_s[0, 60], 'emoji' => s[:emoji].to_s[0, 8].presence || '📥' }
+        end
+      end
+      fresh
     end
-    crm_settings.update!(agenda_config: cfg)
     render json: { funnel_sources: cfg['funnel_sources'] || {}, source_catalog: source_catalog }
   end
 

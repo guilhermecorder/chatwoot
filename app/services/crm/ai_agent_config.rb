@@ -28,24 +28,61 @@ module Crm::AiAgentConfig
     'copywriter'   => { 'model' => 'claude-opus-4-8', 'effort' => 'high' },   # copy persuasiva multi-formato
     'pagebuilder'  => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # montar página a partir de copy pronta
     'mentor'       => { 'model' => 'claude-sonnet-5', 'effort' => 'high' },   # feedback semanal do time (1x/semana)
+    'sheet_match'  => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # mesma pessoa escrita diferente (planilha)
     'comments'     => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # comentário público: curto, mas é a cara da clínica
     'harvest'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # pontuar leads em lote: volume alto, tarefa simples
     'manager'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # briefing diário curto (a matemática é do Ruby)
     'auditor'      => { 'model' => 'claude-haiku-4-5', 'effort' => nil },     # nota diária em volume — barato por desenho
-    'creative'     => { 'model' => 'claude-sonnet-5', 'effort' => 'high' }    # copy que vai pro anúncio — qualidade importa
-  }.freeze
+    'creative'     => { 'model' => 'claude-sonnet-5', 'effort' => 'high' },   # copy que vai pro anúncio — qualidade importa
+    'followup_ia'  => { 'model' => 'claude-sonnet-5', 'effort' => 'low' },    # item 315: cutucada do follow-up escrita pela IA
+    'followup_leitor' => { 'model' => 'claude-haiku-4-5', 'effort' => nil },  # 13/10: conversa aberta × encerrada (classificação curta)
+    'campaigns'    => { 'model' => 'claude-haiku-4-5', 'effort' => nil }    # item 352: resumo diário do Agente de Campanhas (a matemática é do Ruby)
+  }.merge(
+    # 🗣️ rodada 188: respondedores do WhatsApp (Roteiro CEVICO + bloco da etapa)
+    # 💸 item 214 (23/09): HAIKU no pós-agendamento (conversa simples, 2x mais
+    # barato — preço conferido 06/10/2026; a conta de 23/09 dizia 3x porque usava
+    # o preço errado do Sonnet, ver #444). No agendamento ele NÃO quis esforço low — segue medium.
+    # O admin ainda pode escolher outro modelo/esforço por agente.
+    'atendente_agendamento' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }, # conversa com paciente até agendar
+    'atendente_pos' => { 'model' => 'claude-haiku-4-5', 'effort' => nil }, # suporte a quem já agendou (dúvidas, remarcar)
+    # 🩺 item 251: pós-operatório é o de MAIOR risco clínico — Sonnet, esforço médio
+    'atendente_pos_op' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' },
+    # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação (a voz real roda na ElevenLabs)
+    'voice' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }
+  ).freeze
 
   # Agentes RESPONDEDORES: os únicos autorizados a falar com o paciente
-  # (hoje só o Atendente Instagram, restrito às caixas escolhidas na config).
+  # (Instagram/comentários nas caixas escolhidas; atendentes do WhatsApp; e o
+  # Agente de Ligação, cujo simulador por texto usa o mesmo motor — 195).
   # Todos os demais seguem a trava operacional de leitura.
-  RESPONDER_AGENTS = %w[instagram comments].freeze
+  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos atendente_pos_op voice].freeze
 
-  # preço US$ por milhão de tokens (entrada / saída)
+  # preço US$ por milhão de tokens (entrada / saída) — preço de LISTA da API
+  # da Anthropic (não é a fatura: imposto/câmbio ficam de fora).
+  # 💸 #444 (13/10): conferido na tabela oficial de 06/10/2026 — o Sonnet 5
+  # custa US$ 2 / US$ 10 (estava 3 / 15 e o "Gasto da IA" saía ~50% maior
+  # nos agentes de mais volume). Opus 4.8 e Haiku 4.5 já estavam certos.
+  # Mudou o preço ou entrou modelo novo em MODELS? Atualize aqui E a data.
+  # O que já foi gravado antes do conserto continua com o preço velho: para
+  # corrigir o histórico existe `rake cevico:ai_usage_reprice` (Crm::AiUsageReprice,
+  # DRY=1 por padrão — só muda algo com DRY=0, decisão do Guilherme).
+  PRICING_TABLE_DATE = '2026-10-06'.freeze
   PRICING = {
     'claude-opus-4-8'  => [5.0, 25.0],
-    'claude-sonnet-5'  => [3.0, 15.0],
+    'claude-sonnet-5'  => [2.0, 10.0],
     'claude-haiku-4-5' => [1.0, 5.0]
   }.freeze
+  # 💸 CACHE DO PROMPT (item 213, 23/09): o roteiro/prompt do agente (e as
+  # ferramentas, que vêm antes dele na chamada) ficam guardados na Anthropic
+  # por 1 h. Gravar custa 2x a entrada, LER custa 10% — e o Atendente lê o
+  # mesmo roteiro de ~10 mil tokens centenas de vezes por dia. O que muda a
+  # cada chamada (contexto, conversa) vai na mensagem do usuário, fora do cache.
+  CACHE_TTL = '1h'.freeze
+  # Os dois fatores valem para os 3 modelos de MODELS (tabela de 06/10/2026).
+  # Atenção: modelos mais novos (ex.: Opus 5.5) cobram a leitura do cache a
+  # 5% — se um deles entrar em MODELS, o fator de leitura precisa ser por modelo.
+  CACHE_WRITE_FACTOR = 2.0   # ttl 1h (5 min seria 1.25)
+  CACHE_READ_FACTOR = 0.1
 
   # Trava de segurança aplicada a TODOS os agentes, mesmo com prompt
   # personalizado: agente interno nunca fala com paciente. (Tecnicamente
@@ -74,7 +111,9 @@ module Crm::AiAgentConfig
       endereços, nomes ou dados clínicos.
     - NUNCA forneça diagnóstico médico nem prometa resultado de cirurgia.
     - Só ofereça horários que constem na lista de HORÁRIOS DISPONÍVEIS
-      fornecida no contexto. Fora dela, diga que vai verificar com a equipe.
+      fornecida no contexto. Fora dela: se você tem a ferramenta horarios_do_dia,
+      consulte-a e ofereça só o que ela devolver; sem ferramenta, diga que vai
+      verificar com a equipe.
     - Urgência (dor intensa, perda súbita de visão, trauma): oriente procurar
       pronto atendimento oftalmológico imediatamente e marque chamar_humano.
     - Em dúvida sobre qualquer informação, marque chamar_humano em vez de
@@ -83,6 +122,12 @@ module Crm::AiAgentConfig
   GUARD
 
   private
+
+  # chave do agente: constante da classe por padrão; o motor dos respondedores
+  # (Crm::ResponderAgentService) sobrescreve com a chave recebida no construtor
+  def agent_key
+    self.class::AGENT_KEY
+  end
 
   def client
     # 300s: Copywriter/Construtor geram páginas inteiras (minutos) — 60s estourava no meio (bug 17/07)
@@ -98,7 +143,7 @@ module Crm::AiAgentConfig
   end
 
   def agent_config
-    (ai_config['agents'] || {})[self.class::AGENT_KEY] || {}
+    (ai_config['agents'] || {})[agent_key] || {}
   end
 
   # INTERRUPTOR DEFINITIVO: agente só roda com enabled == true gravado.
@@ -113,45 +158,42 @@ module Crm::AiAgentConfig
   # chumbado no serviço (que É o preset da clínica). Respondedor (fala
   # com o cliente) tem trava própria; os demais, a de leitura.
   def system_prompt
-    base = agent_config['prompt'].presence ||
-           Segmento.prompt(segment_prompt_key) ||
-           self.class::SYSTEM_PROMPT
-    base = substitute_placeholders(base)
-    responder = RESPONDER_AGENTS.include?(self.class::AGENT_KEY)
-    guard = Segmento.guardrail(respondedor: responder) ||
-            (responder ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL)
-    base + guard
-  end
-
-  # chave do serviço nos `prompts:` do segmento (Crm::ConversationInsightService
-  # → 'conversation_insight'); AGENT_KEY não serve — 'sales' e 'pagebuilder'
-  # são compartilhados por 2 serviços cada
-  def segment_prompt_key
-    self.class.name.demodulize.underscore.sub(/_service\z/, '')
-  end
-
-  # {{TABELA_DE_PRECOS}}  → tabela oficial (Configurações → Tabela de preços;
-  #                         sem tabela salva = padrão do segmento)
-  # {{CONTEXTO_DO_NEGOCIO}} → descrição do negócio (CRM → Integrações → IA →
-  #                         Contexto do negócio; senão a do segmento)
-  # {{NOME_DA_EMPRESA}}   → nome da instalação (pacote de marca)
-  def substitute_placeholders(base)
+    base = agent_config['prompt'].presence || default_system_prompt
+    # {{TABELA_DE_PRECOS}} vira a tabela de preços oficial na hora da chamada
+    # (Configurações → Tabela de preços; sem tabela salva = valores padrão)
     if base.include?('{{TABELA_DE_PRECOS}}')
       base = base.gsub('{{TABELA_DE_PRECOS}}', Cevico::PriceList.prompt_block(@account))
     end
-    if base.include?('{{CONTEXTO_DO_NEGOCIO}}')
-      contexto = ai_config['business_context'].presence || Segmento.contexto_negocio
-      base = base.gsub('{{CONTEXTO_DO_NEGOCIO}}', contexto.to_s)
-    end
-    if base.include?('{{NOME_DA_EMPRESA}}')
-      nome = GlobalConfig.get('INSTALLATION_NAME')['INSTALLATION_NAME'].presence || 'empresa'
-      base = base.gsub('{{NOME_DA_EMPRESA}}', nome)
-    end
-    base
+    guard = RESPONDER_AGENTS.include?(agent_key) ? RESPONDER_GUARDRAIL : OPERATIONAL_GUARDRAIL
+    base + guard
+  end
+
+  # 🏢 rodada 334: prompt PADRÃO do agente — o serviço pode trocar por um
+  # genérico quando a empresa da conta não é clínica (Crm::CompanyPrompts).
+  # Sem override, continua a constante de sempre.
+  def default_system_prompt
+    self.class::SYSTEM_PROMPT
+  end
+
+  # a empresa da conta (nome, ramo, vocabulário) para os prompts
+  def cevico_company
+    @cevico_company ||= Cevico::Company.for(@account)
+  end
+
+  # schema de saída com as marcas trocadas fora da clínica (clínica = o mesmo)
+  def company_schema(schema)
+    Crm::CompanyPrompts.rebrand_schema(cevico_company, schema)
+  end
+
+  # o prompt do agente como bloco marcado para cache (item 213) — passar em
+  # `system_:` no lugar da string. Prompts curtos (abaixo do mínimo do modelo)
+  # a Anthropic simplesmente não guarda; nada quebra.
+  def cached_system(text = system_prompt)
+    [{ type: 'text', text: text, cache_control: { type: 'ephemeral', ttl: CACHE_TTL } }]
   end
 
   def recommended
-    RECOMMENDED[self.class::AGENT_KEY] || {}
+    RECOMMENDED[agent_key] || {}
   end
 
   # modelo: escolha do agente > recomendado para o agente > global > padrão
@@ -207,19 +249,25 @@ module Crm::AiAgentConfig
   # grava tokens + custo estimado da chamada (alimenta o relatório de gastos)
   def record_usage(message)
     usage = message.usage
-    input = usage.input_tokens.to_i +
-            usage.cache_creation_input_tokens.to_i +
-            usage.cache_read_input_tokens.to_i
+    fresh = usage.input_tokens.to_i
+    written = usage.cache_creation_input_tokens.to_i
+    read = usage.cache_read_input_tokens.to_i
+    input = fresh + written + read
     output = usage.output_tokens.to_i
     price_in, price_out = PRICING[model] || PRICING[DEFAULT_MODEL]
-    cost = ((input * price_in) + (output * price_out)) / 1_000_000.0
+    # item 213: entrada lida do cache custa 10%; gravação no cache custa 2x (ttl 1h)
+    cost = ((fresh * price_in) + (written * price_in * CACHE_WRITE_FACTOR) +
+            (read * price_in * CACHE_READ_FACTOR) + (output * price_out)) / 1_000_000.0
+    Rails.logger.info("[Crm::AiUsage] #{agent_key} #{model} entrada=#{fresh} cache_gravado=#{written} cache_lido=#{read} saida=#{output} US$#{cost.round(4)}")
 
     Crm::AiUsage.create!(
       account: @account,
-      agent_key: self.class::AGENT_KEY,
+      agent_key: agent_key,
       model: model,
       input_tokens: input,
       output_tokens: output,
+      cache_read_tokens: read,     # item 232: quanto da entrada veio do cache
+      cache_write_tokens: written,
       cost_usd: cost.round(6)
     )
   rescue StandardError => e

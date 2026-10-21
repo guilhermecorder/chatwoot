@@ -1,25 +1,69 @@
 class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
+  # 🤖📞 item 169: ações do Agente de Ligação (ElevenLabs) vivem no concern
+  include Crm::VoiceAgentSettings
+  include Crm::ResolvesPeriod # item 321: régua padrão no gasto da IA
 
-  # integração/config sensível = admin (ou área concedida). Leitura (show) e os
-  # atalhos usados pela tela do atendente ficam livres.
+  # 🍎🍊 paletas do Meu Painel (rodada 162): iMac G3 + frutas da Apple; e os
+  # blocos da tela que aceitam paleta própria — só chaves conhecidas entram
+  PALETTE_KEYS = %w[bondi blueberry strawberry lime tangerine grape graphite
+                    laranja limao melancia uva kiwi coco pessego cereja abacate mirtilo].freeze
+  # escopos de paleta dos Relatórios/Dashboards (rodada 163) — além dos painéis
+  REPORT_PALETTE_SCOPES = %w[report:crm report:campanhas report:funil report:medicos report:agentes
+                             report:agenda report:meta report:google report:whatsapp report:etiquetas
+                             report:criativos crm:chamadas crm:jornada crm:paginas crm:formularios crm:tarefas
+                             crm:agendamentos crm:oftalmofacil report:paginas].freeze
+
+  # integração/config sensível = admin (ou área concedida). A leitura (show)
+  # continua aberta à equipe, mas desde a Rodada 2 da auditoria (12/10) o JSON
+  # é montado POR PAPEL: quem não tem a área "settings" recebe só o que as
+  # telas do dia a dia usam (ver team_settings_json).
+  # 🧹 item 214: como as atendentes veem os cartões de Conversas
+  LIST_CLEAN_MODES = %w[full no_stage clean].freeze
+  # item 239: "quantos indicadores eu quiser" no Meu Painel (antes: 40 no total)
+  KPI_LAYOUT_MAX = 200
+  # Rodada 2 (achado #338): chaves que o rascunho de um agente nunca guarda
+  DRAFT_SECRET_KEYS = %w[page_access_token api_key gemini_api_key access_token api_secret].freeze
+  # Rodada 2 (achados #295/#337): o que sai (ou fica) no GET settings da equipe sem a área "settings"
+  TEAM_HIDDEN_KEYS = %i[agent_permissions price_table scheduler_log team_roles
+                        appointment_reminders_state nps_survey_state
+                        n8n_base_url n8n_workflows n8n_workflows_fetched_at n8n_api_key_configured].freeze
+  TEAM_AI_KEYS = %i[configured gemini_key_set live_enabled opportunity_alerts_count opportunity_last_run_at].freeze
+  TEAM_AGENT_KEYS = %i[enabled stage_ids inbox_ids inbox_id mode live_days hours_start hours_end
+                       no_card after_booking_stage_id handoff_inbox_id].freeze
+  TEAM_OFTALMOFACIL_HIDDEN = %i[base_url key_set db_host db_port db_name db_user db_password_set last_error].freeze
+  TEAM_VOICE_KEYS = %i[enabled configured permission_template handoff_inbox_id whatsapp_number persona_name].freeze
+
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
-    update_google_ads test_google_ads update_sheets test_sheets update_agenda agenda_backfill
-    update_oftalmofacil
+    update_google_ads test_google_ads test_search_console update_sheets test_sheets
+    update_oftalmofacil test_oftalmofacil sync_oftalmofacil
+    update_calls enable_calls_at_meta calls_meta_status
+    update_voice test_voice sync_voice voice_whatsapp_accounts voice_voices voice_state
     update_public_domain check_public_domain sync_scheduler_stages sync_agent_stages
-    sales_insights radar_scan run_mentor copywriter_content update_price_table
-    update_inbox_investments update_segment
+    sales_insights radar_scan run_mentor copywriter_content
+    update_inbox_investments
     harvest_status harvest_preview harvest_approve harvest_pause harvest_resume
     harvest_skip_lead harvest_send_now run_manager run_auditor auditor_summary
     run_creative creative_state creative_review
+    ai_usage
   ].freeze
   before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
+  # 🔐 rodada 334: nós mais finos da árvore para o que não é "integração"
+  before_action -> { require_access('agenda.configuracao', :edit) }, only: %i[update_agenda agenda_backfill agenda_ai_preview]
+  before_action -> { require_access('configuracoes.precos', :edit) }, only: [:update_price_table]
+  # Rodada 2: ler o domínio público = nó "Domínio público" da árvore (só admin)
+  before_action -> { require_access('configuracoes.dominio', :view) }, only: [:public_domain]
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
-  before_action :require_administrator!, only: [:update_agent_grants]
+  before_action :require_administrator!, only: %i[update_agent_grants update_agent_access update_access_roles access_admin update_company]
 
+  # 🔐 Rodada 2 (achados #295/#337): a MESMA rota serve admin e equipe, mas
+  # quem não tem a área "settings" recebe o JSON enxuto — sem Roteiro, prompts,
+  # concessões dos colegas, preços, registros com nome de paciente nem dados
+  # da conexão do hub. A filtragem é no servidor; a tela não precisa mudar.
   def show
-    render json: settings_json(crm_settings)
+    full = settings_json(crm_settings)
+    render json: crm_can?(:settings) ? full : team_settings_json(full)
   end
 
   # POST update_agent_grants — admin configura os acessos de UM atendente.
@@ -75,6 +119,88 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                    health_modules: perms['health_modules'] || {} }
   end
 
+  # ── 🔐 rodada 334: ACESSOS EM ÁRVORE (ver × editar, papéis, unidades) ──
+  # GET access_admin — tudo que a tela Acessos precisa (admin): catálogo,
+  # papéis, cada pessoa com marcação própria + nível efetivo + unidades.
+  def access_admin
+    render json: Cevico::Access.admin_payload(Current.account)
+  end
+
+  # POST update_agent_access — a marcação de UMA pessoa.
+  # body: { user_id:, tree: { 'crm' => 'edit', 'relatorios.medicos' => 'none' },
+  #         role_id: 'r_ab12' | nil, units: ['paulista'], reset: true }
+  # Só chaves do catálogo e níveis none|view|edit entram; o que não vier
+  # na marcação herda do pai/papel/padrão. `reset` apaga a marcação própria.
+  def update_agent_access # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    user_id = params[:user_id].to_s
+    return render json: { error: 'Informe a pessoa.' }, status: :unprocessable_entity if user_id.blank?
+    unless Current.account.account_users.exists?(user_id: user_id)
+      return render json: { error: 'Essa pessoa não é desta empresa.' }, status: :unprocessable_entity
+    end
+
+    perms = (crm_settings.agent_permissions || {}).dup
+    tree_all = (perms['tree'] || {}).dup
+    if ActiveModel::Type::Boolean.new.cast(params[:reset])
+      tree_all.delete(user_id)
+    elsif params.key?(:tree)
+      tree_all[user_id] = sanitize_access_tree(params[:tree])
+    end
+    perms['tree'] = tree_all
+
+    if params.key?(:role_id)
+      by_user = (perms['role_by_user'] || {}).dup
+      role_id = params[:role_id].to_s
+      if role_id.present? && Array(perms['roles']).any? { |r| r['id'].to_s == role_id }
+        by_user[user_id] = role_id
+      else
+        by_user.delete(user_id)
+      end
+      perms['role_by_user'] = by_user
+    end
+
+    if params.key?(:units)
+      units_all = (perms['units'] || {}).dup
+      list = Array(params[:units]).map(&:to_s) & cevico_company.unit_keys
+      list.empty? ? units_all.delete(user_id) : units_all[user_id] = list
+      perms['units'] = units_all
+    end
+
+    crm_settings.update!(agent_permissions: perms)
+    render json: Cevico::Access.admin_payload(Current.account)
+  end
+
+  # POST update_access_roles — a lista inteira de papéis da empresa.
+  # body: { roles: [{ id?, name, hint, tree: {...}, units: [] }] }
+  # Papel apagado some das pessoas que o usavam (elas voltam ao padrão).
+  def update_access_roles # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    perms = (crm_settings.agent_permissions || {}).dup
+    roles = Array(params[:roles]).first(30).filter_map do |raw|
+      raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+      name = raw['name'].to_s.strip[0, 60]
+      next if name.blank?
+
+      {
+        'id' => raw['id'].to_s.match?(/\Ar_[a-z0-9]{4,12}\z/) ? raw['id'].to_s : "r_#{SecureRandom.alphanumeric(6).downcase}",
+        'name' => name,
+        'hint' => raw['hint'].to_s.strip[0, 200],
+        'tree' => sanitize_access_tree(raw['tree']),
+        'units' => Array(raw['units']).map(&:to_s) & cevico_company.unit_keys
+      }
+    end
+    ids = roles.pluck('id')
+    perms['roles'] = roles
+    perms['role_by_user'] = (perms['role_by_user'] || {}).select { |_uid, rid| ids.include?(rid.to_s) }
+    crm_settings.update!(agent_permissions: perms)
+    render json: Cevico::Access.admin_payload(Current.account)
+  end
+
+  # POST update_company — Identidade da empresa (nome, ramo, vocabulário,
+  # unidades, assistente, módulos, domínio/hub/rastreio próprios)
+  def update_company
+    company = Cevico::Company.save!(Current.account, params.fetch(:company, {}).permit!.to_h)
+    render json: { company: company.to_h, access: Cevico::Access.for(Current.account, Current.user, account_user: Current.account_user).to_h }
+  end
+
   def update
     # bloqueios de acesso por agente: só administradores podem alterar
     if params.key?(:agent_permissions) && !Current.account_user.administrator?
@@ -88,22 +214,26 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # POST update_price_table — Tabela de preços oficial (Configurações →
   # Tabela de preços). Alimenta o Espaço do Paciente e os prompts da IA.
   def update_price_table
-    items = Array(params[:items]).first(60).filter_map do |raw|
-      name = raw[:name].to_s.strip[0, 80]
-      next if name.blank?
-
-      {
-        'group' => raw[:group].to_s.strip[0, 80].presence || 'Outros',
-        'name' => name,
-        'price' => raw[:price].to_f.round(2),
-        'promo_price' => raw[:promo_price].present? ? raw[:promo_price].to_f.round(2) : nil
-      }.compact
+    # 🔢 Rodada 5 (#401): procedimento sem preço (vazio/R$ 0) NÃO é gravado —
+    # virava "R$ 0" no prompt da IA e no Espaço do Paciente. Promoção R$ 0 ou
+    # maior que o preço vira "sem promoção"; a unidade é campo próprio.
+    rows = Array(params[:items]).first(60).select { |raw| raw.respond_to?(:permit) }.map do |raw|
+      Cevico::PriceList.sanitize_row(raw.permit(:group, :name, :price, :promo_price, :unit))
+    end
+    # linha com nome mas sem preço, sem unidade ou com grupo × unidade em
+    # contradição: recusa a tabela inteira e diz o que corrigir
+    problems = rows.filter_map(&:last)
+    if problems.any?
+      return render json: { error: "Corrija antes de salvar — #{problems.join('; ')}." },
+                    status: :unprocessable_entity
     end
 
-    cfg = crm_settings.agenda_config || {}
-    cfg['price_table'] = { 'items' => items, 'updated_at' => Time.current.iso8601 }
-    crm_settings.update!(agenda_config: cfg)
-    render json: { price_table: cfg['price_table'] }
+    items = rows.filter_map(&:first)
+
+    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
+    price_table = { 'items' => items, 'updated_at' => Time.current.iso8601 }
+    Cevico::SettingMerge.merge!(crm_settings, :agenda_config) { |cfg| cfg.merge('price_table' => price_table) }
+    render json: { price_table: price_table }
   end
 
   # POST update_inbox_investments — investimento em anúncios por caixa de
@@ -114,10 +244,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   #                        "15" => { mode: 'meta_auto' } } }
   def update_inbox_investments
     investments = sanitized_investments
-    cfg = crm_settings.agenda_config || {}
-    cfg['inbox_investments'] = investments
-    apply_capture_inboxes(cfg)
-    crm_settings.update!(agenda_config: cfg)
+    # Rodada 4 (#413): mexe só nas chaves recebidas, sob trava e em cima da foto fresca
+    cfg = Cevico::SettingMerge.merge!(crm_settings, :agenda_config) do |fresh|
+      fresh['inbox_investments'] = investments
+      apply_capture_inboxes(fresh)
+      fresh
+    end
     render json: { inbox_investments: investments, capture_inbox_ids: cfg['capture_inbox_ids'] }
   end
 
@@ -216,6 +348,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Meta Ads ────────────────────────────────────────────────────────────────
 
+  # parâmetros bom/atenção/ruim da Central de Criativos (item 172)
+  def apply_creative_targets(cfg)
+    cfg['creative_targets'] = Crm::CreativeTargets.sanitize(params[:creative_targets]) if params.key?(:creative_targets)
+  end
+
   def update_meta_ads
     cfg = crm_settings.meta_ads_config || {}
     cfg['pixel_id']          = params[:pixel_id]          if params[:pixel_id].present?
@@ -224,16 +361,15 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg['test_event_code']   = params[:test_event_code]   # pode ser blank
     # etapas do CRM que contam como conversão no relatório de anúncios
     cfg['conversion_stage_ids'] = Array(params[:conversion_stage_ids]).map(&:to_i) if params.key?(:conversion_stage_ids)
+    apply_creative_targets(cfg)
     crm_settings.update!(meta_ads_config: cfg)
     render json: meta_ads_json(crm_settings)
   end
 
+  # 📣 item 345 (14/10): testa o site E cada caixa do WhatsApp (conjunto da
+  # conta), sempre com código de teste — resposta em lista, um por destino
   def test_meta_ads
-    result = MetaAdsConversionsService.new(
-      account: Current.account,
-      event_name: 'PageView'
-    ).call
-    render json: result
+    render json: Crm::MetaAdsTestService.new(account: Current.account).call
   end
 
   # ── 🌾 Colheitadeira da Base (item 128) ──────────────────────────────────────
@@ -244,6 +380,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def harvest_preview
+    return render_harvest_busy if Crm::HarvestJob.busy?
+
     Crm::HarvestJob.perform_later(Current.account.id, 'preview')
     render json: { enqueued: true }
   end
@@ -265,8 +403,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def harvest_send_now
+    return render_harvest_busy if Crm::HarvestJob.busy?
+
     Crm::HarvestJob.perform_later(Current.account.id, 'batch')
     render json: { enqueued: true }
+  end
+
+  # achado #44: com uma rodada em andamento o pedido é recusado AQUI, com aviso
+  # na tela (409), em vez de a tela dizer "disparado" e nada sair
+  def render_harvest_busy
+    render json: { error: Crm::HarvestJob::BUSY_MESSAGE }, status: :conflict
   end
 
   # ── 📊 Gestor Autônomo (item 128): rodar agora ───────────────────────────────
@@ -282,10 +428,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   # ranking dos atendentes + falhas mais comuns do time (últimos N dias)
+  # item 321: ?preset=… (régua padrão) vence o ?days= antigo
   def auditor_summary
+    auditor = Crm::ConversationAuditorService.new(account: Current.account)
+    if (range = standard_period_range)
+      return render json: auditor.summary(from: range.first.to_date, to: range.last.to_date)
+    end
+
     days = params[:days].to_i.clamp(1, 30)
     days = 7 if days.zero?
-    render json: Crm::ConversationAuditorService.new(account: Current.account).summary(days: days)
+    render json: auditor.summary(days: days)
   end
 
   # ── 🎨 Criativo Perpétuo (item 131) ──────────────────────────────────────────
@@ -325,24 +477,20 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def apply_google_cost_config(cfg)
     cfg['ga4_property_id'] = params[:ga4_property_id].to_s.gsub(/\D/, '') if params.key?(:ga4_property_id)
     cfg['service_account_json'] = params[:service_account_json] if params[:service_account_json].present?
+    # 🔎 16/10: propriedade do Search Console (mesma conta de serviço)
+    cfg['search_console_site'] = params[:search_console_site].to_s.strip if params.key?(:search_console_site)
   end
 
   # ── IA (análise de conversas — Anthropic) ──────────────────────────────────
 
   def update_ai
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores podem configurar a IA.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores podem configurar a IA.' }, status: :forbidden unless Current.account_user.administrator?
 
+    # Rodada 4 (#413): `cfg` aqui é só a FOTO para VALIDAR o que chegou; a
+    # gravação acontece mais abaixo, sob trava, em cima da foto fresca do banco
+    # e só nas chaves recebidas (Cevico::SettingMerge).
     cfg = crm_settings.ai_config || {}
-    cfg['api_key'] = params[:api_key] if params[:api_key].present?
-    # Gemini (Google): reservada para geração de IMAGENS das Páginas
-    cfg['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
-    cfg['model']   = params[:model]   if params.key?(:model)
-    cfg['effort']  = params[:effort]  if params.key?(:effort)
-    # sistema coringa: descrição do negócio injetada em {{CONTEXTO_DO_NEGOCIO}}
-    # nos prompts dos robôs (sem ela, vale o contexto do segmento)
-    cfg['business_context'] = params[:business_context].to_s[0, 8000] if params.key?(:business_context)
+    permitted = nil
     # agentes internos: ligar/pausar, prompt, modelo e esforço por agente
     # (o Radar de Oportunidades ainda tem as vigias: coluna + painel do
     # atendente + janela de tempo, além dos minutos de espera).
@@ -377,19 +525,192 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                 manager: agent_fields + [:drop_pct],
                                 # 🎓 Auditor de Conversas (item 130): teto diário
                                 auditor: agent_fields + [:daily_cap],
+                                # 🤖📞 Agente de Ligação (item 169 → 195): interruptor, bloco da
+                                # etapa (prompt), modo sombra/ao vivo + janela, colunas vigiadas,
+                                # horas sem resposta / dias olhados / tentativas / teto diário e a
+                                # caixa do WhatsApp p/ continuar por escrito. Chave/voz/número
+                                # continuam em ai_config['voice'] (tela de Integrações).
+                                voice: agent_fields + [:mode, :silence_hours, :lookback_days, :max_attempts, :daily_cap,
+                                                       :hours_start, :hours_end, :handoff_inbox_id,
+                                                       { stage_ids: [], live_days: [] }],
                                 # 🎨 Criativo Perpétuo (item 131)
-                                creative: agent_fields + [:winners_count, :variations_count])
+                                creative: agent_fields + [:winners_count, :variations_count],
+                                # 🗣️ Atendente de Agendamento (rodada 188): modo sombra/ao vivo,
+                                # caixas, colunas (+ sem card), coluna pós-agendamento, teto da
+                                # sombra, janela de horas. O "prompt" dele é o bloco da etapa;
+                                # o Roteiro compartilhado chega em params[:script].
+                                # (193) live_days = dias da semana 0..6 em que fica ao vivo; vazio = todos
+                                # (200) reply_delay_seconds = segundos entre a mensagem do paciente e a resposta (3–30; padrão 6)
+                                # 🔁 (343) task_assignee_id = quem recebe as tarefas (id ou 'retorno_team')
+                                atendente_agendamento: agent_fields + [:mode, :no_card, :after_booking_stage_id,
+                                                                       :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
+                                                                       :task_assignee_id,
+                                                                       { inbox_ids: [], stage_ids: [], live_days: [] }],
+                                # 🗣️ Atendente Pós-agendamento (agente B): suporte a quem já marcou
+                                atendente_pos: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
+                                                               :task_assignee_id,
+                                                               { inbox_ids: [], stage_ids: [], live_days: [] }],
+                                # 🩺 Atendente de Pós-operatório (item 251): + quem recebe as tarefas
+                                # (task_assignee_id) e a janela de "cirurgia recente" pela Agenda (dias)
+                                atendente_pos_op: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
+                                                                  :task_assignee_id, :recent_surgery_days,
+                                                                  { inbox_ids: [], stage_ids: [], live_days: [] }])
                         .to_h
-      existing = cfg['agents'] || {}
-      cfg['agents'] = existing.merge(permitted) do |_key, old_agent, new_agent|
-        merged = (old_agent || {}).merge(new_agent || {})
-        # draft vazio = limpar o rascunho (acontece no Publicar)
-        merged.delete('draft') if merged['draft'].blank?
-        merged
+      # 🟢 Ao vivo (193): exige pelo menos uma caixa marcada — sem caixa o agente
+      # não escuta ninguém e o admin acha que está atendendo. Dias fora de 0..6 caem.
+      live_error = responder_live_error(cfg['agents'] || {}, permitted)
+      return render json: { error: live_error }, status: :unprocessable_entity if live_error
+
+      # 🎙️ (195) Agente de Ligação ao vivo: exige colunas vigiadas + ElevenLabs configurada
+      voice_error = voice_live_error(cfg, permitted)
+      return render json: { error: voice_error }, status: :unprocessable_entity if voice_error
+
+      # uma coluna pertence a UM agente: quem fala é decidido pela coluna
+      conflict = responder_stage_conflict(cfg['agents'] || {}, permitted)
+      if conflict
+        return render json: { error: "A coluna \"#{conflict}\" já pertence a outro atendente. Cada coluna tem um dono só." },
+                      status: :unprocessable_entity
       end
+      # Rodada 2 (achado #338): token/chave NUNCA ficam no rascunho — só entram
+      # ao Publicar (campo de verdade, que a tela nunca recebe de volta). A
+      # limpeza é feita no que CHEGOU, antes do merge: o bloco do merge só roda
+      # para agente que já existia, e o primeiro rascunho de um agente nunca
+      # salvo entraria inteiro.
+      permitted.each_value { |agent| agent['draft'] = agent['draft'].except(*DRAFT_SECRET_KEYS) if agent['draft'].is_a?(Hash) }
     end
-    crm_settings.update!(ai_config: cfg)
-    render json: ai_json(crm_settings)
+    # 📜 Roteiro CEVICO (fonte única dos respondedores): seção em branco = padrão
+    script_in = nil
+    if params[:script].present?
+      keys = Crm::CevicoScript::SECTIONS.pluck('key')
+      script_in = params.require(:script).permit(*keys).to_h.transform_values { |v| v.to_s.strip }
+      # 🕘 rodada 191: foto do Roteiro atual antes de sobrescrever ("Histórico" no card)
+      Crm::ScriptVersion.snapshot!(Current.account, kind: 'script', note: 'antes de editar na tela', by: Current.user)
+    end
+    # 🧪 (22/09) Roteiro v2 PARALELO: as seções do Roteiro + os Passos dos dois atendentes
+    # (chaves stage_*), tudo num card só; em branco = padrão do v2. Só o 🧪 Testar
+    # agente lê isto — nada de sombra ou ao vivo muda ao salvar aqui.
+    script_v2_in = nil
+    if params[:script_v2].present?
+      keys = Crm::CevicoScript::SECTIONS.pluck('key') + Crm::CevicoScript::STAGE_SECTIONS.pluck('key')
+      script_v2_in = params.require(:script_v2).permit(*keys).to_h.transform_values { |v| v.to_s.strip }
+    end
+    # Rodada 4 (#413): grava sob trava, relendo a foto FRESCA do banco e mexendo
+    # só nas chaves recebidas — o estado dos jobs (harvest_state da Colheitadeira,
+    # alertas do Radar, voice_state…) e o que outro admin salvou no meio-tempo
+    # ficam como estão (fecha o achado #44 sem o remendo do with_lock de antes)
+    Cevico::SettingMerge.merge!(crm_settings, :ai_config) do |fresh|
+      fresh['api_key'] = params[:api_key] if params[:api_key].present?
+      # Gemini (Google): reservada para geração de IMAGENS das Páginas
+      fresh['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
+      fresh['model']  = params[:model]  if params.key?(:model)
+      fresh['effort'] = params[:effort] if params.key?(:effort)
+      if permitted
+        fresh['agents'] = (fresh['agents'] || {}).merge(permitted) do |_key, old_agent, new_agent|
+          merged = (old_agent || {}).merge(new_agent || {})
+          # draft vazio = limpar o rascunho (acontece no Publicar)
+          merged.delete('draft') if merged['draft'].blank?
+          merged
+        end
+        # 🤖📞 item 169: o interruptor do card "Agente de Ligação" (e a caixa do
+        # WhatsApp, 195) espelha em ai_config['voice'], que é o que a assistente lê
+        mirror_voice_agent!(fresh, permitted['voice']) if permitted.key?('voice')
+      end
+      fresh['script'] = (fresh['script'] || {}).merge(script_in, 'updated_at' => Time.current.iso8601) if script_in
+      if script_v2_in
+        incoming = script_v2_in.dup
+        Crm::CevicoScript::STAGE_SECTIONS.each do |sec|
+          next unless incoming.key?(sec['key'])
+
+          fresh['agents'] ||= {}
+          fresh['agents'][sec['agent']] = (fresh['agents'][sec['agent']] || {}).merge('prompt_v2' => incoming.delete(sec['key']))
+        end
+        fresh['script_v2'] = (fresh['script_v2'] || {}).merge(incoming).merge('updated_at' => Time.current.iso8601)
+      end
+      fresh
+    end
+    # 🎙️ (195) publicou o Agente de Ligação com a ElevenLabs configurada? o prompt
+    # novo (Roteiro + regras de voz + etapa) sobe para lá; falha vira aviso, não erro
+    sync = voice_sync_after_publish(params[:agents])
+    render json: ai_json(crm_settings).merge(sync ? { voice_sync: sync } : {})
+  end
+
+  # 🕶️ TELA SOMBRA (rodada 188): o que o Atendente interno TERIA respondido
+  # (nota interna de atividade) lado a lado com o que o N8N/equipe respondeu
+  # de verdade logo depois, na mesma conversa. Só admin.
+  def ai_shadow
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    agent_key = params[:agent].presence || 'atendente_agendamento'
+    limit = params[:limit].to_i.clamp(1, 200)
+    limit = 60 if limit.zero?
+    notes = Current.account.messages
+                   .where(message_type: :activity, private: true)
+                   .where("additional_attributes ? 'cevico_ia_shadow'")
+                   .where("additional_attributes -> 'cevico_ia_shadow' ->> 'agent' = ?", agent_key)
+                   .includes(conversation: :contact)
+                   .reorder(created_at: :desc)
+                   .limit(limit)
+    items = notes.map { |note| shadow_item(note) }
+    render json: { agent: agent_key, items: items, summary: shadow_summary(items) }
+  end
+
+  # 🧪 SIMULADOR (rodada 188): conversa com o agente como paciente, com a IA
+  # de verdade, numa caixa interna sem canal de envio. Sem conversation_id
+  # (ou reset) abre conversa nova; com text, manda a fala e devolve os balões.
+  def ai_simulate # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    agent_key = params[:agent].presence || 'atendente_agendamento'
+    return render json: { error: 'Agente inválido.' }, status: :unprocessable_entity unless Crm::AiAgentConfig::RESPONDER_AGENTS.include?(agent_key)
+
+    # 🎙️ (195) objective = "Motivo da ligação" do Agente de Ligação (opcional; só ele usa)
+    # 🧪 (22/09) script_version = 'v1' (Roteiro atual) ou 'v2' (paralelo) — só vale
+    # ao abrir a conversa; depois a conversa segue presa à versão em que nasceu
+    sim = Crm::AgentSimulator.new(account: Current.account, agent_key: agent_key, objective: params[:objective],
+                                  script_version: params[:script_version])
+    conversation = Current.account.conversations.find_by(id: params[:conversation_id]) if params[:conversation_id].present?
+    conversation = nil if conversation && !Crm::AgentSimulator.simulated?(conversation)
+    conversation ||= sim.start!
+    sim.objective!(conversation) if params[:objective].present?
+    error = nil
+    if params[:text].present?
+      outcome = sim.say!(conversation, params[:text])
+      error = outcome[:error]
+    end
+    render json: { agent: agent_key, conversation_id: conversation.id, display_id: conversation.display_id,
+                   script_version: Crm::AgentSimulator.script_version(conversation),
+                   turns: sim.transcript(conversation), error: error }
+  end
+
+  # 📋 (195) "Ver quem ligaria hoje": roda a seleção de leads não responsivos
+  # AGORA, em sombra (nada é discado), grava a lista em voice_state.shadow e a
+  # devolve para a tela. Só admin.
+  def voice_shadow_run
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    cfg = (crm_settings.ai_config || {}).dig('agents', 'voice') || {}
+    settings = Crm::VoiceAgent::Settings.new(Current.account, crm_settings: crm_settings)
+    items = Crm::VoiceAgent::UnresponsiveLeadsJob.shadow!(Current.account, cfg, log: false)
+    render json: { date: Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s, at: Time.current.iso8601, count: items.size,
+                   items: items, ready: settings.configured?,
+                   live_now: Crm::VoiceAgent::UnresponsiveLeadsJob.live_now?(Current.account, cfg, settings: settings) }
+  end
+
+  # 👍/👎 do admin numa nota de sombra (alimenta o ajuste do Roteiro)
+  def ai_shadow_rate # rubocop:disable Metrics/AbcSize
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    note = Current.account.messages.where(message_type: :activity).find(params[:message_id])
+    rating = %w[good bad].include?(params[:rating].to_s) ? params[:rating].to_s : nil
+    # Rodada 4 da auditoria: gravado pelo Cevico::AttributeMerge (relê na trava)
+    Cevico::AttributeMerge.merge!(note) do |attrs|
+      shadow = (attrs['cevico_ia_shadow'] || {}).merge('rating' => rating)
+      shadow['rating_note'] = params[:note].to_s.strip.first(300) if params.key?(:note)
+      attrs.merge('cevico_ia_shadow' => shadow)
+    end
+    # ✍️ rodada 191: 👎 vira orientação pendente (1 por nota) para o admin corrigir o Roteiro
+    Crm::AgentGuidance.from_shadow_note!(note, by: Current.user) if rating == 'bad'
+    render json: shadow_item(note.reload)
   end
 
   # testa a conexão com a Claude de verdade (mini-chamada à API)
@@ -468,20 +789,266 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: result
   end
 
+  # 🔎 16/10: testa o Search Console (1 pergunta pequena, nada gravado) e,
+  # se respondeu, já pede a primeira foto dos 28 dias
+  def test_search_console
+    result = Cevico::SearchConsole.new(Current.account).test
+    Crm::SearchConsoleSyncJob.perform_later(Current.account.id) if result[:success]
+    render json: result
+  end
+
   # ── Google Sheets (planilha de cirurgias → Dashboard) ──────────────────────
 
   # ── OftalmoFácil: conexão nativa (endereço + chave da API) ─────────────────
   # A chave nunca volta na resposta (só o selo key_set); o fluxo de dados
   # liga em cima desta conexão quando a documentação da API for plugada.
-  def update_oftalmofacil # rubocop:disable Metrics/AbcSize
-    cfg = crm_settings.agenda_config || {}
-    of = cfg['oftalmofacil'] || {}
+  # Item 157: a conexão de verdade é o BANCO do OftalmoFácil (usuário
+  # só-leitura): host/porta/banco/usuário/senha + o nome do fornecedor
+  # (CATARATA_SP = CEVICO) + o de-para de médicos (CRM → nome) + liga/desliga.
+  def update_oftalmofacil
+    # Rodada 4 (#413): mexe só em agenda_config['oftalmofacil'], sob trava e em
+    # cima da foto fresca — o cursor/last_run que o sync grava não é apagado
+    Cevico::SettingMerge.merge_key!(crm_settings, :agenda_config, 'oftalmofacil') { |of| apply_oftalmofacil_params(of) }
+    Crm::PartnerGuard.forget!(Current.account) # item 322: funil/caixas dos parceiros mudaram → cerca e mapa das fontes releem
+    render json: { oftalmofacil: oftalmofacil_json(crm_settings) }
+  end
+
+  # aplica em `of` (a chave 'oftalmofacil' FRESCA, dentro da trava) só o que veio nos params
+  def apply_oftalmofacil_params(of) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     of['base_url'] = params[:base_url].to_s.strip if params.key?(:base_url)
     of['api_key'] = params[:api_key].to_s.strip if params[:api_key].to_s.strip.present?
+    %w[db_host db_name db_user provider_name].each do |k|
+      of[k] = params[k].to_s.strip[0, 200] if params.key?(k)
+    end
+    of['db_port'] = params[:db_port].to_i.clamp(1, 65_535) if params.key?(:db_port) && params[:db_port].to_i.positive?
+    of['db_password'] = params[:db_password].to_s if params[:db_password].to_s.present? # write-only
+    of['enabled'] = ActiveModel::Type::Boolean.new.cast(params[:enabled]) == true if params.key?(:enabled)
+    if params.key?(:doctors)
+      raw = params[:doctors].respond_to?(:to_unsafe_h) ? params[:doctors].to_unsafe_h : {}
+      of['doctors'] = raw.to_h { |crm, name| [crm.to_s.gsub(/\D/, '')[0, 12], name.to_s.strip[0, 80]] }
+                         .reject { |crm, name| crm.blank? || name.blank? }
+    end
+    # 🏥 item 228: hub de parceiros + Agenda unificada
+    %w[partners_enabled agenda_enabled].each do |k|
+      of[k] = ActiveModel::Type::Boolean.new.cast(params[k]) == true if params.key?(k)
+    end
+    %w[partner_pipeline_id own_pipeline_id].each do |k|
+      next unless params.key?(k)
+
+      id = params[k].to_i
+      of[k] = id.positive? && Current.account.crm_pipelines.exists?(id: id) ? id : nil
+    end
+    # 🚧 item 231: caixa(s) por onde a equipe fala com os pacientes dos parceiros
+    of['partner_inbox_ids'] = Array(params[:partner_inbox_ids]).map(&:to_i) & Current.account.inboxes.pluck(:id) if params.key?(:partner_inbox_ids)
+    if params.key?(:agenda_from)
+      of['agenda_from'] = begin
+        Date.parse(params[:agenda_from].to_s).iso8601
+      rescue ArgumentError, TypeError
+        nil
+      end
+    end
+    if params.key?(:clinics)
+      raw = params[:clinics].respond_to?(:to_unsafe_h) ? params[:clinics].to_unsafe_h : {}
+      of['clinics'] = raw.to_h { |name, unit| [name.to_s.strip[0, 120], unit.to_s.strip[0, 40]] }
+                         .reject { |name, unit| name.blank? || unit.blank? }
+    end
     of['updated_at'] = Time.current.iso8601
-    cfg['oftalmofacil'] = of
-    crm_settings.update!(agenda_config: cfg)
-    render json: { oftalmofacil: oftalmofacil_json(crm_settings) }
+    of
+  end
+
+  # testa a conexão só-leitura e conta as cirurgias do fornecedor lá
+  def test_oftalmofacil
+    of = (crm_settings.agenda_config || {})['oftalmofacil'] || {}
+    return render json: { ok: false, error: 'Preencha host, banco, usuário, senha e fornecedor.' } unless Crm::OftalmofacilSyncService.configured?(of)
+
+    render json: Crm::OftalmofacilSyncService.new(account: Current.account, config: of).probe
+  end
+
+  # "Sincronizar agora": roda em segundo plano (full = recarrega tudo desde o
+  # início, silencioso; senão incremental a partir do cursor)
+  def sync_oftalmofacil
+    of = (crm_settings.agenda_config || {})['oftalmofacil'] || {}
+    return render json: { ok: false, error: 'Conexão não configurada.' } unless Crm::OftalmofacilSyncService.configured?(of)
+    # Rodada 2 (achado #193): desligada pelo admin = o botão também não roda
+    # (antes só o cron respeitava a chave; o botão criava paciente/card/consulta
+    # e disparava automação mesmo com a integração desligada)
+    return render json: { ok: false, error: Crm::OftalmofacilSyncJob::OFF_MESSAGE } unless of['enabled'] == true
+    # Rodada 4 (achado #172): com uma rodada em andamento o pedido é recusado
+    # AQUI, com aviso na tela (409), em vez de "iniciada" e nada acontecer
+    # (o job só pularia a conta e escreveria no log)
+    if Crm::OftalmofacilSyncJob.busy?(Current.account.id)
+      return render json: { ok: false, error: Crm::OftalmofacilSyncJob::BUSY_MESSAGE }, status: :conflict
+    end
+
+    Crm::OftalmofacilSyncJob.perform_later(Current.account.id, full: params[:full] == true)
+    render json: { ok: true, queued: true }
+  end
+
+  # ── 📞 Ligações nativas de WhatsApp (item 167) ─────────────────────────────
+  # liga/desliga, caixa, quem atende, horário, gravar/transcrever e a
+  # mensagem de permissão — tudo em agenda_config['calls'] (padrões em
+  # Crm::Calls::Settings)
+  def update_calls
+    # Rodada 4 (#413): mexe só em agenda_config['calls'], sob trava e em cima da foto fresca
+    Cevico::SettingMerge.merge_key!(crm_settings, :agenda_config, 'calls') do |calls|
+      apply_call_flags(calls)
+      apply_call_targets(calls)
+      apply_call_texts(calls)
+      # 🔒 item 325: trava da ligação + responsável por coluna do CRM
+      calls.merge!(Crm::Calls::CallbackLock.sanitize(Current.account, params)) if params.key?(:lock)
+      calls['updated_at'] = Time.current.iso8601
+      calls
+    end
+    render json: { calls: calls_json(crm_settings) }
+  end
+
+  # horário (HH:MM–HH:MM) e a mensagem do pedido de permissão
+  def apply_call_texts(calls)
+    calls['hours'] = sanitize_call_hours(params[:hours]) if params.key?(:hours)
+    calls['permission_message'] = params[:permission_message].to_s.strip[0, 1024] if params.key?(:permission_message)
+  end
+
+  # ligado / só no horário / gravar / transcrever
+  def apply_call_flags(calls)
+    %w[enabled business_hours_only record transcribe].each do |flag|
+      calls[flag] = ActiveModel::Type::Boolean.new.cast(params[flag]) == true if params.key?(flag)
+    end
+  end
+
+  # caixas (só da conta) e quem atende em cada uma (só gente da conta;
+  # vazio = todos da caixa). `inboxes` = formato novo (várias caixas);
+  # inbox_id/ring_* soltos = formato antigo (1 caixa), ainda aceito.
+  def apply_call_targets(calls)
+    calls['inbox_id'] = Current.account.inboxes.find_by(id: params[:inbox_id])&.id if params.key?(:inbox_id)
+    apply_call_ring(calls)
+    return unless params.key?(:inboxes)
+
+    calls['inboxes'] = sanitize_call_inboxes(calls)
+    first = calls['inboxes'].first || {}
+    calls.merge!('inbox_id' => first['inbox_id'], 'ring_user_ids' => first['ring_user_ids'] || [],
+                 'ring_first_user_ids' => first['ring_first_user_ids'] || [],
+                 'ring_cascade_seconds' => first['ring_cascade_seconds'])
+  end
+
+  # só caixas WhatsApp (API oficial) da conta, sem repetir; o estado da Meta
+  # já visto em cada caixa é preservado
+  def sanitize_call_inboxes(calls)
+    known = Array(calls['inboxes']).index_by { |c| c['inbox_id'].to_i }
+    entries = Array(params[:inboxes]).filter_map { |raw| sanitize_call_inbox(raw, known) }
+    entries.uniq { |c| c['inbox_id'] }
+  end
+
+  def sanitize_call_inbox(raw, known)
+    h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+    inbox = calls_inbox_from(h['inbox_id'])
+    return nil unless inbox
+
+    Crm::Calls::Settings.normalize_inbox(
+      h.merge('inbox_id' => inbox.id, 'ring_user_ids' => account_user_ids(h['ring_user_ids']),
+              'ring_first_user_ids' => account_user_ids(h['ring_first_user_ids']),
+              'meta' => known.dig(inbox.id, 'meta') || {})
+    )
+  end
+
+  # quem atende, quem toca primeiro (só gente da conta) e a espera da cascata
+  def apply_call_ring(calls)
+    %w[ring_user_ids ring_first_user_ids].each do |key|
+      calls[key] = account_user_ids(params[key]) if params.key?(key)
+    end
+    return unless params.key?(:ring_cascade_seconds)
+
+    range = Crm::Calls::Settings::CASCADE_RANGE
+    calls['ring_cascade_seconds'] = params[:ring_cascade_seconds].to_i.clamp(range.min, range.max)
+  end
+
+  def account_user_ids(raw)
+    Array(raw).map(&:to_i) & Current.account.users.pluck(:id)
+  end
+
+  # "HH:MM" válidos e início < fim; senão volta ao padrão 08:00–19:00
+  def sanitize_call_hours(raw)
+    h = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : (raw || {}).to_h
+    start_at = h['start'].to_s.strip
+    end_at = h['end'].to_s.strip
+    valid = [start_at, end_at].all? { |v| v.match?(/\A([01]\d|2[0-3]):[0-5]\d\z/) } && start_at < end_at
+    valid ? { 'start' => start_at, 'end' => end_at } : Crm::Calls::Settings::DEFAULT_HOURS.dup
+  end
+
+  CALLS_META_TIP = 'A Meta exige limite de 2.000 mensagens/dia ou mais neste número.'.freeze
+
+  # "Ativar ligações": liga o recurso no número (POST /settings) e confirma
+  # com um GET. O erro da Meta volta cru (message/code) para o Henrique, mais
+  # a dica que mais pega: o número precisa do limite de 2.000 msgs/dia.
+  def enable_calls_at_meta
+    inbox = calls_inbox_from(params[:inbox_id])
+    return render json: { ok: false, error: 'Escolha primeiro a caixa do WhatsApp (API oficial) que vai receber as ligações.' } unless inbox
+
+    client = Crm::Calls::MetaClient.new(inbox.channel)
+    client.update_settings(status: 'ENABLED', call_icon_visibility: 'DEFAULT', callback_permission_status: 'ENABLED')
+    render json: { ok: true, inbox_id: inbox.id, meta: store_calls_meta(inbox, client.settings['calling'] || {}) }
+  rescue Crm::Calls::MetaError => e
+    render json: { ok: false, inbox_id: inbox.id, error: "A Meta não ligou as chamadas neste número. #{CALLS_META_TIP}",
+                   message: e.message, code: e.code, meta: store_calls_meta(inbox, {}, error: e.message) }
+  end
+
+  # GET calls_meta_status: estado do recurso na Meta + saúde do número (limite/qualidade)
+  def calls_meta_status
+    inbox = calls_inbox_from(params[:inbox_id])
+    return render json: { ok: false, error: 'Nenhuma caixa configurada para ligações.' } unless inbox
+
+    calling = Crm::Calls::MetaClient.new(inbox.channel).settings['calling'] || {}
+    render json: { ok: true, inbox_id: inbox.id, meta: store_calls_meta(inbox, calling), health: calls_health(inbox) }
+  rescue Crm::Calls::MetaError => e
+    render json: { ok: false, inbox_id: inbox.id, error: "A Meta não respondeu: #{e.message}", message: e.message, code: e.code,
+                   meta: store_calls_meta(inbox, {}, error: e.message), health: calls_health(inbox) }
+  end
+
+  # caixa das ligações: a enviada (se for da conta) ou a configurada; só WhatsApp API oficial
+  def calls_inbox_from(inbox_id)
+    inbox = if inbox_id.present?
+              Current.account.inboxes.find_by(id: inbox_id)
+            else
+              Crm::Calls::Settings.new(Current.account, crm_settings: crm_settings).inbox
+            end
+    return nil unless inbox&.channel.is_a?(Channel::Whatsapp) && inbox.channel.provider == 'whatsapp_cloud'
+
+    inbox
+  end
+
+  # guarda o último estado visto na Meta NA CAIXA (agenda_config.calls.inboxes[].meta;
+  # erro não apaga o estado anterior). A primeira caixa também espelha em calls.meta.
+  def store_calls_meta(inbox, calling, error: nil)
+    meta = nil
+    # Rodada 4 (#413): mexe só em agenda_config['calls'], sob trava e em cima da foto fresca
+    Cevico::SettingMerge.merge_key!(crm_settings, :agenda_config, 'calls') do |calls|
+      entries = calls_entries_with(inbox, calls)
+      entry = entries.find { |c| c['inbox_id'] == inbox.id }
+      entry['meta'] = (entry['meta'] || {}).merge(calls_meta_seen(calling), 'checked_at' => Time.current.iso8601, 'error' => error)
+      calls['inboxes'] = entries
+      calls['meta'] = entries.first['meta']
+      meta = entry['meta']
+      calls
+    end
+    meta
+  end
+
+  # as caixas configuradas (lidas do `calls` FRESCO de dentro da trava, não da
+  # foto da requisição), garantindo uma entrada para esta caixa
+  def calls_entries_with(inbox, calls)
+    carrier = CrmSetting.new(agenda_config: { 'calls' => calls }) # só para o Settings ler ESTE calls
+    entries = Crm::Calls::Settings.new(Current.account, crm_settings: carrier).inboxes
+    entries << Crm::Calls::Settings.normalize_inbox('inbox_id' => inbox.id) if entries.none? { |c| c['inbox_id'] == inbox.id }
+    entries
+  end
+
+  def calls_meta_seen(calling)
+    { 'calling_status' => calling['status'], 'callback_permission_status' => calling['callback_permission_status'],
+      'call_icon_visibility' => calling['call_icon_visibility'] }.compact
+  end
+
+  def calls_health(inbox)
+    health = inbox&.channel.try(:phone_number_health) || {}
+    { messaging_limit_tier: health['messaging_limit_tier'], quality_rating: health['quality_rating'] }
   end
 
   def update_sheets
@@ -499,21 +1066,61 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Agenda: janelas de avaliação dos médicos ────────────────────────────────
 
+  # 🗂️ item 307: o que a IA está recebendo AGORA sobre a agenda — as regras
+  # (faixas reservadas + texto da clínica) e as vagas que ela pode oferecer.
+  # É a prova, na tela de Configurações da Agenda, de que a mudança pegou.
+  def agenda_ai_preview
+    render json: {
+      rules: Crm::AgendaSlots.rules_text(Current.account),
+      slots: Crm::AgendaSlots.free_slots_text(Current.account, days: 14, per_window: 3)
+    }
+  end
+
+  # item 267 (28/09, "as meninas devem poder fechar as agendas de médicos"):
+  # fechar/reabrir um dia (inteiro, uma unidade ou um médico) é da EQUIPE,
+  # não só do admin — por isso fica fora de ADMIN_SETTINGS_ACTIONS
+  def update_blocked_days
+    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
+    days = sanitize_blocked_days(params[:blocked_days])
+    Cevico::SettingMerge.merge!(Current.account, :agenda_config) { |cfg| cfg.merge('blocked_days' => days) }
+    render json: { agenda_blocked_days: days }
+  end
+
   def update_agenda
-    cfg = crm_settings.agenda_config || {}
+    # cadeado (rodada 171): quem NÃO é admin não muda quem lê o prontuário —
+    # a área "settings" concedida não basta para se incluir entre os médicos
+    # (checado ANTES de qualquer gravação)
+    if params.key?(:clinical_access) && !Current.account_user.administrator?
+      return render json: { error: 'Só administradores mudam o acesso às anotações clínicas.' }, status: :forbidden
+    end
+
+    # Rodada 4 (#351): o corpo abaixo monta `cfg` a partir de uma FOTO só para
+    # saber o que esta requisição mexeu; no fim, save_agenda_keys! grava sob
+    # trava SÓ essas chaves, em cima da foto fresca do banco. Assim um arrasto
+    # no Modo edição não apaga o recorde, o aniversário ou o estado do lembrete
+    # que um job gravou no mesmo hash enquanto a tela pensava.
+    before = (crm_settings.agenda_config || {}).deep_dup
+    cfg = before.deep_dup
     if params.key?(:windows)
+      # item 307: `only` = tipos que a faixa aceita (vazio = todos)
       cfg['windows'] = Array(params[:windows]).map do |w|
-        w.permit(:dow, :unit, :doctor, :turno, :start, :end, :block).to_h
+        win = w.permit(:dow, :unit, :doctor, :turno, :start, :end, :block, only: []).to_h
+        only = Array(win.delete('only')).map(&:to_s) & Crm::AgendaSlots::RESERVABLE
+        only.any? ? win.merge('only' => only) : win
       end
     end
+    # 🗂️ item 307: regras da agenda escritas pela clínica — entram no prompt dos
+    # agentes num bloco próprio (Agenda → Configurações → Regras para a IA)
+    cfg['ai_rules'] = params[:ai_rules].to_s.strip[0, 2000] if params.key?(:ai_rules)
     # horários fechados com o cadeado (almoço, ausência do médico...)
     if params.key?(:blocked)
       cfg['blocked'] = Array(params[:blocked]).map do |b|
         b.permit(:date, :time, :unit, :doctor).to_h
       end
     end
-    # dias inteiros fechados (feriado, congresso, folga...)
-    cfg['blocked_days'] = Array(params[:blocked_days]).map(&:to_s) if params.key?(:blocked_days)
+    # dias fechados (feriado, congresso, folga...): string = dia INTEIRO;
+    # item 267: {date, unit} ou {date, doctor} = só aquela unidade / aquele médico
+    cfg['blocked_days'] = sanitize_blocked_days(params[:blocked_days]) if params.key?(:blocked_days)
     # médicos com a agenda FECHADA (item 76): janelas deles somem de toda
     # parte (agenda, ocupação, saúde) até reabrir
     cfg['closed_doctors'] = Array(params[:closed_doctors]).map(&:to_s) if params.key?(:closed_doctors)
@@ -523,14 +1130,80 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         l.permit(:key, :label).to_h
       end.select { |l| l['label'].present? }
     end
+    # 💰 item 324: valores pré-configurados por tipo de atendimento (só admin)
+    if params.key?(:appointment_prices) && Current.account_user.administrator?
+      cfg[Crm::AppointmentPrice::KEY] = Crm::AppointmentPrice.sanitize(params[:appointment_prices])
+    end
+    # 🔬 janela de EXAMES (unidade + dia + horário + bloco) — 23/09
+    if params.key?(:exam_windows)
+      cfg['exam_windows'] = Array(params[:exam_windows]).map do |w|
+        w.permit(:dow, :unit, :start, :end, :block).to_h
+      end
+    end
     # janelas da SALA CIRÚRGICA (clínica parceira + dia + horário + bloco)
     if params.key?(:surgery_windows)
       cfg['surgery_windows'] = Array(params[:surgery_windows]).map do |w|
         w.permit(:dow, :location, :start, :end, :block).to_h
       end
     end
+    # 🏷️ item 200: o que acontece quando uma consulta é marcada/remarcada/
+    # cancelada (etiquetas + coluna do card) — tela Agendamentos → Ajustes, só admin
+    if params.key?(:booking) && Current.account_user.administrator?
+      raw = params[:booking].respond_to?(:permit) ? params[:booking] : ActionController::Parameters.new(params[:booking].to_h)
+      booking = raw.permit(:stage_id, :cancel_stage_id, :budget_stage_id, :labels_enabled, labels: %i[created rescheduled canceled]).to_h
+      valid_stage_ids = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }).pluck(:id)
+      cfg['booking'] = {
+        'labels_enabled' => ActiveModel::Type::Boolean.new.cast(booking['labels_enabled']) != false,
+        'labels' => (booking['labels'] || {}).to_h.transform_values { |v| v.to_s.strip.downcase.gsub(/[^\p{L}\p{N}_-]/, '')[0, 40] }.compact_blank,
+        'stage_id' => (valid_stage_ids.include?(booking['stage_id'].to_i) ? booking['stage_id'].to_i : nil),
+        'cancel_stage_id' => (valid_stage_ids.include?(booking['cancel_stage_id'].to_i) ? booking['cancel_stage_id'].to_i : nil),
+        # 💰 item 236: coluna de "Envio de Orçamento" (o card anda sozinho quando a clínica manda um valor)
+        'budget_stage_id' => (valid_stage_ids.include?(booking['budget_stage_id'].to_i) ? booking['budget_stage_id'].to_i : nil)
+      }
+    end
     # tema visual dos ambientes (Santorini, Flor del Mar...) — escolha do admin
     cfg['theme'] = params[:theme].to_s if params.key?(:theme)
+    # 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (rodada 160): variantes de um painel-base com
+    # layout próprio (blocos/cards/cores) — [{id, name, base, user_ids}]. Só
+    # admin. Quem está em user_ids fica atribuído à variante; variante
+    # removida leva junto as atribuições e os layouts dela.
+    if params.key?(:panel_variants) && Current.account_user.administrator?
+      before = Array(cfg['panel_variants'])
+      before_keys = before.map { |v| "variant:#{v['id']}" }
+      valid_users = Current.account.users.pluck(:id)
+      variants = Array(params[:panel_variants]).first(20).filter_map do |raw|
+        v = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+        base = v['base'].to_s
+        name = v['name'].to_s.strip[0, 40]
+        next unless %w[agendamento conducao cirurgia medico gestor].include?(base)
+        next if name.blank?
+
+        {
+          'id' => v['id'].to_s.downcase.gsub(/[^a-z0-9_]/, '')[0, 24].presence || "v#{SecureRandom.hex(4)}",
+          'name' => name,
+          'base' => base,
+          'user_ids' => Array(v['user_ids']).map(&:to_i).select { |u| valid_users.include?(u) }.uniq.first(50)
+        }
+      end
+      cfg['panel_variants'] = variants.uniq { |v| v['id'] }
+      assignments = (cfg['panel_assignments'] || {}).dup
+      removed = before_keys - cfg['panel_variants'].map { |v| "variant:#{v['id']}" }
+      assignments = assignments.reject { |_, k| removed.include?(k.to_s) }
+      # Rodada 4: os layouts são mesclados painel a painel na gravação — a
+      # variante removida vira "null" (apaga só o layout dela, não os outros)
+      PANEL_LAYOUT_KEYS.each { |key| cfg[key] = removed.index_with { nil } } if removed.any?
+      # a lista de pessoas da variante É a atribuição: entra quem está nela,
+      # sai quem saiu dela (e apontava pra ela)
+      cfg['panel_variants'].each do |v|
+        key = "variant:#{v['id']}"
+        was = before.find { |b| b['id'] == v['id'] }
+        Array(was&.dig('user_ids')).map(&:to_s).each do |uid|
+          assignments.delete(uid) if assignments[uid] == key && v['user_ids'].exclude?(uid.to_i)
+        end
+        v['user_ids'].each { |uid| assignments[uid.to_s] = key }
+      end
+      cfg['panel_assignments'] = assignments
+    end
     # qual versão do Meu Painel cada agente vê ({user_id => panel_key})
     if params.key?(:panel_assignments)
       cfg['panel_assignments'] = params.require(:panel_assignments)
@@ -545,51 +1218,86 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # LAYOUT da fileira de indicadores por painel (item 142): ordem dos cards
     # (arrasto magnético) + cards ocultos + COR escolhida por card (item 143)
     # — {painel => {order: [], hidden: [], colors: {id => grad}}}
+    # Rodada 4 (#351): a tela manda SÓ o painel que editou e o servidor mescla
+    # painel a painel (save_agenda_keys!); painel enviado como null = apagar
     if params.key?(:kpi_layout)
       raw = params.require(:kpi_layout).permit!.to_h
-      cfg['kpi_layout'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor').transform_values do |v|
+      cfg['kpi_layout'] = raw.slice(*layout_panel_keys(cfg)).transform_values do |v|
+        next nil if v.nil?
+
         h = v.to_h
+        # item 239: sem teto prático de cards (200), card GRANDE (2×2, resumo) e
+        # ESPAÇOS vazios ("gap:…") que entram na ordem como um card qualquer
         {
-          'order' => Array(h['order']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
-          'hidden' => Array(h['hidden']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(40),
-          'colors' => sanitize_kpi_colors(h['colors'])
-        }
+          'order' => Array(h['order']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(KPI_LAYOUT_MAX),
+          'hidden' => Array(h['hidden']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(KPI_LAYOUT_MAX),
+          'colors' => sanitize_kpi_colors(h['colors']),
+          'sizes' => (h['sizes'] || {}).to_h.to_a.first(KPI_LAYOUT_MAX).each_with_object({}) do |(k, size), acc|
+            acc[k.to_s[0, 40]] = 'lg' if size.to_s == 'lg' && k.present?
+          end,
+          'spacers' => Array(h['spacers']).map(&:to_s).grep(/\Agap:[a-z0-9]{1,20}\z/).uniq.first(60),
+          # item 276: cards por linha (3 · 4 · 6); ausente = 4
+          'cols' => h['cols'].to_i.between?(2, 12) ? h['cols'].to_i : nil, # 2–12 (fase quadrados); 12 = livre
+          # item 276: grade já em quadrados (senão é a antiga de 12 colunas e o painel converte)
+          'grid_units' => ActiveModel::Type::Boolean.new.cast(h['grid_units']) ? true : nil,
+          # item 277: grade LIVRE de 12 colunas (a do Painel do empresário)
+          'grid_free' => ActiveModel::Type::Boolean.new.cast(h['grid_free']) ? true : nil,
+          # item 275: divisórias com título ({"div:abc" => "Início da jornada"})
+          'dividers' => (h['dividers'] || {}).to_h.to_a.first(30).each_with_object({}) do |(k, label), acc|
+            acc[k.to_s] = label.to_s.strip[0, 60] if k.to_s.match?(/\Adiv:[a-z0-9]{1,20}\z/) && label.to_s.strip.present?
+          end,
+          # item 248: modelo aplicado (para "restaurar o modelo") + julgamento pela média histórica
+          'preset' => h['preset'].to_s[/\A[a-z0-9_-]{1,40}\z/],
+          'judge' => ActiveModel::Type::Boolean.new.cast(h['judge']) || false,
+          # item 266: linha de tendência nos gráficos do painel
+          'trend' => ActiveModel::Type::Boolean.new.cast(h['trend']) || false,
+          # item 266b: grade do ímã dos cards ({id,x,y,w,h}); ausente → o painel monta pela ordem
+          'grid' => sanitize_tile_grid(h['grid'], min_w: 1),
+          # item 269: paleta automática dos indicadores (família + nível); ausente = ligada
+          'auto_palette' => h.key?('auto_palette') ? ActiveModel::Type::Boolean.new.cast(h['auto_palette']) == true : nil
+        }.compact
       end
     end
     # ORDEM DOS BLOCOS do Meu Painel (item 143): arrasto magnético em TODOS
     # os blocos — duas áreas (acima e abaixo do seletor de painel), pode
     # cruzar entre elas — {painel => {top: [ids], main: [ids]}}
+    # (Rodada 4: também só o painel editado; null = apagar — "restaurar o padrão")
     if params.key?(:block_layout)
       raw = params.require(:block_layout).permit!.to_h
-      cfg['block_layout'] = raw.slice('agendamento', 'conducao', 'cirurgia', 'medico', 'gestor').transform_values do |v|
+      cfg['block_layout'] = raw.slice(*layout_panel_keys(cfg)).transform_values do |v|
+        next nil if v.nil?
+
         h = v.to_h
         {
           'top' => Array(h['top']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
-          'main' => Array(h['main']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20)
-        }
+          'main' => Array(h['main']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
+          # item 248: blocos em MEIA largura (lado a lado) — divide o painel na horizontal
+          'half' => Array(h['half']).map { |x| x.to_s[0, 40] }.reject(&:blank?).first(20),
+          # item 266: grade do ímã por área ({id,x,y,w} em colunas/linhas) + trava
+          'grid_top' => sanitize_block_grid(h['grid_top']),
+          'grid_main' => sanitize_block_grid(h['grid_main']),
+          'locked' => ActiveModel::Type::Boolean.new.cast(h['locked']) || false
+        }.compact
+      end
+    end
+    # 🍎🍊 PALETAS do Meu Painel por painel (rodada 162): modo do painel (cor
+    # do dia / paleta fixa / salada de frutas) + paleta por bloco —
+    # {painel => {mode, key, blocks: {bloco => paleta}}}; entrada vazia some
+    if params.key?(:panel_palettes)
+      raw = params.require(:panel_palettes).permit!.to_h
+      # (Rodada 4: só o painel editado; entrada vazia ou null = apaga a daquele painel)
+      cfg['panel_palettes'] = raw.slice(*(layout_panel_keys(cfg) + REPORT_PALETTE_SCOPES)).transform_values do |v|
+        v.nil? ? nil : sanitize_panel_palette(v)
       end
     end
     # CARDS DE INDICADOR criados pelo admin no "+" do Meu Painel (item 141):
     # indicador pronto OU fórmula sobre o cesto de indicadores, com cor,
     # formato e painel de destino. Sanitizado campo a campo.
+    # Lista inteira = tela de antes da Rodada 4. A tela nova manda só o que
+    # mudou em `custom_kpis_patch` (mesclado pelo id na gravação — ver
+    # save_agenda_keys!).
     if params.key?(:custom_kpis)
-      cfg['custom_kpis'] = Array(params[:custom_kpis]).first(40).filter_map do |raw|
-        k = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
-        expr = k['expr'].to_s.strip[0, 200]
-        next if expr.blank? || expr !~ %r{\A[a-z0-9_+\-*/().\s]+\z}i
-        next if k['label'].to_s.strip.blank?
-
-        {
-          'id' => k['id'].to_s[/\A[a-z0-9_-]{1,40}\z/i] || SecureRandom.hex(4),
-          'label' => k['label'].to_s.strip[0, 60],
-          'expr' => expr,
-          'format' => %w[number percent currency].include?(k['format'].to_s) ? k['format'].to_s : 'number',
-          'color' => k['color'].to_s[0, 120],
-          'icon' => k['icon'].to_s[/\Ai-lucide-[a-z0-9-]{1,40}\z/] || 'i-lucide-sparkles',
-          'panel' => %w[all agendamento conducao cirurgia medico gestor].include?(k['panel'].to_s) ? k['panel'].to_s : 'all',
-          'note' => k['note'].to_s.strip[0, 200]
-        }
-      end
+      cfg['custom_kpis'] = Array(params[:custom_kpis]).first(KPI_LAYOUT_MAX).filter_map { |kpi_raw| sanitize_custom_kpi(kpi_raw) }
     end
     # TEMA por painel do Meu Painel ({painel => tema}) — opção do admin
     # (item 140): cada ambiente com sua família de cores
@@ -614,6 +1322,23 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['panel_owners'] = raw.slice('agendamento', 'conducao', 'cirurgia')
                                .transform_values { |v| v.presence&.to_i }.compact
     end
+    # 🧹 LISTA LIMPA (item 214): atendentes veem os cartões de Conversas sem a
+    # coluna do CRM e sem etiquetas (elas não querem); admins veem tudo.
+    cfg['list_clean_for_agents'] = ActiveModel::Type::Boolean.new.cast(params[:list_clean_for_agents]) == true if params.key?(:list_clean_for_agents)
+    # modos (pedido 23/09 noite): full = tudo · no_stage = só sem a coluna · clean = sem coluna e etiquetas
+    if params.key?(:list_clean_mode) && LIST_CLEAN_MODES.include?(params[:list_clean_mode].to_s)
+      cfg['list_clean_mode'] = params[:list_clean_mode].to_s
+    end
+    # 🎨 COR DE CADA PESSOA (item 212): {user_id => '#hex'} escolhida pelo
+    # admin em Configurações → Painéis; vale na lista de Conversas (crachá +
+    # pílula), no painel da conversa e no filtro "quem cuida". Sem entrada =
+    # cor automática (ordem de entrada na equipe).
+    if params.key?(:person_colors)
+      raw = params.require(:person_colors).permit!.to_h
+      valid_ids = Current.account.users.pluck(:id).map(&:to_s)
+      cfg['person_colors'] = raw.slice(*valid_ids).transform_values { |v| v.to_s.strip.downcase }
+                                .select { |_, v| v.match?(/\A#[0-9a-f]{6}\z/) }
+    end
     # METAS por painel ({painel => {indicador => meta mensal}}): os cards
     # do Meu Painel mudam de cor conforme o desempenho contra a meta
     if params.key?(:panel_goals)
@@ -628,6 +1353,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                        .to_h
                                        .transform_values(&:presence)
     end
+    # 🔁 item 343 (13/10): EQUIPE DOS RETORNOS — retorno não tem dono
+    # individual; as pessoas daqui veem todos e quem pegar primeiro assume.
+    # Decisão de gestão: só o administrador escolhe.
+    if params.key?(:retorno_team_user_ids) && Current.account_user.administrator?
+      ids = Array(params[:retorno_team_user_ids]).map(&:to_i).select(&:positive?).uniq
+      cfg[Crm::TaskOwner::RETORNO_TEAM_KEY] = Current.account.users.where(id: ids).pluck(:id)
+    end
+    # 27/09: PAPEL E RESPONSABILIDADES de cada pessoa — o Mentor do Time julga
+    # cada um pelo próprio papel (fechamento de cirurgia ≠ linha de frente)
+    if params.key?(:team_roles) && Current.account_user.administrator?
+      cfg['team_roles'] = sanitize_team_roles(params[:team_roles])
+    end
     # conferência do dia → CRM: para onde vai o card em cada caso
     if params.key?(:attendance_stages)
       cfg['attendance_stages'] = params.require(:attendance_stages)
@@ -638,7 +1375,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # Central do Paciente: quem são os MÉDICOS no sistema (editam anotações
     # clínicas) e se a equipe pode visualizar as anotações (LGPD: fechado
     # por padrão)
-    if params.key?(:clinical_access)
+    if params.key?(:clinical_access) # (cadeado de admin checado no topo do método)
       access = params.require(:clinical_access).permit(:team_view, doctor_user_ids: []).to_h
       cfg['clinical_access'] = {
         'doctor_user_ids' => Array(access['doctor_user_ids']).map(&:to_i),
@@ -662,9 +1399,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     # painel PRINCIPAL da conta: o padrão do Meu Painel para quem não tem
     # painel atribuído ('' volta ao padrão de fábrica) — só admin
-    if params.key?(:main_panel) && Current.account_user.administrator?
-      cfg['main_panel'] = params[:main_panel].to_s[0, 60].presence
-    end
+    cfg['main_panel'] = params[:main_panel].to_s[0, 60].presence if params.key?(:main_panel) && Current.account_user.administrator?
     # 📌 PRO MAX (item 129): histórico de AÇÕES DA EMPRESA (LP nova no ar,
     # campanha X, deploy…) — marcadores na linha do tempo do estúdio, para
     # entender o que cada ação gerou. Lista inteira substituída a cada save.
@@ -688,16 +1423,57 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         }.compact
       end.sort_by { |a| a['date'] }
     end
-    crm_settings.update!(agenda_config: cfg)
+    # 🕐 HORÁRIO DE ENVIO dos robôs de follow-up (item 147): janela em que as
+    # cutucadas podem sair — padrão 08h–20h SP; 0–24 = a qualquer hora do dia
+    # (aproveita a janela de 24h do WhatsApp em vez de empilhar pro dia
+    # seguinte). Etapa que vence fora da janela espera ela reabrir. Só admin.
+    if params.key?(:followup_hours) && Current.account_user.administrator?
+      raw = params.require(:followup_hours).permit(:start, :end).to_h
+      h_start = raw['start'].to_i.clamp(0, 23)
+      h_end = raw['end'].to_i.clamp(1, 24)
+      cfg['followup_hours'] = { 'start' => h_start, 'end' => h_end } if h_start < h_end
+    end
+    # 🚦 RITMO DE ENVIO por número (item 345): até N cutucadas a cada M min
+    # por caixa — evita a rajada das 08:00 que parece spam para a Meta.
+    # Inválido → padrão 5 a cada 5; per_window 0 = sem limite. Só admin.
+    if params.key?(:followup_pace) && Current.account_user.administrator?
+      cfg['followup_pace'] = Crm::FollowupBotJob.pace_config(params.require(:followup_pace).permit(:per_window, :minutes).to_h)
+    end
+    # 🏷️ ETIQUETAS QUE ENCERRAM O FOLLOW-UP (rodada 158): contato ou conversa
+    # com uma delas não recebe cutucada de NENHUM robô (além das fixas
+    # nao_perturbe / perda_* do job). Ex.: att_encerrado. Só admin.
+    if params.key?(:followup_stop_labels) && Current.account_user.administrator?
+      cfg['followup_stop_labels'] = Array(params[:followup_stop_labels])
+                                    .map { |l| l.to_s.strip.downcase }.reject(&:blank?).uniq.first(30)
+    end
+    # 📅 LEMBRETES DO DIA DA CONSULTA (item 156): D-1 véspera c/ confirmação
+    # + D-0 no dia (ex.: 07h) — cada régua com hora, caixa e mensagem modelo
+    if params.key?(:appointment_reminders) && Current.account_user.administrator?
+      cfg['appointment_reminders'] = sanitize_appointment_reminders(params[:appointment_reminders])
+    end
+    # item 256: pesquisa de satisfação pós-cirurgia (NPS)
+    if params.key?(:nps_survey) && Current.account_user.administrator?
+      cfg[Crm::NpsSurvey::CONFIG_KEY] = sanitize_nps_survey(params[:nps_survey])
+    end
+    # item 253: interruptor geral do agente "Confirmação de consulta" (Agentes de IA)
+    if params.key?(:appointment_confirmation) && Current.account_user.administrator?
+      cfg[Crm::AppointmentReminderSendJob::MASTER_KEY] = appointment_confirmation_cfg(cfg[Crm::AppointmentReminderSendJob::MASTER_KEY])
+    end
+    cfg = save_agenda_keys!(before, cfg, custom_kpis_patch)
     render json: {
       agenda_windows: cfg['windows'] || [],
       agenda_blocked: cfg['blocked'] || [],
       agenda_blocked_days: cfg['blocked_days'] || [],
       agenda_closed_doctors: cfg['closed_doctors'] || [],
+      agenda_ai_rules: cfg['ai_rules'].to_s,
       attendance_stages: cfg['attendance_stages'] || {},
       attendance_owners: cfg['attendance_owners'] || {},
+      retorno_team_user_ids: Array(cfg[Crm::TaskOwner::RETORNO_TEAM_KEY]), # 🔁 item 343
+      team_roles: cfg['team_roles'] || {},
       surgery_locations: cfg['surgery_locations'] || [],
       surgery_windows: cfg['surgery_windows'] || [],
+      exam_windows: cfg['exam_windows'] || [],
+      appointment_prices: Crm::AppointmentPrice::DEFAULTS.merge(cfg[Crm::AppointmentPrice::KEY] || {}), # 💰 item 324
       agenda_theme: cfg['theme'],
       panel_assignments: cfg['panel_assignments'] || {},
       panel_owners: panel_owners_json(cfg),
@@ -706,37 +1482,337 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       custom_kpis: cfg['custom_kpis'] || [],
       kpi_layout: cfg['kpi_layout'] || {},
       block_layout: cfg['block_layout'] || {},
+      panel_palettes: cfg['panel_palettes'] || {},
+      person_colors: cfg['person_colors'] || {},
+      list_clean_for_agents: cfg['list_clean_for_agents'] == true,
+      list_clean_mode: list_clean_mode(cfg),
       performance_metrics: cfg['performance_metrics'] || {},
-      clinical_access: cfg['clinical_access'] || {}
+      clinical_access: cfg['clinical_access'] || {},
+      followup_hours: cfg['followup_hours'] || { 'start' => 8, 'end' => 20 },
+      followup_pace: Crm::FollowupBotJob.pace_config(cfg['followup_pace']), # 🚦 item 345
+      followup_stop_labels: cfg['followup_stop_labels'] || [],
+      appointment_reminders: cfg['appointment_reminders'] || {},
+      appointment_reminders_state: cfg[Crm::AppointmentReminderSendJob::STATE_KEY] || {},
+      panel_variants: cfg['panel_variants'] || []
     }
   end
 
-  # ── SISTEMA CORINGA: Personalização da conta (Configurações → Personalização)
-  # O admin ajusta profissionais, unidades, listas e metas SEM tocar no
-  # pacote do segmento — gravado em agenda_config['segment'] e resolvido
-  # em todo lugar como: conta > segmento > preset clínica.
-  def update_segment
-    cfg = crm_settings.agenda_config || {}
-    seg = cfg['segment'] || {}
-    if params.key?(:professionals)
-      seg['professionals'] = Array(params[:professionals]).map do |p|
-        p.permit(:nome, :apelido, :cor, :grafias).to_h
-      end.select { |p| p['nome'].present? }.first(30)
+  # chaves de painel que aceitam layout (fileira/blocos): os 5 fixos + as
+  # variantes por pessoa existentes (rodada 160)
+  def layout_panel_keys(cfg)
+    %w[agendamento conducao cirurgia medico gestor] +
+      Array(cfg['panel_variants']).map { |v| "variant:#{v['id']}" }
+  end
+
+  # chaves do agenda_config guardadas POR PAINEL (fileira de indicadores,
+  # blocos e paletas do Meu Painel)
+  PANEL_LAYOUT_KEYS = %w[kpi_layout block_layout panel_palettes].freeze
+
+  # Rodada 4 (#351): grava sob trava (Cevico::SettingMerge) SÓ as chaves que o
+  # update_agenda mexeu nesta requisição, em cima da foto fresca do banco. As
+  # chaves por painel são mescladas PAINEL A PAINEL: a tela manda só o painel
+  # editado; painel enviado como null é apagado. Assim dois administradores em
+  # painéis diferentes (ou duas abas) não apagam o trabalho um do outro, e as
+  # chaves dos jobs (recorde, aniversários, estado dos lembretes…) nunca são
+  # tocadas por quem só arrastou um card. Devolve a coluna gravada.
+  # item 253 + 🔁 343: o interruptor geral da Confirmação de consulta e quem
+  # recebe as tarefas dela (id ou 'retorno_team') — mexe só no que chegou
+  def appointment_confirmation_cfg(current)
+    conf = (current.is_a?(Hash) ? current : {}).dup
+    incoming = params.require(:appointment_confirmation)
+    if incoming.key?(:enabled)
+      conf['enabled'] = ActiveModel::Type::Boolean.new.cast(incoming[:enabled]) == true
+      conf['updated_at'] = Time.current.iso8601
     end
-    if params.key?(:units)
-      seg['units'] = Array(params[:units]).map do |u|
-        u.permit(:key, :nome, :cor, :endereco).to_h
-      end.select { |u| u['key'].present? && u['nome'].present? }.first(20)
+    conf['task_assignee_id'] = incoming[:task_assignee_id].to_s.presence if incoming.key?(:task_assignee_id)
+    conf
+  end
+
+  def save_agenda_keys!(before, cfg, kpis_patch = nil)
+    changed = cfg.reject { |key, value| before.key?(key) && before[key] == value }
+    Cevico::SettingMerge.merge!(crm_settings, :agenda_config) do |fresh|
+      changed.each do |key, value|
+        fresh[key] = PANEL_LAYOUT_KEYS.include?(key) ? merge_panels(fresh[key], value) : value
+      end
+      fresh['custom_kpis'] = apply_custom_kpis_patch(fresh['custom_kpis'], kpis_patch) if kpis_patch
+      fresh
     end
-    seg['problemas'] = Array(params[:problemas]).map { |v| v.to_s[0, 60] }.select(&:present?).first(30) if params.key?(:problemas)
-    seg['procedimentos'] = Array(params[:procedimentos]).map { |v| v.to_s[0, 60] }.select(&:present?).first(30) if params.key?(:procedimentos)
-    if params.key?(:metas)
-      seg['metas'] = params.require(:metas).permit(:vendas_mes).to_h
-                           .transform_values { |v| v.to_i.positive? ? v.to_i : nil }.compact
+  end
+
+  # um card de indicador do "+" do Meu Painel (item 141), sanitizado campo a
+  # campo; nil = descartado (sem nome ou fórmula com caractere estranho)
+  def sanitize_custom_kpi(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    k = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+    expr = k['expr'].to_s.strip[0, 200]
+    return if expr.blank? || expr !~ %r{\A[a-z0-9_+\-*/().\s]+\z}i
+    return if k['label'].to_s.strip.blank?
+
+    {
+      'id' => k['id'].to_s[/\A[a-z0-9_-]{1,40}\z/i] || SecureRandom.hex(4),
+      'label' => k['label'].to_s.strip[0, 60],
+      'expr' => expr,
+      'format' => %w[number percent currency].include?(k['format'].to_s) ? k['format'].to_s : 'number',
+      'color' => k['color'].to_s[0, 120],
+      'icon' => k['icon'].to_s[/\Ai-lucide-[a-z0-9-]{1,40}\z/] || 'i-lucide-sparkles',
+      # item 241: ícone escolhido À MÃO no construtor (senão o nome decide)
+      'icon_manual' => ActiveModel::Type::Boolean.new.cast(k['icon_manual']) || false,
+      'panel' => %w[all agendamento conducao cirurgia medico gestor].include?(k['panel'].to_s) ? k['panel'].to_s : 'all',
+      'note' => k['note'].to_s.strip[0, 200],
+      # 🔒 auditoria R2 (#350): marca "só Financeiro" dos modelos prontos —
+      # o Meu Painel esconde o card de quem não pode ver dinheiro
+      'finance' => ActiveModel::Type::Boolean.new.cast(k['finance']) || false
+    }
+  end
+
+  # 🔒 Rodada 4 (#351): o que a tela mudou nos cards de indicador —
+  # { upsert: [cards criados/editados], remove: [ids], remove_prefix: 'painel_p_' }
+  # (o "modelo pronto" troca todos os cards dele de uma vez). nil = não veio.
+  def custom_kpis_patch
+    raw = params[:custom_kpis_patch]
+    return unless raw.is_a?(ActionController::Parameters)
+
+    {
+      'upsert' => Array(raw[:upsert]).first(KPI_LAYOUT_MAX).filter_map { |k| sanitize_custom_kpi(k) },
+      'remove' => Array(raw[:remove]).filter_map { |id| id.to_s[/\A[a-z0-9_-]{1,40}\z/i] },
+      'remove_prefix' => raw[:remove_prefix].to_s[/\A[a-z0-9_:-]{1,40}\z/i]
+    }
+  end
+
+  # aplica o patch em cima da lista FRESCA do banco, pelo id: dois admins
+  # criando/apagando cards ao mesmo tempo não apagam o card um do outro
+  def apply_custom_kpis_patch(saved, patch)
+    list = Array(saved).select { |k| k.is_a?(Hash) }.reject { |k| patch['remove'].include?(k['id'].to_s) }
+    list = list.reject { |k| k['id'].to_s.start_with?(patch['remove_prefix']) } if patch['remove_prefix']
+    patch['upsert'].each do |kpi|
+      i = list.index { |k| k['id'] == kpi['id'] }
+      i ? list[i] = kpi : list << kpi
     end
-    cfg['segment'] = seg
-    crm_settings.update!(agenda_config: cfg)
-    render json: { segment: seg }
+    list.first(KPI_LAYOUT_MAX)
+  end
+
+  def merge_panels(saved, incoming)
+    base = saved.is_a?(Hash) ? saved.dup : {}
+    (incoming || {}).each do |panel, layout|
+      if layout.nil?
+        base.delete(panel)
+      else
+        base[panel] = layout
+      end
+    end
+    base
+  end
+
+  # cada régua (d1/d0) do lembrete: liga/desliga, hora cheia, caixa do
+  # WhatsApp e a mensagem modelo (mesmo formato das Campanhas); lixo cai fora
+  # item 253 (26/09): QUANTOS lembretes quiser (chaves d0..d7 = dias antes). O que
+  # não vem na lista é apagado. Cada um tem modo sombra/ao vivo, modelo POR
+  # UNIDADE (units.paulista / units.tatuape) + geral, valor padrão, modalidades
+  # atendidas e a ponte de fim de semana (sexta → segunda, só para 1–2 dias antes)
+  def sanitize_appointment_reminders(raw)
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    (Crm::AppointmentReminderSendJob::REGUAS & raw.keys).index_with do |regua|
+      r = raw[regua].is_a?(ActionController::Parameters) ? raw[regua] : ActionController::Parameters.new
+      {
+        'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) == true,
+        'hour' => r[:hour].to_i.clamp(0, 23),
+        'inbox_id' => r[:inbox_id].to_i,
+        # item 310: caixas que TAMBÉM enviam — o lembrete sai pela caixa em que o
+        # paciente já conversa; a `inbox_id` fica como padrão (paciente sem conversa)
+        'inbox_ids' => (Array(r[:inbox_ids]).map(&:to_i) & (Current.account.inboxes.pluck(:id) - [r[:inbox_id].to_i])).presence,
+        # item 312: colunas do CRM que recebem (vazio = todas)
+        'stage_ids' => (Array(r[:stage_ids]).map(&:to_i) & reminder_stage_ids).presence,
+        'template_params' => reminder_template_params(r[:template_params]),
+        'message_preview' => r[:message_preview].to_s[0, 2000].presence
+      }.merge(sanitize_reminder_extras(r)).compact
+    end
+  end
+
+  # item 256: pesquisa de satisfação — tipos de cirurgia (palavras + dias depois),
+  # modo, hora, caixa, modelo da Meta, links e intervalo mínimo entre pesquisas
+  def sanitize_nps_survey(raw) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    rules = Array(raw[:rules]).first(10).filter_map do |r|
+      next unless r.is_a?(ActionController::Parameters)
+
+      label = r[:label].to_s.strip.first(40)
+      next if label.blank?
+
+      { 'key' => (r[:key].to_s.presence || label).parameterize(separator: '_').first(30), 'label' => label,
+        'days_after' => r[:days_after].to_i.clamp(1, 365), 'enabled' => ActiveModel::Type::Boolean.new.cast(r[:enabled]) != false,
+        'keywords' => Array(r[:keywords]).map { |w| w.to_s.strip.downcase.first(30) }.compact_blank.uniq.first(30) }
+    end
+    {
+      'enabled' => ActiveModel::Type::Boolean.new.cast(raw[:enabled]) == true,
+      'mode' => raw[:mode].to_s == 'live' ? 'live' : 'shadow',
+      'hour' => raw[:hour].to_i.clamp(0, 23),
+      'inbox_id' => raw[:inbox_id].to_i,
+      'template_params' => reminder_template_params(raw[:template_params]),
+      'message_preview' => raw[:message_preview].to_s[0, 2000].presence,
+      'google_review_url' => safe_url(raw[:google_review_url]),
+      'complaint_form_url' => safe_url(raw[:complaint_form_url]),
+      'min_interval_days' => raw[:min_interval_days].to_i.positive? ? raw[:min_interval_days].to_i.clamp(7, 365) : 60,
+      'rules' => rules.presence,
+      'updated_at' => Time.current.iso8601
+    }.merge(sanitize_nps_extras(raw)).compact
+  end
+
+  # 27/09 (NPS v1.1 do N8N): recuperação de atrasados, lembrete para quem não
+  # respondeu (modelo da Meta) e agradecimento com o link do Google (sem IA)
+  def sanitize_nps_extras(raw) # rubocop:disable Metrics/AbcSize
+    rem = raw[:reminder].is_a?(ActionController::Parameters) ? raw[:reminder] : nil
+    reminder = if rem
+                 { 'enabled' => ActiveModel::Type::Boolean.new.cast(rem[:enabled]) == true,
+                   'hours' => rem[:hours].to_i.positive? ? rem[:hours].to_i.clamp(1, 72) : Crm::NpsSurvey::DEFAULT_REMINDER_HOURS,
+                   'inbox_id' => rem[:inbox_id].to_i.positive? ? rem[:inbox_id].to_i : nil,
+                   'template_params' => reminder_template_params(rem[:template_params]),
+                   'message_preview' => rem[:message_preview].to_s[0, 2000].presence }.compact
+               end
+    {
+      'catch_up_days' => raw.key?(:catch_up_days) ? raw[:catch_up_days].to_i.clamp(0, 30) : nil,
+      'reminder' => reminder,
+      'thanks_enabled' => raw.key?(:thanks_enabled) ? ActiveModel::Type::Boolean.new.cast(raw[:thanks_enabled]) == true : nil,
+      'thanks_text' => raw[:thanks_text].to_s[0, 1500].presence,
+      'thanks_bands' => (Array(raw[:thanks_bands]).map(&:to_s) & Crm::NpsSurvey::BANDS.keys).presence
+    }
+  end
+
+  def safe_url(value)
+    url = value.to_s.strip.first(300)
+    url.match?(%r{\Ahttps?://\S+\z}) ? url : nil
+  end
+
+  def reminder_template_params(value)
+    return nil unless value.is_a?(ActionController::Parameters)
+
+    value.permit(:name, :namespace, :language, :category, processed_params: {}).to_h.presence
+  end
+
+  def reminder_stage_ids
+    @reminder_stage_ids ||= Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }).pluck(:id)
+  end
+
+  def sanitize_reminder_extras(r) # rubocop:disable Naming/MethodParameterName, Metrics/AbcSize, Metrics/CyclomaticComplexity
+    units = {}
+    if r[:units].is_a?(ActionController::Parameters)
+      Crm::AgendaSlots::UNIT_LABELS.each_key do |unit|
+        u = r[:units][unit]
+        next unless u.is_a?(ActionController::Parameters)
+
+        tp = reminder_template_params(u[:template_params])
+        units[unit] = { 'template_params' => tp, 'message_preview' => u[:message_preview].to_s[0, 2000].presence }.compact if tp
+      end
+    end
+    {
+      'mode' => r[:mode].to_s == 'live' ? 'live' : 'shadow',
+      'default_value' => r[:default_value].to_s.strip[0, 20].presence,
+      'weekend_bridge' => ActiveModel::Type::Boolean.new.cast(r[:weekend_bridge]) == true,
+      'modalities' => Array(r[:modalities]).map(&:to_s).select { |m| %w[avaliacao retorno teleconsulta exames pos_op].include?(m) }.presence,
+      'units' => units.presence,
+      'variants' => reminder_variants(r[:variants]).presence, # 🎯 item 327
+      'by_inbox' => sanitize_reminder_by_inbox(r[:by_inbox], r[:inbox_ids]),
+      'partner' => sanitize_reminder_partner(r[:partner]),
+      'followup' => sanitize_reminder_followup(r[:followup])
+    }
+  end
+
+  # item 314: modelos ESCOLHIDOS para cada caixa de "também envia por" —
+  # unidade (Paulista/Tatuapé), geral e o do reforço. Só caixas marcadas.
+  def sanitize_reminder_by_inbox(raw, inbox_ids)
+    return nil unless raw.is_a?(ActionController::Parameters)
+
+    allowed = Array(inbox_ids).map(&:to_i) & Current.account.inboxes.pluck(:id)
+    allowed.index_with { |inbox_id| reminder_inbox_config(raw[inbox_id.to_s]) }.compact.transform_keys(&:to_s).presence
+  end
+
+  def reminder_inbox_config(cfg)
+    return nil unless cfg.is_a?(ActionController::Parameters)
+
+    {
+      'template_params' => reminder_template_params(cfg[:template_params]),
+      'message_preview' => cfg[:message_preview].to_s[0, 2000].presence,
+      'units' => reminder_units(cfg[:units]).presence,
+      'variants' => reminder_variants(cfg[:variants]).presence, # 🎯 item 327
+      'followup' => reminder_slot(cfg[:followup])
+    }.compact.presence
+  end
+
+  # 🎯 item 327: MODELOS PERSONALIZADOS de um bloco — por tipo de atendimento,
+  # por médico, ou os dois. Sem tipo nem médico, ou sem nenhum modelo, não entra.
+  def reminder_variants(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    Array(raw).first(Crm::ReminderModels::MAX_VARIANTS).filter_map do |v|
+      next unless v.is_a?(ActionController::Parameters)
+
+      variant = {
+        'id' => v[:id].to_s.gsub(/[^a-z0-9_-]/i, '')[0, 24].presence || SecureRandom.hex(4),
+        'modality' => (Crm::ReminderModels::MODALITIES.include?(v[:modality].to_s) ? v[:modality].to_s : nil),
+        'doctor' => v[:doctor].to_s.strip[0, 80].presence,
+        'template_params' => reminder_template_params(v[:template_params]),
+        'message_preview' => v[:message_preview].to_s[0, 2000].presence,
+        'units' => reminder_units(v[:units]).presence,
+        'followup' => reminder_slot(v[:followup])
+      }.compact
+      next if variant['modality'].nil? && variant['doctor'].nil?
+      next unless Crm::ReminderModels.any?(variant) || variant['followup']
+
+      variant
+    end
+  end
+
+  # { 'template_params', 'message_preview' } de um bloco de modelo, ou nil
+  def reminder_slot(raw)
+    tp = raw.is_a?(ActionController::Parameters) ? reminder_template_params(raw[:template_params]) : nil
+    tp && { 'template_params' => tp, 'message_preview' => raw[:message_preview].to_s[0, 2000].presence }.compact
+  end
+
+  def reminder_units(raw)
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    Crm::AgendaSlots::UNIT_LABELS.keys.index_with { |unit| reminder_slot(raw[unit]) }.compact
+  end
+
+  # 🔁 item 288: reforço para quem não respondeu ao lembrete — liga/desliga,
+  # horas de espera (padrão 6), até 2 reforços, o modelo da Meta e o modelo
+  # próprio dos pacientes do Oftalmofácil. Sem o bloco = desligado.
+  def sanitize_reminder_followup(raw) # rubocop:disable Metrics/AbcSize
+    return nil unless raw.is_a?(ActionController::Parameters)
+
+    fu = Crm::AppointmentReminderFollowup
+    partner = raw[:partner].is_a?(ActionController::Parameters) ? raw[:partner] : ActionController::Parameters.new
+    partner_tp = reminder_template_params(partner[:template_params])
+    {
+      'enabled' => ActiveModel::Type::Boolean.new.cast(raw[:enabled]) == true,
+      'hours' => raw[:hours].to_i.positive? ? raw[:hours].to_i.clamp(fu::HOURS_RANGE.min, fu::HOURS_RANGE.max) : fu::DEFAULT_HOURS,
+      'max' => raw[:max].to_i.clamp(1, fu::MAX_FOLLOWUPS),
+      'template_params' => reminder_template_params(raw[:template_params]),
+      'message_preview' => raw[:message_preview].to_s[0, 2000].presence,
+      'partner' => partner_tp && { 'template_params' => partner_tp, 'message_preview' => partner[:message_preview].to_s[0, 2000].presence }.compact
+    }.compact
+  end
+
+  # pacientes do Oftalmofácil (26/09): a caixa escolhida e o modelo dela — só
+  # por aqui a cerca dos parceiros libera o lembrete (ver AppointmentReminderSendJob)
+  def sanitize_team_roles(raw)
+    return {} unless raw.is_a?(ActionController::Parameters)
+
+    ids = Current.account.users.pluck(:id).map(&:to_s)
+    raw.to_unsafe_h.slice(*ids).to_h do |uid, r|
+      r = r.is_a?(Hash) ? r : {}
+      [uid, { 'papel' => r['papel'].to_s.strip[0, 60], 'responsabilidades' => r['responsabilidades'].to_s.strip[0, 1200],
+              'updated_at' => Time.current.iso8601 }]
+    end.reject { |_, v| v['papel'].blank? && v['responsabilidades'].blank? }
+  end
+
+  def sanitize_reminder_partner(raw)
+    return nil unless raw.is_a?(ActionController::Parameters)
+
+    {
+      'enabled' => ActiveModel::Type::Boolean.new.cast(raw[:enabled]) == true,
+      'inbox_id' => raw[:inbox_id].to_i.positive? ? raw[:inbox_id].to_i : nil,
+      'template_params' => reminder_template_params(raw[:template_params]),
+      'message_preview' => raw[:message_preview].to_s[0, 2000].presence
+    }.compact
   end
 
   # Colunas onde o Secretário da Agenda atua: a tela manda a lista de
@@ -744,11 +1820,15 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # criadas/removidas de acordo. Só mexe nas automações com o nome-marcador —
   # automações criadas à mão no Modo Programação ficam intactas.
   SCHEDULER_MARKER = 'Secretário da Agenda (automático)'.freeze
+  # rodada 148: automação IRMÃ por coluna — o card entra ANTES da confirmação
+  # e a leitura única perdia o horário combinado depois; a irmã escuta as
+  # MENSAGENS do paciente na coluna e relê a conversa (1 min de espera junta
+  # mensagens picadas; freio de 3 min por paciente; o Applier ainda corta
+  # leituras quase simultâneas)
+  SCHEDULER_MSG_MARKER = 'Secretário da Agenda (mensagens)'.freeze
 
   def sync_scheduler_stages
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     wanted = Array(params[:stage_ids]).map(&:to_i).reject(&:zero?).uniq
     managed = Crm::Automation.joins(stage: :pipeline)
@@ -767,16 +1847,37 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                               trigger_type: 'card_entered', action_type: 'schedule_appointment',
                               action_config: {}, active: true)
     end
+    sync_scheduler_message_automations(wanted)
 
     render json: { scheduler_stage_ids: managed.reload.pluck(:stage_id) }
+  end
+
+  # mantém as automações-irmãs "Mensagem criada" espelhando as colunas de
+  # atuação do Secretário (criadas/removidas junto; as manuais ficam)
+  def sync_scheduler_message_automations(wanted)
+    managed = Crm::Automation.joins(stage: :pipeline)
+                             .where(crm_pipelines: { account_id: Current.account.id })
+                             .where(action_type: 'schedule_appointment', name: SCHEDULER_MSG_MARKER)
+    managed.where.not(stage_id: wanted).destroy_all
+    existing_ids = managed.pluck(:stage_id)
+    (wanted - existing_ids).each do |stage_id|
+      stage = Crm::Stage.joins(:pipeline)
+                        .where(crm_pipelines: { account_id: Current.account.id })
+                        .find_by(id: stage_id)
+      next if stage.blank?
+
+      Crm::Automation.create!(stage_id: stage.id, name: SCHEDULER_MSG_MARKER,
+                              trigger_type: 'message_created', action_type: 'schedule_appointment',
+                              delay_minutes: 1,
+                              action_config: { 'message_direction' => 'incoming', 'throttle_minutes' => 3 },
+                              active: true)
+    end
   end
 
   # Insights comerciais do Consultor Comercial: analisa as conversas que
   # geraram fechamento e grava o relatório p/ a gestão (job assíncrono).
   def sales_insights
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     Crm::SalesInsightsJob.perform_later(Current.account.id)
     render json: { success: true, message: 'Análise iniciada! Os insights aparecem aqui em 1-2 minutos.' }
@@ -797,9 +1898,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   def sync_agent_stages
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     agent = params[:agent].to_s
     action = AGENT_STAGE_ACTIONS[agent]
@@ -823,6 +1922,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                               trigger_type: 'card_entered', action_type: action,
                               action_config: {}, active: true)
     end
+    # Secretário: as irmãs "Mensagem criada" acompanham as colunas (rodada 148)
+    sync_scheduler_message_automations(wanted) if agent == 'scheduler'
 
     render json: { agent: agent, stage_ids: managed.reload.pluck(:stage_id) }
   end
@@ -830,9 +1931,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Preencher a Agenda com o histórico: varre conversas com confirmação de
   # agendamento e registra as consultas (Agente de Agendamento). Admin-only.
   def agenda_backfill
-    unless Current.account_user.administrator?
-      return render json: { error: 'Apenas administradores.' }, status: :forbidden
-    end
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     Crm::AgendaBackfillJob.perform_later(Current.account.id, {
                                            'since_days' => params[:since_days].to_i,
@@ -857,9 +1956,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Mentor do Time pontual (admin): gera o feedback dos últimos 7 dias agora,
   # sem esperar a segunda-feira — bom para testar e para a primeira rodada.
   def run_mentor
-    unless Current.account_user.administrator?
-      return render json: { error: 'Só administradores rodam o Mentor.' }, status: :forbidden
-    end
+    return render json: { error: 'Só administradores rodam o Mentor.' }, status: :forbidden unless Current.account_user.administrator?
 
     Crm::WeeklyMentorJob.perform_later(Current.account.id)
     render json: { success: true, message: 'Mentor do Time iniciado! Os feedbacks aparecem no Meu Painel em alguns minutos.' }
@@ -867,18 +1964,55 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Relatório de uso/custo dos agentes de IA ────────────────────────────────
 
+  # ?date=AAAA-MM-DD (23/09): análise de UM dia — totais e quebra por agente
+  # daquele dia (fuso da clínica), além dos períodos de sempre
+  # ?preset=… (item 321, 03/10): a régua padrão do sistema (hoje, ontem, 7 dias,
+  # semana passada, mês, mês passado, 90 dias, ano, personalizado) → `period`
   def ai_usage
     scope = Crm::AiUsage.where(account: Current.account)
     render json: {
+      period: usage_period(scope),
       by_agent: usage_breakdown(scope, :agent_key),
       by_model: usage_breakdown(scope, :model),
       periods: {
-        today: usage_totals(scope.where(created_at: Date.current.all_day)),
+        today: usage_totals(scope.where(created_at: ActiveSupport::TimeZone['America/Sao_Paulo'].now.all_day)), # dia da clínica, não UTC
         last7: usage_totals(scope.where(created_at: 7.days.ago..Time.current)),
         last30: usage_totals(scope.where(created_at: 30.days.ago..Time.current)),
         all: usage_totals(scope)
-      }
+      },
+      day: usage_day(scope, params[:date])
     }
+  end
+
+  def usage_period(scope)
+    range = standard_period_range
+    return nil if range.nil?
+
+    in_range = scope.where(created_at: range.first..range.last)
+    {
+      preset: params[:preset], from: range.first.to_date.iso8601, to: range.last.to_date.iso8601,
+      totals: usage_totals(in_range),
+      by_agent: usage_breakdown(in_range, :agent_key, period: false),
+      by_model: usage_breakdown(in_range, :model, period: false)
+    }
+  end
+
+  def usage_day(scope, raw)
+    return nil if raw.blank?
+
+    tz = ActiveSupport::TimeZone['America/Sao_Paulo']
+    day = tz.parse(raw.to_s)
+    return nil if day.nil?
+
+    day_scope = scope.where(created_at: day.all_day)
+    {
+      date: day.to_date.iso8601,
+      totals: usage_totals(day_scope),
+      by_agent: usage_breakdown(day_scope, :agent_key, period: false),
+      by_model: usage_breakdown(day_scope, :model, period: false)
+    }
+  rescue ArgumentError
+    nil
   end
 
   # ── Configurações → Domínio (público das páginas/formulários) ──────────────
@@ -947,6 +2081,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # {painel => user_id} vira {painel => {user_id, name}} — o front mostra o
   # 1º nome na pílula do Meu Painel sem depender da lista de agentes
+  # modo salvo; sem modo, o booleano antigo ligado vale como "clean"
+  def list_clean_mode(cfg)
+    mode = cfg['list_clean_mode'].to_s
+    return mode if LIST_CLEAN_MODES.include?(mode)
+
+    cfg['list_clean_for_agents'] == true ? 'clean' : 'full'
+  end
+
   def panel_owners_json(cfg)
     owners = cfg['panel_owners'] || {}
     return {} if owners.blank?
@@ -1009,27 +2151,45 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     { http_ok: false, http_error: e.class.name.demodulize }
   end
 
-  def usage_breakdown(scope, column)
-    last30 = scope.where(created_at: 30.days.ago..Time.current)
+  def usage_breakdown(scope, column, period: true)
+    last30 = period ? scope.where(created_at: 30.days.ago..Time.current) : scope
     last30.group(column)
-          .pluck(column, Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'))
-          .map do |key, calls, input, output, cost|
-            { key: key, calls: calls, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4) }
+          .pluck(column, Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'),
+                 Arel.sql('SUM(cache_read_tokens)'))
+          .map do |key, calls, input, output, cost, cached|
+            { key: key, calls: calls, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4),
+              cache_pct: input.to_i.positive? ? ((cached.to_i * 100.0) / input.to_i).round : 0 } # item 232
           end
           .sort_by { |r| -r[:cost_usd] }
   end
 
   def usage_totals(scope)
-    calls, input, output, cost = scope.pick(Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'), Arel.sql('SUM(cost_usd)'))
-    { calls: calls.to_i, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4) }
+    calls, input, output, cost, cached = scope.pick(Arel.sql('COUNT(*)'), Arel.sql('SUM(input_tokens)'), Arel.sql('SUM(output_tokens)'),
+                                                    Arel.sql('SUM(cost_usd)'), Arel.sql('SUM(cache_read_tokens)'))
+    { calls: calls.to_i, input_tokens: input.to_i, output_tokens: output.to_i, cost_usd: cost.to_f.round(4),
+      cache_pct: input.to_i.positive? ? ((cached.to_i * 100.0) / input.to_i).round : 0 } # item 232
   end
 
   def crm_settings
     @crm_settings ||= CrmSetting.find_or_create_by!(account: Current.account)
   end
 
+  # { 'crm' => 'edit', … } só com nós do catálogo e níveis válidos (rodada 334)
+  def sanitize_access_tree(raw)
+    raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+    raw.each_with_object({}) do |(key, level), out|
+      key = key.to_s
+      level = level.to_s
+      next unless Cevico::AccessCatalog.exist?(key) && Cevico::AccessCatalog::LEVELS.include?(level)
+      next if Cevico::AccessCatalog.admin_only?(key)
+
+      out[key] = Cevico::AccessCatalog.clamp(key, level)
+    end
+  end
+
   def settings_params
-    params.permit(:n8n_base_url, :n8n_api_key, column_presets: [:name, { stage_ids: [] }], agent_permissions: {})
+    # rodada 334: agent_permissions NÃO entra mais por aqui (árvore/papéis têm endpoints próprios)
+    params.permit(:n8n_base_url, :n8n_api_key, column_presets: [:name, { stage_ids: [] }])
   end
 
   def oftalmofacil_json(s)
@@ -1037,9 +2197,116 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     {
       base_url: of['base_url'],
       key_set: of['api_key'].present?,
-      configured: of['base_url'].present? && of['api_key'].present?,
+      # item 157: conexão de banco só-leitura (senha nunca volta)
+      db_host: of['db_host'], db_port: of['db_port'] || 3306, db_name: of['db_name'], db_user: of['db_user'],
+      db_password_set: of['db_password'].present?,
+      provider_name: of['provider_name'].presence || 'CATARATA_SP',
+      enabled: of['enabled'] == true,
+      doctors: of['doctors'] || {},
+      configured: Crm::OftalmofacilSyncService.configured?(of),
+      last_sync_at: of['last_sync_at'], last_run_at: of['last_run_at'], last_result: of['last_result'],
+      # Rodada 4 (achado #382): a última falha e o alerta da faixa vermelha (erro cru só para admin)
+      last_error: of['last_error'], last_error_at: of['last_error_at'], sync_alert: Crm::OftalmofacilSyncJob.alert_for(of, account_id: s.account_id),
+      mirror_count: Crm::OftalmofacilSurgery.where(account_id: s.account_id).count,
+      # 🏥 item 228: parceiros + Agenda
+      partners_enabled: of['partners_enabled'] == true,
+      partner_pipeline_id: of['partner_pipeline_id'],
+      own_pipeline_id: of['own_pipeline_id'],
+      partner_inbox_ids: Array(of['partner_inbox_ids']), # 🚧 item 231
+      agenda_enabled: of['agenda_enabled'] == true,
+      agenda_from: of['agenda_from'],
+      clinics: of['clinics'] || {},
+      partners_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).group(:provider_name).count
+                                             .map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
+      clinics_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).where.not(clinic_name: [nil, ''])
+                                            .group(:clinic_name).count.map { |name, total| { name: name, total: total } }.sort_by { |x| -x[:total] },
+      types_seen: Crm::OftalmofacilSurgery.where(account_id: s.account_id).group(:procedure_type).count
+                                          .map { |name, total| { name: name.presence || '(sem tipo)', total: total } }.sort_by { |x| -x[:total] },
+      agenda_count: s.account.tasks.where(source: 'oftalmofacil').count,
       updated_at: of['updated_at']
     }
+  end
+
+  # 📞 ligações nativas (item 167) com os padrões preenchidos
+  def calls_json(record)
+    Crm::Calls::Settings.new(Current.account, crm_settings: record).to_h
+  end
+
+  # 🤖📞 item 169: mantém ai_config['voice'] (fonte da assistente) em dia com o
+  # que o card do Painel dos agentes salvou: interruptor e, desde a 195, a caixa
+  # do WhatsApp p/ continuar por escrito. O "prompt" NÃO é mais espelhado — ele
+  # é o bloco da etapa e vive só em agents.voice.prompt (o script inteiro é
+  # montado por Crm::VoiceAgent::Script.build). Chave/número/voz: Integrações.
+  def mirror_voice_agent!(cfg, agent)
+    voice = cfg['voice'] || {}
+    voice['enabled'] = agent['enabled'] == true if agent.key?('enabled')
+    voice['handoff_inbox_id'] = Current.account.inboxes.find_by(id: agent['handoff_inbox_id'])&.id if agent.key?('handoff_inbox_id')
+    voice.delete('prompt') # resquício do script inteiro custom (antes da 195)
+    cfg['voice'] = voice
+  end
+
+  # 🎙️ (195) valida/normaliza a config do Agente de Ligação no próprio
+  # `permitted`: live_days 0..6 sem repetição, números dentro dos limites
+  # (Crm::VoiceAgent::UnresponsiveLeads::LIMITS), stage_ids só desta conta.
+  # Ao vivo exige a trava do servidor, colunas vigiadas e ElevenLabs configurada.
+  VOICE_LIVE_LOCKED = 'O modo Ao vivo está trancado no servidor (variável CEVICO_RESPONDERS_LIVE). ' \
+                      'Por enquanto o Agente de Ligação só monta a lista em sombra.'.freeze
+  VOICE_LIVE_NO_STAGES = 'Para ficar Ao vivo, escolha pelo menos uma coluna para o Agente de Ligação vigiar.'.freeze
+  VOICE_LIVE_NOT_READY = 'Para ficar Ao vivo, configure e sincronize a ElevenLabs em Integrações → Agente de Ligação ' \
+                         '(chave da API + agente).'.freeze
+
+  def voice_live_error(cfg, permitted)
+    agent = permitted['voice']
+    return nil if agent.blank?
+
+    normalize_voice_agent!(agent)
+    return nil unless agent['mode'] == 'live'
+    return VOICE_LIVE_LOCKED unless Crm::ResponderAgentJob::LIVE_ENABLED
+
+    stages = agent.key?('stage_ids') ? agent['stage_ids'] : Array(cfg.dig('agents', 'voice', 'stage_ids'))
+    return VOICE_LIVE_NO_STAGES if stages.compact_blank.empty?
+    return VOICE_LIVE_NOT_READY unless Crm::VoiceAgent::Settings.new(Current.account, crm_settings: crm_settings).configured?
+
+    nil
+  end
+
+  def normalize_voice_agent!(agent) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    agent['live_days'] = Array(agent['live_days']).map(&:to_i).select { |d| d.between?(0, 6) }.uniq if agent.key?('live_days')
+    if agent.key?('stage_ids')
+      ids = Array(agent['stage_ids']).map(&:to_i).select(&:positive?).uniq
+      agent['stage_ids'] = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: Current.account.id }, id: ids).pluck(:id)
+    end
+    Crm::VoiceAgent::UnresponsiveLeads::LIMITS.each_key do |key|
+      agent[key] = Crm::VoiceAgent::UnresponsiveLeads.setting(agent, key) if agent.key?(key)
+    end
+    agent['mode'] = %w[shadow live].include?(agent['mode']) ? agent['mode'] : 'shadow' if agent.key?('mode')
+  end
+
+  # 🎙️ (195) depois de PUBLICAR o card do Agente de Ligação (não o simples
+  # interruptor), sobe o prompt novo para a ElevenLabs. Devolve { ok, error }
+  # ou nil quando não havia o que sincronizar. Nunca derruba o publish.
+  def voice_sync_after_publish(agents_param)
+    keys = voice_publish_keys(agents_param)
+    return nil if (keys - %w[enabled]).empty? || Crm::VoiceAgent::Settings.simulate_env? # só o interruptor: nada a subir
+    return nil unless Crm::VoiceAgent::Settings.new(Current.account, crm_settings: crm_settings.reload).configured?
+
+    result = Crm::VoiceAgent::SyncService.new(Current.account).perform
+    { ok: result[:ok] == true, error: result[:error] }
+  rescue StandardError => e
+    { ok: false, error: e.message.to_s.truncate(200) }
+  end
+
+  # chaves enviadas em params[:agents][:voice] (vazio quando o card não veio)
+  def voice_publish_keys(agents_param)
+    return [] unless agents_param.respond_to?(:key?) && agents_param.key?(:voice)
+
+    voice_param = agents_param[:voice]
+    voice_param.respond_to?(:keys) ? voice_param.keys.map(&:to_s) : []
+  end
+
+  # 🤖📞 agente de ligação (item 169) — sem segredos, com defaults e URLs prontas
+  def voice_json(record)
+    Crm::VoiceAgent::Settings.new(Current.account, crm_settings: record).to_h
   end
 
   def settings_json(s)
@@ -1050,24 +2317,44 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       n8n_workflows_fetched_at: s.n8n_workflows_fetched_at,
       column_presets: s.column_presets || [],
       agent_permissions: s.agent_permissions || {},
+      # 🔐 rodada 334: o nível de QUEM está logado em cada nó da árvore + catálogo
+      access: cevico_access.to_h,
+      # 🏢 identidade da empresa (ramo, vocabulário, unidades, assistente)
+      company: cevico_company.to_h,
       meta_ads: meta_ads_json(s),
       google_ads: google_ads_json(s),
       ai: ai_json(s),
       sheets: sheets_json(s),
       oftalmofacil: oftalmofacil_json(s),
+      calls: calls_json(s),
+      voice: voice_json(s),
       agenda_windows: (s.agenda_config || {})['windows'] || [],
       agenda_blocked: (s.agenda_config || {})['blocked'] || [],
       agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],
       agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
+      agenda_ai_rules: (s.agenda_config || {})['ai_rules'].to_s, # item 307
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
+      retorno_team_user_ids: Array((s.agenda_config || {})[Crm::TaskOwner::RETORNO_TEAM_KEY]), # 🔁 item 343
+      team_roles: (s.agenda_config || {})['team_roles'] || {},
       surgery_locations: (s.agenda_config || {})['surgery_locations'] || [],
       surgery_windows: (s.agenda_config || {})['surgery_windows'] || [],
+      exam_windows: (s.agenda_config || {})['exam_windows'] || [],
+      appointment_prices: Crm::AppointmentPrice::DEFAULTS.merge((s.agenda_config || {})[Crm::AppointmentPrice::KEY] || {}), # 💰 item 324
       agenda_theme: (s.agenda_config || {})['theme'],
-      # Personalização da conta (sistema coringa): ajustes sobre o segmento
-      segment: (s.agenda_config || {})['segment'] || {},
-      # HUB: recursos ligáveis da saúde (ex.: boxe) — o menu lê daqui
-      health_features: (s.agenda_config || {}).dig('health', 'features') || {},
+      # 🕐 janela de envio dos robôs de follow-up (item 147; padrão 08h–20h)
+      followup_hours: (s.agenda_config || {})['followup_hours'] || { 'start' => 8, 'end' => 20 },
+      # 🚦 ritmo de envio por número (item 345; padrão 5 a cada 5 min)
+      followup_pace: Crm::FollowupBotJob.pace_config((s.agenda_config || {})['followup_pace']),
+      # 🏷️ etiquetas que encerram o follow-up de todos os robôs (rodada 158)
+      followup_stop_labels: (s.agenda_config || {})['followup_stop_labels'] || [],
+      # 📅 lembretes do dia da consulta D-1/D-0 (item 156)
+      appointment_reminders: (s.agenda_config || {})['appointment_reminders'] || {},
+      appointment_reminders_state: (s.agenda_config || {})[Crm::AppointmentReminderSendJob::STATE_KEY] || {},
+      appointment_confirmation: (s.agenda_config || {})[Crm::AppointmentReminderSendJob::MASTER_KEY] || {},
+      # 📊 item 256: pesquisa de satisfação (com os tipos padrão quando ainda não salvou)
+      nps_survey: Crm::NpsSurvey.config(s.account),
+      nps_survey_state: (s.agenda_config || {})[Crm::NpsSurvey::STATE_KEY] || {},
       # tabela de preços vigente (com os padrões quando não há tabela salva)
       price_table: {
         items: Cevico::PriceList.items(Current.account),
@@ -1081,10 +2368,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       custom_kpis: (s.agenda_config || {})['custom_kpis'] || [],
       kpi_layout: (s.agenda_config || {})['kpi_layout'] || {},
       block_layout: (s.agenda_config || {})['block_layout'] || {},
+      panel_palettes: (s.agenda_config || {})['panel_palettes'] || {},
+      person_colors: (s.agenda_config || {})['person_colors'] || {},
+      list_clean_for_agents: (s.agenda_config || {})['list_clean_for_agents'] == true,
+      list_clean_mode: list_clean_mode(s.agenda_config || {}),
       performance_metrics: (s.agenda_config || {})['performance_metrics'] || {},
       performance_metric_keys: Crm::AgentPerformance::METRIC_KEYS,
       panel_goals: (s.agenda_config || {})['panel_goals'] || {},
       custom_panels: (s.agenda_config || {})['custom_panels'] || [],
+      # 🧑‍🤝‍🧑 painéis por pessoa (rodada 160)
+      panel_variants: (s.agenda_config || {})['panel_variants'] || [],
       main_panel: (s.agenda_config || {})['main_panel'].presence,
       company_actions: (s.agenda_config || {})['company_actions'] || [],
       clinical_access: (s.agenda_config || {})['clinical_access'] || {},
@@ -1113,28 +2406,116 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     }
   end
 
+  # colunas (stage_ids) não podem se repetir entre os atendentes do WhatsApp
+  # (193) valida a janela ao vivo dos respondedores e normaliza live_days no
+  # próprio `permitted` (inteiros 0..6, sem repetição). Devolve a mensagem de
+  # erro ou nil. Ao vivo sem caixa marcada (nem agora, nem já gravada) = 422.
+  def responder_live_error(existing, permitted) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    CrmListener::RESPONDER_KEYS.each do |key|
+      agent = permitted[key]
+      next if agent.blank?
+
+      agent['live_days'] = Array(agent['live_days']).map(&:to_i).select { |d| d.between?(0, 6) }.uniq if agent.key?('live_days')
+      next unless agent['mode'] == 'live'
+      unless Crm::ResponderAgentJob::LIVE_ENABLED
+        return 'O modo Ao vivo está trancado no servidor (variável CEVICO_RESPONDERS_LIVE). Por enquanto os atendentes só trabalham em sombra.'
+      end
+
+      inboxes = agent.key?('inbox_ids') ? Array(agent['inbox_ids']) : Array(existing.dig(key, 'inbox_ids'))
+      return 'Para ficar Ao vivo, marque pelo menos uma caixa de WhatsApp para o atendente.' if inboxes.compact_blank.empty?
+    end
+    nil
+  end
+
+  def responder_stage_conflict(existing, permitted)
+    keys = CrmListener::RESPONDER_KEYS
+    merged = keys.index_with { |k| (existing[k] || {}).merge(permitted[k] || {}) }
+    seen = {}
+    keys.each do |k|
+      # rascunho não conta: só o que está (ou vai ficar) publicado
+      Array(merged[k]['stage_ids']).map(&:to_i).each do |sid|
+        return Crm::Stage.find_by(id: sid)&.name || sid if seen[sid] && seen[sid] != k
+
+        seen[sid] = k
+      end
+    end
+    nil
+  end
+
+  # uma nota de sombra + a mensagem do paciente que a disparou + o que foi
+  # respondido DE VERDADE em seguida (N8N ou equipe), para comparar
+  def shadow_item(note) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    shadow = (note.additional_attributes || {})['cevico_ia_shadow'] || {}
+    conversation = note.conversation
+    trigger = conversation.messages.find_by(id: shadow['trigger_message_id'])
+    real = conversation.messages
+                       .where(message_type: :outgoing, private: false)
+                       .where('id > ?', shadow['trigger_message_id'].to_i)
+                       .where('created_at < ?', note.created_at + 30.minutes)
+                       .reorder(:id).limit(3)
+    {
+      id: note.id,
+      at: note.created_at.iso8601,
+      conversation_id: conversation.display_id,
+      contact: conversation.contact&.name.presence || conversation.contact&.phone_number || 'Paciente',
+      patient_said: trigger&.content.to_s.truncate(400),
+      shadow: shadow.slice('etapa', 'mensagens', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura',
+                           'rating', 'rating_note', 'acoes'), # acoes = ferramentas (rodada 192)
+      real_replies: real.map { |m| { content: m.content.to_s.truncate(400), by: reply_author(m), at: m.created_at.iso8601 } }
+    }
+  end
+
+  def reply_author(message)
+    attrs = message.additional_attributes || {}
+    return 'agente interno' if attrs['cevico_ia_agent'].present?
+    return 'robô de follow-up' if attrs['cevico_followup_bot_id'].present?
+    return 'jornada' if attrs['cevico_journey'].present?
+
+    message.sender.is_a?(User) ? (message.sender.name.presence || 'equipe') : 'N8N / API'
+  end
+
+  def shadow_summary(items) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    total = items.size
+    booked = items.count { |i| i[:shadow]['agendar'] }
+    {
+      total: total,
+      would_book: booked,
+      slot_valid: items.count { |i| i[:shadow]['agendar'] && i[:shadow]['slot_valid'] },
+      human: items.count { |i| i[:shadow]['chamar_humano'] },
+      rated_good: items.count { |i| i[:shadow]['rating'] == 'good' },
+      rated_bad: items.count { |i| i[:shadow]['rating'] == 'bad' },
+      by_stage: items.group_by { |i| i[:shadow]['etapa'].presence || '?' }.transform_values(&:size)
+    }
+  end
+
   def ai_json(s)
     cfg = s.ai_config || {}
     agents = cfg['agents'] || {}
     # prompt padrão exibido na UI: o do SEGMENTO quando existir (sistema
     # coringa), senão o chumbado no serviço (preset clínica)
     default_prompts = {
-      'conversation' => Segmento.prompt('conversation_insight') || Crm::ConversationInsightService::SYSTEM_PROMPT,
-      'form' => Segmento.prompt('form_insight') || Crm::FormInsightService::SYSTEM_PROMPT,
-      'scheduler' => Segmento.prompt('appointment_extraction') || Crm::AppointmentExtractionService::SYSTEM_PROMPT,
-      'opportunity' => Segmento.prompt('opportunity_radar') || Crm::OpportunityRadarService::SYSTEM_PROMPT,
-      'closing' => Segmento.prompt('surgery_closing') || Crm::SurgeryClosingService::SYSTEM_PROMPT,
-      'nps' => Segmento.prompt('nps') || Crm::NpsService::SYSTEM_PROMPT,
-      'sales' => Segmento.prompt('sales_coach') || Crm::SalesCoachService::SYSTEM_PROMPT,
-      'instagram' => Segmento.prompt('instagram_agent') || Crm::InstagramAgentService::SYSTEM_PROMPT,
-      'copywriter' => Segmento.prompt('copywriter') || Crm::CopywriterService::SYSTEM_PROMPT,
-      'pagebuilder' => Segmento.prompt('page_builder') || Crm::PageBuilderService::SYSTEM_PROMPT,
-      'mentor' => Segmento.prompt('weekly_mentor') || Crm::WeeklyMentorService::SYSTEM_PROMPT,
-      'comments' => Segmento.prompt('comments_agent') || Crm::CommentsAgentService::SYSTEM_PROMPT,
-      'harvest' => Segmento.prompt('harvest') || Crm::HarvestService::SYSTEM_PROMPT,
-      'manager' => Segmento.prompt('auto_manager') || Crm::AutoManagerService::SYSTEM_PROMPT,
-      'auditor' => Segmento.prompt('conversation_auditor') || Crm::ConversationAuditorService::SYSTEM_PROMPT,
-      'creative' => Segmento.prompt('creative') || Crm::CreativeService::SYSTEM_PROMPT
+      'conversation' => Crm::ConversationInsightService::SYSTEM_PROMPT,
+      'form' => Crm::FormInsightService::SYSTEM_PROMPT,
+      'scheduler' => Crm::AppointmentExtractionService::SYSTEM_PROMPT,
+      'opportunity' => Crm::OpportunityRadarService::SYSTEM_PROMPT,
+      'closing' => Crm::SurgeryClosingService::SYSTEM_PROMPT,
+      'nps' => Crm::NpsService::SYSTEM_PROMPT,
+      'sales' => Crm::SalesCoachService::SYSTEM_PROMPT,
+      'instagram' => Crm::InstagramAgentService::SYSTEM_PROMPT,
+      'copywriter' => Crm::CopywriterService::SYSTEM_PROMPT,
+      'pagebuilder' => Crm::PageBuilderService::SYSTEM_PROMPT,
+      'mentor' => Crm::WeeklyMentorService::SYSTEM_PROMPT,
+      'comments' => Crm::CommentsAgentService::SYSTEM_PROMPT,
+      'harvest' => Crm::HarvestService::SYSTEM_PROMPT,
+      'manager' => Crm::AutoManagerService::SYSTEM_PROMPT,
+      'auditor' => Crm::ConversationAuditorService::SYSTEM_PROMPT,
+      'creative' => Crm::CreativeService::SYSTEM_PROMPT,
+      # 🎙️ rodada 195: o prompt do Agente de Ligação também é o BLOCO DA ETAPA (Roteiro + regras de voz vão à parte)
+      'voice' => Crm::CevicoScript.default_stage_prompt('voice', 'v1', account: s.account),
+      # 🗣️ rodada 188: o prompt do Atendente é o BLOCO DA ETAPA; o Roteiro vai à parte (script)
+      'atendente_agendamento' => Crm::CevicoScript.default_stage_prompt('atendente_agendamento', 'v1', account: s.account),
+      'atendente_pos' => Crm::CevicoScript.default_stage_prompt('atendente_pos', 'v1', account: s.account),
+      'atendente_pos_op' => Crm::CevicoScript.default_stage_prompt('atendente_pos_op', 'v1', account: s.account)
     }
     {
       api_key_set: cfg['api_key'].present?,
@@ -1148,6 +2529,23 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       opportunity_last_run: cfg.dig('opportunity_state', 'last_run'),
       sales_insights: cfg.dig('agents', 'sales', 'insights'),
       instagram_events: Array(cfg.dig('instagram_state', 'events')).first(30),
+      # 🗣️ rodada 188: Roteiro CEVICO (fonte única) + registro/sombra do Atendente de Agendamento
+      script: Crm::CevicoScript.sections(s.account),
+      script_updated_at: cfg.dig('script', 'updated_at'),
+      # 🧪 (22/09) Roteiro v2 paralelo (seções do Roteiro + passos dos 2 atendentes), só para o teste
+      script_v2: Crm::CevicoScript.sections(s.account, 'v2'),
+      script_v2_updated_at: cfg.dig('script_v2', 'updated_at'),
+      responder_events: CrmListener::RESPONDER_KEYS.index_with { |k| Array(cfg.dig("#{k}_state", 'events')).first(30) },
+      responder_shadow_today: CrmListener::RESPONDER_KEYS.index_with do |k|
+        (cfg.dig("#{k}_state", 'shadow_days', Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s) || {}).slice('count', 'conversation_ids')
+      end,
+      live_enabled: Crm::ResponderAgentJob::LIVE_ENABLED,
+      # 🎙️ rodada 195: Agente de Ligação — registro, lista "ligaria hoje" (sombra) ou
+      # "ligações hoje" (ao vivo), ElevenLabs pronta e se está ao vivo AGORA
+      voice_events: Array(cfg.dig('voice_state', 'events')).first(30),
+      voice_shadow: voice_shadow_json(cfg),
+      voice_ready: voice_settings_of(s).configured?,
+      voice_live_now: Crm::VoiceAgent::UnresponsiveLeadsJob.live_now?(s.account, agents['voice'] || {}, settings: voice_settings_of(s)),
       comments_events: Array(cfg.dig('comments_state', 'events')).first(30),
       comments_last_run_at: cfg.dig('comments_state', 'last_run_at'),
       # 🌾 resumo da colheita do mês (a lista completa vem por harvest_status)
@@ -1187,6 +2585,12 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           monthly_size: agents.dig(key, 'monthly_size').presence&.to_i,
           cold_days: agents.dig(key, 'cold_days').presence&.to_i,
           daily_cap: agents.dig(key, 'daily_cap').presence&.to_i,
+          # 🎙️ Agente de Ligação (195): horas sem resposta, dias olhados, tentativas por lead,
+          # caixa do WhatsApp p/ continuar por escrito (a de Integrações vale quando o card não tem)
+          silence_hours: agents.dig(key, 'silence_hours').presence&.to_i,
+          lookback_days: agents.dig(key, 'lookback_days').presence&.to_i,
+          max_attempts: agents.dig(key, 'max_attempts').presence&.to_i,
+          handoff_inbox_id: voice_handoff_inbox_id(cfg, agents, key),
           day_of_month: agents.dig(key, 'day_of_month').presence&.to_i,
           inbox_id: agents.dig(key, 'inbox_id').presence&.to_i,
           require_approval: agents.dig(key, 'require_approval') != false,
@@ -1195,6 +2599,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
           template_params: agents.dig(key, 'template_params').presence,
           # 📊 Gestor Autônomo (item 128)
           drop_pct: agents.dig(key, 'drop_pct').presence&.to_i,
+          # 🗣️ Atendente de Agendamento (rodada 188)
+          no_card: (agents.dig(key, 'no_card').nil? ? nil : agents.dig(key, 'no_card') == true),
+          after_booking_stage_id: agents.dig(key, 'after_booking_stage_id').presence&.to_i,
+          shadow_daily_cap: agents.dig(key, 'shadow_daily_cap').presence&.to_i,
+          hours_start: agents.dig(key, 'hours_start').presence,
+          hours_end: agents.dig(key, 'hours_end').presence,
+          # (193) janela ao vivo por dia da semana (0=dom … 6=sáb; vazio = todos os dias)
+          live_days: Array(agents.dig(key, 'live_days')).map(&:to_i),
+          # 🔁 (343) quem recebe as tarefas dos atendentes (id ou 'retorno_team') e a
+          # janela de cirurgia recente do pós-op — antes não voltavam para a tela
+          task_assignee_id: agents.dig(key, 'task_assignee_id').presence,
+          recent_surgery_days: agents.dig(key, 'recent_surgery_days'),
           watchers: Array(agents.dig(key, 'watchers')).map do |w|
             {
               stage_id: w['stage_id'].to_i,
@@ -1202,11 +2618,84 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
               lookback_hours: w['lookback_hours'].presence&.to_i || 24
             }
           end,
-          draft: agents.dig(key, 'draft').presence,
+          draft: agent_draft_json(agents.dig(key, 'draft')),
+          # Rodada 2 (achado #338): rascunho antigo com token gravado só avisa que existe
+          draft_token_set: agents.dig(key, 'draft').is_a?(Hash) && agents.dig(key, 'draft', 'page_access_token').present?,
           default_prompt: default_prompt
         }]
       end
     }
+  end
+
+  # rascunho de um agente sem as chaves sensíveis (nil quando não sobra nada)
+  def agent_draft_json(draft)
+    return nil unless draft.is_a?(Hash)
+
+    draft.except(*DRAFT_SECRET_KEYS).presence
+  end
+
+  # ── 🔐 Rodada 2 (achados #295/#337): o que a EQUIPE recebe em GET settings ──
+  # Parte do JSON completo e tira o que é do admin: concessões dos colegas,
+  # tabela de preços (salvo quem pode VER "Tabela de preços" ou editar o
+  # orçamento do paciente), Roteiro/prompts,
+  # registros com nome de paciente (lembretes, NPS, Secretário, eventos dos
+  # atendentes de IA), insights comerciais, papéis da equipe, dados de conexão
+  # (hub, Meta, Google, planilha, N8N) e a lista de médicos do cadeado clínico
+  # (fica só o próprio usuário). Mantém o que CrmBoard, Conversas, Meu Painel,
+  # Agenda, Chamadas e Espaço do Paciente usam.
+  def team_settings_json(full) # rubocop:disable Metrics/AbcSize
+    json = full.except(*TEAM_HIDDEN_KEYS)
+    # a tabela de preços fica para quem pode VER "Tabela de preços" OU altera o
+    # orçamento no Espaço do Paciente (nó "pacientes" EDITAR): sem ela a tela
+    # cairia nos preços fixos do código e um valor errado iria ao paciente sem
+    # ninguém perceber (decisão R2-G4, registrada no BACKLOG)
+    json[:price_table] = full[:price_table] if cevico_can?('configuracoes.precos', :view) || cevico_can?('pacientes', :edit)
+    # quem cuida de lembretes/confirmação/NPS (nó "modelos") continua vendo o
+    # estado das rodadas no card — mesmo nó que appointment_reminders#run
+    if cevico_can?('configuracoes.modelos', :view)
+      json[:appointment_reminders_state] = full[:appointment_reminders_state]
+      json[:nps_survey_state] = full[:nps_survey_state]
+    end
+    ai = full[:ai].to_h
+    json[:ai] = ai.slice(*TEAM_AI_KEYS).merge(
+      agents: ai[:agents].to_h.transform_values { |agent| agent.slice(*TEAM_AGENT_KEYS) }
+    )
+    json[:oftalmofacil] = full[:oftalmofacil].to_h.except(*TEAM_OFTALMOFACIL_HIDDEN)
+    json[:voice] = full[:voice].to_h.slice(*TEAM_VOICE_KEYS)
+    json[:meta_ads] = full[:meta_ads].to_h.slice(:configured, :insights_configured)
+    json[:google_ads] = full[:google_ads].to_h.slice(:configured, :insights_configured, :cost_configured)
+    json[:sheets] = full[:sheets].to_h.slice(:configured)
+    json[:clinical_access] = own_clinical_access(full[:clinical_access].to_h)
+    json
+  end
+
+  # do cadeado clínico, a equipe só precisa saber de si: "sou médico?" e se a
+  # equipe vê o Espaço do Médico — a lista de colegas não viaja
+  def own_clinical_access(access)
+    ids = Array(access['doctor_user_ids']).map(&:to_i)
+    { 'team_view' => access['team_view'] == true, 'doctor_user_ids' => ids & [Current.user.id] }
+  end
+
+  def voice_settings_of(record)
+    @voice_settings_of ||= {}
+    @voice_settings_of[record.id] ||= Crm::VoiceAgent::Settings.new(record.account, crm_settings: record)
+  end
+
+  # caixa do WhatsApp p/ continuar por escrito: a do card; senão a da Integração (só o voice)
+  def voice_handoff_inbox_id(cfg, agents, key)
+    value = agents.dig(key, 'handoff_inbox_id').presence
+    value ||= cfg.dig('voice', 'handoff_inbox_id') if key == 'voice'
+    value.presence&.to_i
+  end
+
+  # 🎙️ (195) lista do dia do Agente de Ligação: só vale se for de HOJE (a de
+  # ontem some sozinha); mode 'shadow' = ligaria, 'live' = está na campanha
+  def voice_shadow_json(cfg)
+    shadow = cfg.dig('voice_state', 'shadow') || {}
+    today = Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s
+    return { 'date' => today, 'at' => nil, 'mode' => 'shadow', 'items' => [] } unless shadow['date'] == today
+
+    shadow.slice('date', 'at', 'mode', 'campaign_id', 'items')
   end
 
   # badge do Radar na sidebar: admin vê tudo; atendente só vê os avisos
@@ -1226,14 +2715,94 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       ad_account_id: cfg['ad_account_id'],
       test_event_code: cfg['test_event_code'],
       configured: cfg['pixel_id'].present? && cfg['access_token'].present?,
-      insights_configured: cfg['ad_account_id'].present? && cfg['access_token'].present?
+      insights_configured: cfg['ad_account_id'].present? && cfg['access_token'].present?,
+      whatsapp_datasets: meta_whatsapp_datasets(s, cfg)
     }
+  end
+
+  # 📣 item 345: caixa do WhatsApp → conjunto de dados da conta (só leitura)
+  def meta_whatsapp_datasets(setting, cfg)
+    Crm::MetaWabaDatasets.new(setting.account, cfg).overview
+  rescue StandardError => e
+    Rails.logger.warn "[MetaWabaDatasets] lista da tela falhou: #{e.message}"
+    []
   end
 
   # cor escolhida pelo admin por card da fileira (item 143): só strings de
   # cor/gradiente CSS simples — nada de caracteres que escapem do style
+  # {mode, key, blocks} de um painel; modo fixo sem chave válida vira cor do
+  # dia; "cor do dia" sem bloco próprio = nada a guardar (nil)
+  def sanitize_panel_palette(raw)
+    h = (raw || {}).to_h
+    key = PALETTE_KEYS.include?(h['key'].to_s) ? h['key'].to_s : ''
+    mode = palette_mode(h['mode'], key)
+    blocks = sanitize_palette_blocks(h['blocks'])
+    return nil if mode == 'day' && blocks.empty?
+
+    { 'mode' => mode, 'key' => key, 'blocks' => blocks }
+  end
+
+  # modo fixo sem chave válida vira cor do dia
+  def palette_mode(raw_mode, key)
+    mode = %w[day fixed salad].include?(raw_mode.to_s) ? raw_mode.to_s : 'day'
+    mode == 'fixed' && key.blank? ? 'day' : mode
+  end
+
+  # blocos: id curto da seção (cada tela tem os seus) → chave de paleta
+  def sanitize_palette_blocks(raw)
+    (raw || {}).to_h.to_a.first(30).each_with_object({}) do |(bid, pk), acc|
+      next unless bid.to_s.match?(/\A[a-z0-9_-]{1,40}\z/) && PALETTE_KEYS.include?(pk.to_s)
+
+      acc[bid.to_s] = pk.to_s
+    end
+  end
+
+  # item 266: cada célula da grade do ímã = {id, x, y, w} inteiros dentro das
+  # 12 colunas; lista ausente vira nil (o painel monta a grade pela ordem antiga)
+  def sanitize_blocked_days(list)
+    Array(list).filter_map do |b|
+      next b.to_s if b.is_a?(String)
+
+      h = b.respond_to?(:permit) ? b.permit(:date, :unit, :doctor).to_h : b.to_h
+      date = h['date'].to_s[/\A\d{4}-\d{2}-\d{2}\z/]
+      next if date.blank?
+
+      part = { 'date' => date, 'unit' => h['unit'].to_s[0, 40].presence, 'doctor' => h['doctor'].to_s[0, 80].presence }.compact
+      part.size == 1 ? date : part
+    end.uniq
+  end
+
+  def sanitize_block_grid(list)
+    return nil unless list.is_a?(Array)
+
+    list.first(20).filter_map do |raw|
+      g = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+      id = g['id'].to_s[0, 40]
+      next if id.blank?
+
+      w = g['w'].to_i.clamp(2, 12)
+      { 'id' => id, 'x' => g['x'].to_i.clamp(0, 12 - w), 'y' => g['y'].to_i.clamp(0, 9999), 'w' => w }
+    end
+  end
+
+  # item 266b: célula do card na grade de 12 colunas; h em linhas de 16 px
+  # min_w: blocos = 2 colunas; cards do Meu Painel (item 276) = 1 quadrado
+  def sanitize_tile_grid(list, min_w: 2)
+    return nil unless list.is_a?(Array)
+
+    list.first(KPI_LAYOUT_MAX).filter_map do |raw|
+      g = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
+      id = g['id'].to_s[0, 40]
+      next if id.blank?
+
+      w = g['w'].to_i.clamp(min_w, 12)
+      { 'id' => id, 'x' => g['x'].to_i.clamp(0, 12 - w), 'y' => g['y'].to_i.clamp(0, 9999), 'w' => w,
+        'h' => g['h'].to_i.clamp(4, 80) }
+    end
+  end
+
   def sanitize_kpi_colors(raw)
-    (raw || {}).to_h.to_a.first(40).each_with_object({}) do |(k, v), acc|
+    (raw || {}).to_h.to_a.first(KPI_LAYOUT_MAX).each_with_object({}) do |(k, v), acc|
       key = k.to_s[0, 40]
       color = v.to_s.strip[0, 160]
       next if key.blank? || color.blank?
@@ -1243,7 +2812,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
   end
 
-  def google_ads_json(s)
+  def google_ads_json(s) # rubocop:disable Metrics/AbcSize
     cfg = s.google_ads_config || {}
     {
       measurement_id: cfg['measurement_id'],
@@ -1255,13 +2824,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       insights_configured: cfg['developer_token'].present? && cfg['customer_id'].present?,
       ga4_property_id: cfg['ga4_property_id'],
       service_account_set: cfg['service_account_json'].present?,
-      cost_configured: cfg['ga4_property_id'].present? && cfg['service_account_json'].present?
+      cost_configured: cfg['ga4_property_id'].present? && cfg['service_account_json'].present?,
+      # 🔎 Search Console: o e-mail da conta de serviço é o que se adiciona lá
+      service_account_email: Cevico::GoogleServiceAccount.email(cfg['service_account_json']),
+      search_console_site: cfg['search_console_site'].presence || Cevico::SearchConsole::DEFAULT_SITE,
+      search_console_fetched_at: (cfg.dig('search_console_cache', 'fetched_at') unless cfg.dig('search_console_cache', 'demo')),
+      search_console_error: cfg.dig('search_console_cache', 'error')
     }
   end
 
   # Extrai o path do webhook do primeiro nó Webhook ativo no workflow
   def extract_webhook_path(workflow)
-    nodes = workflow.dig('nodes') || []
+    nodes = workflow['nodes'] || []
     webhook_node = nodes.find { |n| n['type'] == 'n8n-nodes-base.webhook' }
     webhook_node&.dig('parameters', 'path')
   rescue StandardError

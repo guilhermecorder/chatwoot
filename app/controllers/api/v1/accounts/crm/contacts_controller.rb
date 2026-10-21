@@ -1,6 +1,11 @@
 class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseController
   before_action :pipeline
   before_action :crm_contact, only: [:update, :destroy, :history, :trigger_label_change, :detect_value, :start_conversation]
+  # 🔒 Rodada 2 da auditoria (#0, #300): remover card e varrer valores em lote
+  # é "tratamento de dados" (admin ou quem tem esse nó); detectar o valor de um
+  # card grava R$ no card, então pede o Financeiro (admin ou concessão).
+  before_action -> { require_capability(:data_tools) }, only: [:destroy, :detect_values_bulk]
+  before_action -> { require_capability(:finance) }, only: [:detect_value]
 
   # scope=preview: os N cards mais recentes de CADA coluna (carga inicial
   #   instantânea — o board completa em background com a janela de trabalho).
@@ -14,22 +19,28 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   # scope=stage_page&stage_id&offset&limit: próxima página de UMA coluna,
   #   mesmo período/ordenação do scope=period.
   # scope=days&days=N: leads com atividade nos últimos N dias (legado).
-  # scope=all: tudo desde o início (sob demanda: busca ou "Carregar todos").
+  # scope=all(&q=texto): tudo desde o início (sob demanda: busca ou "Carregar
+  #   todos"). 🫁 Rodada 7 (#323): NÃO entrega mais o funil inteiro de uma vez
+  #   (com 30 mil cards isso derrubava o servidor). Funciona igual ao
+  #   scope=period, só que sem datas: contagem VERDADEIRA por coluna + até 200
+  #   cards por coluna; o resto vem pelo "Carregar mais" de cada coluna
+  #   (scope=stage_page&range=all). O q= filtra no servidor (nome, telefone,
+  #   anotação, etiqueta) para a busca achar o paciente na base toda.
   # scope=recent (legado): ativos nos últimos 30 dias.
+  # (days e recent também param em 200 cards por coluna — ver index)
   PREVIEW_PER_STAGE = 15
   PERIOD_PER_STAGE = 50
+  ALL_PER_STAGE = 200
   BOARD_TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def index
-    return render_period if params[:scope] == 'period'
+    return render_period if %w[period all].include?(params[:scope])
     return render_stage_page if params[:scope] == 'stage_page'
 
     base = @pipeline.crm_contacts
     total = base.count
 
     scoped = case params[:scope]
-             when 'all'
-               base
              when 'preview'
                base.where(id: preview_ids(base))
              when 'days'
@@ -48,6 +59,11 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
                )
              end
 
+    # 🫁 Rodada 7 (#323, revisão): os caminhos antigos (days=365 e recent)
+    # também têm teto por coluna — ninguém traz o funil inteiro de uma vez
+    # por eles (depois de uma carga em massa o "recent" pegava quase tudo)
+    scoped = base.where(id: ranked_ids(scoped, ALL_PER_STAGE)) unless params[:scope] == 'preview'
+
     crm_contacts = scoped.includes(:stage, :assignee, contact: { avatar_attachment: :blob }).to_a
     preload_card_data(crm_contacts)
 
@@ -58,8 +74,8 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
         shown: crm_contacts.size,
         # leads do funil que têm pelo menos uma conversa (o total inclui
         # contatos migrados/cadastrados que nunca conversaram)
-        with_conversations: base.joins(contact: :conversations).distinct.count,
-        scope: %w[all preview days].include?(params[:scope]) ? params[:scope] : 'recent'
+        with_conversations: with_conversations_count,
+        scope: %w[preview days].include?(params[:scope]) ? params[:scope] : 'recent'
       }
     }
   end
@@ -67,15 +83,17 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   def create
     contact = Current.account.contacts.find(params[:contact_id])
     stage = @pipeline.stages.find(params[:stage_id])
-    @crm_contact = @pipeline.crm_contacts.create!(
-      contact: contact,
-      stage: stage,
-      assignee_id: params[:assignee_id],
-      value: params[:value],
-      origin: params[:origin],
-      procedure_of_interest: params[:procedure_of_interest],
-      notes: params[:notes]
-    )
+    @crm_contact = with_environment_choice do
+      @pipeline.crm_contacts.create!(
+        contact: contact,
+        stage: stage,
+        assignee_id: params[:assignee_id],
+        value: finance_edit? ? params[:value] : nil, # 💰 R2 (#287): valor só com Financeiro
+        origin: params[:origin],
+        procedure_of_interest: params[:procedure_of_interest],
+        notes: params[:notes]
+      )
+    end
     preload_card_data([@crm_contact]) # resposta completa (conversa, etiquetas)
     render json: contact_json(@crm_contact), status: :created
   end
@@ -112,8 +130,11 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     render json: contact_json(@crm_contact)
   end
 
+  # DELETE — "Remover do funil". 🔒 R2 (#300): só tratamento de dados/admin
+  # (before_action); fica registrado quem removeu e o histórico de colunas
+  # (stage_logs) é preservado para os indicadores — ver Crm::Contact#remove_from_pipeline!
   def destroy
-    @crm_contact.destroy!
+    @crm_contact.remove_from_pipeline!(by: Current.user)
     head :no_content
   end
 
@@ -134,31 +155,15 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   end
 
   # POST /crm/pipelines/:pipeline_id/contacts/:id/trigger_label_change
-  # Chamado pelo frontend após salvar etiquetas — recebe diff e dispara automações
+  # 🏷️ Rodada 5 (#17): NÃO dispara mais nada. O disparo de verdade sai do
+  # servidor quando a etiqueta do contato muda no banco
+  # (Contact#cevico_fire_label_triggers) — e as telas do CRM gravam a etiqueta
+  # por /contacts/:id/labels, que já passa por lá. Antes este endpoint confiava
+  # no "antes×depois" que o navegador mandava, e o navegador pode ter uma foto
+  # velha das etiquetas: marcar de novo uma etiqueta que a IA já tinha posto
+  # disparava a automação (e a conversão Meta/Google) uma segunda vez.
+  # Fica respondendo 200 só para telas abertas com a versão antiga.
   def trigger_label_change
-    added   = Array(params[:added])
-    removed = Array(params[:removed])
-
-    added.each do |label|
-      CrmAutomationTriggerService.new(
-        crm_contact: @crm_contact,
-        new_stage: @crm_contact.stage,
-        previous_stage: @crm_contact.stage,
-        event_type: 'label_added',
-        label: label
-      ).call
-    end
-
-    removed.each do |label|
-      CrmAutomationTriggerService.new(
-        crm_contact: @crm_contact,
-        new_stage: @crm_contact.stage,
-        previous_stage: @crm_contact.stage,
-        event_type: 'label_removed',
-        label: label
-      ).call
-    end
-
     head :ok
   end
 
@@ -192,10 +197,12 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   end
 
   # POST detect_values_bulk — roda a detecção para todos os cards do pipeline (background)
+  # 🔒 R2 (#0): sobrescrever valor já preenchido (only_empty=false) só o admin;
+  # para os demais a varredura só preenche cards sem valor.
   def detect_values_bulk
-    only_empty = params[:only_empty].to_s != 'false'
+    only_empty = params[:only_empty].to_s != 'false' || !Current.account_user&.administrator?
     Crm::BulkDetectValuesJob.perform_later(@pipeline.id, only_empty)
-    render json: { enqueued: true }
+    render json: { enqueued: true, only_empty: only_empty }
   end
 
   private
@@ -250,12 +257,61 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
   end
 
   def per_stage_limit
-    (params[:per_stage].presence || PERIOD_PER_STAGE).to_i.clamp(10, 200)
+    (params[:per_stage].presence || default_per_stage).to_i.clamp(10, ALL_PER_STAGE)
+  end
+
+  # 🫁 #323: "Carregar todos" (scope=all, ou range=all na próxima página de
+  # uma coluna) = a base toda, sem datas, mas sempre em páginas por coluna
+  def all_range?
+    params[:scope] == 'all' || params[:range] == 'all'
+  end
+
+  def default_per_stage
+    all_range? ? ALL_PER_STAGE : PERIOD_PER_STAGE
+  end
+
+  # recorte do board: período da régua OU a base toda; mais a busca (q)
+  def board_scope(base)
+    scoped = all_range? ? base.joins(:contact) : period_scope(base)
+    search_scope(scoped)
+  end
+
+  # Busca no SERVIDOR — os mesmos campos da busca da tela (nome, telefone,
+  # anotação do card, etiqueta), para achar o paciente sem baixar o funil todo
+  def search_term
+    params[:q].to_s.strip.first(80)
+  end
+
+  def search_scope(scoped)
+    return scoped if search_term.blank?
+
+    like = "%#{ActiveRecord::Base.sanitize_sql_like(search_term)}%"
+    scoped.where(
+      'contacts.name ILIKE :q OR contacts.phone_number ILIKE :q OR crm_contacts.notes ILIKE :q ' \
+      'OR EXISTS (SELECT 1 FROM taggings tg JOIN tags t ON t.id = tg.tag_id ' \
+      "WHERE tg.taggable_type = 'Contact' AND tg.context = 'labels' " \
+      'AND tg.taggable_id = crm_contacts.contact_id AND t.name ILIKE :q)',
+      q: like
+    )
+  end
+
+  # 🫁 #323: "N com conversa" no topo do board. Antes era um COUNT DISTINCT de
+  # cards × conversas do funil inteiro a cada abertura; agora é um EXISTS
+  # (sem multiplicar linhas) guardado por 5 minutos por funil.
+  def with_conversations_count
+    Rails.cache.fetch("cevico:crm:with_conversations:#{@pipeline.id}", expires_in: 5.minutes) do
+      # 🧭 item 341: conversa de caixa de outro ambiente não conta
+      foreign = Crm::Environments.foreign_inbox_ids(Current.account, @pipeline)
+      extra = foreign.any? ? " AND cv.inbox_id NOT IN (#{foreign.map(&:to_i).join(',')})" : ''
+      @pipeline.crm_contacts
+               .where("EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id = crm_contacts.contact_id#{extra})")
+               .count
+    end
   end
 
   def render_period
     base = @pipeline.crm_contacts
-    scoped = period_scope(base)
+    scoped = board_scope(base)
     stage_counts = scoped.group(:stage_id).count
     stage_values = scoped.group(:stage_id).sum(:value)
 
@@ -263,31 +319,40 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
                 .includes(:stage, :assignee, contact: { avatar_attachment: :blob }).to_a
     preload_card_data(cards)
 
-    from, to = period_range
     render json: {
       payload: cards.map { |c| contact_json(c) },
       meta: {
         total: base.count,
         matching: stage_counts.values.sum,
         stage_counts: stage_counts,
-        stage_values: stage_values.transform_values(&:to_f),
+        # 💰 R2 (#287): soma por coluna é visão do Financeiro
+        stage_values: finance_view? ? stage_values.transform_values(&:to_f) : {},
         shown: cards.size,
         per_stage: per_stage_limit,
-        with_conversations: base.joins(contact: :conversations).distinct.count,
-        scope: 'period',
-        date_mode: %w[created moved].include?(params[:date_mode]) ? params[:date_mode] : 'activity',
-        date_from: from.to_date.iso8601,
-        date_to: to.to_date.iso8601
-      }
+        with_conversations: with_conversations_count
+      }.merge(board_scope_meta)
+    }
+  end
+
+  def board_scope_meta
+    return { scope: 'all', q: search_term } if all_range?
+
+    from, to = period_range
+    {
+      scope: 'period',
+      date_mode: %w[created moved].include?(params[:date_mode]) ? params[:date_mode] : 'activity',
+      date_from: from.to_date.iso8601,
+      date_to: to.to_date.iso8601
     }
   end
 
   # Próxima página de UMA coluna — mesma ordenação do ranking do scope=period
   # (última atividade DESC), então offset = quantos cards a coluna já tem.
+  # (com range=all, a base toda sem datas — "Carregar mais" do "Carregar todos")
   def render_stage_page
     stage = @pipeline.stages.find(params[:stage_id])
-    scoped = period_scope(@pipeline.crm_contacts).where(stage_id: stage.id)
-    limit = (params[:limit].presence || PERIOD_PER_STAGE).to_i.clamp(10, 200)
+    scoped = board_scope(@pipeline.crm_contacts).where(stage_id: stage.id)
+    limit = (params[:limit].presence || default_per_stage).to_i.clamp(10, ALL_PER_STAGE)
     offset = params[:offset].to_i.clamp(0, 1_000_000)
 
     cards = scoped.order(Arel.sql('contacts.last_activity_at DESC NULLS LAST, crm_contacts.id DESC'))
@@ -326,8 +391,26 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     @crm_contact ||= @pipeline.crm_contacts.find(params[:id])
   end
 
+  # 🏷️ #17: do diff que a tela mandou, só o que confere com o contato agora
   def crm_contact_params
-    params.permit(:stage_id, :assignee_id, :value, :origin, :procedure_of_interest, :notes)
+    permitted = %i[stage_id assignee_id origin procedure_of_interest notes]
+    permitted << :value if finance_edit? # 💰 R2 (#287): só o Financeiro grava valor
+    params.permit(*permitted)
+  end
+
+  # 💰 R2 (#287): valor em R$ do card é visão do Financeiro — admin ou quem
+  # tem o nó "financeiro" (ver = enxerga; editar = grava). O admin passa
+  # direto no Cevico::Access.
+  def finance_view?
+    return @finance_view if defined?(@finance_view)
+
+    @finance_view = cevico_can?('financeiro', :view)
+  end
+
+  def finance_edit?
+    return @finance_edit if defined?(@finance_edit)
+
+    @finance_edit = crm_can?(:finance)
   end
 
   # Carrega em ~6 consultas tudo que a listagem precisa, evitando o N+1 que
@@ -336,31 +419,27 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
     contact_ids = cards.map(&:contact_id).uniq
     return if contact_ids.empty?
 
+    # 🧭 item 341 (Ambientes do CRM): conversas das caixas de OUTRO ambiente
+    # (ex.: caixa 12 Oftalmofácil no funil da CEVICO) não aparecem no balão
+    # nem na contagem do card
+    @foreign_inbox_ids = @pipeline ? Crm::Environments.foreign_inbox_ids(Current.account, @pipeline) : []
+
     # caixas de entrada PRINCIPAIS por coluna (settings.main_inbox_ids)
     @main_inboxes_by_stage = Crm::Stage.where(id: cards.map(&:stage_id).uniq)
                                        .pluck(:id, :settings).to_h
                                        .transform_values { |s| Array((s || {})['main_inbox_ids']).map(&:to_i) }
 
-    # conversas por contato, mais recente primeiro (+ inbox)
-    convs_by_contact = Hash.new { |h, k| h[k] = [] }
-    Conversation.where(contact_id: contact_ids)
-                .includes(:inbox)
-                .order(last_activity_at: :desc)
-                .each { |cv| convs_by_contact[cv.contact_id] << cv }
+    # 🫁 #323: antes carregava TODAS as conversas de TODOS os contatos como
+    # objetos (no "Carregar todos" do funil principal, dezenas de milhares).
+    # Agora: só a CONTAGEM por contato e o id da conversa mais recente de cada
+    # um (DISTINCT ON); os objetos carregados são só os do balão (1 por card).
+    # 🏷️ item 344: o TIPO do atendimento (Consulta, Exame, Cirurgia, Lente,
+    # Retorno, Pós-op, Intravítrea) vira etiqueta + filtro no card
+    @kind_by_contact = Crm::AppointmentKind.for_contacts(Current.account, contact_ids)
 
-    # total de conversas por contato (da lista já carregada — sem query extra)
-    @conv_count_by_contact = convs_by_contact.transform_values(&:size)
+    @conv_count_by_contact = without_foreign_inboxes(Conversation.where(contact_id: contact_ids)).group(:contact_id).count
     @conv_count_by_contact.default = 0
-
-    # conversa do balão POR CARD: se a coluna tem caixas principais, a mais
-    # recente NESSAS caixas ganha; senão (ou sem conversa nelas), a mais recente
-    @last_conv_by_card = {}
-    cards.each do |card|
-      convs = convs_by_contact[card.contact_id]
-      main_ids = @main_inboxes_by_stage[card.stage_id] || []
-      chosen = main_ids.any? ? convs.find { |cv| main_ids.include?(cv.inbox_id) } : nil
-      @last_conv_by_card[card.id] = chosen || convs.first
-    end
+    @last_conv_by_card = balloon_conversations(cards, contact_ids)
 
     # última mensagem (não-atividade) da conversa escolhida de cada card
     conv_ids = @last_conv_by_card.values.compact.map(&:id).uniq
@@ -387,6 +466,50 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       .each { |t| @labels_by_contact[t.taggable_id] << t.tag.name }
   end
 
+  # { card.id => conversa do balão }: se a coluna tem caixas principais, a
+  # mais recente NESSAS caixas ganha; senão (ou sem conversa nelas), a mais
+  # recente de qualquer caixa. Só as conversas escolhidas viram objeto.
+  def balloon_conversations(cards, contact_ids)
+    latest_any = latest_conversation_ids(contact_ids)
+    latest_main = latest_in_main_inboxes(cards)
+    chosen_ids = cards.to_h do |card|
+      main_ids = @main_inboxes_by_stage[card.stage_id] || []
+      [card.id, latest_main.dig(main_ids, card.contact_id) || latest_any[card.contact_id]]
+    end
+    convs_by_id = Conversation.where(id: chosen_ids.values.compact.uniq).includes(:inbox).index_by(&:id)
+    chosen_ids.transform_values { |conv_id| convs_by_id[conv_id] }
+  end
+
+  # { [caixas principais] => { contact_id => conversa mais recente nelas } }
+  # — uma consulta por grupo de colunas que têm caixas principais
+  def latest_in_main_inboxes(cards)
+    cards.group_by { |card| @main_inboxes_by_stage[card.stage_id] || [] }
+         .reject { |main_ids, _group| main_ids.empty? }
+         .to_h { |main_ids, group| [main_ids, latest_conversation_ids(group.map(&:contact_id).uniq, inbox_ids: main_ids)] }
+  end
+
+  # { contact_id => id da conversa mais recente } — uma linha por contato,
+  # direto do banco (DISTINCT ON), sem montar objetos de conversa
+  def latest_conversation_ids(contact_ids, inbox_ids: nil)
+    rel = without_foreign_inboxes(Conversation.where(contact_id: contact_ids))
+    rel = rel.where(inbox_id: inbox_ids) if inbox_ids
+    rel.reorder(Arel.sql('conversations.contact_id, conversations.last_activity_at DESC, conversations.id DESC'))
+       .pluck(Arel.sql('DISTINCT ON (conversations.contact_id) conversations.contact_id'), 'conversations.id')
+       .to_h
+  end
+
+  # 🧭 item 341: tira as conversas das caixas de outro ambiente
+  def without_foreign_inboxes(rel)
+    @foreign_inbox_ids.present? ? rel.where.not(inbox_id: @foreign_inbox_ids) : rel
+  end
+
+  # 🧭 item 341: o card nasce no funil do ambiente do paciente (Crm::CardRouter);
+  # o administrador pode forçar o funil escolhido com ignore_environment=true
+  def with_environment_choice(&)
+    force = Current.account_user&.administrator? && ActiveModel::Type::Boolean.new.cast(params[:ignore_environment])
+    force ? Crm::CardRouter.bypass('admin', &) : yield
+  end
+
   def contact_json(c)
     contact = c.contact
     last_conversation = @last_conv_by_card&.[](c.id)
@@ -404,7 +527,9 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       stage_id: c.stage_id,
       pipeline_id: c.pipeline_id,
       assignee: c.assignee ? { id: c.assignee.id, name: c.assignee.name } : nil,
-      value: c.value,
+      # 💰 R2 (#287): valor só para quem vê o Financeiro (a tela já escondia;
+      # agora o servidor também não manda)
+      value: finance_view? ? c.value : nil,
       origin: c.origin,
       procedure_of_interest: c.procedure_of_interest,
       notes: c.notes,
@@ -414,7 +539,8 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       last_activity_at: contact.last_activity_at,
       conversations_count: @conv_count_by_contact ? (@conv_count_by_contact[contact.id] || 0) : contact.conversations.count,
       last_conversation_id: last_conversation&.id,
-      last_conversation: last_conv_data
+      last_conversation: last_conv_data,
+      appointment_kind: @kind_by_contact&.[](contact.id)
     }
   end
 

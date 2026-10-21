@@ -29,24 +29,18 @@ const capturedAt = computed(() => {
 </script>
 
 <template>
-  <div
-    v-if="adData"
-    class="mx-4 mb-2 rounded-xl border border-blue-500/40 bg-blue-500/5 p-3"
-  >
-    <div class="flex items-center gap-1.5 mb-1">
-      <span class="i-lucide-megaphone text-blue-500 text-sm flex-shrink-0" />
-      <span class="text-xs font-semibold text-blue-600">
+  <div v-if="adData" class="cv-side-card p-4">
+    <div class="flex items-center gap-2 mb-2">
+      <p class="cv-side-title flex-1 min-w-0">
+        <span class="cv-side-icon cv-side-icon-blue"><span class="i-lucide-megaphone" /></span>
         Veio de anúncio (Meta)
-      </span>
-      <span v-if="capturedAt" class="text-[10px] text-n-slate-9 ml-auto">
+      </p>
+      <span v-if="capturedAt" class="text-[10px] text-n-slate-9 flex-shrink-0">
         {{ capturedAt }}
       </span>
     </div>
     <!-- nome interno do anúncio (nomenclatura do Gerenciador) em destaque -->
-    <p
-      v-if="adData.ad_name"
-      class="text-sm font-semibold text-n-slate-12 mb-0.5"
-    >
+    <p v-if="adData.ad_name" class="text-sm font-semibold text-n-slate-12 mb-0.5">
       {{ adData.ad_name }}
     </p>
     <p

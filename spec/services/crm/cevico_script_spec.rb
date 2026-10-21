@@ -1,0 +1,150 @@
+require 'rails_helper'
+
+RSpec.describe Crm::CevicoScript do
+  let(:account) { create(:account) }
+
+  describe 'item 295: lente fácica é sempre POR OLHO' do
+    let(:clinic) { create(:account) }
+
+    it 'a tabela e a regra fixa entram nos dois roteiros', :aggregate_failures do
+      %w[v1 v2].each do |version|
+        text = described_class.text(clinic, version)
+        expect(text).to include('Fácica (por olho): Artisan R$ 11.900')
+        expect(text).to include('NUNCA diga que o valor vale para os dois olhos')
+      end
+    end
+
+    it 'vale mesmo com a tabela salva pela clínica sem o "por olho" e com o roteiro editado na tela', :aggregate_failures do
+      settings = CrmSetting.find_or_create_by!(account: clinic)
+      settings.update!(agenda_config: { 'price_table' => { 'items' => [{ 'group' => 'Fácica', 'name' => 'Artisan', 'price' => 12_500 }] } })
+
+      expect(Cevico::PriceList.prompt_block(clinic)).to include('- Fácica (por olho): Artisan R$ 12.500.')
+      expect(described_class.text(clinic, 'v1')).to include('o valor é POR OLHO')
+    end
+  end
+
+  it 'monta o Roteiro padrão com as 6 seções e a tabela de preços oficial' do
+    text = described_class.text(account)
+    expect(text).to include('ROTEIRO CEVICO')
+    described_class::SECTIONS.each { |sec| expect(text).to include("== #{sec['title'].upcase} ==") }
+    expect(text).to include('Guilherme, atendente da CEVICO')
+    expect(text).not_to include('{{TABELA_DE_PRECOS}}')
+    expect(text).to include('PRK R$ 4.900') # tabela padrão do sistema entrou no lugar do marcador
+  end
+
+  # 24/09: os 3 médicos como equipe, tabela de exames avulsos, casos especiais e vídeo do médico
+  it 'ensina os três médicos, os exames avulsos, os casos especiais e o vídeo do médico (v1 e v2)', :aggregate_failures do
+    %w[v1 v2].each do |version|
+      text = described_class.text(account, version)
+      expect(text).to include('TRÊS oftalmologistas da CEVICO')
+      expect(text).to include('avaliam o seu caso em conjunto')
+      expect(text).to include('OCT de segmento R$ 700').and include('curva tensional diária R$ 200')
+      expect(text).to include('CERATOCONE').and include('LENTE ESCLERAL').and include('Vinicius Almeida')
+      expect(text).to include('== VÍDEOS DOS MÉDICOS ==').and include('Dr. Gustavo Bittar · refrativa: https://www.instagram.com/reel/DPUSQsyAjdK/')
+      expect(described_class.stage_prompt(account, 'atendente_agendamento', version)).to include('D2. VÍDEO DO MÉDICO')
+    end
+    expect(described_class::SECTIONS.pluck('key')).to include('doctor_videos')
+  end
+
+  it 'seção personalizada vence o padrão; seção em branco volta ao padrão' do
+    CrmSetting.create!(account: account, ai_config: { 'script' => { 'persona' => 'Você é a Vanessa, da CEVICO.', 'handoff' => '   ' } })
+    sections = described_class.sections(account).index_by { |s| s['key'] }
+
+    expect(sections['persona']['text']).to eq('Você é a Vanessa, da CEVICO.')
+    expect(sections['persona']['custom']).to be(true)
+    expect(sections['handoff']['text']).to eq(described_class::DEFAULT['handoff'])
+    expect(sections['handoff']['custom']).to be(false)
+    expect(described_class.text(account)).to include('Você é a Vanessa').and include(described_class::DEFAULT['form_rules'].lines.first.strip)
+  end
+
+  it 'bloco da etapa: o prompt do card do agente substitui o padrão' do
+    expect(described_class.stage_prompt(account, 'atendente_agendamento')).to include('SEU PAPEL NESTA ETAPA')
+
+    CrmSetting.create!(account: account, ai_config: { 'agents' => { 'atendente_agendamento' => { 'prompt' => 'Só agende, sem sondagem.' } } })
+    expect(described_class.stage_prompt(account, 'atendente_agendamento')).to eq('Só agende, sem sondagem.')
+  end
+
+  it 'as etapas dos dois atendentes ensinam as ferramentas (192)', :aggregate_failures do
+    %w[atendente_agendamento atendente_pos].each do |key|
+      prompt = described_class.stage_prompt(account, key)
+      expect(prompt).to include('FERRAMENTAS')
+      Crm::ResponderTools::NAMES.each { |name| expect(prompt).to include(name) }
+      expect(prompt).to include('ok=true').and include('simulado=true')
+    end
+  end
+
+  # 🔒 auditoria 10/10 (#99/#442): consulta de outra pessoa só com o telefone da consulta; sem casar, passa para a equipe
+  it 'consulta de OUTRA pessoa: o Roteiro pede o telefone cadastrado na consulta e passa para a equipe quando não casa', :aggregate_failures do
+    %w[v1 v2].product(%w[atendente_agendamento atendente_pos]).each do |version, key|
+      prompt = described_class.stage_prompt(account, key, version)
+      expect(prompt).to include('telefone com DDD cadastrado na consulta')
+      expect(prompt).to include('terceiros_ocultos')
+      expect(prompt).to include('ok=false vale igual em sombra')
+      expect(prompt).to include('nome_completo').and include('outra_pessoa=true')
+      expect(prompt).to include('titular pode chamar')
+    end
+    expect(described_class.stage_prompt(account, 'atendente_pos_op')).to include('outra_pessoa=true')
+  end
+
+  # 🙋 auditoria 10/10 (#443/#457/#458): aviso honesto à equipe, cancelar só pela ferramenta, abrir_tarefa nos três
+  it 'é honesto sobre o aviso à equipe, cancela só pela ferramenta (confirma com ok=true) e ensina abrir_tarefa aos três', :aggregate_failures do
+    prompts = described_class::STAGE_PROMPTS
+    expect(prompts['atendente_pos_op']).not_to include('agora; a equipe já foi avisada')
+    expect(prompts['atendente_pos_op']).to include('próximo horário de atendimento')
+    expect(described_class::DEFAULT['handoff']).to include('próximo horário de atendimento').and include('SEJA HONESTO')
+    %w[v1 v2].each do |version|
+      # o v2 (simulador 🧪) segue a mesma honestidade e ensina abrir_tarefa aos três
+      text = described_class.text(account, version)
+      expect(text).to include('SEJA HONESTO').and include('próximo horário de atendimento')
+      expect(text).not_to include('(a equipe assume por aqui mesmo)')
+      pos = described_class.stage_prompt(account, 'atendente_pos', version)
+      expect(pos).to include('chame a ferramenta cancelar_consulta').and include('Só diga que cancelou se o resultado vier ok=true')
+      expect(pos).not_to include('marque cancelar=true, diga que a consulta será cancelada')
+      Crm::ResponderTools::TASK_TOOL_KEYS.each do |key|
+        expect(described_class.stage_prompt(account, key, version)).to include('abrir_tarefa {motivo, detalhes, urgencia (alta|normal)}')
+      end
+    end
+    expect(described_class.stage_prompt(account, 'atendente_agendamento')).to include('chame cancelar_consulta {id, motivo}')
+  end
+
+  # 26/09: cada atendente tem o SEU bloco de passos (um heredoc mal fechado já
+  # colou o do pós-operatório dentro do Agente de Ligação)
+  it 'cada etapa tem o próprio texto: pós-operatório não vaza para a ligação', :aggregate_failures do
+    prompts = described_class::STAGE_PROMPTS
+    expect(prompts.keys).to include('atendente_agendamento', 'atendente_pos', 'voice', 'atendente_pos_op')
+    expect(prompts['atendente_pos_op']).to include('PESQUISA DE SATISFAÇÃO').and include('REGRA VERMELHA')
+    expect(prompts['voice']).not_to include('REGRA VERMELHA')
+    expect(prompts.values.join).not_to include('Haddad')
+  end
+
+  # 🧪 22/09: Roteiro v2 paralelo (só para o Testar agente)
+  describe 'versão v2 (paralela)' do
+    it 'tem padrão próprio nas 5 seções, título próprio e os passos dos 2 atendentes como seções extras', :aggregate_failures do
+      text = described_class.text(account, 'v2')
+      expect(text).to include('ROTEIRO CEVICO 2')
+      expect(text).to include('Postura de quem resolve') # persona v2
+      expect(text).not_to include('{{TABELA_DE_PRECOS}}')
+      sections = described_class.sections(account, 'v2')
+      expect(sections.map { |x| x['key'] }).to eq(described_class::SECTIONS.pluck('key') + described_class::STAGE_SECTIONS.pluck('key'))
+      expect(sections.last['text']).to include('SEU PAPEL NESTA ETAPA')
+      expect(described_class.stage_prompt(account, 'atendente_agendamento', 'v2')).to include('DOIS HORÁRIOS CONCRETOS')
+    end
+
+    it 'personalização do v2 vive em script_v2 / prompt_v2 e não encosta no v1', :aggregate_failures do
+      CrmSetting.create!(account: account, ai_config: { 'script_v2' => { 'persona' => 'Persona só do v2.' },
+                                                        'agents' => { 'atendente_pos' => { 'prompt' => 'Passos v1.',
+                                                                                           'prompt_v2' => 'Passos v2.' } } })
+      expect(described_class.text(account, 'v2')).to include('Persona só do v2.')
+      expect(described_class.text(account)).to include('Guilherme, atendente da CEVICO')
+      expect(described_class.text(account)).not_to include('Persona só do v2.')
+      expect(described_class.stage_prompt(account, 'atendente_pos', 'v2')).to eq('Passos v2.')
+      expect(described_class.stage_prompt(account, 'atendente_pos')).to eq('Passos v1.')
+      expect(described_class.sections(account, 'v2').find { |x| x['key'] == 'stage_atendente_pos' }['custom']).to be(true)
+    end
+
+    it 'versão desconhecida cai no v1' do
+      expect(described_class.normalize_version('v9')).to eq('v1')
+      expect(described_class.text(account, nil)).to include('fonte única dos atendentes')
+    end
+  end
+end

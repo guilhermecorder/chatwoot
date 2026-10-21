@@ -49,7 +49,7 @@ class Crm::SurgeryClosingService
 
     CONTEXTO DE VALORES (referência, não invente além do que está na conversa):
     - Cirurgia refrativa: na casa de R$ 5.000 (os dois olhos).
-    - Lentes fácicas (Artisan): na casa de R$ 11.900.
+    - Lentes fácicas (Artisan): na casa de R$ 11.900 POR OLHO.
     - A clínica fala "investimento"; parcelamento no cartão é comum (até 10x),
       além de PIX à vista e boleto.
 
@@ -84,7 +84,7 @@ class Crm::SurgeryClosingService
     message = client.messages.create(
       model: model,
       max_tokens: 1024,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: transcript }]
     )

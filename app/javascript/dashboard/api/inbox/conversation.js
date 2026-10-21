@@ -17,6 +17,8 @@ class ConversationApi extends ApiClient {
     sortBy,
     updatedWithin,
     crmStageId,
+    crmPipelineId,
+    assigneeIds,
   }) {
     return axios.get(this.url, {
       params: {
@@ -30,6 +32,10 @@ class ConversationApi extends ApiClient {
         sort_by: sortBy,
         updated_within: updatedWithin,
         crm_stage_id: crmStageId,
+        crm_pipeline_id: crmPipelineId,
+        // item 212: filtro "quem cuida" (ids; 0 = sem responsável)
+        assignee_ids:
+          assigneeIds && assigneeIds.length ? assigneeIds : undefined,
       },
     });
   }
@@ -64,9 +70,10 @@ class ConversationApi extends ApiClient {
     });
   }
 
-  assignAgent({ conversationId, agentId }) {
+  assignAgent({ conversationId, agentId, assigneeType }) {
     return axios.post(`${this.url}/${conversationId}/assignments`, {
       assignee_id: agentId,
+      assignee_type: assigneeType,
     });
   }
 

@@ -3,7 +3,7 @@ import { useAlert } from 'dashboard/composables';
 import { computed, onMounted, ref } from 'vue';
 import Avatar from 'next/avatar/Avatar.vue';
 import { useI18n } from 'vue-i18n';
-import { picoSearch } from '@scmmishra/pico-search';
+import { picoSearch } from '@chatwoot/pico-search';
 import {
   useStoreGetters,
   useStore,
@@ -51,9 +51,32 @@ const uiFlags = computed(() => getters['agents/getUIFlags'].value);
 const currentUserId = computed(() => getters.getCurrentUserID.value);
 const customRoles = useMapGetter('customRole/getCustomRoles');
 
+// 🔐 rodada 334: o PAPEL CEVICO de cada pessoa (Acessos e papéis) já vem
+// nas settings do CRM (agent_permissions.roles + role_by_user) — sem
+// chamada extra. A pílula aparece ao lado do nome; o link no topo leva à
+// tela de Acessos e papéis.
+const crmSettings = useMapGetter('crm/getSettings');
+const accountId = computed(() => getters.getCurrentAccountId.value);
+const cevicoRoleName = agent => {
+  if (agent.role === 'administrator') return '';
+  const perms = crmSettings.value?.agent_permissions || {};
+  const roleId = perms.role_by_user?.[String(agent.id)];
+  if (!roleId) return '';
+  return (
+    (perms.roles || []).find(r => String(r.id) === String(roleId))?.name || ''
+  );
+};
+const accessRoute = computed(() => ({
+  name: 'acessos_settings_index',
+  params: { accountId: accountId.value },
+}));
+
 onMounted(() => {
   store.dispatch('agents/get');
   store.dispatch('customRole/getCustomRole');
+  if (!crmSettings.value?.access) {
+    store.dispatch('crm/fetchSettings').catch(() => {});
+  }
 });
 
 const findCustomRole = agent =>
@@ -176,6 +199,14 @@ const confirmDeletion = () => {
           </span>
         </template>
         <template #actions>
+          <router-link
+            :to="accessRoute"
+            class="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-n-weak text-xs font-medium text-n-slate-11 hover:bg-n-alpha-1 hover:text-n-slate-12 transition-colors"
+            title="Papéis, árvore de acessos (ver × editar) e unidades de cada pessoa"
+          >
+            <span class="i-lucide-shield-check text-sm" />
+            Acessos e papéis
+          </router-link>
           <Button
             :label="$t('AGENT_MGMT.HEADER_BTN_TXT')"
             size="sm"
@@ -206,8 +237,18 @@ const confirmDeletion = () => {
               hide-offline-status
             />
             <div class="flex flex-col gap-1.5 items-start">
-              <span class="block text-heading-3 text-n-slate-12 capitalize">
-                {{ agent.name }}
+              <span class="flex items-center gap-2 flex-wrap">
+                <span class="block text-heading-3 text-n-slate-12 capitalize">
+                  {{ agent.name }}
+                </span>
+                <span
+                  v-if="cevicoRoleName(agent)"
+                  class="inline-flex items-center gap-1 h-5 px-2 rounded-full text-[10.5px] font-semibold bg-n-brand/10 text-n-brand border border-n-brand/25"
+                  title="papel em Acessos e papéis"
+                >
+                  <span class="i-lucide-id-card text-[10px]" />
+                  {{ cevicoRoleName(agent) }}
+                </span>
               </span>
               <div class="flex items-center gap-2">
                 <span class="text-body-main text-n-slate-11">

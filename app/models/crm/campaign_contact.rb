@@ -21,7 +21,7 @@
 # Foreign Keys
 #
 #  fk_rails_...  (campaign_id => crm_campaigns.id)
-#  fk_rails_...  (contact_id => contacts.id)
+#  fk_rails_...  (contact_id => contacts.id) ON DELETE => cascade
 #  fk_rails_...  (conversation_id => conversations.id)
 #
 class Crm::CampaignContact < ApplicationRecord

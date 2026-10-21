@@ -4,7 +4,6 @@
 class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
-  before_action -> { require_capability(:finance) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   HISTORY_MONTHS = 12
@@ -21,6 +20,63 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
       by_category: build_by_category(scope),
       monthly: monthly_series,
       entries: scope.order(entry_date: :desc, id: :desc).limit(ENTRIES_LIMIT).map { |e| entry_json(e) }
+    }
+  end
+
+  # 🏥 LUCRATIVIDADE (item 157): o que sobra de verdade por cirurgia, lido do
+  # espelho do OftalmoFácil — receita (valor cobrado) − custo do prestador −
+  # taxa da plataforma = resultado CEVICO. Cortes por procedimento, prestador,
+  # médico e mês; e o marketing do período (investimento por caixa) pra ver
+  # o resultado LÍQUIDO. Cirurgias canceladas/ausentes ficam fora da conta.
+  def profitability # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    from, to = resolve_period
+    scope = Crm::OftalmofacilSurgery.where(account: Current.account).in_period(from, to)
+                                    .where(status_kind: %w[realizada agendada aguardando_pagamento])
+    rows = scope.to_a
+    # 🚧 item 231: por padrão só o que é da CEVICO (CATARATA_SP); side=partners
+    # mostra os parceiros do hub, side=all junta tudo
+    side = %w[own partners all].include?(params[:side].to_s) ? params[:side].to_s : 'own'
+    own = Crm::PartnerGuard.own_provider_name(Current.account)
+    rows = rows.select { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'partners'
+    rows = rows.reject { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'own'
+    doctors = (CrmSetting.find_by(account: Current.account)&.agenda_config || {}).dig('oftalmofacil', 'doctors') || {}
+    marketing, marketing_source = period_marketing(from, to)
+    sums = lambda do |list|
+      receita = list.sum { |s| s.amount.to_f }
+      custo = list.sum { |s| s.clinic_price.to_f }
+      taxa = list.sum { |s| s.profit.to_f }
+      { count: list.size, receita: receita.round(2), custo: custo.round(2), taxa: taxa.round(2),
+        resultado: (receita - custo - taxa).round(2),
+        margem_pct: receita.positive? ? (((receita - custo - taxa) / receita) * 100).round(1) : nil,
+        ticket: list.any? ? (receita / list.size).round(2) : 0.0,
+        resultado_por_cirurgia: list.any? ? ((receita - custo - taxa) / list.size).round(2) : 0.0 }
+    end
+    # item 318: lá NUNCA marcam "realizada" — realizada = ativa/realizada com a
+    # data já passada (mesma régua do Financeiro & CAC e do funil por anúncio)
+    done = ->(s) { Crm::AdFunnelSteps::OF_DONE.include?(s.status_kind) && s.surgery_date.present? && s.surgery_date < Date.current }
+    realizadas = rows.select(&done)
+    summary = sums.call(realizadas)
+    summary[:pago] = realizadas.sum { |s| s.paid_amount.to_f }.round(2)
+    summary[:agendadas] = rows.count { |s| !done.call(s) }
+    summary[:agendadas_receita] = rows.reject(&done).sum { |s| s.amount.to_f }.round(2)
+    summary[:marketing] = marketing.round(2)
+    summary[:marketing_source] = marketing_source
+    summary[:resultado_liquido] = (summary[:resultado] - marketing).round(2)
+    summary[:custo_aquisicao_por_cirurgia] = realizadas.any? ? (marketing / realizadas.size).round(2) : nil
+    group = lambda do |key_fn, label_fn|
+      realizadas.group_by(&key_fn).map { |k, list| sums.call(list).merge(key: k.to_s, label: label_fn.call(k)) }
+                .sort_by { |h| -h[:resultado] }
+    end
+    render json: {
+      period: { from: from.iso8601, to: to.iso8601, preset: params[:preset].presence },
+      side: side,
+      has_data: Crm::OftalmofacilSurgery.where(account: Current.account).exists?,
+      summary: summary,
+      by_procedure: group.call(->(s) { s.procedure_name.to_s.presence || 'Sem procedimento' }, ->(k) { k }),
+      by_clinic: group.call(->(s) { s.clinic_name.to_s.presence || 'Sem prestador' }, ->(k) { k }),
+      by_doctor: group.call(->(s) { s.doctor_crm.to_s.presence || '—' }, ->(k) { doctors[k].presence || (k == '—' ? 'Sem médico' : "CRM #{k}") }),
+      monthly: realizadas.group_by { |s| s.surgery_date.strftime('%Y-%m') }.sort.map { |m, list| sums.call(list).merge(month: m) },
+      note: 'Receita = valor cobrado no OftalmoFácil · Custo = repasse ao prestador · Taxa = margem da plataforma · Resultado = o que fica na CEVICO. Marketing = gasto real do Google + Meta no período (o mesmo do Financeiro & CAC); sem leitura deles, o investimento por caixa rateado.'
     }
   end
 
@@ -70,7 +126,9 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
       kind: params[:kind].to_s,
       category: params[:category].to_s.presence,
       description: params[:description].to_s.strip[0, 300],
-      amount: params[:amount].to_f.round(2)
+      # Rodada 6 (#260): regra única do dinheiro — "5.000" é R$ 5.000,00 (o to_f dava 5,00);
+      # o que não é dinheiro vira 0 e a validação (> 0) recusa
+      amount: Cevico::Money.parse(params[:amount]) || 0.0
     }
   end
 
@@ -87,6 +145,30 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     when 'last_month' then [(today << 1).beginning_of_month, (today << 1).end_of_month]
     else [today.beginning_of_month, today] # 'month' (padrão)
     end
+  end
+
+  # item 318: marketing = gasto REAL do Google + Meta (Financeiro & CAC);
+  # sem leitura deles, o investimento manual por caixa rateado (o de antes)
+  def period_marketing(from, to)
+    real = Crm::AcquisitionCostService.new(account: Current.account, since: from.in_time_zone(TZ).beginning_of_day,
+                                           until_at: to.in_time_zone(TZ).end_of_day).ads_spend
+    return [real, 'anuncios'] if real.positive?
+
+    [marketing_spend(from, to), 'manual']
+  rescue StandardError => e
+    Rails.logger.warn "[finance#profitability] gasto real indisponível: #{e.message}"
+    [marketing_spend(from, to), 'manual']
+  end
+
+  # investimento em anúncios do período: soma do "investimento mensal" de
+  # cada caixa (Resultados por caixa) rateado pelos dias do período
+  def marketing_spend(from, to)
+    raw = CrmSetting.find_by(account: Current.account)&.agenda_config&.dig('inbox_investments') || {}
+    monthly_total = raw.values.sum { |v| (v.is_a?(Hash) ? v['monthly'] : v).to_f }
+    return 0.0 if monthly_total.zero?
+
+    days = (to - from).to_i + 1
+    monthly_total * (days / 30.0)
   end
 
   def totals_by_kind(scope)

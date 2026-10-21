@@ -42,7 +42,8 @@ const toggleSidebar = () => {
     class="fixed bottom-4 ltr:left-4 rtl:right-4 z-40 transition-transform duration-200 ease-out block md:hidden"
     :class="[
       {
-        'ltr:translate-x-48 rtl:-translate-x-48': isMobileSidebarOpen,
+        'ltr:translate-x-[min(80vw,320px)] rtl:-translate-x-[min(80vw,320px)]':
+          isMobileSidebarOpen,
       },
     ]"
   >

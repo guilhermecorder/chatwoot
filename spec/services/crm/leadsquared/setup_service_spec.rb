@@ -18,6 +18,10 @@ RSpec.describe Crm::Leadsquared::SetupService do
 
   before do
     account.enable_features('crm_integration')
+    # A marca da instalação CEVICO é "Sistema CEVICO" (config/installation_config.yml);
+    # aqui fixamos "Chatwoot" para o teste não depender da marca configurada.
+    allow(GlobalConfig).to receive(:get).and_call_original
+    allow(GlobalConfig).to receive(:get).with('BRAND_NAME').and_return('BRAND_NAME' => 'Chatwoot')
     allow(Crm::Leadsquared::Api::BaseClient).to receive(:new).and_return(base_client)
     allow(Crm::Leadsquared::Api::ActivityClient).to receive(:new).and_return(activity_client)
     allow(base_client).to receive(:get).with('Authentication.svc/UserByAccessKey.Get').and_return(endpoint_response)

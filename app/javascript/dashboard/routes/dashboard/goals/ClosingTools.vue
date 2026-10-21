@@ -2,14 +2,17 @@
 // FERRAMENTAS DE FECHAMENTO (high ticket): o arsenal de quem fecha —
 // script CEVICO, MAPA DE OBJEÇÕES por estágio (gerado pela IA a partir
 // das conversas que CONVERTERAM) e as ferramentas importantes do time.
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
-import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { useAlert } from 'dashboard/composables';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
-const { isAdmin } = useAdmin();
+// 🔐 rodada 334: quem só VÊ lê o script e o mapa; editar = salvar/gerar
+const { canEdit } = useCevicoAccess();
+const canEditTools = computed(() => canEdit('metas.ferramentas'));
 const isLoading = ref(true);
 const data = ref(null);
 const script = ref('');
@@ -79,7 +82,7 @@ onMounted(load);
           <span class="i-lucide-swords text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Ferramentas de Fechamento</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Ferramentas de Fechamento <CevicoViewOnlyPill v-if="!canEditTools" /></h1>
           <p class="text-xs text-n-slate-10">o arsenal do high ticket: script, mapa de objeções e as respostas que mais converteram</p>
         </div>
       </div>
@@ -94,13 +97,13 @@ onMounted(load);
               <span class="i-lucide-scroll-text text-base" style="color: #B8860B" /> Script de fechamento
             </h2>
             <button
-              v-if="isAdmin && !editingScript"
+              v-if="canEditTools && !editingScript"
               class="ml-auto px-2.5 h-7 rounded-lg border border-n-weak text-[11px] text-n-slate-11 hover:bg-n-alpha-1"
               @click="editingScript = true"
             >
               Editar
             </button>
-            <template v-else-if="isAdmin">
+            <template v-else-if="canEditTools">
               <button class="ml-auto px-2.5 h-7 rounded-lg text-[11px] text-n-slate-10 hover:bg-n-alpha-1" @click="editingScript = false; script = data.script || ''">
                 Cancelar
               </button>
@@ -123,7 +126,7 @@ onMounted(load);
           />
           <pre v-else-if="script" class="text-xs text-n-slate-11 whitespace-pre-wrap font-sans leading-relaxed bg-n-alpha-1 rounded-xl p-3 max-h-80 overflow-y-auto">{{ script }}</pre>
           <p v-else class="text-xs text-n-slate-9">
-            Nenhum script salvo ainda{{ isAdmin ? ' — clique em Editar e cole o script oficial.' : '.' }}
+            Nenhum script salvo ainda{{ canEditTools ? ' — clique em Editar e cole o script oficial.' : '.' }}
           </p>
         </div>
 
@@ -137,7 +140,7 @@ onMounted(load);
               gerado {{ new Date(data.objection_map.generated_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }}
             </span>
             <button
-              v-if="isAdmin"
+              v-if="canEditTools"
               class="ml-auto px-3 h-8 rounded-lg text-[11px] font-bold text-white disabled:opacity-50"
               style="background: linear-gradient(135deg, #065F46, #34D399)"
               :disabled="generating"
@@ -178,7 +181,7 @@ onMounted(load);
             </div>
           </template>
           <p v-else class="text-xs text-n-slate-9">
-            Nenhum mapa gerado ainda{{ isAdmin ? ' — clique em "Gerar com IA" (precisa do Consultor Comercial ligado).' : '.' }}
+            Nenhum mapa gerado ainda{{ canEditTools ? ' — clique em "Gerar com IA" (precisa do Consultor Comercial ligado).' : '.' }}
           </p>
         </div>
       </template>

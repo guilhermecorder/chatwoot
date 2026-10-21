@@ -46,26 +46,8 @@ Rails.application.routes.draw do
     resource :slack_uploads, only: [:show]
   end
 
-  # Formulário público CEVICO (paciente responde pelo link do WhatsApp, sem login)
-  get 'forms/:slug/:token', to: 'cevico_forms#show', as: :cevico_form
-  post 'forms/:slug/:token', to: 'cevico_forms#submit'
-  post 'forms/:slug/:token/track', to: 'cevico_forms#track'
-  # Páginas públicas CEVICO (nutrição/procedimentos — preparadas p/ SEO)
-  # /cta e /next = redirecionadores que CONTAM o clique (funil + conversão)
-  get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
-  get 'p/:slug/next', to: 'cevico_pages#next_step', as: :cevico_page_next
-  post 'p/:slug/track', to: 'cevico_pages#track', as: :cevico_page_track
-  post 'p/:slug/ref', to: 'cevico_pages#mint_ref', as: :cevico_page_ref
-  # Protocolo do HUB (porta de entrada na raiz do domínio dedicado)
-  post 'hub/ref', to: 'cevico_pages#hub_ref', as: :cevico_hub_ref
-  # prévia do RASCUNHO (link secreto do admin — token assinado) +
-  # ambiente de montagem: status da construção e retoque inline
-  get 'p/rascunho/:token/status', to: 'cevico_pages#build_status'
-  post 'p/rascunho/:token/retocar', to: 'cevico_pages#inline_update'
-  post 'p/rascunho/:token/construtor', to: 'cevico_pages#builder_chat'
-  post 'p/rascunho/:token/foto', to: 'cevico_pages#builder_upload'
-  get 'p/rascunho/:token', to: 'cevico_pages#preview', as: :cevico_page_preview
-  get 'p/:slug', to: 'cevico_pages#show', as: :cevico_page
+  # 🔧 CEVICO: formulários/páginas públicas e webhooks em config/routes/cevico_public.rb
+  draw(:cevico_public)
 
   get '/health', to: 'health#show'
   get '/api', to: 'api#index'
@@ -95,6 +77,16 @@ Rails.application.routes.draw do
             resources :assistants do
               member do
                 post :playground
+                get :metrics
+                get :faq_stats
+                get :summary
+                get :drilldown
+              end
+              resource :stats, only: [], controller: :assistant_stats do
+                get :overview
+                get :overview_summary
+                get :resolution_flow
+                get :resolution_trend
               end
               collection do
                 get :tools
@@ -102,7 +94,15 @@ Rails.application.routes.draw do
               resources :inboxes, only: [:index, :create, :destroy], param: :inbox_id
               resources :scenarios
             end
-            resources :assistant_responses
+            resources :agent_sessions, only: [:show]
+            resources :assistant_responses do
+              get :drilldown, on: :member
+            end
+            resources :faq_suggestions, only: [:index, :show, :update] do
+              post :approve, on: :member
+              post :dismiss, on: :member
+            end
+            resources :message_reports, only: [:create]
             resources :bulk_actions, only: [:create]
             resources :copilot_threads, only: [:index, :create] do
               resources :copilot_messages, only: [:index, :create]
@@ -112,6 +112,7 @@ Rails.application.routes.draw do
             end
             resources :documents, only: [:index, :show, :create, :destroy] do
               post :sync, on: :member
+              get :drilldown, on: :member
             end
             resource :tasks, only: [], controller: 'tasks' do
               post :rewrite
@@ -157,271 +158,14 @@ Rails.application.routes.draw do
               resources :inbox_limits, only: [:create, :update, :destroy]
             end
           end
-          resources :campaigns, only: [:index, :create, :show, :update, :destroy]
-          namespace :crm do
-            resources :campaigns, only: [:index, :show, :create, :destroy] do
-              member do
-                post :send_now
-                post :schedule
-                get :results
-              end
-              collection do
-                post :preview_audience
-                get :templates
-              end
-            end
-            resources :message_automations, only: [:index, :create, :update, :destroy] do
-              member { get :preview_eligible }
-            end
-            resources :followup_bots, only: [:index, :create, :update, :destroy] do
-              member { post :toggle } # chave de emergência — aberta às atendentes
-            end
-            resource :traffic_report, only: [:show]
-            resource :ads_report, only: [:show], controller: 'ads_reports' do
-              post :backfill
-            end
-            resource :conversation_summary, only: [:show], controller: 'conversation_summaries' do
-              post :analyze
-                post :sales_help
-              post :move_stage
-              post :toggle_followup
-            end
-            # Radar de Oportunidades: "Atender agora" tira o aviso da fila
-            # (se o paciente seguir sem resposta, a próxima auditoria recoloca)
-            post 'radar/attend', to: 'radar#attend'
-            resources :forms, only: [:index, :create, :update, :destroy] do
-              member do
-                get :summary
-                post :generate_insights
-                get :preview_link
-              end
-            end
-            resource :retro_labels, only: [] do
-              post :preview
-              post :apply
-            end
-            resource :batch_updates, only: [] do
-              post :preview
-              post :apply
-            end
-            resource :external_surgeries, only: [] do
-              post :preview
-              post :apply
-              # 📄 planilha de fechamento (item 132): upload + prévia + aplicar
-              post :preview_sheet
-              post :apply_sheet
-              # ↩️ desfazer a última importação (item 133)
-              get :import_status
-              post :undo_last
-            end
-            resource :label_replacements, only: [] do
-              post :preview
-              post :apply
-            end
-            resource :label_removals, only: [] do
-              post :preview
-              post :apply
-            end
-            resource :contact_unification, only: [], controller: 'contact_unifications' do
-              post :preview
-              post :apply
-            end
-            resource :settings, only: [:show, :update] do
-              post :test_n8n
-              post :fetch_workflows
-              post :update_meta_ads
-              post :test_meta_ads
-              post :update_ai
-              post :test_ai
-              post :test_gemini
-              # Estúdio do Copywriter: conteúdo multi-formato (carrossel, reels...)
-              post :copywriter_content
-              post :update_google_ads
-              post :test_google_ads
-              post :update_sheets
-              post :test_sheets
-              # OftalmoFácil: conexão nativa (endereço + chave)
-              post :update_oftalmofacil
-              post :update_agenda
-              # Personalização (sistema coringa): profissionais/unidades/listas/metas
-              post :update_segment
-              post :agenda_backfill
-              # Configurações → Domínio (público das páginas/formulários)
-              get :public_domain
-              post :update_public_domain
-              post :update_public_hub
-              post :update_public_tracking
-              post :check_public_domain
-              post :sync_scheduler_stages
-                post :sync_agent_stages
-                post :sales_insights
-              post :radar_scan
-              post :run_mentor
-              # 🌾 Colheitadeira da Base + 📊 Gestor Autônomo (item 128)
-              get :harvest_status
-              post :harvest_preview
-              post :harvest_approve
-              post :harvest_pause
-              post :harvest_resume
-              post :harvest_skip_lead
-              post :harvest_send_now
-              post :run_manager
-              # 🎓 Auditor de Conversas (item 130)
-              post :run_auditor
-              get :auditor_summary
-              # 🎨 Criativo Perpétuo (item 131)
-              post :run_creative
-              get :creative_state
-              post :creative_review
-              get :ai_usage
-              # concessão de acessos por atendente (allow-list, admin)
-              post :update_agent_grants
-              # tabela de preços oficial (Espaço do Paciente + prompts da IA)
-              post :update_price_table
-              # investimento mensal por caixa (ROI/CAC do Dashboard CRM)
-              post :update_inbox_investments
-            end
-            # Feedback de bugs do time (vira card 🐞 no board do admin)
-            resources :bug_reports, only: [:create], controller: 'bug_reports'
-            # Páginas públicas (ambiente Páginas)
-            resources :pages, only: [:index, :create, :update, :destroy], controller: 'pages' do
-              # agente copywriter escreve a página inteira em seções
-              # (item 111: geração roda em segundo plano — start + status)
-              collection do
-                post :generate
-                post :generate_start
-                get :generate_status
-                post :upload_image
-              end
-              # estúdio de copy: comentários do time na página
-              member do
-                post :add_comment
-                post :delete_comment
-              end
-            end
-            # Resultados de tráfego das Páginas: origem (Google/SEO/Meta) →
-            # visitas → cliques → leads (Protocolo) → agendou → cirurgia
-            resource :pages_report, only: [:show], controller: 'pages_reports'
-            # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
-            resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do
-              # 🌪 Montador de Funis (item 60): fontes de captação
-              post :save_funnel_sources
-            end
-            # Planejamento de conteúdos (workflow kanban de marketing)
-            resources :content_items, only: [:index, :create, :update, :destroy] do
-              # renovar o ambiente: publicados → coluna oculta (item 95)
-              collection { post :archive_published }
-            end
-            # Ambiente Pessoas: DISC + desenvolvimento pessoal + feedbacks
-            resource :people, only: [:show], controller: 'people' do
-              post :save_disc
-              post :save_goals
-              post :save_assessment
-              post :save_life
-            end
-            # Painel de Metas (admin cria; time acompanha)
-            resource :goal_plans, only: [:show], controller: 'goal_plans' do
-              post :upsert
-              post :add_note
-              post :delete_note
-              post :update_routines
-            end
-            # Ferramentas de Fechamento (script + mapa de objeções)
-            resource :closing_tools, only: [:show], controller: 'closing_tools' do
-              post :update_script
-              post :generate_map
-            end
-            # Dashboard Google (Ads + GA4): conversões enviadas + integração
-            resource :google_dashboard, only: [:show], controller: 'google_dashboards'
-            # Gestão Financeira (receitas, custos, tributos, investimentos) — só admin
-            resource :finance, only: [:show], controller: 'finance' do
-              post :create_entry
-              post :update_entry
-              post :delete_entry
-              get :compare
-            end
-            # SAÚDE (HUB, segmento saude): treino, dieta e corpo — painel pessoal
-            resource :health, only: [:show], controller: 'health' do
-              post :create_record
-              post :update_record
-              post :delete_record
-              post :update_config
-            end
-            # Ferramentas da Academia (item 77): time lê, admin escreve
-            resources :team_tools, only: [:index, :create, :update, :destroy], controller: 'team_tools'
-            # Estoque (item 68): dashboard/CRUD são área financeira;
-            # lookup + pedido são do fluxo clínico (abertos ao time)
-            resource :stock, only: [:show], controller: 'stock' do
-              post :create_item
-              post :update_item
-              post :delete_item
-              get :lookup
-              post :create_order
-              post :update_order
-              post :delete_order
-            end
-            # Painel Estratégico (a empresa por pilares) — só admin
-            resource :strategy, only: [:show], controller: 'strategy' do
-              post :create_pillar
-              post :update_pillar
-              post :delete_pillar
-              post :create_item
-              post :update_item
-              post :delete_item
-              # 🏭 Desenho do Processo (item 59)
-              post :save_processes
-              # 🧭 Painel do Empresário (quadro de gestão do dono)
-              post :save_business_board
-            end
-            # Central do Paciente: espaço do paciente + anotações do médico
-            resources :patients, only: [:show], controller: 'patients' do
-              member { post :update_profile }
-              resources :clinical_notes, only: [:index, :create, :update, :destroy], controller: 'clinical_notes'
-            end
-            resource :home, only: [:show], controller: 'home' do
-              # popup de prioridade máxima do Radar (checagem leve) e
-              # pausa manual do radar pela atendente (com registro)
-              get :radar_ping
-              post :toggle_radar
-              # cesto de indicadores c/ série + período anterior (item 141)
-              get :kpis
-            end
-            resource :campaigns_dashboard, only: [:show], controller: 'campaigns_dashboards'
-            resource :automations_dashboard, only: [:show], controller: 'automations_dashboards'
-            resource :doctors_dashboard, only: [:show], controller: 'doctors_dashboards' do
-              # 🩺 Ambiente do médico (item 104): perfis de gestão — só admin
-              post :save_profiles
-            end
-            resource :agents_dashboard, only: [:show], controller: 'agents_dashboards'
-            # Dashboard dos AGENTES DE IA (item 85, só admin)
-            resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'
-            resource :agenda_dashboard, only: [:show], controller: 'agenda_dashboards'
-            resources :pipelines, only: [:index, :show, :create, :update, :destroy] do
-              resources :stages, only: [:index, :create, :update, :destroy] do
-                collection { post :reorder }
-                resources :automations, only: [:index, :create, :update, :destroy] do
-                  member { post :trigger }
-                end
-              end
-              resources :contacts, only: [:index, :create, :update, :destroy] do
-                member do
-                  get  :history
-                  post :trigger_label_change
-                  post :detect_value
-                  post :start_conversation
-                end
-                collection do
-                  post :detect_values_bulk
-                end
-              end
-              resource :dashboard, only: [:show] do
-                # PRO MAX (item 129): séries diárias p/ o estúdio de análise
-                get :pro_series
-                # lista de resgate das perdas por motivo (item 145)
-                get :loss_contacts
-              end
+          resources :campaigns, only: [:index, :create, :show, :update, :destroy] do
+            if ChatwootApp.enterprise?
+              get 'analytics/metrics', to: 'campaigns/analytics#metrics'
+              get 'analytics/contacts', to: 'campaigns/analytics#contacts'
             end
           end
+          # 🔧 CEVICO: rotas do CRM em config/routes/cevico_crm.rb (facilita o merge do upstream)
+          draw(:cevico_crm)
           resources :dashboard_apps, only: [:index, :show, :create, :update, :destroy]
           namespace :channels do
             resource :twilio_channel, only: [:create]
@@ -456,6 +200,7 @@ Rails.application.routes.draw do
               post :update_last_seen
               post :unread
               post :custom_attributes
+              post :destroy_custom_attributes
               get :attachments
               get :inbox_assistant
               get :reporting_events if ChatwootApp.enterprise?
@@ -511,6 +256,18 @@ Rails.application.routes.draw do
               post :call, on: :member, to: 'calls#create' if ChatwootApp.enterprise?
             end
           end
+          resources :data_imports, only: [:index, :show, :create] do
+            collection do
+              post :validate_source
+            end
+            member do
+              post :start
+              post :retry, action: :retry_import
+              post :abandon
+              get :error_logs
+              get :skip_logs
+            end
+          end
           resources :csat_survey_responses, only: [:index] do
             collection do
               get :metrics
@@ -529,6 +286,7 @@ Rails.application.routes.draw do
           resources :reporting_events, only: [:index] if ChatwootApp.enterprise?
 
           if ChatwootApp.enterprise?
+            resources :calls, only: [:index]
             resources :whatsapp_calls, only: [:show] do
               member do
                 post :accept
@@ -544,13 +302,16 @@ Rails.application.routes.draw do
 
           resources :custom_attribute_definitions, only: [:index, :show, :create, :update, :destroy]
           resources :custom_filters, only: [:index, :show, :create, :update, :destroy]
+          resource :branded_email_layout, only: [:show, :update]
           resources :inboxes, only: [:index, :show, :create, :update, :destroy] do
             get :assignable_agents, on: :member
             get :campaigns, on: :member
             get :agent_bot, on: :member
+            get :message_templates, on: :member
             post :set_agent_bot, on: :member
             delete :avatar, on: :member
             post :sync_templates, on: :member
+            put :whatsapp_business_management_token, on: :member
             get :health, on: :member
             post :register_webhook, on: :member
             post :reset_secret, on: :member
@@ -810,6 +571,7 @@ Rails.application.routes.draw do
               get :conversations
               get :conversations_summary
               get :conversation_traffic
+              get :drilldown
               get :bot_metrics
               get :inbox_label_matrix
               get :first_response_time_distribution
@@ -836,9 +598,11 @@ Rails.application.routes.draw do
             member do
               post :checkout
               post :subscription
+              post :select_billing_currency
               get :limits
               post :toggle_deletion
               post :topup_checkout
+              get :topup_options
             end
           end
         end
@@ -996,6 +760,7 @@ Rails.application.routes.draw do
       end
       resources :users, only: [:index, :new, :create, :show, :edit, :update, :destroy] do
         delete :avatar, on: :member, action: :destroy_avatar
+        post :resend_confirmation, on: :member
       end
 
       resources :access_tokens, only: [:index, :show]

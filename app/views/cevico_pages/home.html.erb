@@ -3,13 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CEVICO — Cuidados Oculares | Comece por aqui</title>
-  <meta name="description" content="<%= @hub['tagline'].presence || 'CEVICO — Cuidados Oculares: cirurgia refrativa, cirurgia de catarata e lentes trifocais. Tecnologia de ponta, acolhimento humano e clareza visual.' %>">
+  <%# rodada 334: no domínio de uma EMPRESA, o hub fala o nome dela (@company); sem empresa, a CEVICO de sempre %>
+  <% brand = @company ? @company.name : 'CEVICO — Cuidados Oculares' %>
+  <% brand_desc = @company ? [@company.tagline.presence, @company.offers.presence].compact.join(' ') : 'CEVICO — Cuidados Oculares: cirurgia refrativa, cirurgia de catarata e lentes trifocais. Tecnologia de ponta, acolhimento humano e clareza visual.' %>
+  <title><%= brand %> | Comece por aqui</title>
+  <meta name="description" content="<%= @hub['tagline'].presence || brand_desc %>">
   <link rel="canonical" href="<%= Cevico::PublicSite.base_url %>/">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="CEVICO — Cuidados Oculares">
-  <meta property="og:description" content="<%= @hub['tagline'].presence || 'Cirurgia refrativa, catarata e lentes trifocais — comece por aqui.' %>">
-  <meta property="og:site_name" content="CEVICO — Cuidados Oculares">
+  <meta property="og:title" content="<%= brand %>">
+  <meta property="og:description" content="<%= @hub['tagline'].presence || (@company ? brand_desc : 'Cirurgia refrativa, catarata e lentes trifocais — comece por aqui.') %>">
+  <meta property="og:site_name" content="<%= brand %>">
   <meta property="og:url" content="<%= Cevico::PublicSite.base_url %>/">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&display=swap" rel="stylesheet">
@@ -85,10 +88,14 @@
 </head>
 <body>
   <div class="hero">
-    <img src="/brand-assets/cevico-logo-dark-bg.png" alt="CEVICO — Cuidados Oculares">
-    <p><%= @hub['tagline'].presence || 'Tecnologia de ponta, acolhimento humano e clareza visual. Comece por aqui: escolha o seu caminho ou fale direto com a gente.' %></p>
+    <% if @company %>
+      <h1 style="margin:0 0 8px;font-size:2rem"><%= @company.name %></h1>
+    <% else %>
+      <img src="/brand-assets/cevico-logo-dark-bg.png" alt="CEVICO — Cuidados Oculares">
+    <% end %>
+    <p><%= @hub['tagline'].presence || (@company ? "#{brand_desc.presence || 'Comece por aqui'}: fale direto com a gente." : 'Tecnologia de ponta, acolhimento humano e clareza visual. Comece por aqui: escolha o seu caminho ou fale direto com a gente.') %></p>
     <% if @hub_whatsapp %>
-      <a class="whats" href="<%= @hub_whatsapp %>" rel="noopener">💬 Falar com a CEVICO no WhatsApp</a>
+      <a class="whats" href="<%= @hub_whatsapp %>" rel="noopener">💬 Falar com a <%= @company ? @company.name : 'CEVICO' %> no WhatsApp</a>
     <% end %>
   </div>
 
@@ -130,7 +137,7 @@
     <% end %>
   </div>
 
-  <footer>CEVICO — Cuidados Oculares</footer>
+  <footer><%= brand %></footer>
 
   <%# rastreio do hub: origem viaja pras páginas; WhatsApp ganha Protocolo %>
   <%= render 'cevico_pages/analytics_snippet', page: nil %>

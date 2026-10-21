@@ -1,0 +1,213 @@
+# Central de Criativos (item 172): desempenho individual dos anúncios da Meta
+# lido como gancho / corpo / CTA, cruzado com a jornada do CRM.
+class Api::V1::Accounts::Crm::CreativesController < Api::V1::Accounts::BaseController
+  include Crm::AccessControl
+  include Crm::ResolvesPeriod
+  # gaveta Marketing (20/09): Relatórios OU Marketing ('pages') liberam
+
+  RUNNING_STALE = 30.minutes
+
+  # GET /crm/creatives?preset=month[&campaign_id=&fmt=&status=&q=&sort=]
+  # (fmt, não format: params[:format] é o formato da requisição nas rotas da API)
+  def index
+    render json: analytics.overview(
+      campaign_id: params[:campaign_id].presence, format: params[:fmt].presence,
+      status: params[:status].presence, query: params[:q].presence, sort: params[:sort].presence || 'spend'
+    ).merge(base_json)
+  end
+
+  # GET /crm/creatives/:ad_id
+  def show
+    render json: analytics.detail(params[:ad_id]).merge(base_json)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'anúncio não encontrado' }, status: :not_found
+  end
+
+  # GET /crm/creatives/:ad_id/timeline[?preset=year] — item 299: todas as fontes no mesmo eixo de tempo
+  def timeline
+    Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
+    render json: analytics.timeline(params[:ad_id]).merge(base_json)
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'anúncio não encontrado' }, status: :not_found
+  end
+
+  # GET /crm/creatives/history — recordes (dia/semana/mês), campeões por mês e de todos os tempos
+  def history
+    records = Crm::CreativeRecords.new(account: Current.account).call
+    render json: records.merge(assets_months: analytics.assets_history(months: params[:months].to_i.clamp(1, 12).then { |m| m.zero? ? 6 : m }),
+                               targets: Crm::CreativeTargets.for(Current.account))
+  end
+
+  # GET /crm/creatives/assets — ranking de ganchos, corpos e CTAs (criativo dinâmico)
+  def assets
+    render json: analytics.assets_for(nil).merge(base_json)
+  end
+
+  # POST /crm/creatives/sync[?days=30] — atualiza agora (fila low, trava por conta)
+  def sync
+    return render json: { error: 'Meta Ads não configurado (token e conta de anúncios).' }, status: :unprocessable_entity unless graph.configured?
+    return render json: { error: 'Atualização já em andamento.', sync: sync_state }, status: :conflict if running?
+    return render json: { error: 'Aguarde alguns minutos entre atualizações.', sync: sync_state }, status: :too_many_requests if too_soon?
+
+    days = params[:days].to_i.clamp(0, Crm::AdInsightsSyncService::MAX_DAYS)
+    Crm::AdInsightsSyncJob.perform_later(Current.account.id, days.positive? ? days : nil)
+    render json: { enqueued: true, sync: sync_state }
+  end
+
+  # POST /crm/creatives/load_history — carga COMPLETA (até 37 meses, em janelas),
+  # só admin; roda em segundo plano e o progresso aparece em sync_status
+  def load_history
+    return render json: { error: 'Só administrador carrega o histórico completo.' }, status: :forbidden unless Current.account_user&.administrator?
+    return render json: { error: 'Meta Ads não configurado (token e conta de anúncios).' }, status: :unprocessable_entity unless graph.configured?
+    return render json: { error: 'Atualização já em andamento.', sync: sync_state }, status: :conflict if running?
+
+    Crm::AdInsightsSyncJob.perform_later(Current.account.id, Crm::AdInsightsSyncService::MAX_DAYS)
+    render json: { enqueued: true, days: Crm::AdInsightsSyncService::MAX_DAYS, sync: sync_state }
+  end
+
+  # item 181: todos os vídeos pendentes; :ad_id/transcribe = um só
+  # (achado #410: mesmo limite do job por vez — o botão não enfileira mais do que a carga/cron)
+  def transcribe_videos
+    count = Crm::AdVideoTranscribeJob.enqueue_pending(Current.account, limit: Crm::AdVideoTranscribeJob::LIMIT)
+    render json: { enqueued: count, limit: Crm::AdVideoTranscribeJob::LIMIT }
+  end
+
+  def transcribe
+    creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
+    refusal = transcribe_refusal(creative)
+    return render(**refusal) if refusal
+
+    creative.video_upload.attach(params[:video]) if params[:video].present?
+    creative.queue_transcript!(link: params[:video_link].to_s.strip)
+    Crm::AdVideoTranscribeJob.perform_later(creative.id)
+    render json: { enqueued: true, transcript: creative.transcript }
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'anúncio não encontrado' }, status: :not_found
+  end
+
+  # POST /crm/creatives/:ad_id/share[?share_period=year|last90|screen][&preset=|from=&to=][&finance=1] — item 287: link SÓ DE LEITURA
+  # da análise deste anúncio neste período (token assinado, vale 30 dias; endereço curto /c/<código> — item 302)
+  def share
+    creative = Crm::AdCreative.find_by!(account_id: Current.account.id, ad_id: params[:ad_id].to_s)
+    since, until_d, period = Crm::CreativeShareLink.period_for(
+      params[:share_period], screen_since: since_date, screen_until: until_date, today: Crm::ResolvesPeriod::PERIOD_TZ.today
+    )
+    link = Crm::CreativeShareLink.generate(account: Current.account, ad_id: creative.ad_id, since_date: since, until_date: until_d,
+                                           finance: ActiveModel::Type::Boolean.new.cast(params[:finance]) == true)
+    render json: link.slice(:url, :expires_at, :expires_label, :finance, :finance_label)
+                     .merge(since: since, until: until_d, period: period, period_label: Crm::CreativeShareLink::PERIODS[period])
+  rescue ActiveRecord::RecordNotFound
+    render json: { error: 'anúncio não encontrado' }, status: :not_found
+  end
+
+  def sync_status
+    render json: { sync: sync_state, configured: graph.configured?, storage: storage_summary }
+  end
+
+  # GET /crm/creatives/export[?preset=|from=&to=] — CSV do que está guardado aqui
+  def export
+    range = params[:all].present? ? [nil, nil] : [since_date, until_date]
+    exporter = Crm::CreativesExport.new(account: Current.account, since_date: range.first, until_date: range.last)
+    send_data exporter.call, filename: exporter.filename, type: 'text/csv; charset=utf-8'
+  end
+
+  private
+
+  # Motivo de recusar o pedido de transcrição de UM vídeo (nil = pode seguir):
+  # material inválido → 422; achado #410: sem arquivo nem link novo (tela
+  # desatualizada clicando por cima de um vídeo já na fila/transcrevendo há
+  # pouco) → 409 e não enfileira de novo, o primeiro job termina sozinho. Com
+  # material novo é retentativa de propósito e passa.
+  def transcribe_refusal(creative)
+    problem = manual_video_problem(creative)
+    return { json: { error: problem }, status: :unprocessable_entity } if problem
+    return unless transcript_busy?(creative)
+
+    { json: { error: "Este vídeo já está na fila/transcrevendo — volte em alguns minutos#{busy_until(creative)}.",
+              transcript: creative.transcript },
+      status: :conflict }
+  end
+
+  # se o trabalho parou no meio (deploy, falta de memória), a trava vence
+  # sozinha depois de STUCK_AFTER — a mensagem diz o horário em que libera
+  def busy_until(creative)
+    marked_at = Time.zone.parse(creative.transcript['status_at'].to_s)
+    return '' unless marked_at
+
+    frees_at = (marked_at + Crm::AdVideoTranscribeJob::STUCK_AFTER).in_time_zone(Crm::ResolvesPeriod::PERIOD_TZ)
+    " (se não terminar, libera às #{frees_at.strftime('%H:%M')})"
+  rescue ArgumentError
+    ''
+  end
+
+  def transcript_busy?(creative)
+    params[:video].blank? && params[:video_link].to_s.strip.blank? && creative.transcript_in_progress?
+  end
+
+  # item 293: arquivo enviado ou link colado (sem eles, vale o vídeo da Meta)
+  def manual_video_problem(creative) # rubocop:disable Metrics/CyclomaticComplexity
+    file = params[:video]
+    link = params[:video_link].to_s.strip
+    return Crm::AdVideoInput.link_problem(link) if link.present?
+    return 'Só anúncios em vídeo têm transcrição.' if file.blank? && !creative.transcribable?
+    return nil if file.blank?
+    return 'Envie um arquivo de vídeo (mp4, mov, webm…).' unless file.respond_to?(:content_type) && file.content_type.to_s.start_with?('video/')
+    return 'Vídeo acima de 200 MB.' if file.size > Crm::AdVideoInput::UPLOAD_MAX
+
+    nil
+  end
+
+  def analytics
+    @analytics ||= Crm::CreativeAnalyticsService.new(account: Current.account, since_date: since_date, until_date: until_date)
+  end
+
+  def graph
+    @graph ||= Crm::MetaGraph.new(account: Current.account)
+  end
+
+  def base_json
+    { configured: graph.configured?, simulated: graph.simulate?, ad_account_id: graph.ad_account_id,
+      since: since_date, until: until_date, sync: sync_state, targets: Crm::CreativeTargets.for(Current.account),
+      storage: storage_summary }
+  end
+
+  # o que é NOSSO: quanto histórico já está guardado aqui, independente da Meta
+  def storage_summary
+    insights = Crm::AdInsight.where(account_id: Current.account.id)
+    creatives = Crm::AdCreative.where(account_id: Current.account.id)
+    { ads: creatives.count, gone_on_meta: creatives.where(effective_status: %w[DELETED ARCHIVED]).count,
+      rows: insights.count, days: insights.distinct.count(:date), since: insights.minimum(:date), until: insights.maximum(:date),
+      thumbnails: creatives.joins(:thumbnail_attachment).count, max_days: Crm::AdInsightsSyncService::MAX_DAYS }
+  end
+
+  def sync_state
+    state = Crm::AdInsightsSyncService.state(Current.account)
+    state.merge('running' => running?)
+  end
+
+  def running?
+    started = Crm::AdInsightsSyncService.state(Current.account)['running_since']
+    started.present? && Time.zone.parse(started) > RUNNING_STALE.ago
+  rescue ArgumentError
+    false
+  end
+
+  def too_soon?
+    synced = Crm::AdInsightsSyncService.state(Current.account)['synced_at']
+    synced.present? && Time.zone.parse(synced) > Crm::AdInsightsSyncService::MIN_MANUAL_GAP.ago && !params[:force]
+  rescue ArgumentError
+    false
+  end
+
+  def period_dates
+    @period_dates ||= (standard_period_range || []).map(&:to_date)
+  end
+
+  def since_date
+    @since_date ||= period_dates.first || (Date.current - 29)
+  end
+
+  def until_date
+    @until_date ||= period_dates.last || Date.current
+  end
+end

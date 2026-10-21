@@ -8,6 +8,8 @@
 # contato já tem (find_or_create_by). Mover card registra o StageLog normal.
 class Crm::BatchUpdateJob < ApplicationJob
   queue_as :low
+  # 🏷️ item 322: tudo o que este lote cria ou move nasce carimbado como CARGA (fora dos indicadores de "Entrou em…")
+  around_perform { |_job, block| Crm::Stamp.with(via: 'carga', &block) }
 
   def perform(account_id, filters = {}, actions = {})
     account = Account.find_by(id: account_id)

@@ -38,6 +38,7 @@ const handleError = () => {
       v-else
       class="object-cover w-full h-full skip-context-menu"
       :src="attachment.dataUrl"
+      :title="attachment.transcribedText || ''"
       @error="handleError"
     />
   </div>

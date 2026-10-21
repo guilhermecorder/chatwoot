@@ -1,5 +1,7 @@
 class Webhooks::WhatsappEventsJob < MutexApplicationJob
-  queue_as :low
+  # 🚦 CEVICO Rodada 6 (RESIL-1): era :low (fundo da fila). A mensagem do
+  # paciente entrando no sistema não pode esperar lote de robô nem relatório.
+  queue_as :medium
   # Retry budget (19 × 2s = 38s) must exceed the 30s lock TTL set in `perform`, otherwise
   # a webhook that arrives just after the lock is acquired can exhaust retries before the
   # holder finishes and silently drop its message.
@@ -153,11 +155,11 @@ class Webhooks::WhatsappEventsJob < MutexApplicationJob
   end
 
   def get_channel_from_wb_payload(wb_params)
-    phone_number = "+#{wb_params[:entry].first[:changes].first.dig(:value, :metadata, :display_phone_number)}"
-    phone_number_id = wb_params[:entry].first[:changes].first.dig(:value, :metadata, :phone_number_id)
-    channel = Channel::Whatsapp.find_by(phone_number: phone_number)
-    # validate to ensure the phone number id matches the whatsapp channel
-    return channel if channel && channel.provider_config['phone_number_id'] == phone_number_id
+    metadata = wb_params[:entry].first[:changes].first.dig(:value, :metadata) || {}
+    Whatsapp::WebhookChannelFinderService.new(
+      display_phone_number: metadata[:display_phone_number],
+      phone_number_id: metadata[:phone_number_id]
+    ).perform
   end
 end
 

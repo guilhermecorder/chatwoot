@@ -43,11 +43,22 @@ class Crm::Form < ApplicationRecord
   has_many :responses, class_name: 'Crm::FormResponse', foreign_key: :crm_form_id, dependent: :destroy
 
   validates :name, presence: true
-  validates :slug, presence: true, uniqueness: true
+  validates :slug, presence: true, uniqueness: true,
+                   format: { with: /\A[a-z0-9-]+\z/, message: 'só aceita letras minúsculas, números e hífens' } # rubocop:disable Rails/I18nLocaleTexts
 
   before_validation :ensure_slug, on: :create
+  before_validation :normalize_slug
+  # 🔐 achado #118: o id '_cevico' é reservado para a marca "não confirmada"
+  # dentro das respostas — nenhuma pergunta pode usar esse id
+  validate :questions_sem_id_reservado
 
   QUESTION_TYPES = %w[choice multi text scale yesno message].freeze
+
+  # 🔐 Rodada 4 (achado #119): teto diário GLOBAL de pacientes NOVOS criados
+  # pelo link limpo de cada formulário (telefone desconhecido). Passou disso,
+  # o envio é recusado até o dia seguinte e o administrador recebe tarefa 🔴.
+  # Ver Crm::FormVerification.new_contact_allowed?
+  DAILY_NEW_CONTACTS = ENV.fetch('CEVICO_FORM_DAILY_NEW_CONTACTS', '200').to_i
 
   # incremento atômico da retenção ({'open'=>n, 'q:<id>'=>n, 'done'=>n}) —
   # SQL puro para aguentar respostas simultâneas sem perder contagem
@@ -63,17 +74,29 @@ class Crm::Form < ApplicationRecord
 
   # link público único por contato: o token assinado identifica
   # formulário + contato sem expor nenhum id
+  # Segurança (rodada 171): o link vale 90 dias. Links enviados ANTES desta
+  # rodada não têm validade gravada — continuam aceitos (fallback) para não
+  # quebrar o WhatsApp de quem já recebeu; trocar por token novo é automático.
+  LINK_TTL = 90.days
+
   def public_link_for(contact)
     token = Rails.application.message_verifier(:cevico_form).generate(
-      { form_id: id, account_id: account_id, contact_id: contact&.id }
+      { form_id: id, account_id: account_id, contact_id: contact&.id }, purpose: :public_link, expires_in: LINK_TTL
     )
     "#{base_url}/forms/#{slug}/#{CGI.escape(token)}"
   end
 
   def self.verify_token(token)
-    Rails.application.message_verifier(:cevico_form).verify(token)
-  rescue ActiveSupport::MessageVerifier::InvalidSignature
+    verifier = Rails.application.message_verifier(:cevico_form)
+    verifier.verified(token, purpose: :public_link) || verifier.verified(token)
+  rescue ActiveSupport::MessageVerifier::InvalidSignature, ArgumentError
     nil
+  end
+
+  # link LIMPO, amigável de mandar no WhatsApp (sem token): o paciente
+  # se identifica com nome + WhatsApp dentro do próprio formulário
+  def public_short_link
+    "#{base_url}/forms/#{slug}"
   end
 
   private
@@ -83,6 +106,18 @@ class Crm::Form < ApplicationRecord
 
     base = name.to_s.parameterize.presence || 'form'
     self.slug = "#{base}-#{SecureRandom.alphanumeric(6).downcase}"
+  end
+
+  # o admin edita o "endereço do link" livremente — aqui vira slug limpo
+  # ("Pré Avaliação" → "pre-avaliacao")
+  def normalize_slug
+    self.slug = slug.to_s.parameterize if slug.present?
+  end
+
+  def questions_sem_id_reservado
+    return unless Array(questions).any? { |q| q.is_a?(Hash) && q['id'].to_s == Crm::FormResponse::META_ID }
+
+    errors.add(:questions, "o id '#{Crm::FormResponse::META_ID}' é reservado pelo sistema e não pode ser usado em pergunta")
   end
 
   def base_url

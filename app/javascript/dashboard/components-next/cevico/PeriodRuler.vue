@@ -1,11 +1,18 @@
 <script setup>
-// Régua de período PADRÃO dos dashboards (06/08):
-//   Hoje | Ontem | Últimos 7 dias | Este mês | Este ano | Personalizado
+// Régua de período PADRÃO do sistema (06/08; item 321 — 03/10: a mesma em
+// todos os ambientes):
+//   Hoje | Ontem | Últimos 7 dias | Semana passada | Este mês | Mês passado |
+//   90 dias | Este ano | Personalizado
 //
 // v-model = { preset, from, to } — from/to SEMPRE preenchidos (YYYY-MM-DD),
 // mesmo nos presets, para telas cujo backend só entende De/Até. Backends
 // migrados usam o preset direto (concern Crm::ResolvesPeriod).
 import { ref, computed, watch } from 'vue';
+import {
+  PERIOD_PRESETS,
+  periodDateStr,
+  periodRangeFor,
+} from 'dashboard/helper/cevicoPeriod';
 
 const props = defineProps({
   modelValue: {
@@ -14,68 +21,20 @@ const props = defineProps({
   },
   // esconde pílulas específicas quando uma tela não suporta (evitar!)
   hiddenPresets: { type: Array, default: () => [] },
+  // 🍎 formato novo (rodada 161): a régua veste o segmentado de vidro do
+  // kit .cv-* (cor do dia). Só o Meu Painel liga; os relatórios seguem iguais.
+  glass: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['update:modelValue']);
 
-const ALL_PRESETS = [
-  { key: 'today', label: 'Hoje' },
-  { key: 'yesterday', label: 'Ontem' },
-  { key: 'last7', label: 'Últimos 7 dias' },
-  { key: 'last_week', label: 'Semana passada' },
-  { key: 'month', label: 'Este mês' },
-  { key: 'last_month', label: 'Mês passado' },
-  { key: 'year', label: 'Este ano' },
-];
-
+// item 321: a lista é UMA só para o sistema inteiro (helper/cevicoPeriod.js)
 const presets = computed(() =>
-  ALL_PRESETS.filter(p => !props.hiddenPresets.includes(p.key))
+  PERIOD_PRESETS.filter(p => !props.hiddenPresets.includes(p.key))
 );
 
-const pad = n => String(n).padStart(2, '0');
-const dateStr = d =>
-  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-
-const rangeFor = key => {
-  const now = new Date();
-  const today = dateStr(now);
-  if (key === 'yesterday') {
-    const y = new Date(now);
-    y.setDate(y.getDate() - 1);
-    const d = dateStr(y);
-    return { from: d, to: d };
-  }
-  if (key === 'last7') {
-    const s = new Date(now);
-    s.setDate(s.getDate() - 6);
-    return { from: dateStr(s), to: today };
-  }
-  if (key === 'last_week') {
-    // semana passada = segunda a domingo ANTERIORES (fuso local)
-    const dow = (now.getDay() + 6) % 7; // seg=0 … dom=6
-    const end = new Date(now);
-    end.setDate(now.getDate() - dow - 1); // domingo passado
-    const start = new Date(end);
-    start.setDate(end.getDate() - 6); // segunda passada
-    return { from: dateStr(start), to: dateStr(end) };
-  }
-  if (key === 'month') {
-    return {
-      from: dateStr(new Date(now.getFullYear(), now.getMonth(), 1)),
-      to: today,
-    };
-  }
-  if (key === 'last_month') {
-    return {
-      from: dateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)),
-      to: dateStr(new Date(now.getFullYear(), now.getMonth(), 0)),
-    };
-  }
-  if (key === 'year') {
-    return { from: dateStr(new Date(now.getFullYear(), 0, 1)), to: today };
-  }
-  return { from: today, to: today }; // today
-};
+const dateStr = periodDateStr;
+const rangeFor = periodRangeFor;
 
 const activePreset = computed(() => props.modelValue?.preset ?? 'month');
 
@@ -118,24 +77,36 @@ const clearCustom = () => {
 </script>
 
 <template>
+  <!-- item 321: com 9 opções a régua QUEBRA em duas linhas quando não cabe
+       (no celular continua rolando para o lado) -->
   <div
-    class="inline-flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5 flex-nowrap overflow-x-auto md:overflow-visible"
+    class="inline-flex items-center gap-0.5 max-w-full flex-nowrap overflow-x-auto md:flex-wrap md:overflow-visible"
+    :class="
+      glass
+        ? 'cv-seg'
+        : 'min-h-[34px] py-0.5 bg-n-solid-2 border border-n-weak rounded-xl px-0.5'
+    "
   >
     <span
       class="i-lucide-calendar-clock text-sm ml-2 mr-0.5 flex-shrink-0"
-      style="color: #7c3aed"
+      :style="{ color: glass ? 'var(--cv)' : '#7c3aed' }"
     />
     <button
       v-for="p in presets"
       :key="p.key"
-      class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0"
+      class="text-xs font-medium transition-colors whitespace-nowrap flex-shrink-0"
       :class="
-        activePreset === p.key
-          ? 'text-white'
-          : 'text-n-slate-11 hover:bg-n-alpha-1'
+        glass
+          ? ['cv-seg-item', activePreset === p.key ? 'cv-seg-on' : '']
+          : [
+              'h-7 px-2.5 rounded-lg',
+              activePreset === p.key
+                ? 'text-white'
+                : 'text-n-slate-11 hover:bg-n-alpha-1',
+            ]
       "
       :style="
-        activePreset === p.key
+        !glass && activePreset === p.key
           ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' }
           : {}
       "
@@ -146,14 +117,19 @@ const clearCustom = () => {
 
     <div class="relative flex-shrink-0">
       <button
-        class="h-7 px-2.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+        class="text-xs font-medium transition-colors whitespace-nowrap"
         :class="
-          activePreset === 'custom'
-            ? 'text-white'
-            : 'text-n-slate-11 hover:bg-n-alpha-1'
+          glass
+            ? ['cv-seg-item', activePreset === 'custom' ? 'cv-seg-on' : '']
+            : [
+                'h-7 px-2.5 rounded-lg',
+                activePreset === 'custom'
+                  ? 'text-white'
+                  : 'text-n-slate-11 hover:bg-n-alpha-1',
+              ]
         "
         :style="
-          activePreset === 'custom'
+          !glass && activePreset === 'custom'
             ? { background: 'linear-gradient(135deg, #0F5FA6, #7C3AED)' }
             : {}
         "
@@ -164,13 +140,23 @@ const clearCustom = () => {
       </button>
       <div
         v-if="showCustom"
-        class="absolute top-9 right-0 z-50 bg-white dark:bg-n-solid-2 border border-n-weak rounded-2xl shadow-xl p-3 flex items-center gap-2"
+        class="absolute top-9 right-0 z-50 p-3 flex items-center gap-2"
+        :class="
+          glass
+            ? 'cv-pop'
+            : 'bg-white dark:bg-n-solid-2 border border-n-weak rounded-2xl shadow-xl'
+        "
         @click.stop
       >
         <input
           v-model="customFrom"
           type="date"
-          class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+          class="h-8 text-xs text-n-slate-12"
+          :class="
+            glass
+              ? 'cv-input !h-8 !rounded-full'
+              : 'border border-n-weak rounded-full px-2.5 bg-n-solid-1'
+          "
           style="width: 8.4rem"
           title="De"
           @change="applyCustom"
@@ -179,7 +165,12 @@ const clearCustom = () => {
         <input
           v-model="customTo"
           type="date"
-          class="h-8 text-xs border border-n-weak rounded-full px-2.5 bg-n-solid-1 text-n-slate-12"
+          class="h-8 text-xs text-n-slate-12"
+          :class="
+            glass
+              ? 'cv-input !h-8 !rounded-full'
+              : 'border border-n-weak rounded-full px-2.5 bg-n-solid-1'
+          "
           style="width: 8.4rem"
           title="Até (vazio = hoje)"
           @change="applyCustom"

@@ -5,6 +5,22 @@
 # dado novo: é o que o sistema já guarda, costurado pelo contact_id
 # unificado da Fase 0.
 class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
+  # 🔐 achado #307: respostas de formulário só com acesso clínico; dinheiro
+  # (fechamento, valor do card) só admin ou quem tem o Financeiro
+  include Crm::ClinicalAccessGate
+
+  # 🔎 item 346: GET /crm/patients/search?q= — pacientes para as barras de
+  # pesquisa e os formulários (nome sem acento, telefone com/sem 9)
+  def search
+    render json: { payload: Crm::PatientSearch.new(account: Current.account, query: params[:q], limit: params[:limit] || 8).call }
+  end
+
+  # GET /crm/patients/phone_owner?phone= — "este telefone já é de X, usar?"
+  def phone_owner
+    contact = Crm::PatientSearch.phone_owner(Current.account, params[:phone])
+    render json: { payload: contact && { id: contact.id, name: contact.name, phone_number: contact.phone_number } }
+  end
+
   def show
     contact = Current.account.contacts.find(params[:id])
     render json: {
@@ -13,8 +29,26 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       timeline: timeline(contact),
       label_events: label_events(contact),
       automations: automations(contact),
-      updates: updates(contact)
+      updates: updates(contact),
+      # 🏥 ficha cirúrgica do OftalmoFácil (item 157) — só admin vê o dinheiro
+      surgeries: Current.account_user.administrator? ? oftalmofacil_surgeries(contact) : nil
     }
+  end
+
+  def oftalmofacil_surgeries(contact)
+    doctors = (CrmSetting.find_by(account: Current.account)&.agenda_config || {}).dig('oftalmofacil', 'doctors') || {}
+    Crm::OftalmofacilSurgery.where(account: Current.account, contact_id: contact.id)
+                            .order(surgery_date: :desc, id: :desc).limit(30).map do |s|
+      {
+        id: s.id, date: s.surgery_date&.iso8601, hour: s.surgery_hour, status: s.status_kind, status_label: s.status_kind_label,
+        procedure: s.procedure_name, procedure_type: s.procedure_type, eye: s.eye, clinic: s.clinic_name,
+        doctor_crm: s.doctor_crm, doctor: doctors[s.doctor_crm.to_s].presence || (s.doctor_crm.present? ? "CRM #{s.doctor_crm}" : nil),
+        amount: s.amount&.to_f, clinic_price: s.clinic_price&.to_f, profit: s.profit&.to_f, rebate: s.rebate&.to_f,
+        resultado: s.resultado.round(2), paid_amount: s.paid_amount&.to_f,
+        paid: s.paid_amount.to_f.positive? && s.paid_amount.to_f >= s.amount.to_f * 0.99,
+        cpf: s.patient_cpf, match_via: s.match_via, applied_action: s.applied_action, synced_at: s.updated_at&.iso8601
+      }
+    end
   end
 
   # POST /crm/patients/:id/update_profile — sexo/nascimento do paciente
@@ -40,7 +74,7 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
 
   # ---------- identidade ----------
 
-  def identity(contact) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+  def identity(contact) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     profile = patient_profile(contact)
     {
       id: contact.id,
@@ -52,8 +86,15 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       created_at: contact.created_at,
       gender: profile[:gender],
       age: profile[:age],
+      # 🔐 achado #307: true = os valores vieram em branco por falta do Financeiro
+      money_restricted: !money_visible?,
       origin: contact.additional_attributes&.dig('meta_ads')
                      &.slice('headline', 'ad_name', 'source_url', 'thumbnail_url', 'captured_at'),
+      # 👪 item 346: quem agendou para quem (os dois lados ficam amarrados)
+      scheduled_by: contact.additional_attributes&.dig('agendado_por'),
+      scheduled_for: Array(contact.additional_attributes&.dig('agendou_para')),
+      # ⚠️ item 346: alertas de conferência (possível duplicado, nome diferente…)
+      review: Crm::PatientReview.list(contact),
       cards: patient_cards(contact).map do |card|
         {
           id: card.id,
@@ -61,12 +102,17 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
           pipeline: card.pipeline.name,
           stage: card.stage&.name,
           stage_color: card.stage&.color,
-          value: card.value,
+          value: card_value(card),
           assignee: card.assignee&.name,
           moved_at: card.stage_moved_at
         }
       end
     }
+  end
+
+  # 🔐 achado #307: valor do card só para admin ou quem tem o Financeiro
+  def card_value(card)
+    money_visible? ? card.value : nil
   end
 
   def patient_cards(contact)
@@ -228,7 +274,7 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
     card_ids = patient_cards(contact).map(&:id)
     return [] if card_ids.empty?
 
-    Crm::StageLog.where(crm_contact_id: card_ids, event_type: 'entered')
+    Crm::StageLog.where(crm_contact_id: card_ids, event_type: [Crm::StageLogBulk::ENTERED, Crm::StageLogBulk::BULK])
                  .order(entered_at: :asc)
                  .map do |log|
       {
@@ -275,6 +321,10 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
     closing = contact.additional_attributes&.dig('surgery_closing')
     return [] if closing.blank? || closing['at'].blank?
 
+    # 🔐 achado #307: sem o Financeiro a jornada mostra que FECHOU, sem valor,
+    # forma de pagamento nem a observação (que costuma trazer o valor)
+    return [{ type: 'fechamento', at: closing['at'], surgery_date: closing['surgery_date'] }] unless money_visible?
+
     [{
       type: 'fechamento',
       at: closing['at'],
@@ -289,7 +339,10 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
     nps = contact.additional_attributes&.dig('nps')
     return [] if nps.blank? || nps['at'].blank?
 
-    [{ type: 'nps', at: nps['at'], score: nps['score'], comment: nps['comment'] }]
+    # 🔐 achado #307: o comentário livre do NPS pode falar da saúde do paciente —
+    # só com acesso clínico (lado mais fechado; decisão final com o Guilherme)
+    [{ type: 'nps', at: nps['at'], score: nps['score'],
+       comment: clinical_access_view? ? nps['comment'] : nil, comment_restricted: !clinical_access_view? }]
   end
 
   def form_events(contact)
@@ -301,7 +354,11 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
         at: resp.completed_at || resp.created_at,
         form: resp.form&.name,
         completed: resp.completed_at.present?,
-        answers: Array(resp.answers)
+        verified: resp.verified?, # 🔐 achado #118: false = link limpo em cadastro existente
+        informed_name: resp.meta['informed_name'],
+        # 🔐 achado #307: respostas são dado de saúde (LGPD) — só com acesso clínico
+        restricted: !clinical_access_view?,
+        answers: clinical_access_view? ? resp.answer_items : []
       }
     end
   end
@@ -343,8 +400,9 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       missed: consultas.count { |t| t.attendance == 'missed' },
       rescheduled: consultas.sum(&:rescheduled_count),
       surgeries: cirurgias.size,
-      value: closing['value'].presence || patient_cards(contact).filter_map(&:value).max,
-      payment: closing['payment'],
+      # 🔐 achado #307: dinheiro só para admin ou quem tem o Financeiro
+      value: money_visible? ? (closing['value'].presence || patient_cards(contact).filter_map(&:value).max) : nil,
+      payment: money_visible? ? closing['payment'] : nil,
       nps: contact.additional_attributes&.dig('nps', 'score')
     }
   end

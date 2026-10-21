@@ -99,6 +99,51 @@ class CevicoPage < ApplicationRecord
 
   before_validation :generate_slug, on: :create
 
+  # 🔒 destino do botão (auditoria rodada 2, #20/#150/#399/#428): a página
+  # pública redireciona para o cta_url sem perguntar nada — então só entra
+  # WhatsApp (wa.me, api.whatsapp.com, whatsapp:), caminho do próprio site
+  # ("/forms/…") ou https de um domínio da clínica (domínio público geral,
+  # domínio da empresa, host do sistema e a lista extra CEVICO_CTA_HOSTS).
+  # Vale quando o campo MUDA: página antiga com valor fora da régua continua
+  # salvando o resto (comentários, IA) até alguém trocar o link.
+  CTA_WHATSAPP = %r{\A(https://(wa\.me|api\.whatsapp\.com)(/|\z)|whatsapp:)}i
+  CTA_MESSAGE = 'só aceita link do WhatsApp (wa.me) ou endereço https do site da clínica'.freeze
+
+  # grava sem espaços nas pontas: ' https://wa.me/55 ' passava na régua mas o
+  # clique público não reconhecia o WhatsApp e mandava para um link quebrado
+  before_validation { self.cta_url = cta_url.to_s.strip.presence if will_save_change_to_cta_url? }
+  validate :cta_url_allowed, if: -> { cta_url.present? && will_save_change_to_cta_url? }
+
+  def self.cta_url_allowed?(url, account: nil)
+    url = url.to_s.strip
+    return true if url.blank? || url.match?(CTA_WHATSAPP) || local_path?(url)
+
+    host = https_host(url)
+    host.present? && clinic_hosts(account).any? { |allowed| host == allowed || host.end_with?(".#{allowed}") }
+  end
+
+  # caminho do próprio site ("/forms/x"); "//outro.com" NÃO é caminho
+  def self.local_path?(url)
+    url.start_with?('/') && !url.start_with?('//')
+  end
+
+  # host de um link https (sem "www."); nil para qualquer outra coisa
+  def self.https_host(url)
+    uri = URI.parse(url)
+    uri.is_a?(URI::HTTPS) ? uri.host.to_s.downcase.delete_prefix('www.').presence : nil
+  rescue URI::InvalidURIError
+    nil
+  end
+
+  # domínios da clínica onde o botão pode levar o paciente
+  def self.clinic_hosts(account = nil)
+    extra = ENV.fetch('CEVICO_CTA_HOSTS', '').split(',')
+    [Cevico::PublicSite.host, Cevico::PublicSite.app_host,
+     (account && Cevico::Company.for(account).public_host), *extra]
+      .filter_map { |h| Cevico::PublicSite.normalize(h.to_s)&.downcase&.delete_prefix('www.') }
+      .uniq
+  end
+
   scope :published, -> { where(status: 'published') }
 
   def published?
@@ -109,12 +154,17 @@ class CevicoPage < ApplicationRecord
   # Link secreto do admin: quem tem o link vê a página antes de publicar,
   # em qualquer domínio, sem login. O token é assinado pelo segredo do
   # servidor — não dá pra forjar nem adivinhar.
+  # Segurança (rodada 171): os links têm VALIDADE — prévia 30 dias, retoque
+  # 7 dias — e finalidade própria; um link vazado deixa de valer sozinho.
+  PREVIEW_TTL = 30.days
+  EDIT_TTL = 7.days
+
   def preview_token
-    Rails.application.message_verifier('cevico-page-preview').generate(id)
+    Rails.application.message_verifier('cevico-page-preview').generate(id, purpose: :preview, expires_in: PREVIEW_TTL)
   end
 
   def self.find_by_preview_token(token)
-    id = Rails.application.message_verifier('cevico-page-preview').verify(token.to_s)
+    id = Rails.application.message_verifier('cevico-page-preview').verify(token.to_s, purpose: :preview)
     find_by(id: id)
   rescue ActiveSupport::MessageVerifier::InvalidSignature
     nil
@@ -124,11 +174,11 @@ class CevicoPage < ApplicationRecord
   # link da prévia só OLHA; editar inline exige este token, que apenas o
   # time logado recebe (vem no builder_url do admin)
   def edit_token
-    Rails.application.message_verifier('cevico-page-edit').generate(id)
+    Rails.application.message_verifier('cevico-page-edit').generate(id, purpose: :edit, expires_in: EDIT_TTL)
   end
 
   def valid_edit_token?(token)
-    Rails.application.message_verifier('cevico-page-edit').verify(token.to_s) == id
+    Rails.application.message_verifier('cevico-page-edit').verify(token.to_s, purpose: :edit) == id
   rescue ActiveSupport::MessageVerifier::InvalidSignature
     false
   end
@@ -217,10 +267,18 @@ class CevicoPage < ApplicationRecord
     (['a'] + active_variants.pluck('key')).sample
   end
 
+  # item 306: procura entre TODAS as variações — ao vivo só entra variação
+  # ativa (sorteio/?v= validados); a prévia mostra também as pausadas
   def variant_field(field)
     return nil if serving_variant.blank? || serving_variant == 'a'
 
-    active_variants.find { |v| v['key'] == serving_variant }&.dig(field).presence
+    Array(ab_variants).find { |v| v['key'] == serving_variant }&.dig(field).presence
+  end
+
+  # 🧪 item 306: página HTML ANEXADA em teste — o título da variação entra no
+  # lugar do <h1> da primeira dobra (original = HTML como foi anexado)
+  def custom_html_for_serving
+    Cevico::HeadlineSwap.call(custom_html.to_s, variant_field('title'))
   end
 
   def display_title
@@ -233,16 +291,27 @@ class CevicoPage < ApplicationRecord
 
   AB_KINDS = %w[view cta next].freeze
 
-  # placar consolidado do teste (todas as datas do daily_stats)
+  # placar consolidado do teste (todas as datas do daily_stats) + item 306:
+  # 'lead' = cliques que viraram CONVERSA na caixa (Protocolo casado)
   def ab_results
     keys = ['a'] + Array(ab_variants).pluck('key')
-    totals = keys.index_with { { 'view' => 0, 'cta' => 0, 'next' => 0 } }
+    totals = keys.index_with { { 'view' => 0, 'cta' => 0, 'next' => 0, 'lead' => 0 } }
     (daily_stats || {}).each_value do |day|
       keys.each do |key|
         AB_KINDS.each { |kind| totals[key][kind] += day["#{kind}_#{key}"].to_i }
       end
     end
+    ab_leads.each { |key, count| totals[key]['lead'] = count if totals.key?(key) }
     totals
+  end
+
+  # o clique no WhatsApp carrega a letra da variação no Protocolo; quando o
+  # paciente manda a mensagem, o Protocolo casa com o contato = lead
+  def ab_leads
+    return {} if ab_variants.blank?
+
+    refs.where.not(contact_id: nil).where("source_data->>'variant' IS NOT NULL")
+        .group(Arel.sql("source_data->>'variant'")).count
   end
 
   # ── Funil + rastreamento (pedido 17/07) ─────────────────────────────
@@ -302,6 +371,10 @@ class CevicoPage < ApplicationRecord
   end
 
   private
+
+  def cta_url_allowed
+    errors.add(:cta_url, CTA_MESSAGE) unless self.class.cta_url_allowed?(cta_url, account: account)
+  end
 
   # marca de qual página do funil o visitante veio ({"de" => {slug => n}})
   def record_origin(day, source)

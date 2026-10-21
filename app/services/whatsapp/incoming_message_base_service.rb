@@ -99,7 +99,30 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
       error = status[:errors]&.first
       message.external_error = "#{error[:code]}: #{error[:title]}"
     end
+    # 💸 item 303 (30/09): a Meta diz em cada status se a mensagem foi COBRADA
+    # e em qual categoria (service/utility/marketing) — fica na própria
+    # mensagem para a tela Gasto do WhatsApp (merge, nunca substitui o resto)
+    store_billing(message, status[:pricing]) if status[:pricing].present?
     message.save!
+    # 🚦 Saúde do WhatsApp (16/10): 131050 = parou o marketing (certo);
+    # entregue de novo = sai da suspeita de bloqueio
+    Crm::StopSignals.on_status_change(message)
+  end
+
+  # Rodada 4 da auditoria (#229): gravado pelo Cevico::AttributeMerge (trava da
+  # linha). Os status sent/delivered/read chegam em paralelo e a atribuição +
+  # save! gravava a coluna inteira a partir de uma foto velha, apagando o que
+  # outro escritor (carimbo do robô, por exemplo) tinha acabado de guardar.
+  # O merge! cuida da mensagem "suja" (status já trocado em memória): trava uma
+  # cópia limpa e devolve a coluna gravada para o save! logo abaixo não a reescrever.
+  def store_billing(message, pricing)
+    billing = {
+      'billable' => pricing[:billable].to_s == 'true',
+      'category' => pricing[:category].to_s.downcase,
+      'type' => pricing[:type].to_s.downcase,
+      'model' => pricing[:pricing_model].to_s
+    }
+    Cevico::AttributeMerge.merge!(message) { |attrs| attrs.merge('cevico_wa_billing' => billing) }
   end
 
   def create_messages
@@ -150,12 +173,14 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
   end
 
   def set_conversation
+    # Scope reuse to the contact across all its contact_inboxes in this inbox: WhatsApp coexistence
+    # gives one contact multiple source_ids (phone + BSUID), so reopen must not be limited to a single contact_inbox.
+    conversations = @contact.conversations.where(inbox_id: @inbox.id)
     # if lock to single conversation is disabled, we will create a new conversation if previous conversation is resolved
     @conversation = if @inbox.lock_to_single_conversation
-                      @contact_inbox.conversations.last
+                      conversations.last
                     else
-                      @contact_inbox.conversations
-                                    .where.not(status: :resolved).last
+                      conversations.where.not(status: :resolved).last
                     end
     return if @conversation
 
@@ -211,9 +236,20 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
 
   def message_content_attributes(message)
     content_attrs = outgoing_echo ? { external_echo: true } : {}
+    content_attrs[:in_reply_to] = @in_reply_to_message_id if @in_reply_to_message_id.present?
     content_attrs[:in_reply_to_external_id] = @in_reply_to_external_id if @in_reply_to_external_id.present?
     referral_content_attrs = referral_attributes(message)
     content_attrs[:referral] = referral_content_attrs if referral_content_attrs.present?
+
+    flow_response = message.dig(:interactive, :nfm_reply)
+    if flow_response.present?
+      content_attrs[:whatsapp_flow_response] = {
+        name: flow_response[:name],
+        body: flow_response[:body],
+        response_json: parse_flow_response_json(flow_response[:response_json])
+      }.compact
+    end
+
     content_attrs
   end
 
@@ -257,3 +293,5 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
     @contact.name == phone_number || @contact.name == formatted_phone_number
   end
 end
+
+Whatsapp::IncomingMessageBaseService.prepend_mod_with('Whatsapp::IncomingMessageBaseService')

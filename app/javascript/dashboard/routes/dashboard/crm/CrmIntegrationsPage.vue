@@ -2,6 +2,9 @@
 // Aba "Integrações" — central única de conexões. Cards organizados como
 // os aplicativos nativos; "Configurar" abre a janela da integração.
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { useStore, useStoreGetters, useMapGetter } from 'dashboard/composables/store';
 import CrmIntegrationsModal from './components/CrmIntegrationsModal.vue';
 import IntegrationItem from 'dashboard/routes/dashboard/settings/integrations/IntegrationItem.vue';
@@ -9,6 +12,10 @@ import IntegrationItem from 'dashboard/routes/dashboard/settings/integrations/In
 const store = useStore();
 const getters = useStoreGetters();
 const settings = useMapGetter('crm/getSettings');
+const router = useRouter();
+// 🔐 rodada 334: quem só VÊ integrações não salva conexões (o servidor barra)
+const { canEdit } = useCevicoAccess();
+const accountId = useMapGetter('getCurrentAccountId');
 
 const configuring = ref(null); // 'n8n' | 'meta' | 'google' | 'ai' | 'sheets' | null
 
@@ -76,7 +83,47 @@ const cevicoCards = computed(() => [
     description: 'Conexão nativa com o sistema OftalmoFácil — endereço e chave da API guardados no CEVICO S.I.',
     enabled: !!settings.value?.oftalmofacil?.configured,
   },
+  // 🏷️ item 322: de quem é cada paciente (CEVICO × Oftalmofácil × …) — tela própria
+  {
+    key: 'sources',
+    // 🧭 item 341: virou "Ambientes do CRM" (qual número fica em qual CRM)
+    name: 'Ambientes do CRM',
+    icon: 'i-lucide-git-fork',
+    color: '#152C61',
+    description:
+      'Qual número de WhatsApp e qual funil ficam em qual ambiente (CEVICO, Oftalmofácil…) e o carimbo de origem em tudo o que nasce.',
+    enabled: true,
+    route: 'crm_sources',
+  },
+  // 📞 item 167 e 🤖📞 item 169: têm tela própria (rota), não janela
+  {
+    key: 'calls',
+    name: 'Ligações (WhatsApp)',
+    icon: 'i-lucide-phone',
+    color: '#25D366',
+    description: 'Receba e faça ligações de voz pelo WhatsApp na tela da conversa, com gravação e transcrição.',
+    enabled: !!settings.value?.calls?.enabled,
+    route: 'crm_integrations_calls',
+  },
+  {
+    key: 'voice',
+    name: 'Agente de Ligação (IA)',
+    icon: 'i-lucide-phone-call',
+    color: '#7C3AED',
+    description: 'Assistente virtual que atende as ligações num número próprio da clínica e liga para pacientes nas campanhas — ElevenLabs.',
+    enabled: !!settings.value?.voice?.enabled,
+    route: 'crm_integrations_voice_agent',
+  },
 ]);
+
+// cards com tela própria navegam; os demais abrem a janela de configuração
+const openCard = card => {
+  if (card.route) {
+    router.push({ name: card.route, params: { accountId: accountId.value } });
+    return;
+  }
+  configuring.value = card.key;
+};
 
 const closeConfig = () => {
   configuring.value = null;
@@ -93,6 +140,7 @@ const closeConfig = () => {
             <span class="i-lucide-plug text-white text-base" />
           </span>
           Integrações
+          <CevicoViewOnlyPill v-if="!canEdit('configuracoes.integracoes')" />
         </h1>
         <p class="text-xs text-n-slate-10 mt-1.5">
           Central única de conexões do CEVICO S.I — rastreamento de conversões, IA e aplicativos
@@ -126,7 +174,7 @@ const closeConfig = () => {
             <p class="text-sm font-semibold text-n-slate-12">{{ card.name }}</p>
             <button
               class="text-xs font-medium text-n-brand hover:underline flex items-center gap-1 flex-shrink-0"
-              @click="configuring = card.key"
+              @click="openCard(card)"
             >
               <span class="i-lucide-settings-2 text-xs" />
               Configurar

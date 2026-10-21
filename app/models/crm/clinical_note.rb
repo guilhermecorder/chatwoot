@@ -41,7 +41,7 @@
 #
 #  fk_rails_...  (account_id => accounts.id)
 #  fk_rails_...  (author_id => users.id)
-#  fk_rails_...  (contact_id => contacts.id)
+#  fk_rails_...  (contact_id => contacts.id) ON DELETE => cascade
 #  fk_rails_...  (task_id => tasks.id)
 #
 class Crm::ClinicalNote < ApplicationRecord

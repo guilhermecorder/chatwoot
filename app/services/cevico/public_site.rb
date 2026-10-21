@@ -15,7 +15,7 @@
 # pro endereço oficial, e canonical/og:url apontam sempre pra ele.
 #
 # Sem host configurado, nada muda: tudo continua no FRONTEND_URL (/p/slug).
-module Cevico::PublicSite
+module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
   module_function
 
   def host
@@ -38,7 +38,12 @@ module Cevico::PublicSite
     host.present?
   end
 
+  # host global OU o domínio público de alguma empresa (rodada 334)
   def official_host?(request_host)
+    global_host?(request_host) || account_for_host(request_host).present?
+  end
+
+  def global_host?(request_host)
     configured? && request_host.to_s.casecmp?(host)
   end
 
@@ -57,7 +62,14 @@ module Cevico::PublicSite
   # a raiz "/" só vira índice de páginas em domínio DEDICADO — no domínio
   # do próprio sistema a raiz continua sendo o app (login)
   def public_root?(request_host)
-    dedicated_host? && official_host?(request_host)
+    (dedicated_host? && global_host?(request_host)) || company_root?(request_host)
+  end
+
+  # domínio de uma empresa é sempre dedicado às páginas dela (nunca o host do app)
+  def company_root?(request_host)
+    return false if request_host.to_s.casecmp?(app_host.to_s)
+
+    account_for_host(request_host).present?
   end
 
   def base_url
@@ -65,9 +77,51 @@ module Cevico::PublicSite
   end
 
   # URL pública de uma página: raiz limpa no domínio oficial,
-  # /p/slug no modo antigo.
-  def page_url(slug)
-    configured? ? "#{base_url}/#{slug}" : "#{base_url}/p/#{slug}"
+  # /p/slug no modo antigo. Com `account:`, no domínio da EMPRESA dona da
+  # página (rodada 334); sem conta, igual a sempre.
+  def page_url(slug, account: nil)
+    page_host = account ? host_for(account) : host
+    page_host.present? ? "https://#{page_host}/#{slug}" : "#{base_url}/p/#{slug}"
+  end
+
+  # ── 🏢 EMPRESAS (rodada 334): domínio, hub e rastreio POR CONTA ──
+  # Cada conta (empresa) pode ter o próprio domínio público, WhatsApp do hub
+  # e Pixel/GA4 em Configurações → Identidade da empresa. Campo vazio = vale
+  # a configuração geral do sistema (Configurações → Domínio), como sempre.
+  COMPANY_HOST_SQL = "agenda_config -> 'company' ->> 'public_host'".freeze
+
+  def company_for(account)
+    Cevico::Company.for(account)
+  end
+
+  # domínio público desta empresa (ou o global)
+  def host_for(account)
+    return host if account.nil?
+
+    company_for(account).public_host.presence || host
+  end
+
+  # a conta cuja empresa tem este domínio público; nil se nenhuma
+  def account_for_host(request_host)
+    wanted = normalize(request_host.to_s)
+    return nil if wanted.blank?
+
+    CrmSetting.where("lower(#{COMPANY_HOST_SQL}) = ?", wanted.downcase).order(:account_id).first&.account
+  end
+
+  # hub (WhatsApp, frase, botão) da empresa; campo vazio cai no global
+  def hub_config_for(account)
+    return hub_config if account.nil?
+
+    hub_config.merge(company_for(account).hub.to_h.transform_keys(&:to_s).compact_blank)
+  end
+
+  # rastreio (Pixel, GA4) da empresa; campo vazio cai no global (GTM é só global)
+  def tracking_config_for(account)
+    return tracking_config if account.nil?
+
+    own = company_for(account).tracking.to_h.transform_keys(&:to_s)
+    tracking_config.merge({ 'meta_pixel_id' => own['meta_pixel_id'], 'ga4_id' => own['ga4_measurement_id'] }.compact_blank)
   end
 
   # ── HUB (porta de entrada na raiz do domínio dedicado) ──
@@ -96,13 +150,22 @@ module Cevico::PublicSite
     value
   end
 
-  # link do botão do hub (sem protocolo — ele entra no clique)
-  def hub_whatsapp_url
-    number = hub_config['whatsapp'].presence
+  # link do botão do hub (sem protocolo — ele entra no clique). Com `account`,
+  # o WhatsApp e a frase da EMPRESA (rodada 334); a frase padrão fala o nome dela.
+  def hub_whatsapp_url(account = nil)
+    cfg = hub_config_for(account)
+    number = cfg['whatsapp'].presence
     return nil if number.blank?
 
-    text = hub_config['cta_text'].presence || 'Olá! Vim do site da CEVICO e quero agendar uma avaliação.'
+    text = cfg['cta_text'].presence || default_hub_text(account)
     "https://wa.me/#{number}?text=#{ERB::Util.url_encode(text)}"
+  end
+
+  def default_hub_text(account = nil)
+    company = account && company_for(account)
+    return 'Olá! Vim do site da CEVICO e quero agendar uma avaliação.' if company.nil? || company.clinic?
+
+    "Olá! Vim do site da #{company.name} e quero mais informações."
   end
 
   # ── 📊 RASTREAMENTO central (item 117) ──

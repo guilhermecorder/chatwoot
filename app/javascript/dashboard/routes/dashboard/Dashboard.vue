@@ -11,6 +11,7 @@ import { useAccount } from 'dashboard/composables/useAccount';
 import { useWindowSize } from '@vueuse/core';
 
 import wootConstants from 'dashboard/constants/globals';
+import { isUpgradePageBypassRoute } from 'dashboard/helper/routeHelpers';
 
 const CommandBar = defineAsyncComponent(
   () => import('./commands/commandbar.vue')
@@ -24,7 +25,12 @@ import CopilotContainer from 'dashboard/components/copilot/CopilotContainer.vue'
 
 import MobileSidebarLauncher from 'dashboard/components-next/sidebar/MobileSidebarLauncher.vue';
 import RadarPriorityPopup from 'dashboard/components-next/radar/RadarPriorityPopup.vue';
+import CevicoCallPopup from 'dashboard/components-next/cevico/calls/CevicoCallPopup.vue';
+import CevicoCallLock from 'dashboard/components-next/cevico/calls/CevicoCallLock.vue';
+import NovaConversaModal from 'dashboard/components-next/cevico/conversas/NovaConversaModal.vue';
 import BugReportDrawer from 'dashboard/components-next/radar/BugReportDrawer.vue';
+import CevicoContextMenu from 'dashboard/components-next/cevico/CevicoContextMenu.vue';
+import PatientChatHost from 'dashboard/components-next/cevico/PatientChatHost.vue';
 import { useCallsStore } from 'dashboard/stores/calls';
 
 export default {
@@ -38,7 +44,12 @@ export default {
     FloatingCallWidget,
     MobileSidebarLauncher,
     RadarPriorityPopup,
+    CevicoCallPopup,
+    CevicoCallLock,
+    NovaConversaModal,
     BugReportDrawer,
+    CevicoContextMenu,
+    PatientChatHost,
   },
   setup() {
     const upgradePageRef = ref(null);
@@ -63,22 +74,33 @@ export default {
       showCreateAccountModal: false,
       showShortcutModal: false,
       isMobileSidebarOpen: false,
+      // título que veio do servidor (nome da instalação) — é o padrão da aba.
+      // 🏷️ item 345: "Chatwoot" de fábrica nunca vira título (14/10 a aba
+      // voltou a mostrar Chatwoot em produção)
+      baseTabTitle: /^(chatwoot)?$/i.test((document.title || '').trim())
+        ? 'CEVICO S.Un'
+        : document.title.trim(),
     };
   },
   computed: {
     isSmallScreen() {
       return this.windowWidth < wootConstants.SMALL_SCREEN_BREAKPOINT;
     },
+    // Título da aba segue a EMPRESA da conta aberta (Sua Ótica, etc.);
+    // sem empresa configurada, fica o nome da instalação.
+    cevicoTabTitle() {
+      const company = this.$store.getters['crm/getCompany'];
+      if (company?.configured && company.name) return company.name;
+      return this.baseTabTitle;
+    },
     showUpgradePage() {
       return this.upgradePageRef?.shouldShowUpgradePage;
     },
+    isAccountPaywalled() {
+      return this.upgradePageRef?.isAccountPaywalled;
+    },
     bypassUpgradePage() {
-      return [
-        'billing_settings_index',
-        'settings_inbox_list',
-        'general_settings_index',
-        'agent_list',
-      ].includes(this.$route.name);
+      return isUpgradePageBypassRoute(this.$route.name);
     },
     previouslyUsedDisplayType() {
       const {
@@ -93,6 +115,12 @@ export default {
     },
   },
   watch: {
+    cevicoTabTitle: {
+      handler(title) {
+        if (title) document.title = title;
+      },
+      immediate: true,
+    },
     isSmallScreen: {
       handler() {
         const { LAYOUT_TYPES } = wootConstants;
@@ -163,9 +191,17 @@ export default {
       </UpgradePage>
       <template v-if="!showUpgradePage">
         <router-view />
-        <CommandBar />
+        <CommandBar :is-paywalled="isAccountPaywalled" />
         <RadarPriorityPopup />
+        <CevicoCallPopup />
+        <!-- 🔒 item 325: trava da ligação (tocando há N s / perdida até retornar) -->
+        <CevicoCallLock />
+        <!-- CEVICO 199: Nova conversa em 3 passos (abre por openNovaConversa) -->
+        <NovaConversaModal />
         <BugReportDrawer />
+        <!-- CEVICO 283: menu do botão direito (abre por openMenu / v-cv-menu) -->
+        <CevicoContextMenu />
+        <PatientChatHost />
         <MobileSidebarLauncher
           :is-mobile-sidebar-open="isMobileSidebarOpen"
           @toggle="toggleMobileSidebar"
@@ -173,6 +209,7 @@ export default {
         <CopilotContainer />
         <FloatingCallWidget v-if="hasActiveCall || hasIncomingCall" />
       </template>
+      <CommandBar :is-paywalled="isAccountPaywalled" />
       <AddAccountModal
         :show="showCreateAccountModal"
         @close-account-create-modal="closeCreateAccountModal"

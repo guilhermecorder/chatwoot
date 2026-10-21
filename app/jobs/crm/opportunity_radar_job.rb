@@ -17,7 +17,8 @@ class Crm::OpportunityRadarJob < ApplicationJob
       return
     end
 
-    return unless should_run_now?
+    # 🚨 #217: fora do horário o cron também está vivo — deixa o sinal de vida
+    return Crm::CronHealth.ran!('radar') unless should_run_now?
 
     CrmSetting.find_each do |settings|
       agents = (settings.ai_config || {})['agents'] || {}
@@ -31,7 +32,9 @@ class Crm::OpportunityRadarJob < ApplicationJob
       Rails.logger.info "[Crm::OpportunityRadar] account=#{settings.account_id} #{result.inspect}"
     rescue StandardError => e
       Rails.logger.error "[Crm::OpportunityRadar] account=#{settings.account_id} falhou: #{e.message}"
+      Crm::CronHealth.failed!('radar', e, account: settings.account) # 🚨 #217: avisa se repetir
     end
+    Crm::CronHealth.ran!('radar') # 🚨 #217: sinal de vida da rodada (o vigia confere)
   end
 
   private

@@ -6,6 +6,8 @@ import { removeEmoji } from 'shared/helpers/emoji';
 import Icon from 'dashboard/components-next/icon/Icon.vue';
 import ChannelIcon from 'dashboard/components-next/icon/ChannelIcon.vue';
 import wootConstants from 'dashboard/constants/globals';
+// CEVICO 199: degradê alegre por pessoa quando não há foto
+import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 
 const props = defineProps({
   src: {
@@ -45,6 +47,17 @@ const props = defineProps({
   hideOfflineStatus: {
     type: Boolean,
     default: false,
+  },
+  // CEVICO 199: iniciais brancas sobre um degradê fixo por pessoa (sem foto)
+  gradient: {
+    type: Boolean,
+    default: false,
+  },
+  // CEVICO 212b (23/09): degradê vindo de fora — a "foto" do paciente na cor
+  // de quem cuida dele (sem responsável = cinza neutro). Vale só sem foto.
+  gradientOverride: {
+    type: String,
+    default: '',
   },
 });
 
@@ -125,8 +138,24 @@ const borderRadiusClass = computed(() => {
   return 'rounded-2xl'; // 16px
 });
 
+// degradê por pessoa: só com nome, sem foto válida e com a prop ligada
+const useGradient = computed(
+  () =>
+    props.gradient &&
+    !showDefaultAvatar.value &&
+    !props.iconName &&
+    (!props.src || !isImageValid.value)
+);
+
 const avatarStyles = computed(() => ({
   ...containerStyles.value,
+  ...(useGradient.value
+    ? {
+        backgroundImage: props.gradientOverride || personGradient(props.name),
+        boxShadow:
+          'inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -8px 16px rgba(0,0,0,0.12)',
+      }
+    : {}),
   backgroundColor:
     !showDefaultAvatar.value && (!props.src || !isImageValid.value)
       ? getColorsByNameLength.value.bg
@@ -155,6 +184,9 @@ const iconStyles = computed(() => ({
 
 const initialsStyles = computed(() => ({
   fontSize: `${Math.min(props.size / 2.5, 24)}px`,
+  ...(useGradient.value
+    ? { color: '#fff', fontWeight: 700, letterSpacing: '0.01em' }
+    : {}),
 }));
 
 const invalidateCurrentImage = () => {
@@ -234,7 +266,8 @@ watch(
         borderRadiusClass,
         {
           'dark:!bg-[var(--dark-bg)] dark:!text-[var(--dark-text)]':
-            !showDefaultAvatar && (!src || !isImageValid),
+            !showDefaultAvatar && (!src || !isImageValid) && !useGradient,
+          '!text-white': useGradient,
           'bg-n-slate-3 dark:bg-n-slate-4': showDefaultAvatar,
         },
       ]"
@@ -280,6 +313,7 @@ watch(
         :handle-image-upload="handleImageUpload"
       >
         <div
+          v-if="allowUpload"
           class="absolute inset-0 z-10 flex items-center justify-center invisible w-full h-full transition-all duration-300 ease-in-out opacity-0 bg-n-alpha-black1 group-hover/avatar:visible group-hover/avatar:opacity-100"
           :class="borderRadiusClass"
           @click="handleUploadAvatar"
@@ -290,7 +324,6 @@ watch(
             :style="{ width: `${size / 2}px`, height: `${size / 2}px` }"
           />
           <input
-            v-if="allowUpload"
             ref="fileInput"
             type="file"
             accept="image/png, image/jpeg, image/jpg, image/gif, image/webp"

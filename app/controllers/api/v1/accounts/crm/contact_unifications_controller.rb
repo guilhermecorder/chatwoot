@@ -1,6 +1,5 @@
 class Api::V1::Accounts::Crm::ContactUnificationsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
-  before_action -> { require_capability(:data_tools) }
 
   # POST /api/v1/accounts/:account_id/crm/contact_unification/preview
   def preview

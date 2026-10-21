@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
 
 // inline: renderiza como PÁGINA em vez de modal flutuante
 // only: mostra só uma seção ('n8n' | 'meta' | 'google' | 'ai') — usado
@@ -160,17 +161,36 @@ const testSheets = async () => {
 };
 
 // ── Google ─────────────────────────────────────────────────
-const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '' });
+// ga4_property_id + service_account_json (item 155): a LEITURA (cliques,
+// custo, palavras-chave, investimento automático) usa a GA4 Data API —
+// esses 2 campos só existiam na tela antiga e o aviso apontava pra cá
+const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '', ga4_property_id: '', service_account_json: '', search_console_site: '' });
 const isGoogleSaving = ref(false);
 const isGoogleTesting = ref(false);
 const googleTestResult = ref(null);
 const showGoogleRequirements = ref(false);
+// 🔎 16/10: Search Console (mesma conta de serviço; teste à parte)
+const isGscTesting = ref(false);
+const gscTestResult = ref(null);
 
 onMounted(async () => {
   await store.dispatch('crm/fetchSettings');
   n8nUrl.value    = settings.value.n8n_base_url || '';
   n8nApiKey.value = '';  // nunca pré-preenche a key por segurança
   oftalmo.value.base_url = settings.value.oftalmofacil?.base_url || '';
+  const of = settings.value.oftalmofacil || {};
+  oftalmo.value = {
+    ...oftalmo.value,
+    db_host: of.db_host || '', db_port: of.db_port || 3306, db_name: of.db_name || '', db_user: of.db_user || '',
+    db_password: '', provider_name: of.provider_name || 'CATARATA_SP', enabled: !!of.enabled,
+    // 🏥 item 228: hub de parceiros + Agenda unificada
+    partners_enabled: !!of.partners_enabled, partner_pipeline_id: of.partner_pipeline_id || null,
+    own_pipeline_id: of.own_pipeline_id || null, agenda_enabled: !!of.agenda_enabled, agenda_from: of.agenda_from || '',
+    partner_inbox_ids: (of.partner_inbox_ids || []).map(Number), // 🚧 item 231
+  };
+  oftalmoDoctors.value = Object.entries(of.doctors || {}).map(([crm, name]) => ({ crm, name }));
+  oftalmoClinics.value = Object.entries(of.clinics || {}).map(([name, unit]) => ({ name, unit }));
+  if (!crmPipelines.value.length) store.dispatch('crm/fetchPipelines').catch(() => {});
 
   const m = settings.value.meta_ads || {};
   meta.value = {
@@ -190,6 +210,9 @@ onMounted(async () => {
     client_id: g.client_id || '',
     developer_token: '',
     customer_id: g.customer_id || '',
+    ga4_property_id: g.ga4_property_id || '',
+    service_account_json: '', // write-only, nunca volta do servidor
+    search_console_site: g.search_console_site || 'sc-domain:cevico.com.br',
   };
 
   sheets.value = { sheet_url: settings.value.sheets?.sheet_url || '' };
@@ -201,7 +224,61 @@ const aiStatus = computed(() => settings.value.ai || {});
 const sheetsStatus = computed(() => settings.value.sheets || {});
 
 // ── OftalmoFácil (conexão nativa) ──────────────────────────
-const oftalmo = ref({ base_url: '', api_key: '' });
+// item 157: a conexão real é o BANCO (usuário só-leitura) + fornecedor + de-para de médicos
+const oftalmo = ref({
+  base_url: '', api_key: '', db_host: '', db_port: 3306, db_name: '', db_user: '', db_password: '', provider_name: 'CATARATA_SP', enabled: false,
+  partners_enabled: false, partner_pipeline_id: null, own_pipeline_id: null, agenda_enabled: false, agenda_from: '', partner_inbox_ids: [],
+});
+const oftalmoDoctors = ref([]); // [{ crm, name }]
+// 🏥 item 228: de-para clínica do OftalmoFácil → unidade/local da Agenda
+const oftalmoClinics = ref([]); // [{ name, unit }]
+const addOftalmoClinic = (name = '') => oftalmoClinics.value.push({ name, unit: '' });
+const crmPipelines = useMapGetter('crm/getPipelines');
+const allInboxes = useMapGetter('inboxes/getInboxes'); // 🚧 item 231: caixa(s) dos parceiros
+const oftalmoUnitOptions = computed(() => {
+  const base = [
+    { key: 'paulista', label: 'Av. Paulista (consultas/exames)' },
+    { key: 'tatuape', label: 'Tatuapé (consultas/exames)' },
+  ];
+  const locs = Array.isArray(settings.value.surgery_locations) && settings.value.surgery_locations.length
+    ? settings.value.surgery_locations
+    : [{ key: 'iop', label: 'IOP' }, { key: 'ocular_surgery', label: 'Ocular Surgery' }];
+  return base.concat(locs.map(l => ({ key: l.key, label: `${l.label} (cirurgias)` })));
+});
+// parceiros/clínicas/tipos vistos: do espelho (já sincronizado) ou do teste de conexão (retrato do hub inteiro)
+const oftalmoPartnersSeen = computed(() => oftalmoTest.value?.partners?.length ? oftalmoTest.value.partners : (oftalmoStatus.value.partners_seen || []).map(p => ({ ...p, own: (p.name || '').toLowerCase().includes((oftalmo.value.provider_name || '').toLowerCase()) })));
+const oftalmoClinicsSeen = computed(() => oftalmoTest.value?.clinics?.length ? oftalmoTest.value.clinics : (oftalmoStatus.value.clinics_seen || []));
+const oftalmoTypesSeen = computed(() => oftalmoTest.value?.procedure_types?.length ? oftalmoTest.value.procedure_types : (oftalmoStatus.value.types_seen || []));
+const clinicMapped = name => oftalmoClinics.value.some(c => c.name.trim().toLowerCase() === String(name).trim().toLowerCase());
+const isOftalmoTesting = ref(false);
+const oftalmoTest = ref(null);
+const isOftalmoSyncing = ref(false);
+const addOftalmoDoctor = () => oftalmoDoctors.value.push({ crm: '', name: '' });
+const testOftalmo = async () => {
+  isOftalmoTesting.value = true;
+  oftalmoTest.value = null;
+  try {
+    const { data } = await CrmAPI.testOftalmofacil();
+    oftalmoTest.value = data;
+  } catch {
+    oftalmoTest.value = { ok: false, error: 'Não consegui testar agora.' };
+  } finally {
+    isOftalmoTesting.value = false;
+  }
+};
+const syncOftalmo = async full => {
+  isOftalmoSyncing.value = true;
+  try {
+    await CrmAPI.syncOftalmofacil(full);
+    useAlert(full ? 'Recarga completa iniciada em segundo plano (histórico em silêncio)' : 'Sincronização iniciada em segundo plano');
+    setTimeout(() => store.dispatch('crm/fetchSettings').catch(() => {}), 4000);
+  } catch (e) {
+    // 409 = outra sincronização ainda rodando (o servidor manda o aviso)
+    useAlert(e?.response?.data?.error || 'Erro ao iniciar a sincronização.');
+  } finally {
+    isOftalmoSyncing.value = false;
+  }
+};
 const isOftalmoSaving = ref(false);
 const oftalmoStatus = computed(() => settings.value.oftalmofacil || {});
 
@@ -211,6 +288,23 @@ const saveOftalmo = async () => {
     await CrmAPI.updateOftalmofacil({
       base_url: oftalmo.value.base_url.trim(),
       api_key: oftalmo.value.api_key.trim(),
+      db_host: oftalmo.value.db_host.trim(),
+      db_port: Number(oftalmo.value.db_port) || 3306,
+      db_name: oftalmo.value.db_name.trim(),
+      db_user: oftalmo.value.db_user.trim(),
+      db_password: oftalmo.value.db_password,
+      provider_name: oftalmo.value.provider_name.trim(),
+      enabled: oftalmo.value.enabled,
+      doctors: Object.fromEntries(oftalmoDoctors.value.filter(d => d.crm && d.name).map(d => [String(d.crm).replace(/\D/g, ''), d.name.trim()])),
+      // 🏥 item 228
+      partners_enabled: oftalmo.value.partners_enabled,
+      partner_pipeline_id: oftalmo.value.partner_pipeline_id || null,
+      own_pipeline_id: oftalmo.value.own_pipeline_id || null,
+      // 🧭 item 341: as caixas da cerca agora se escolhem só em "Ambientes do CRM"
+      // (este card não manda mais partner_inbox_ids — não sobrescreve a tela nova)
+      agenda_enabled: oftalmo.value.agenda_enabled,
+      agenda_from: oftalmo.value.agenda_from || null,
+      clinics: Object.fromEntries(oftalmoClinics.value.filter(c => c.name.trim() && c.unit).map(c => [c.name.trim(), c.unit])),
     });
     oftalmo.value.api_key = ''; // nunca fica na tela depois de salvar
     await store.dispatch('crm/fetchSettings');
@@ -246,9 +340,16 @@ const testMeta = async () => {
   metaTestResult.value = null;
   try {
     const result = await store.dispatch('crm/testMetaAds');
-    metaTestResult.value = result.success
-      ? { success: true, message: `Evento de teste enviado! (${result.events_received ?? 1} recebido pela Meta)` }
-      : { success: false, message: result.error || 'Falha no envio.' };
+    // 📣 item 345: um resultado por destino (site + cada caixa do WhatsApp)
+    const results = result.results || [];
+    metaTestResult.value = {
+      success: !!result.success,
+      results,
+      message: results.length
+        ? `${result.success ? 'Tudo chegou na Meta.' : 'Algum destino foi recusado — veja abaixo.'} Teste com o código ${result.test_event_code}: aparece só em "Testar eventos" da Meta e não conta nas campanhas.`
+        : result.error || 'Falha no envio.',
+    };
+    store.dispatch('crm/fetchSettings'); // atualiza a lista de conjuntos do WhatsApp
   } catch {
     metaTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
   } finally {
@@ -266,9 +367,13 @@ const saveGoogle = async () => {
     if (google.value.client_id.trim()) payload.client_id = google.value.client_id.trim();
     if (google.value.developer_token.trim()) payload.developer_token = google.value.developer_token.trim();
     payload.customer_id = google.value.customer_id.trim();
+    payload.ga4_property_id = google.value.ga4_property_id.trim();
+    if (google.value.service_account_json.trim()) payload.service_account_json = google.value.service_account_json.trim();
+    payload.search_console_site = google.value.search_console_site.trim();
     await store.dispatch('crm/updateGoogleAds', payload);
     google.value.api_secret = '';
     google.value.developer_token = '';
+    google.value.service_account_json = '';
     useAlert('Configurações do Google salvas');
   } catch {
     useAlert('Erro ao salvar configurações do Google.');
@@ -289,6 +394,30 @@ const testGoogle = async () => {
     googleTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
   } finally {
     isGoogleTesting.value = false;
+  }
+};
+
+const testSearchConsole = async () => {
+  isGscTesting.value = true;
+  gscTestResult.value = null;
+  try {
+    const { data } = await CrmAPI.testSearchConsole();
+    gscTestResult.value = data.success
+      ? { success: true, message: `${data.message} A primeira foto dos 28 dias já foi pedida — em 1 minuto aparece em Resultados de tráfego → Otimizar.` }
+      : { success: false, message: data.error || 'O Google não respondeu.' };
+  } catch {
+    gscTestResult.value = { success: false, message: 'Erro inesperado ao testar.' };
+  } finally {
+    isGscTesting.value = false;
+  }
+};
+
+const copyGscEmail = async () => {
+  try {
+    await copyTextToClipboard(googleStatus.value.service_account_email || '');
+    useAlert('E-mail copiado.');
+  } catch {
+    useAlert('Copie o e-mail à mão.');
   }
 };
 
@@ -634,6 +763,31 @@ const fetchWorkflows = async () => {
             />
             {{ metaTestResult.message }}
           </div>
+          <ul v-if="metaTestResult?.results?.length" class="mt-2 space-y-1 text-xs">
+            <li
+              v-for="r in metaTestResult.results"
+              :key="r.target"
+              class="flex items-start gap-1.5 px-3 py-1.5 rounded-lg bg-n-alpha-1 text-n-slate-11"
+            >
+              <span class="flex-shrink-0">{{ r.skipped ? '⚪' : r.ok ? '✅' : '❌' }}</span>
+              <span class="min-w-0">
+                <b class="text-n-slate-12">{{ r.target }}</b>
+                <template v-if="r.skipped"> — {{ r.note }}</template>
+                <template v-else-if="r.ok">
+                  — chegou na Meta<span v-if="r.token"> (chave {{ r.token === 'caixa' ? 'da caixa' : 'do sistema' }})</span>
+                  <span v-if="r.note" class="text-n-slate-10"> · {{ r.note }}</span>
+                </template>
+                <template v-else> — {{ r.error || 'a Meta recusou' }}</template>
+              </span>
+            </li>
+          </ul>
+          <p v-if="metaStatus.whatsapp_datasets?.length" class="mt-2 text-xs text-n-slate-10">
+            <b class="text-n-slate-11">Conjuntos do WhatsApp:</b>
+            <span v-for="(d, i) in metaStatus.whatsapp_datasets" :key="d.waba_id">
+              {{ i ? ' · ' : ' ' }}Caixa {{ d.inbox_id }} {{ d.inbox_name }} →
+              <span class="font-mono">{{ d.dataset_id || 'ainda não criado (o Testar envio cria)' }}</span>
+            </span>
+          </p>
 
           <!-- Atribuição de anúncio (CTWA) — automática -->
           <div class="mt-3 bg-n-alpha-1 rounded-xl p-3.5 text-xs text-n-slate-11 space-y-1.5">
@@ -676,7 +830,7 @@ const fetchWorkflows = async () => {
                 class="text-[10px] px-2 py-0.5 rounded-full font-medium"
                 :class="googleStatus.insights_configured ? 'bg-green-500/15 text-green-600' : 'bg-amber-500/15 text-amber-600'"
               >
-                {{ googleStatus.insights_configured ? '✓ Recebimento (Ads API)' : 'Recebimento: aguarda token' }}
+                {{ googleStatus.insights_configured ? '✓ Token do Ads salvo' : 'Recebimento: aguarda token' }}
               </span>
             </div>
           </div>
@@ -738,6 +892,100 @@ const fetchWorkflows = async () => {
                 class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
                 placeholder="123-456-7890"
               />
+            </div>
+          </div>
+
+          <!-- 📖 LEITURA automática via GA4 Data API (item 155): cliques, custo
+               e CPC por palavra-chave + investimento da caixa GOOGLE — sem
+               precisar do developer token. Os avisos das telas apontam pra cá. -->
+          <div class="mt-3 rounded-xl border border-n-weak bg-n-alpha-1 p-3 space-y-3">
+            <p class="text-xs font-medium text-n-slate-12">
+              📖 Leitura automática (GA4)
+              <span v-if="googleStatus.cost_configured" class="text-green-600 font-normal">· conectada ✓</span>
+              <span v-else class="text-amber-600 font-normal">· falta configurar — é o que acende cliques, custo por palavra-chave e o investimento da caixa GOOGLE</span>
+            </p>
+            <div class="text-[11px] text-n-slate-10 leading-relaxed space-y-0.5">
+              <p><b>1.</b> console.cloud.google.com → ative a API <b>"Google Analytics Data API"</b> → IAM → <b>Contas de serviço</b> → criar (sem papel) → Chaves → <b>Adicionar chave JSON</b> (baixa o arquivo).</p>
+              <p><b>2.</b> No GA4: Administrador → <b>Gerenciamento de acesso à propriedade</b> → adicione o e-mail da conta de serviço como <b>Leitor</b>.</p>
+              <p><b>3.</b> Propriedade: GA4 → Administrador → Configurações da propriedade → número (ex.: 123456789).</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Propriedade do GA4</label>
+                <input
+                  v-model="google.ga4_property_id"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                  placeholder="123456789"
+                />
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                  JSON da conta de serviço
+                  <span v-if="googleStatus.service_account_set" class="text-green-600 font-normal">(já configurado)</span>
+                </label>
+                <textarea
+                  v-model="google.service_account_json"
+                  rows="2"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-xs bg-n-solid-2 text-n-slate-12 font-mono"
+                  :placeholder="googleStatus.service_account_set ? 'Cole para substituir' : 'Cole o conteúdo do arquivo .json inteiro'"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 🔎 SEARCH CONSOLE (16/10): termos, aparições, cliques e posição das
+               páginas no Google → Resultados de tráfego → Otimizar. Usa a MESMA
+               conta de serviço do bloco acima; o e-mail dela entra como usuário
+               da propriedade no Search Console. -->
+          <div class="mt-3 rounded-xl border border-n-weak bg-n-alpha-1 p-3 space-y-3">
+            <p class="text-xs font-medium text-n-slate-12">
+              🔎 Search Console (posição no Google)
+              <span v-if="googleStatus.search_console_fetched_at && !googleStatus.search_console_error" class="text-green-600 font-normal">· conectado ✓</span>
+              <span v-else-if="googleStatus.search_console_error" class="text-red-600 font-normal">· {{ googleStatus.search_console_error }}</span>
+              <span v-else class="text-amber-600 font-normal">· falta ligar — é o que mostra termos buscados, cliques e posição de cada página</span>
+            </p>
+            <div class="text-[11px] text-n-slate-10 leading-relaxed space-y-0.5">
+              <p><b>1.</b> Precisa do JSON da conta de serviço colado acima (se já colou para o GA4, é o mesmo).</p>
+              <p><b>2.</b> console.cloud.google.com → no mesmo projeto → APIs e serviços → Biblioteca → ative <b>"Google Search Console API"</b>.</p>
+              <p><b>3.</b> search.google.com/search-console → propriedade <b>cevico.com.br</b> → Configurações → <b>Usuários e permissões</b> → Adicionar usuário → cole o e-mail abaixo → permissão <b>Restrito</b> (só leitura).</p>
+              <p><b>4.</b> Salvar e <b>Testar Search Console</b>. Daí em diante a foto chega sozinha toda manhã.</p>
+            </div>
+            <div v-if="googleStatus.service_account_email" class="flex items-center gap-2 flex-wrap">
+              <span class="text-[11px] text-n-slate-11">E-mail da conta de serviço:</span>
+              <code class="text-[11px] px-2 py-1 rounded bg-n-solid-2 border border-n-weak text-n-slate-12 break-all">{{ googleStatus.service_account_email }}</code>
+              <button class="text-[11px] text-n-brand hover:underline" @click="copyGscEmail">copiar</button>
+            </div>
+            <div class="grid grid-cols-2 gap-3 items-end">
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Propriedade do Search Console</label>
+                <input
+                  v-model="google.search_console_site"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+                  placeholder="sc-domain:cevico.com.br"
+                />
+              </div>
+              <button
+                class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+                :disabled="isGscTesting || !googleStatus.service_account_set"
+                :title="googleStatus.service_account_set ? 'Faz uma pergunta pequena ao Google (salve antes se mudou algo)' : 'Cole e salve o JSON da conta de serviço primeiro'"
+                @click="testSearchConsole"
+              >
+                <span :class="isGscTesting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-search'" class="text-sm" />
+                {{ isGscTesting ? 'Testando...' : 'Testar Search Console' }}
+              </button>
+            </div>
+            <div
+              v-if="gscTestResult"
+              class="flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs"
+              :class="gscTestResult.success
+                ? 'bg-green-500/10 text-green-700 border border-green-500/20'
+                : 'bg-red-500/10 text-red-700 border border-red-500/20'"
+            >
+              <span
+                class="text-sm flex-shrink-0 mt-0.5"
+                :class="gscTestResult.success ? 'i-lucide-check-circle' : 'i-lucide-alert-circle'"
+              />
+              {{ gscTestResult.message }}
             </div>
           </div>
 
@@ -1045,47 +1293,191 @@ const fetchWorkflows = async () => {
 
           <div class="bg-n-alpha-1 rounded-xl p-3.5 mb-4 text-xs text-n-slate-11 space-y-1.5">
             <p>
-              Guarde aqui o <b>endereço</b> e a <b>chave da API</b> do OftalmoFácil.
-              A chave fica protegida no servidor e <b>nunca</b> volta para a tela.
+              A conexão é <b>direto no banco do OftalmoFácil</b> com um usuário <b>só-leitura</b> —
+              nada é alterado lá. A cada 15 min o CEVICO lê as cirurgias do fornecedor
+              (<b>{{ oftalmo.provider_name || 'CATARATA_SP' }}</b>), casa o paciente por telefone → CPF,
+              põe o <b>valor no card</b>, retrodata a coluna e mostra a ficha completa no Espaço do Paciente (só admin).
             </p>
             <p class="text-n-slate-9">
-              Com a conexão salva, o fluxo de dados entre os dois sistemas é ligado
-              em cima dela assim que a documentação da API for plugada.
+              🛡️ Card que já está adiante nunca volta · realizada até 30 dias → "Cirurgia Realizada", mais antiga → "Pós Operatório" ·
+              cancelada/ausente só ganham etiqueta · primeira carga é silenciosa (sem disparar automações).
             </p>
           </div>
 
-          <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="col-span-2 sm:col-span-1">
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Servidor do banco (host)</label>
+              <input v-model="oftalmo.db_host" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="ex.: 187.45.xx.xx ou mysql.dominio.com.br" />
+            </div>
             <div>
-              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Endereço (URL base)</label>
-              <input
-                v-model="oftalmo.base_url"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
-                placeholder="https://api.oftalmofacil.com.br"
-              />
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Porta</label>
+              <input v-model="oftalmo.db_port" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="3306" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Banco</label>
+              <input v-model="oftalmo.db_name" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="app_oftalmo" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Usuário (só leitura)</label>
+              <input v-model="oftalmo.db_user" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="cevico_leitura" />
             </div>
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
-                Chave da API
-                <span v-if="oftalmoStatus.key_set" class="text-green-600 font-normal">· já configurada (preencha só para trocar)</span>
+                Senha <span v-if="oftalmoStatus.db_password_set" class="text-green-600 font-normal">(já configurada)</span>
               </label>
-              <input
-                v-model="oftalmo.api_key"
-                type="password"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 focus:outline-none focus:border-n-brand font-mono"
-                :placeholder="oftalmoStatus.key_set ? '••••••••••••' : 'cole a chave aqui'"
-              />
+              <input v-model="oftalmo.db_password" type="password" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" :placeholder="oftalmoStatus.db_password_set ? 'Digite para substituir' : 'senha do usuário'" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Fornecedor (a CEVICO lá dentro)</label>
+              <input v-model="oftalmo.provider_name" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="CATARATA_SP" />
+            </div>
+            <div class="flex items-center gap-2 pt-5">
+              <button
+                class="w-9 h-5 rounded-full transition-colors relative flex-shrink-0"
+                :class="oftalmo.enabled ? 'bg-green-500' : 'bg-n-slate-6'"
+                @click="oftalmo.enabled = !oftalmo.enabled"
+              >
+                <span class="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all" :class="oftalmo.enabled ? 'left-[18px]' : 'left-0.5'" />
+              </button>
+              <span class="text-xs text-n-slate-12">Sincronização automática {{ oftalmo.enabled ? 'ligada' : 'desligada' }}</span>
             </div>
           </div>
 
-          <div class="flex gap-2 mt-3">
-            <button
-              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50 transition-colors"
-              style="background: #45B5AA"
-              :disabled="isOftalmoSaving"
-              @click="saveOftalmo"
-            >
+          <!-- de-para de médicos: lá o médico é só o CRM -->
+          <div class="mt-3 rounded-lg border border-n-weak bg-n-alpha-1 p-3">
+            <div class="flex items-center gap-2 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">🩺 Médicos (CRM → nome)</p>
+              <span class="text-[10px] text-n-slate-9">no OftalmoFácil o médico é só o número do CRM</span>
+              <button class="ml-auto text-[11px] text-n-brand hover:underline" @click="addOftalmoDoctor">+ adicionar</button>
+            </div>
+            <div v-for="(d, di) in oftalmoDoctors" :key="di" class="grid grid-cols-[110px_1fr_auto] gap-2 mb-1.5">
+              <input v-model="d.crm" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2 font-mono" placeholder="170937" />
+              <input v-model="d.name" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2" placeholder="Dr. Nome Sobrenome" />
+              <button class="i-lucide-x text-n-slate-9 hover:text-red-500 text-sm" @click="oftalmoDoctors.splice(di, 1)" />
+            </div>
+            <p v-if="!oftalmoDoctors.length" class="text-[11px] text-n-slate-9">Nenhum ainda — até preencher, a ficha mostra "CRM 170937".</p>
+          </div>
+
+          <!-- 🏥 item 228: o OftalmoFácil é um HUB de parceiros. CATARATA_SP = a CEVICO; o resto = parceiros -->
+          <div class="mt-3 rounded-lg border border-n-weak bg-n-alpha-1 p-3">
+            <div class="flex items-center gap-2 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">🤝 Parceiros do hub</p>
+              <span class="text-[10px] text-n-slate-9">o fornecedor acima é a CEVICO; todos os OUTROS fornecedores são parceiros de aquisição</span>
+            </div>
+            <label class="flex items-center gap-2 text-xs text-n-slate-12 mb-2">
+              <input v-model="oftalmo.partners_enabled" type="checkbox" class="rounded" />
+              Ler também os parceiros (sem isso, só as cirurgias do fornecedor da CEVICO entram)
+            </label>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="text-[11px] text-n-slate-11">
+                Funil dos <b>parceiros</b> (cards de quem veio do hub)
+                <select v-model="oftalmo.partner_pipeline_id" class="mt-1 w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2">
+                  <option :value="null">— sem funil: fica só no espelho e na Agenda —</option>
+                  <option v-for="p in crmPipelines" :key="'pp' + p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+              </label>
+              <label class="text-[11px] text-n-slate-11">
+                Funil da <b>CEVICO</b> (cirurgias do nosso fornecedor)
+                <select v-model="oftalmo.own_pipeline_id" class="mt-1 w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2">
+                  <option :value="null">— o primeiro funil (padrão) —</option>
+                  <option v-for="p in crmPipelines" :key="'op' + p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+              </label>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mt-1.5">Cada funil precisa ter as colunas "Cirurgia Agendada", "Cirurgia Realizada" e "Pós Operatório" (procura pelo nome, só dentro do funil escolhido). Contato de parceiro ganha as etiquetas <code>oftalmofacil</code> e <code>of_&lt;parceiro&gt;</code>.</p>
+            <!-- 🚧 item 231: a CERCA — caixa(s) por onde a equipe fala com os pacientes dos parceiros -->
+            <div class="mt-2 rounded-lg border border-amber-200 bg-amber-50/60 dark:bg-amber-900/10 dark:border-amber-800 p-2">
+              <p class="text-[11px] font-medium text-n-slate-12">🚧 Cerca dos parceiros — caixa(s) por onde a equipe fala com esses pacientes</p>
+              <p class="text-[10px] text-n-slate-9 mt-0.5">Paciente de parceiro (card no funil dos parceiros, etiqueta <code>of_…</code> ou conversa nessas caixas) <b>nunca</b> recebe agente de IA, robô de follow-up, automação de coluna, lembrete, jornada, campanha, régua, colheita nem ligação da IA — e não ganha card no funil da CEVICO nem conta como lead. Só gente fala com ele, por aqui.</p>
+              <!-- 🧭 item 341: só leitura — a escolha mora em CRM → Ambientes do CRM -->
+              <div class="flex flex-wrap gap-1.5 mt-1.5">
+                <span v-for="ib in allInboxes.filter(i => oftalmo.partner_inbox_ids.includes(i.id))" :key="'pib' + ib.id" class="flex items-center gap-1 text-[11px] px-2 py-1 rounded-full border border-amber-400 bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-100">
+                  <span class="i-lucide-inbox text-[10px]" /> {{ ib.name }}
+                </span>
+                <span v-if="!oftalmo.partner_inbox_ids.length" class="text-[10px] text-n-slate-9">nenhuma caixa na cerca</span>
+              </div>
+              <p class="text-[10px] text-n-slate-9 mt-1">Para trocar as caixas, use <b>CRM → Ambientes do CRM</b> (um número fica em um ambiente só).</p>
+            </div>
+            <div v-if="oftalmoPartnersSeen.length" class="mt-2 flex flex-wrap gap-1">
+              <span v-for="p in oftalmoPartnersSeen" :key="'ps' + p.name" class="text-[10px] px-2 py-0.5 rounded-full border" :class="p.own ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-n-weak text-n-slate-11'" :title="p.own ? 'É a CEVICO' : 'Parceiro'">
+                {{ p.own ? '⭐ ' : '' }}{{ p.name }} · {{ p.total }}
+              </span>
+            </div>
+            <p v-else class="text-[10px] text-n-slate-9 mt-2">Clique em "Testar conexão" para ver quem são os parceiros que existem lá.</p>
+          </div>
+
+          <!-- 🏥 item 228: Agenda unificada -->
+          <div class="mt-3 rounded-lg border border-n-weak bg-n-alpha-1 p-3">
+            <div class="flex items-center gap-2 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">📅 Agenda unificada</p>
+              <span class="text-[10px] text-n-slate-9">cada cirurgia/exame/consulta do hub vira um agendamento na Agenda, com o selo de origem</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 items-end">
+              <label class="flex items-center gap-2 text-xs text-n-slate-12">
+                <input v-model="oftalmo.agenda_enabled" type="checkbox" class="rounded" />
+                Criar agendamentos na Agenda
+              </label>
+              <label class="text-[11px] text-n-slate-11">
+                Só a partir de (data do procedimento) — vale para a Agenda e para os PARCEIROS
+                <input v-model="oftalmo.agenda_from" type="date" class="mt-1 w-full border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2" />
+              </label>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mt-1.5">Parceiro com data ANTES dessa data fica só no espelho (não vira paciente, card nem agendamento); a CEVICO mantém o histórico inteiro. Sem data = segunda-feira desta semana. Acompanha o hub: mudou a data lá, muda aqui; realizada = concluída e "compareceu"; cancelada sai do calendário; ausente = "faltou". Entram como "Lançada" (não contam como agendamento novo). Hoje: <b>{{ oftalmoStatus.agenda_count || 0 }}</b> agendamento(s) na Agenda vindos do hub.</p>
+
+            <div class="flex items-center gap-2 mt-3 mb-1.5">
+              <p class="text-xs font-medium text-n-slate-12">📍 Clínicas do hub → local na Agenda</p>
+              <button class="ml-auto text-[11px] text-n-brand hover:underline" @click="addOftalmoClinic()">+ adicionar</button>
+            </div>
+            <div v-for="(c, ci) in oftalmoClinics" :key="'cl' + ci" class="grid grid-cols-[1fr_1fr_auto] gap-2 mb-1.5">
+              <input v-model="c.name" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2" placeholder="nome da clínica como aparece lá" />
+              <select v-model="c.unit" class="border border-n-weak rounded-lg px-2 py-1.5 text-xs bg-n-solid-2">
+                <option value="">— escolha o local —</option>
+                <option v-for="u in oftalmoUnitOptions" :key="'uo' + u.key" :value="u.key">{{ u.label }}</option>
+              </select>
+              <button class="i-lucide-x text-n-slate-9 hover:text-red-500 text-sm" @click="oftalmoClinics.splice(ci, 1)" />
+            </div>
+            <div v-if="oftalmoClinicsSeen.length" class="flex flex-wrap gap-1 mt-1">
+              <button v-for="c in oftalmoClinicsSeen" :key="'cs' + c.name" class="text-[10px] px-2 py-0.5 rounded-full border border-n-weak hover:bg-n-alpha-2" :class="clinicMapped(c.name) ? 'text-emerald-700 border-emerald-300' : 'text-n-slate-11'" :title="clinicMapped(c.name) ? 'já mapeada' : 'clique para adicionar ao de-para'" @click="!clinicMapped(c.name) && addOftalmoClinic(c.name)">
+                {{ clinicMapped(c.name) ? '✓ ' : '+ ' }}{{ c.name }} · {{ c.total }}
+              </button>
+            </div>
+            <p v-if="oftalmoTypesSeen.length" class="text-[10px] text-n-slate-9 mt-2">
+              Tipos de procedimento lá: <span v-for="(t, ti) in oftalmoTypesSeen" :key="'ty' + t.name">{{ ti ? ' · ' : '' }}{{ t.name }} ({{ t.total }})</span>. "Exame" vai para o trilho Exames, "Consulta" para Consultas, o resto para Cirurgias.
+            </p>
+          </div>
+
+          <div class="flex gap-2 mt-3 flex-wrap">
+            <button class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50 transition-colors" style="background: #45B5AA" :disabled="isOftalmoSaving" @click="saveOftalmo">
               {{ isOftalmoSaving ? 'Salvando...' : 'Salvar conexão' }}
             </button>
+            <button class="px-3 rounded-lg py-2 text-sm font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50" :disabled="isOftalmoTesting || !oftalmoStatus.configured" @click="testOftalmo">
+              {{ isOftalmoTesting ? 'Testando…' : '🔌 Testar conexão' }}
+            </button>
+            <button class="px-3 rounded-lg py-2 text-sm font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50" :disabled="isOftalmoSyncing || !oftalmoStatus.configured" @click="syncOftalmo(false)">
+              {{ isOftalmoSyncing ? 'Iniciando…' : '🔄 Sincronizar agora' }}
+            </button>
+          </div>
+          <p v-if="oftalmoTest" class="mt-2 text-xs" :class="oftalmoTest.ok ? 'text-emerald-600' : 'text-red-500'">
+            <template v-if="oftalmoTest.ok">✅ Conectou! <b>{{ oftalmoTest.total }}</b> cirurgia(s) do fornecedor lá<template v-if="oftalmoTest.first_date"> desde {{ oftalmoTest.first_date }}</template>.</template>
+            <template v-else>❌ {{ oftalmoTest.error }}</template>
+          </p>
+          <!-- Rodada 4 (achado #382): a sincronização falhou ou parou → faixa vermelha, em vez de a tela seguir mostrando a última rodada boa -->
+          <div v-if="oftalmoStatus.sync_alert" class="mt-2 text-[11px] rounded-lg px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-600">
+            <b>{{ oftalmoStatus.sync_alert.kind === 'erro' ? '❌ A sincronização falhou' : '⏸️ A sincronização parou' }}</b>
+            <template v-if="oftalmoStatus.sync_alert.at"> ({{ new Date(oftalmoStatus.sync_alert.at).toLocaleString('pt-BR') }})</template>
+            · {{ oftalmoStatus.sync_alert.message }}
+            <span v-if="oftalmoStatus.last_error && oftalmoStatus.sync_alert.kind === 'erro'" class="block mt-1 font-mono opacity-80">{{ oftalmoStatus.last_error }}</span>
+          </div>
+          <div v-if="oftalmoStatus.last_run_at" class="mt-2 text-[11px] text-n-slate-10 rounded-lg bg-n-alpha-1 px-3 py-2">
+            Última sincronização: {{ new Date(oftalmoStatus.last_run_at).toLocaleString('pt-BR') }} ·
+            <b>{{ oftalmoStatus.last_result?.pulled || 0 }}</b> lidas · <b>{{ oftalmoStatus.last_result?.moved || 0 }}</b> cards movidos ·
+            <b>{{ oftalmoStatus.last_result?.created_contacts || 0 }}</b> pacientes criados · <b>{{ oftalmoStatus.last_result?.ahead || 0 }}</b> preservados 🛡️ ·
+            <b>{{ oftalmoStatus.mirror_count || 0 }}</b> cirurgias espelhadas no total
+            <template v-if="oftalmoStatus.last_result?.tasks_created || oftalmoStatus.last_result?.tasks_updated"> · Agenda: <b>{{ oftalmoStatus.last_result.tasks_created || 0 }}</b> criados, <b>{{ oftalmoStatus.last_result.tasks_updated || 0 }}</b> atualizados</template>
+            <template v-if="oftalmoStatus.last_result?.partners"> · <b>{{ oftalmoStatus.last_result.partners }}</b> de parceiros</template>
+            <span v-if="oftalmoStatus.last_result?.skipped_partners" class="text-amber-600"> · {{ oftalmoStatus.last_result.skipped_partners }} de parceiro sem funil (escolha o funil dos parceiros)</span>
+            <span v-if="oftalmoStatus.last_result?.error_count" class="text-red-500"> · {{ oftalmoStatus.last_result.error_count }} erro(s): {{ (oftalmoStatus.last_result.errors || [])[0] }}</span>
+            <button class="ml-2 text-n-brand hover:underline" @click="syncOftalmo(true)">recarregar tudo do zero</button>
           </div>
 
           <p v-if="oftalmoStatus.updated_at" class="text-[11px] text-n-slate-9 mt-2">

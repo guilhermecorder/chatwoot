@@ -7,10 +7,14 @@ import { ref, computed, onMounted } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 
+// 🔐 rodada 334: os testes ligam/desligam no editor da página — aqui só se lê
+const { canEdit } = useCevicoAccess();
 const route = useRoute();
 const router = useRouter();
 const isLoading = ref(true);
@@ -39,6 +43,7 @@ const rowsFor = page => {
       active: key === 'a' || !!variants.find(v => v.key === key)?.active,
       views: t.view || 0,
       clicks,
+      leads: t.lead || 0, // item 306: cliques que viraram conversa na caixa
       rate: t.view ? Math.round((clicks / t.view) * 100) : null,
     };
   });
@@ -67,7 +72,7 @@ onMounted(load);
           <span class="i-lucide-flask-conical text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Testes A/B</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Testes A/B <CevicoViewOnlyPill v-if="!canEdit('marketing.funis')" /></h1>
           <p class="text-xs text-n-slate-10">todos os testes num lugar só — o placar decide, não o achismo · páginas hoje; formulários e campanhas em breve</p>
         </div>
       </div>
@@ -100,6 +105,7 @@ onMounted(load);
               <span v-if="!r.active" class="text-[10px] px-1.5 rounded bg-n-alpha-2 text-n-slate-10">pausada</span>
               <span class="text-n-slate-10">{{ r.views }} visitas</span>
               <span class="text-n-slate-10">{{ r.clicks }} cliques</span>
+              <span class="text-n-slate-10">{{ r.leads }} leads</span>
               <b :style="{ color: r.rate >= 10 ? '#047857' : '#64748B' }">{{ fmtPct(r.rate) }}</b>
               <span v-if="leaderOf(p)?.key === r.key" class="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style="background: rgba(16,185,129,0.15); color: #047857">liderando</span>
             </div>

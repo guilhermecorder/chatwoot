@@ -2,7 +2,6 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
   include Crm::AccessControl
   include Crm::ResolvesPeriod
 
-  before_action -> { require_capability(:reports) }
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show
@@ -70,11 +69,15 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     stage_logs = Crm::StageLog.joins(:crm_contact)
                               .where(crm_contacts: { pipeline_id: pipeline.id })
                               .where(entered_at: range)
-    entered = stage_logs.group(:stage_id).group(day.call('crm_contact_stage_logs.entered_at'))
+    # item 309: carga em massa (`bulk`) fica fora do "entrou na coluna"
+    entered = stage_logs.where(event_type: Crm::StageLogBulk::ENTERED)
+                        .group(:stage_id).group(day.call('crm_contact_stage_logs.entered_at'))
                         .distinct.count(:crm_contact_id)
-    revenue = stage_logs.where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
-                        .group(day.call('crm_contact_stage_logs.entered_at'))
-                        .sum('COALESCE(crm_contacts.value, 0)')
+    # Rodada 5 (#198): faturamento sem carga em massa e 1 valor por card
+    # (1ª entrada em "Cirurgia Realizada" no período), igual ao Meu Painel
+    revenue_logs = Crm::RevenueEntries.first_entries(stage_logs, range.first, range.last)
+    revenue = revenue_logs.group(day.call('crm_contact_stage_logs.entered_at'))
+                          .sum('COALESCE(crm_contacts.value, 0)')
 
     series = [
       { key: 'new_conversations', label: 'Novas conversas', color: '#0EA5E9', unit: 'n',
@@ -98,10 +101,9 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     inboxes = Current.account.inboxes.order(:id).to_a
     conv_by_inbox = Current.account.conversations.where(created_at: range)
                            .group(:inbox_id).group(day.call('conversations.created_at')).count
-    rev_by_contact_day = stage_logs.where("crm_contact_stage_logs.stage_name ILIKE '%cirurgia realizada%'")
-                                   .group('crm_contacts.contact_id')
-                                   .group(day.call('crm_contact_stage_logs.entered_at'))
-                                   .sum('COALESCE(crm_contacts.value, 0)')
+    rev_by_contact_day = revenue_logs.group('crm_contacts.contact_id')
+                                     .group(day.call('crm_contact_stage_logs.entered_at'))
+                                     .sum('COALESCE(crm_contacts.value, 0)')
     rev_by_inbox = Hash.new { |h, k| h[k] = {} }
     rev_by_contact_day.each do |(contact_id, d), value|
       inbox_id = entry_inbox_map[contact_id]

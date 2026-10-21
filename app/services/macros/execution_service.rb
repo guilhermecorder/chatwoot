@@ -7,10 +7,29 @@ class Macros::ExecutionService < ActionService
     Current.user = user
   end
 
+  # 🚧 Auditoria 10/2026 (#237): cerca dos parceiros também nos macros.
+  # Macro NÃO é IA: é a pessoa clicando. Por isso a cerca aqui é mais estreita
+  # que na automação nativa (revisão da Rodada 3):
+  #   · na CAIXA DOS PARCEIROS (caixa 12) a equipe dela é quem pode falar com
+  #     o paciente — o macro sai normalmente;
+  #   · paciente de parceiro numa caixa da CEVICO: os passos que mandam
+  #     mensagem/anexo ao paciente (ou a transcrição por e-mail) são pulados e
+  #     fica uma NOTA PRIVADA na conversa dizendo o motivo (a pessoa vê na
+  #     tela, não só no log); nota privada, etiqueta, responsável e status
+  #     continuam valendo.
+  PARTNER_BLOCKED_ACTIONS = %w[send_message send_attachment send_email_transcript].freeze
+  PARTNER_BLOCKED_NOTE = 'Mensagem do macro não enviada: paciente de parceiro (Oftalmofácil). ' \
+                         'Só a caixa do parceiro fala com ele.'.freeze
+
   def perform
     @macro.actions.each do |action|
       action = action.with_indifferent_access
+
       begin
+        # a conferência da cerca fica dentro do rescue: se ela falhar, só este
+        # passo cai (e é registrado), não o macro inteiro
+        next if partner_blocked?(action[:action_name])
+
         send(action[:action_name], action[:action_params])
       rescue StandardError => e
         ChatwootExceptionTracker.new(e, account: @account).capture_exception
@@ -21,6 +40,34 @@ class Macros::ExecutionService < ActionService
   end
 
   private
+
+  # paciente de parceiro numa caixa da CEVICO + passo que fala com o paciente
+  # = pula, registra no log e deixa uma nota privada (uma só por execução)
+  def partner_blocked?(action_name)
+    return false unless PARTNER_BLOCKED_ACTIONS.include?(action_name.to_s)
+
+    @partner_blocked = partner_in_cevico_inbox? if @partner_blocked.nil?
+    return false unless @partner_blocked
+
+    Crm::PartnerGuard.block!("macro '#{@macro.name}' · #{action_name}", conversation: @conversation)
+    leave_partner_blocked_note
+    true
+  end
+
+  # a caixa dos parceiros é livre para a equipe dela; a cerca pega só o
+  # paciente de parceiro conversando por uma caixa da CEVICO
+  def partner_in_cevico_inbox?
+    return false if Crm::PartnerGuard.partner_inbox?(@account, @conversation.inbox_id)
+
+    Crm::PartnerGuard.partner_contact?(@conversation.contact)
+  end
+
+  def leave_partner_blocked_note
+    return if @partner_note_left
+
+    @partner_note_left = true
+    add_private_note([PARTNER_BLOCKED_NOTE])
+  end
 
   def assign_agent(agent_ids)
     agent_ids = agent_ids.map { |id| id == 'self' ? @user.id : id }
@@ -68,3 +115,5 @@ class Macros::ExecutionService < ActionService
     WebhookJob.perform_later(webhook_url.first, payload)
   end
 end
+
+Macros::ExecutionService.include_mod_with('Macros::ExecutionService')

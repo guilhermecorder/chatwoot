@@ -22,6 +22,15 @@ defineProps({
     type: Boolean,
     default: true,
   },
+  // CEVICO 199: ícone lucide (classe i-lucide-…) + cor do squircle
+  lucide: {
+    type: String,
+    default: '',
+  },
+  tone: {
+    type: String,
+    default: 'slate',
+  },
 });
 
 const emit = defineEmits(['toggle']);
@@ -32,24 +41,35 @@ const onToggle = () => {
 </script>
 
 <template>
-  <div class="text-sm">
+  <div class="text-sm accordion-item">
     <button
       class="flex items-center select-none w-full rounded-lg bg-n-slate-2 outline outline-1 outline-n-weak m-0 cursor-grab justify-between py-2 px-4 drag-handle"
       :class="{ 'rounded-bl-none rounded-br-none': isOpen }"
       @click.stop="onToggle"
     >
-      <div class="flex justify-between">
-        <EmojiOrIcon class="inline-block w-5" :icon="icon" :emoji="emoji" />
+      <div class="flex items-center gap-2">
+        <span
+          v-if="lucide"
+          class="cv-side-icon"
+          :class="`cv-side-icon-${tone}`"
+          ><span :class="lucide"
+        /></span>
+        <EmojiOrIcon
+          v-else-if="icon || emoji"
+          class="inline-block w-5"
+          :icon="icon"
+          :emoji="emoji"
+        />
         <h5 class="text-n-slate-12 text-sm mb-0 py-0 pr-2 pl-0">
           {{ title }}
         </h5>
       </div>
-      <div class="flex flex-row">
+      <div class="flex flex-row items-center">
         <slot name="button" />
-        <div class="flex justify-end w-3 text-n-blue-11 cursor-pointer">
-          <fluent-icon v-if="isOpen" size="24" icon="subtract" type="solid" />
-          <fluent-icon v-else size="24" icon="add" type="solid" />
-        </div>
+        <span
+          class="accordion-chevron i-lucide-chevron-down text-base text-n-slate-10 transition-transform"
+          :class="isOpen ? '' : '-rotate-90'"
+        />
       </div>
     </button>
     <div

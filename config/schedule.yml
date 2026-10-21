@@ -123,6 +123,20 @@ remove_orphan_conversations_job:
 
 
 # executado a cada 30 minutos para verificar leads parados nas colunas do CRM
+# 🧹 item 309: cargas em massa dos últimos 3 dias saem dos indicadores de
+# "Entrou em…" (07:10 UTC = 04:10 em São Paulo)
+crm_stage_log_bulk_sweep_job:
+  cron: '10 7 * * *'
+  class: 'Crm::StageLogBulkSweepJob'
+  queue: scheduled_jobs
+
+# 🏷️ item 322: o que ainda estiver sem carimbo de fonte é carimbado pelas
+# regras de hoje (07:25 UTC = 04:25 em São Paulo, depois da carga em massa)
+crm_source_stamp_sweep_job:
+  cron: '25 7 * * *'
+  class: 'Crm::SourceStampSweepJob'
+  queue: scheduled_jobs
+
 crm_stalled_cards_job:
   cron: '*/30 * * * *'
   class: 'CrmStalledCardsJob'
@@ -156,3 +170,119 @@ crm_creative_job:
   cron: '30 11 * * 1'
   class: 'Crm::CreativeJob'
   queue: low
+
+# 📅 Lembretes do dia da consulta (item 156): D-1 véspera c/ confirmação +
+# D-0 no dia (ex.: 07h SP) — roda a cada 15 min e cada régua só age na HORA
+# configurada da conta; marca por consulta garante 1 envio no máximo
+crm_appointment_reminder_send_job:
+  cron: '*/15 * * * *'
+  class: 'Crm::AppointmentReminderSendJob'
+  queue: low
+
+# 📊 Pesquisa de satisfação pós-cirurgia (item 256): N dias depois da cirurgia
+# realizada (por tipo), na hora configurada da conta; 1 por cirurgia
+crm_nps_survey_send_job:
+  cron: '5,20,35,50 * * * *'
+  class: 'Crm::NpsSurveySendJob'
+  queue: low
+
+# 🛟 Resgate do Atendente de IA (item 291): a cada 5 min devolve ao agente as
+# conversas em que o paciente ficou sem resposta (3 min a 2 h); 1 vez por mensagem
+crm_responder_rescue_job:
+  cron: '*/5 * * * *'
+  class: 'Crm::ResponderRescueJob'
+  queue: low
+
+# 🗺️ Mensagens da jornada (item 168): a cada 15 min planeja os envios do dia
+# (cirurgia amanhã, consulta hoje, entrou na coluna…) e despacha os que já
+# chegaram na hora — só nas contas com mensagem ativa
+crm_journey_run_job:
+  cron: '3,18,33,48 * * * *'
+  class: 'Crm::JourneyRunJob'
+  queue: low
+
+# 🏥 Sincronização com o OftalmoFácil (item 157): a cada 15 min, só nas contas
+# com a conexão ligada — lê o banco dele (usuário só-leitura) e trata os cards
+crm_oftalmofacil_sync_job:
+  cron: '7,22,37,52 * * * *'
+  class: 'Crm::OftalmofacilSyncJob'
+  queue: low
+
+# 🤖📞 Discador das campanhas de ligação (item 169): a cada 5 min, só nas
+# contas com a assistente virtual ligada — pede à ElevenLabs as próximas
+# ligações da fila dentro do horário, respeitando simultâneas e teto do dia
+crm_voice_campaign_dialer_job:
+  cron: '*/5 * * * *'
+  class: 'Crm::VoiceAgent::CampaignDialerJob'
+  queue: low
+
+# 📞 Agente de Ligação — leads não responsivos (rodada 195): de hora em hora,
+# nas contas com o card ligado — em sombra monta a lista "ligaria hoje"; ao
+# vivo (janela + trava + ElevenLabs) enfileira na campanha do dia e o discador
+# acima liga. Minuto 12 para não coincidir com o discador (*/5).
+crm_voice_unresponsive_leads_job:
+  cron: '12 * * * *'
+  class: 'Crm::VoiceAgent::UnresponsiveLeadsJob'
+  queue: low
+
+# 🎯 Central de Criativos (item 172): 07:20 UTC (04:20 SP) — anúncios +
+# métricas diárias da Meta (últimos 3 dias; 90 na primeira vez)
+crm_ad_insights_sync_job:
+  cron: '20 7 * * *'
+  class: 'Crm::AdInsightsSyncJob'
+  queue: low
+
+# 🎯 Agente de Campanhas (item 352): 07:55 UTC (04:55 SP), depois da carga dos
+# anúncios da Meta — foto do Google, nossa média, recomendações e aprendizado
+crm_campaign_agent_job:
+  cron: '55 7 * * *'
+  class: 'Crm::CampaignAgentJob'
+  queue: low
+
+# 📄 Agente de Páginas (item 353): 08:25 UTC (05:25 SP), depois da foto do
+# Search Console — pontos a melhorar das páginas viram recomendações + aprendizado
+crm_page_agent_job:
+  cron: '25 8 * * *'
+  class: 'Crm::PageAgentJob'
+  queue: low
+
+# 💸 Gasto do WhatsApp (item 303): 07:40 UTC (04:40 SP) — fatura da Meta
+# (pricing_analytics) dos últimos 35 dias, para todas as contas com WhatsApp
+crm_whatsapp_pricing_sync_job:
+  cron: '40 7 * * *'
+  class: 'Crm::WhatsappPricingSyncJob'
+  queue: low
+
+# 🔎 Search Console (16/10): 08:10 UTC (05:10 SP) — foto dos últimos 28 dias
+# do Google (impressões, cliques, CTR, posição e termos por página) para a aba
+# Otimizar dos Resultados de tráfego; só contas com a conta de serviço do Google
+crm_search_console_sync_job:
+  cron: '10 8 * * *'
+  class: 'Crm::SearchConsoleSyncJob'
+  queue: low
+
+# 🚦 Saúde do WhatsApp (16/10): de hora em hora — anota quando a nota da Meta
+# de cada número muda + varredura da suspeita de bloqueio (mensagens só em
+# "enviado" há 48h+ de quem já recebia)
+crm_whatsapp_health_job:
+  cron: '25 * * * *'
+  class: 'Crm::WhatsappHealthJob'
+  queue: low
+
+# 🚨 Vigia dos robôs (auditoria 10/2026, achado #217): a cada 10 min confere o
+# sinal de vida dos robôs CEVICO (lembretes, NPS, jornada, resgate, OftalmoFácil,
+# Colheitadeira, follow-up, discador) e avisa o administrador (Radar + tarefa 🔴
+# + e-mail) quando um parou ou terminou em erro 2× seguidas. Fila HIGH: roda
+# mesmo com a fila dos lembretes empacada.
+crm_cron_watchdog_job:
+  cron: '*/10 * * * *'
+  class: 'Crm::CronWatchdogJob'
+  queue: high
+
+# 💓 Sinal de vida da fila dos robôs (achado #217): a cada 1 min renova uma
+# chave no Redis pela fila scheduled_jobs; o /health?sidekiq=1 do web e o vigia
+# acima leem essa chave para saber se a fila está andando
+crm_sidekiq_heartbeat_job:
+  cron: '*/1 * * * *'
+  class: 'Crm::SidekiqHeartbeatJob'
+  queue: scheduled_jobs

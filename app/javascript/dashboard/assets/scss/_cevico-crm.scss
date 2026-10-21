@@ -1,0 +1,397 @@
+// ══════════════════════════════════════════════════════════════════════
+// 🍎🚀 CRM (funil) no design Apple (item 215, 23/09) — a pele do quadro de
+// colunas: mesma receita das Conversas (.cv-chat) e da Agenda (.cv-ag-*).
+// Tudo vive sob .cv-crm (raiz do CrmBoard, que também é .cv-page): tirar a
+// classe = visual antigo em 1 linha. Nada de comportamento muda aqui.
+//   topo     = vidro grudado (título, funis, ferramentas, filtros em pílulas)
+//   colunas  = painéis brancos arredondados sobre o cinza agrupado da Apple,
+//              cada coluna com a SUA cor (--sc) no ícone, no contador e no fio
+//   cartões  = brancos, 16 px, fio quase invisível que fica azul royal no hover
+//              (mesmo cartão das Conversas, item 214b), "cara" com degradê da
+//              pessoa, etiquetas .cv-tag (item 212)
+// ══════════════════════════════════════════════════════════════════════
+.cv-crm {
+  --cr-bg: #f2f2f7;             /* cinza agrupado da Apple */
+  --cr-panel: #ffffff;
+  --cr-soft: #f7f7f9;
+  --cr-line: rgba(0, 0, 0, 0.065);
+  --cr-line-strong: rgba(0, 0, 0, 0.12);
+  --cr-text: #1d1d1f;
+  --cr-muted: #6e6e73;
+  --cr-hover: rgba(37, 99, 235, 0.05);
+  --cr-royal: #2563eb;
+  --cr-green: #25d366;
+  --cr-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 30px -24px rgba(0, 0, 0, 0.35);
+  --cr-col-shadow: 0 1px 1px rgba(0, 0, 0, 0.03), 0 10px 28px -22px rgba(15, 23, 42, 0.35);
+  background: var(--cr-bg);
+  color: var(--cr-text);
+}
+.dark .cv-crm {
+  --cr-bg: #0b0d10;
+  --cr-panel: #16191d;
+  --cr-soft: #1c2026;
+  --cr-line: rgba(255, 255, 255, 0.08);
+  --cr-line-strong: rgba(255, 255, 255, 0.14);
+  --cr-text: #f5f5f7;
+  --cr-muted: #98989f;
+  --cr-hover: rgba(59, 130, 246, 0.1);
+  --cr-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px -24px rgba(0, 0, 0, 0.8);
+  --cr-col-shadow: none;
+}
+
+/* ── TOPO grudado em vidro (mesma receita do .cv-ag-top da Agenda) ── */
+.cv-crm .cv-crm-top {
+  position: relative;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.72);
+  border-bottom: 1px solid rgb(var(--cv-rgb) / 0.16);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+.dark .cv-crm .cv-crm-top {
+  background: rgba(17, 18, 21, 0.78);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+.cv-crm .cv-crm-title {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--cr-text);
+}
+/* linha de resumo do período (leads no período · funil todo) */
+.cv-crm .cv-crm-summary {
+  font-size: 11.5px;
+  color: var(--cr-muted);
+  background: rgb(var(--cv-rgb) / 0.05);
+  border-bottom: 1px solid rgb(var(--cv-rgb) / 0.12);
+}
+.cv-crm .cv-crm-summary b { color: var(--cr-text); }
+/* faixa de modo (edição âmbar / programação ouro / excluir vermelho) */
+.cv-crm .cv-crm-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 24px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--cv-deep);
+  background: rgb(var(--cv-rgb) / 0.09);
+  border-bottom: 1px solid rgb(var(--cv-rgb) / 0.22);
+}
+.dark .cv-crm .cv-crm-mode { color: #fff; }
+
+/* botões de ferramenta: pílula de vidro com o ícone na cor dopamine dele */
+.cv-crm .cv-crm-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--cr-text);
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid var(--cr-line-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.cv-crm .cv-crm-tool:hover { background: rgba(255, 255, 255, 0.95); border-color: rgba(0, 0, 0, 0.18); }
+.cv-crm .cv-crm-tool:active { transform: scale(0.97); }
+.cv-crm .cv-crm-tool-on,
+.cv-crm .cv-crm-tool-on:hover {
+  color: #fff;
+  background: var(--tool-grad, var(--cv-grad));
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 6px 14px -8px rgba(0, 0, 0, 0.5);
+}
+.dark .cv-crm .cv-crm-tool { background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+.dark .cv-crm .cv-crm-tool:hover { background: rgba(255, 255, 255, 0.12); }
+.cv-crm .cv-crm-tool.cv-iconbtn { width: 30px; padding: 0; justify-content: center; }
+
+/* os selects dos filtros no mesmo formato das pílulas */
+.cv-crm select.cv-input {
+  height: 32px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 600;
+  padding-right: 26px;
+}
+.cv-crm .cv-crm-search {
+  height: 32px;
+  border-radius: 11px;
+  font-size: 12.5px;
+  padding-left: 32px;
+}
+
+/* ── O QUADRO: colunas ────────────────────────────────────────────── */
+.cv-crm .kanban-board-scroll {
+  background: transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+.dark .cv-crm .kanban-board-scroll { scrollbar-color: rgba(255, 255, 255, 0.2) transparent; }
+
+/* cada coluna define --sc (cor da etapa) e --sc-rgb ("r g b") */
+.cv-crm .cv-crm-col {
+  --sc: #94a3b8;
+  --sc-rgb: 148 163 184;
+  background: var(--cr-panel);
+  border: 1px solid var(--cr-line);
+  border-radius: 20px;
+  box-shadow: var(--cr-col-shadow);
+  overflow: clip;
+}
+.cv-crm .cv-crm-col-prog { box-shadow: 0 0 0 2px rgba(212, 160, 23, 0.45), var(--cr-col-shadow); }
+.cv-crm .cv-crm-col-head {
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--cr-line);
+  background:
+    linear-gradient(180deg, rgb(var(--sc-rgb) / 0.09), rgb(var(--sc-rgb) / 0.02));
+}
+.cv-crm .cv-crm-col-head-prog { background: linear-gradient(180deg, rgba(212, 160, 23, 0.12), rgba(212, 160, 23, 0.02)); }
+/* ícone quadradinho (squircle) na cor da etapa */
+.cv-crm .cv-crm-col-ico {
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sc);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 4px 10px -5px rgb(var(--sc-rgb) / 0.9);
+}
+.cv-crm .cv-crm-col-ico::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.92);
+}
+.cv-crm .cv-crm-col-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--cr-text);
+  /* NUNCA cortar o nome da etapa: embrulha em até 2 linhas */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
+}
+.cv-crm .cv-crm-col-n {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  line-height: 1.3;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--sc) 78%, #111);
+  background: rgb(var(--sc-rgb) / 0.14);
+}
+.dark .cv-crm .cv-crm-col-n { color: #fff; background: rgb(var(--sc-rgb) / 0.32); }
+.cv-crm .cv-crm-col-n-prog { color: #92600a; background: rgba(212, 160, 23, 0.18); }
+.cv-crm .cv-crm-col-value {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: center;
+  color: #059669;
+  font-variant-numeric: tabular-nums;
+}
+.dark .cv-crm .cv-crm-col-value { color: #34d399; }
+.cv-crm .column-cards-scroll {
+  background: var(--cr-soft);
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+.dark .cv-crm .column-cards-scroll { scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
+.cv-crm .cv-crm-col-foot {
+  padding: 6px 8px 8px;
+  background: var(--cr-soft);
+}
+/* "+ Adicionar" e "Carregar mais": botões fantasmas, arredondados */
+.cv-crm .cv-crm-ghost {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--cr-muted);
+  border: 1px dashed var(--cr-line-strong);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.cv-crm .cv-crm-ghost:hover { color: var(--cr-royal); border-color: rgba(37, 99, 235, 0.45); background: var(--cr-hover); }
+.cv-crm .cv-crm-ghost:disabled { opacity: 0.6; }
+.cv-crm .cv-crm-ghost-gold { color: #92600a; border-color: rgba(212, 160, 23, 0.5); }
+.cv-crm .cv-crm-ghost-gold:hover { color: #92600a; border-color: #d4a017; background: rgba(212, 160, 23, 0.1); }
+.dark .cv-crm .cv-crm-ghost-gold { color: #f1cf5c; }
+
+/* cartões de automação / robô no modo programação */
+.cv-crm .cv-crm-auto {
+  border-radius: 14px;
+  background: var(--cr-panel);
+  border: 1px solid var(--cr-line);
+  box-shadow: var(--cr-shadow);
+  transition: border-color 0.15s ease, opacity 0.15s ease;
+}
+.cv-crm .cv-crm-auto:hover { border-color: rgba(212, 160, 23, 0.55); }
+.cv-crm .cv-crm-auto-off { opacity: 0.55; }
+.cv-crm .cv-crm-auto-off:hover { opacity: 0.8; }
+
+/* ── O CARTÃO do paciente ─────────────────────────────────────────── */
+.cv-crm .cv-crm-card {
+  background: var(--cr-panel);
+  border: 1px solid var(--cr-line);
+  border-radius: 16px;
+  padding: 11px 12px 10px;
+  margin-bottom: 8px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.025);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-crm .cv-crm-card:hover {
+  background: var(--cr-hover);
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 8px 20px -14px rgba(37, 99, 235, 0.5);
+}
+.dark .cv-crm .cv-crm-card:hover { border-color: rgba(96, 165, 250, 0.45); }
+/* não lidas: fio azul royal + a bolinha verde do WhatsApp */
+.cv-crm .cv-crm-card-unread { border-color: rgba(37, 99, 235, 0.35); }
+.cv-crm .cv-crm-card-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--cr-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cv-crm .cv-crm-card-sub { font-size: 11.5px; color: var(--cr-muted); font-variant-numeric: tabular-nums; }
+.cv-crm .cv-crm-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #fff;
+  background: var(--cr-green);
+  box-shadow: 0 3px 8px -4px rgba(37, 211, 102, 0.8);
+}
+/* prévia da última mensagem do paciente (quando há não lidas) */
+.cv-crm .cv-crm-preview {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: var(--cr-soft);
+  border-left: 3px solid var(--cr-green);
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--cr-text);
+}
+.cv-crm .cv-crm-meta { font-size: 11px; color: var(--cr-muted); }
+.cv-crm .cv-crm-value { font-size: 12px; font-weight: 700; color: #059669; font-variant-numeric: tabular-nums; }
+.dark .cv-crm .cv-crm-value { color: #34d399; }
+/* bolinha da caixa (cor oficial da caixa) */
+.cv-crm .cv-crm-inbox-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.04);
+}
+/* ações redondas do cartão (Espaço do Paciente, conversa) */
+.cv-crm .cv-crm-act {
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cr-royal);
+  background: rgba(37, 99, 235, 0.09);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.cv-crm .cv-crm-act:hover { background: var(--cr-royal); color: #fff; transform: scale(1.06); }
+.cv-crm .cv-crm-act-off {
+  color: var(--cr-muted);
+  background: transparent;
+  border: 1px dashed var(--cr-line-strong);
+}
+.cv-crm .cv-crm-act-off:hover { color: var(--cr-royal); background: var(--cr-hover); border-color: rgba(37, 99, 235, 0.45); }
+.cv-crm .cv-crm-act-plain { background: transparent; }
+.cv-crm .cv-crm-act-plain:hover { background: var(--cr-hover); color: var(--cr-royal); transform: scale(1.06); }
+.dark .cv-crm .cv-crm-act { color: #93c5fd; background: rgba(59, 130, 246, 0.16); }
+.dark .cv-crm .cv-crm-act:hover { background: var(--cr-royal); color: #fff; }
+.dark .cv-crm .cv-crm-act-off, .dark .cv-crm .cv-crm-act-plain { background: transparent; }
+
+/* pílula "Aguardando resposta · 2 h" (âmbar) */
+.cv-crm .cv-crm-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.13);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+}
+.dark .cv-crm .cv-crm-wait { color: #fcd34d; background: rgba(245, 158, 11, 0.2); }
+
+/* navegador de colunas no celular */
+.cv-crm .cv-crm-mobile-nav {
+  background: rgba(255, 255, 255, 0.72);
+  border-bottom: 1px solid var(--cr-line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.dark .cv-crm .cv-crm-mobile-nav { background: rgba(17, 18, 21, 0.78); }
+
+/* ── MODAIS do CRM (ficha do paciente, adicionar contato): o casco vira
+      .cv-modal e os campos de dentro ganham o formato do kit sem tocar
+      em cada input (a pele restyla os campos do modal) ── */
+.cv-crm .cv-modal :is(input:not([type='checkbox']):not([type='radio']):not([type='color']):not([type='range']), select, textarea):not(.cv-input) {
+  border-radius: 12px;
+  border: 1px solid rgb(var(--cv-rgb) / 0.26);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.cv-crm .cv-modal :is(input, select, textarea):not(.cv-input):focus {
+  outline: none;
+  border-color: var(--cv);
+  box-shadow: 0 0 0 3px rgb(var(--cv-rgb) / 0.2);
+}
+.dark .cv-crm .cv-modal :is(input, select, textarea):not(.cv-input) { background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+.cv-crm .cv-modal-tabs { padding: 10px 20px 0; }
+.cv-crm .cv-crm-modal-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.6);
+  background: var(--pg, var(--cv-grad));
+  flex-shrink: 0;
+}

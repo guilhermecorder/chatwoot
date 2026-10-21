@@ -11,6 +11,7 @@ import { initCevicoFontCombo } from 'dashboard/helper/cevicoFontHelper';
 import {
   DropdownContainer,
   DropdownBody,
+  DropdownSection,
   DropdownSeparator,
   DropdownItem,
 } from 'next/dropdown-menu/base';
@@ -36,6 +37,30 @@ const isFeatureEnabledonAccount = useMapGetter(
   'accounts/isFeatureEnabledonAccount'
 );
 
+// ── 🏢 Empresa (rodada 334): as contas da pessoa (CEVICO, Sua Ótica…) no menu
+// do avatar — a atual com ✓ e o papel; clicar em outra troca de empresa. Com
+// uma conta só, aparece uma linha discreta sem ação.
+const userAccounts = useMapGetter('getUserAccounts');
+const companyAccounts = computed(() =>
+  [...(currentUser.value?.accounts || userAccounts.value || [])].sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''))
+  )
+);
+const hasManyCompanies = computed(() => companyAccounts.value.length > 1);
+const currentCompany = computed(() =>
+  companyAccounts.value.find(a => a.id === accountId.value)
+);
+const roleLabel = account => {
+  if (account.custom_role_id && account.custom_role?.name) {
+    return account.custom_role.name;
+  }
+  return account.role === 'administrator' ? 'administrador' : 'atendente';
+};
+const switchCompany = account => {
+  if (account.id === accountId.value) return;
+  window.location.href = `/app/accounts/${account.id}/dashboard`;
+};
+
 const showChatSupport = computed(() => {
   return (
     isFeatureEnabledonAccount.value(
@@ -44,6 +69,12 @@ const showChatSupport = computed(() => {
     ) && globalConfig.value.chatwootInboxToken
   );
 });
+
+const toggleChatSupport = () => {
+  if (window.$chatwoot) {
+    window.$chatwoot.toggle();
+  }
+};
 
 // ── CEVICO: Alterar fontes — seleção em painel, igual ao menu de temas ──
 initCevicoFontCombo(); // aplica a combinação salva ao abrir o sistema
@@ -55,9 +86,7 @@ const menuItems = computed(() => {
       showOnCustomBrandedInstance: false,
       label: t('SIDEBAR_ITEMS.CONTACT_SUPPORT'),
       icon: 'i-lucide-life-buoy',
-      click: () => {
-        window.$chatwoot.toggle();
-      },
+      click: toggleChatSupport,
     },
     {
       show: true,
@@ -183,6 +212,51 @@ const allowedMenuItems = computed(() => {
     </template>
     <DropdownBody class="bottom-12 z-50 mb-2 w-80 ltr:left-0 rtl:right-0">
       <SidebarProfileMenuStatus />
+      <DropdownSeparator />
+      <!-- 🏢 Empresa: troca de conta (rodada 334) -->
+      <DropdownSection v-if="hasManyCompanies" title="Empresa">
+        <DropdownItem
+          v-for="account in companyAccounts"
+          :id="`profile-account-${account.id}`"
+          :key="account.id"
+          :class="
+            account.id === accountId ? 'cursor-default' : 'cursor-pointer'
+          "
+          @click="switchCompany(account)"
+        >
+          <template #label>
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              <span
+                class="i-lucide-building-2 size-4 flex-shrink-0 text-n-slate-10"
+              />
+              <span
+                class="text-n-slate-12 truncate min-w-0"
+                :title="account.name"
+              >
+                {{ account.name }}
+              </span>
+              <span class="flex-shrink-0 w-px h-3 bg-n-strong" />
+              <span class="text-n-slate-11 text-xs truncate">
+                {{ roleLabel(account) }}
+              </span>
+            </div>
+            <span
+              v-if="account.id === accountId"
+              class="i-lucide-check size-4 text-n-teal-11 flex-shrink-0"
+            />
+          </template>
+        </DropdownItem>
+      </DropdownSection>
+      <div
+        v-else-if="currentCompany"
+        class="px-2 py-1.5 text-xs text-n-slate-11 flex items-center gap-2 min-w-0"
+        :title="currentCompany.name"
+      >
+        <span
+          class="i-lucide-building-2 size-4 flex-shrink-0 text-n-slate-10"
+        />
+        <span class="truncate">Empresa: {{ currentCompany.name }}</span>
+      </div>
       <DropdownSeparator />
       <template v-for="item in allowedMenuItems" :key="item.label">
         <CustomBrandPolicyWrapper

@@ -41,6 +41,9 @@ import LocationBubble from './bubbles/Location.vue';
 import CSATBubble from './bubbles/CSAT.vue';
 import FormBubble from './bubbles/Form.vue';
 import VoiceCallBubble from './bubbles/VoiceCall.vue';
+import WhatsappFlowResponseBubble from './bubbles/WhatsappFlowResponse.vue';
+import CevicoCallBubble from './bubbles/CevicoCall.vue';
+import WhatsappReferral from './bubbles/Text/WhatsappReferral.vue';
 
 import MessageError from './MessageError.vue';
 import ContextMenu from 'dashboard/modules/conversations/components/MessageContextMenu.vue';
@@ -147,7 +150,35 @@ const { t } = useI18n();
 const route = useRoute();
 const inboxGetter = useMapGetter('inboxes/getInbox');
 const inbox = computed(() => inboxGetter.value(props.inboxId) || {});
+const isOnChatwootCloud = useMapGetter('globalConfig/isOnChatwootCloud');
 const { replaceInstallationName } = useBranding();
+
+// 🤖 CEVICO item 212 (23/09): mensagem AUTOMÁTICA da clínica (Atendente IA,
+// robô de follow-up, régua da jornada, lembrete/campanha) é SISTEMA: balão
+// lilás e avatar de robô, mesmo quando foi enviada "em nome" de alguém da
+// equipe — assim ninguém confunde com resposta humana.
+// (a lista converte as chaves para camelCase — cevicoIaAgent —; pelo
+// websocket podem chegar como no banco — cevico_ia_agent; aceita as duas)
+const CEVICO_AUTOMATED = [
+  ['cevicoIaAgent', 'cevico_ia_agent', 'Atendente IA'],
+  ['cevicoFollowupBotId', 'cevico_followup_bot_id', 'Robô de follow-up'],
+  ['cevicoJourney', 'cevico_journey', 'Jornada do paciente'],
+  ['cevicoAuto', 'cevico_auto', 'Envio automático'],
+];
+const cevicoAutomatedKind = computed(() => {
+  const attrs = props.additionalAttributes || {};
+  const present = k =>
+    attrs[k] !== undefined && attrs[k] !== null && attrs[k] !== '';
+  const hit = CEVICO_AUTOMATED.find(
+    ([camel, snake]) => present(camel) || present(snake)
+  );
+  return hit ? hit[2] : null;
+});
+
+const isCaptainMessage = computed(() => {
+  const senderType = props.sender?.type ?? props.senderType;
+  return senderType === SENDER_TYPES.CAPTAIN_ASSISTANT;
+});
 
 /**
  * Computes the message variant based on props
@@ -178,6 +209,7 @@ const variant = computed(() => {
   const isBot =
     props.sender?.type === SENDER_TYPES.AGENT_BOT ||
     props.senderType === SENDER_TYPES.AGENT_BOT ||
+    !!cevicoAutomatedKind.value ||
     (!props.sender && !props.additionalAttributes?.senderName);
   if (isBot && props.messageType === MESSAGE_TYPES.OUTGOING) {
     return MESSAGE_VARIANTS.BOT;
@@ -290,6 +322,10 @@ const componentToRender = computed(() => {
     if (emailInboxTypes.includes(props.messageType)) return EmailBubble;
   }
 
+  if (props.contentAttributes?.whatsappFlowResponse) {
+    return WhatsappFlowResponseBubble;
+  }
+
   if (props.contentType === CONTENT_TYPES.INPUT_CSAT) {
     return CSATBubble;
   }
@@ -298,6 +334,14 @@ const componentToRender = computed(() => {
     [CONTENT_TYPES.INPUT_SELECT, CONTENT_TYPES.FORM].includes(props.contentType)
   ) {
     return FormBubble;
+  }
+
+  // CEVICO (item 167): card das chamadas nativas de WhatsApp
+  if (
+    props.contentAttributes?.cevicoCall ||
+    props.contentAttributes?.cevico_call
+  ) {
+    return CevicoCallBubble;
   }
 
   if (props.contentType === CONTENT_TYPES.VOICE_CALL) {
@@ -359,6 +403,12 @@ const isMessageDeleted = computed(() => {
   return props.contentAttributes?.deleted;
 });
 
+const shouldShowWhatsappReferral = computed(
+  () =>
+    variant.value === MESSAGE_VARIANTS.USER &&
+    !!props.contentAttributes?.referral
+);
+
 const payloadForContextMenu = computed(() => {
   return {
     id: props.id,
@@ -390,6 +440,10 @@ const contextMenuEnabledOptions = computed(() => {
       !props.private &&
       props.inboxSupportsReplyTo.outgoing &&
       !isFailedOrProcessing,
+    report:
+      isOnChatwootCloud.value &&
+      isCaptainMessage.value &&
+      !isMessageDeleted.value,
   };
 });
 
@@ -399,6 +453,8 @@ const shouldRenderMessage = computed(() => {
   const isUnsupported = props.contentAttributes?.isUnsupported;
   const isAnIntegrationMessage =
     props.contentType === CONTENT_TYPES.INTEGRATIONS;
+  const hasWhatsappFlowResponse =
+    !!props.contentAttributes?.whatsappFlowResponse;
   const isFailedMessage = props.status === MESSAGE_STATUS.FAILED;
   const hasExternalError = !!props.contentAttributes?.externalError;
 
@@ -408,6 +464,8 @@ const shouldRenderMessage = computed(() => {
     isEmailContentType ||
     isUnsupported ||
     isAnIntegrationMessage ||
+    hasWhatsappFlowResponse ||
+    shouldShowWhatsappReferral.value ||
     isFailedMessage ||
     hasExternalError
   );
@@ -447,14 +505,24 @@ function handleReplyTo() {
 
 const avatarInfo = computed(() => {
   if (props.contentAttributes?.externalEcho) {
-    const { name, avatar_url, channel_type, medium } = inbox.value;
+    const { name, avatar_url, channel_type, medium, voice_enabled } =
+      inbox.value;
     const iconName = avatar_url
       ? null
-      : getInboxIconByType(channel_type, medium);
+      : getInboxIconByType(channel_type, medium, 'fill', voice_enabled);
     return {
       name: iconName ? '' : name || t('CONVERSATION.NATIVE_APP'),
       src: avatar_url || '',
       iconName,
+    };
+  }
+
+  // CEVICO 212: automática → robô, com o nome do robô
+  if (cevicoAutomatedKind.value) {
+    return {
+      name: cevicoAutomatedKind.value,
+      src: '',
+      iconName: 'i-lucide-bot',
     };
   }
 
@@ -490,6 +558,12 @@ const avatarTooltip = computed(() => {
     return replaceInstallationName(t('CONVERSATION.NATIVE_APP_ADVISORY'));
   }
   if (avatarInfo.value.name === '') return '';
+  if (cevicoAutomatedKind.value) {
+    const who = props.sender?.name
+      ? ` (automático, em nome de ${props.sender.name})`
+      : ' (automático)';
+    return `${t('CONVERSATION.SENT_BY')} ${cevicoAutomatedKind.value}${who}`;
+  }
   return `${t('CONVERSATION.SENT_BY')} ${avatarInfo.value.name}`;
 });
 
@@ -533,7 +607,10 @@ provideMessageContext({
     ]"
   >
     <div v-if="variant === MESSAGE_VARIANTS.ACTIVITY">
-      <ActivityBubble :content="content" />
+      <CevicoCallBubble
+        v-if="contentAttributes?.cevicoCall || contentAttributes?.cevico_call"
+      />
+      <ActivityBubble v-else :content="content" />
     </div>
     <div
       v-else
@@ -561,9 +638,14 @@ provideMessageContext({
         :class="{
           'ltr:ml-8 rtl:mr-8 justify-end': orientation === ORIENTATION.RIGHT,
           'ltr:mr-8 rtl:ml-8': orientation === ORIENTATION.LEFT,
+          'flex-col items-start gap-2': shouldShowWhatsappReferral,
         }"
         @contextmenu="openContextMenu($event)"
       >
+        <WhatsappReferral
+          v-if="shouldShowWhatsappReferral"
+          :referral="contentAttributes.referral"
+        />
         <Component :is="componentToRender" />
       </div>
       <MessageError

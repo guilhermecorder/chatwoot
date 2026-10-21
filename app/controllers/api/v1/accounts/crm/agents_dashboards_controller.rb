@@ -10,7 +10,6 @@ class Api::V1::Accounts::Crm::AgentsDashboardsController < Api::V1::Accounts::Ba
   include Crm::ResolvesPeriod
   include Crm::ResponseGoal
   include Crm::AgentPerformance
-  before_action -> { require_capability(:reports) }
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 

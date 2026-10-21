@@ -73,24 +73,23 @@ class Crm::HarvestService
     return { error: 'Agente desligado.' } if agent_paused?
     return { error: 'Sem chave de API da IA.' } if api_key.blank?
 
-    size = (requested_size || config_int('monthly_size', DEFAULT_MONTHLY)).clamp(10, 1000)
-    pool = candidate_pool(size)
+    size = preview_size(requested_size)
+    # Rodada 6 (revisão do #256): gerar a prévia de novo no MESMO mês não
+    # apaga quem já foi reservado/enviado nem quem o admin pulou. Eles seguem
+    # na lista nova do jeito que estavam e ficam fora da nova busca — senão
+    # quem foi reservado e não terminou (Sidekiq caiu, ou a etiqueta
+    # colheita_AAAA_MM falhou) voltaria como pendente e receberia 2 vezes.
+    kept = decided_leads_this_month
+    room = size - kept.count { |l| l['sent_at'].present? }
+    return { error: 'A colheita deste mês já chegou ao tamanho escolhido.' } if room <= 0
+
+    pool = candidate_pool(room, exclude_ids: kept.pluck('contact_id'))
     return { error: 'Nenhum lead frio elegível encontrado.' } if pool.empty?
 
-    scored = score_pool(pool)
-    selected = scored.sort_by { |l| -l['score'] }.first(size)
-
-    write_state(
-      'month_key' => month_key,
-      'status' => 'preview',
-      'generated_at' => Time.current.iso8601,
-      'approved_at' => nil, 'approved_by' => nil,
-      'selected' => selected,
-      'stats' => { 'pool' => pool.size, 'scored_by_ai' => scored.count { |l| l['ai'] }, 'planned' => selected.size },
-      'last_error' => nil
-    )
-    create_approval_task(selected.size)
-    { ok: true, planned: selected.size, pool: pool.size }
+    fresh = score_pool(pool).sort_by { |l| -l['score'] }.first(room)
+    save_preview!(kept, fresh, pool)
+    create_approval_task(fresh.size)
+    { ok: true, planned: fresh.size, pool: pool.size }
   rescue StandardError => e
     merge_state('last_error' => e.message.truncate(200))
     { error: e.message }
@@ -117,13 +116,20 @@ class Crm::HarvestService
     { ok: true }
   end
 
+  # achado #44: pular é gravado lead a lead dentro da trava — um lote em
+  # andamento nunca sobrescreve o "pular" que o admin fez no meio do caminho
   def skip_lead!(contact_id)
-    selected = state['selected'] || []
-    lead = selected.find { |l| l['contact_id'] == contact_id.to_i }
-    return { error: 'Lead não está na colheita.' } unless lead
+    already_sent = false
+    found = update_lead!(contact_id) do |lead|
+      # clicou em "Pular" no instante em que a mensagem já estava saindo:
+      # não marca pulado (senão o lead contaria duas vezes nos resultados)
+      next already_sent = true if lead['sent_at'].present?
 
-    lead['skipped'] = true
-    merge_state('selected' => selected)
+      lead['skipped'] = true
+    end
+    return { error: 'Lead não está na colheita.' } unless found
+    return { error: 'Esse lead já recebeu a mensagem.' } if already_sent
+
     { ok: true }
   end
 
@@ -132,6 +138,7 @@ class Crm::HarvestService
   # como oportunidade do mês — nenhuma mensagem sai, o time trabalha a lista
   # pelo CRM; 'send' envia mensagem modelo com o teto diário anti-ban.
   def send_batch!(max_now: nil)
+    reconcile_refused! # 🚫 #45: lead cuja mensagem a Meta recusou deixa de contar como enviado
     return { skipped: 'estado' } unless state['status'] == 'approved'
     return { skipped: 'mês virou' } unless state['month_key'] == month_key
     return organize_batch! if harvest_mode == 'organize'
@@ -151,31 +158,46 @@ class Crm::HarvestService
     pending = selected.reject { |l| l['sent_at'].present? || l['skipped'] }
     sent = 0
 
+    # achado #44: a marca de cada lead é gravada ANTES de enviar (claim
+    # atômico) e nada do lote é gravado "no fim" — assim dois cliques no botão,
+    # um clique durante o cron ou um reinício do Sidekiq no meio do lote nunca
+    # mandam a mesma mensagem duas vezes, e o "pular" feito pelo admin durante
+    # o lote é respeitado.
     pending.first(budget).each do |lead|
-      contact = account.contacts.find_by(id: lead['contact_id'])
-      next lead['skipped'] = true if contact.nil? || contact.phone_number.blank?
+      conversation = nil
+      next unless claim_lead!(lead['contact_id']) # outra rodada já pegou, o admin pulou, ou a colheita foi pausada
 
-      conversation = Crm::SendTemplateService.new(
+      contact = account.contacts.find_by(id: lead['contact_id'])
+      next release_lead!(lead['contact_id']) if contact.nil? || contact.phone_number.blank?
+
+      sender = Crm::SendTemplateService.new(
         source: build_source(inbox, lead),
         contact: contact
-      ).perform
+      )
+      conversation = sender.perform
 
       if conversation
-        lead['sent_at'] = Time.current.iso8601
-        lead['conversation_id'] = conversation.display_id
+        mark_sent!(lead['contact_id'], conversation, sender.message)
         contact.add_labels([harvest_label])
         sent += 1
       else
-        lead['skipped'] = true
+        release_lead!(lead['contact_id'])
       end
       sleep THROTTLE_SECONDS
     rescue StandardError => e
-      lead['skipped'] = true
+      # a reserva só é devolvida se a mensagem NÃO saiu; se o erro veio depois
+      # do envio (etiqueta, gravação da conversa), o lead continua "enviado"
+      # e a conversa fica registrada — senão a tela deixaria de contar o envio
+      if conversation
+        update_lead!(lead['contact_id']) { |l| l['conversation_id'] ||= conversation.display_id }
+      else
+        release_lead!(lead['contact_id'])
+      end
       Rails.logger.error("[Colheitadeira] conta=#{account.id} contato=#{lead['contact_id']}: #{e.message}")
     end
 
-    done = selected.all? { |l| l['sent_at'].present? || l['skipped'] }
-    merge_state('selected' => selected, 'status' => done ? 'done' : 'approved')
+    done = (state['selected'] || []).all? { |l| l['sent_at'].present? || l['skipped'] }
+    merge_state('status' => 'done') if done
     { ok: true, sent: sent, done: done }
   end
 
@@ -187,20 +209,63 @@ class Crm::HarvestService
     label = opportunity_label
     organized = 0
 
-    pending.each do |lead|
-      contact = account.contacts.find_by(id: lead['contact_id'])
-      next lead['skipped'] = true if contact.nil?
+    # achado #44: gravado lead a lead dentro da trava (nunca a lista inteira no
+    # fim) — o "pular" feito pelo admin durante a etiquetagem não é sobrescrito
+    pending.each { |lead| organized += 1 if organize_lead!(lead, label) }
 
-      contact.add_labels([label])
-      lead['sent_at'] = Time.current.iso8601
-      organized += 1
-    rescue StandardError => e
-      lead['skipped'] = true
-      Rails.logger.error("[Colheitadeira] organizar conta=#{account.id} contato=#{lead['contact_id']}: #{e.message}")
+    merge_state('status' => 'done', 'organized_label' => label)
+    { ok: true, organized: organized, label: label, done: true }
+  end
+
+  # etiqueta UM lead: reserva na trava, etiqueta; se não deu, devolve a reserva
+  def organize_lead!(lead, label)
+    return false unless claim_lead!(lead['contact_id']) # o admin pulou (ou pausou) no meio
+
+    contact = account.contacts.find_by(id: lead['contact_id'])
+    if contact.nil?
+      release_lead!(lead['contact_id'])
+      return false
     end
 
-    merge_state('selected' => selected, 'status' => 'done', 'organized_label' => label)
-    { ok: true, organized: organized, label: label, done: true }
+    contact.add_labels([label])
+    true
+  rescue StandardError => e
+    release_lead!(lead['contact_id'])
+    Rails.logger.error("[Colheitadeira] organizar conta=#{account.id} contato=#{lead['contact_id']}: #{e.message}")
+    false
+  end
+
+  # ── a Meta recusou (#45, auditoria 10/2026) ────────────────────────────
+  # O lead é dado como enviado quando a mensagem é gravada; a Meta responde
+  # DEPOIS e a mensagem fica `status: failed`. A cada rodada horária, os leads
+  # enviados são conferidos: o recusado sai de "enviado" (sent_at e conversa
+  # limpos — o resultado não conta resposta de uma mensagem que não chegou) e
+  # vira PULADO com o motivo (skip_reason), como já acontece quando o envio
+  # nem sai. Sem reenvio automático: o número que a Meta recusa agora seria
+  # recusado de novo na hora seguinte — a equipe vê o motivo e decide.
+  def reconcile_refused!
+    leads = (state['selected'] || []).select { |l| l['sent_at'].present? && l['message_id'].present? }
+    refused = Crm::SendTemplateService.refused(leads.pluck('message_id'))
+    leads.each do |lead|
+      next unless refused.key?(lead['message_id'])
+
+      refuse_lead!(lead['contact_id'], refused[lead['message_id']])
+      drop_harvest_label!(lead['contact_id'])
+    end
+  rescue StandardError => e
+    Rails.logger.warn("[Colheitadeira] conferência das recusas conta=#{account.id}: #{e.message}")
+  end
+
+  # a etiqueta colheita_AAAA_MM sai junto (revisão da Rodada 3): quem nunca
+  # recebeu a mensagem não pode ficar fora das próximas colheitas
+  # (blocked_contact_ids) nem aparecer no CRM como colhido
+  def drop_harvest_label!(contact_id)
+    contact = account.contacts.find_by(id: contact_id)
+    return if contact.nil? || contact.label_list.exclude?(harvest_label)
+
+    contact.update!(label_list: contact.label_list - [harvest_label])
+  rescue StandardError => e
+    Rails.logger.warn("[Colheitadeira] etiqueta do recusado contato=#{contact_id}: #{e.message}")
   end
 
   def harvest_mode
@@ -228,7 +293,10 @@ class Crm::HarvestService
       'stats' => (state['stats'] || {}).merge(
         'sent' => sent.size, 'replied' => replied,
         'skipped' => selected.count { |l| l['skipped'] },
-        'pending' => selected.count { |l| l['sent_at'].blank? && !l['skipped'] }
+        'pending' => selected.count { |l| l['sent_at'].blank? && !l['skipped'] },
+        # reservado sem conversa: o Sidekiq caiu entre a reserva e o envio (modo
+        # 'send'); ninguém reenvia sozinho — o admin decide à mão
+        'sem_conversa' => (harvest_mode == 'send' ? sent.count { |l| l['conversation_id'].blank? } : 0)
       )
     )
   end
@@ -243,8 +311,34 @@ class Crm::HarvestService
 
   private
 
+  def preview_size(requested_size)
+    (requested_size || config_int('monthly_size', DEFAULT_MONTHLY)).clamp(10, 1000)
+  end
+
+  # grava a prévia nova: quem já tinha destino neste mês (kept) + os novos
+  def save_preview!(kept, fresh, pool)
+    write_state(
+      'month_key' => month_key,
+      'status' => 'preview',
+      'generated_at' => Time.current.iso8601,
+      'approved_at' => nil, 'approved_by' => nil,
+      'selected' => kept + fresh,
+      'stats' => { 'pool' => pool.size, 'scored_by_ai' => pool.count { |l| l['ai'] }, 'planned' => fresh.size,
+                   'kept' => kept.size },
+      'last_error' => nil
+    )
+  end
+
+  # leads da colheita DESTE mês que já têm destino: reservados/enviados
+  # (sent_at) ou pulados. Mês anterior não conta (a lista nova começa limpa).
+  def decided_leads_this_month
+    return [] unless state['month_key'] == month_key
+
+    (state['selected'] || []).select { |l| l['sent_at'].present? || l['skipped'] }
+  end
+
   # ── SELEÇÃO (SQL) ─────────────────────────────────────────────────────
-  def candidate_pool(size)
+  def candidate_pool(size, exclude_ids:)
     pipeline = account.crm_pipelines.order(:position).first
     return [] unless pipeline
 
@@ -262,7 +356,7 @@ class Crm::HarvestService
     scope = scope.where("contacts.phone_number IS NOT NULL AND contacts.phone_number <> ''")
                  .where('contacts.last_activity_at < ? OR contacts.last_activity_at IS NULL', cold_days.days.ago)
 
-    blocked = blocked_contact_ids
+    blocked = blocked_contact_ids(exclude_ids)
     scope = scope.where.not(contact_id: blocked) if blocked.any?
 
     cap = [size * POOL_FACTOR, POOL_HARD_CAP].min
@@ -272,11 +366,13 @@ class Crm::HarvestService
   end
 
   # quem pediu para não ser contatado, virou perda, ou já foi colhido há pouco
-  def blocked_contact_ids
-    optout_tags = ActsAsTaggableOn::Tag.where('name = ? OR name LIKE ?', 'nao_perturbe', 'perda\\_%').ids
+  # (+ extra: quem já tem destino na colheita deste mês — Rodada 6)
+  def blocked_contact_ids(extra)
+    # 🚦 + sinais de quem não quer receber com a chavinha "robôs param" ligada (16/10)
+    optout_tags = ActsAsTaggableOn::Tag.where('name IN (?) OR name LIKE ?', ['nao_perturbe', *Crm::StopSignals.robot_stop_labels(account)], 'perda\\_%').ids
     recent_harvest_tags = ActsAsTaggableOn::Tag.where('name LIKE ?', 'colheita\\_%').ids
 
-    ids = []
+    ids = Crm::PartnerGuard.excluded_contact_ids(account) + extra.map(&:to_i) # 🚧 item 231 (cerca dos parceiros)
     if optout_tags.any?
       ids += ActsAsTaggableOn::Tagging.where(taggable_type: 'Contact', context: 'labels', tag_id: optout_tags)
                                       .pluck(:taggable_id)
@@ -349,7 +445,7 @@ class Crm::HarvestService
       end
 
       message = client.messages.create(
-        model: model, max_tokens: 4096, system_: system_prompt,
+        model: model, max_tokens: 4096, system_: cached_system,
         output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
         messages: [{ role: 'user', content: "Avalie estes #{batch.size} leads frios:\n\n#{lines.join("\n")}" }]
       )
@@ -427,12 +523,20 @@ class Crm::HarvestService
     "colheita_#{month_key.tr('-', '_')}"
   end
 
-  # tarefa de aprovação para o admin (idempotente por mês)
+  # tarefa de aprovação para o admin (idempotente por MÊS — Rodada 6: antes a
+  # trava era o título inteiro, que leva o número de leads; gerar a prévia de
+  # novo com outro número abria uma 2ª tarefa). Se já existe a do mês, só
+  # atualiza o número na tarefa que ainda está aberta.
   def create_approval_task(planned)
     return unless config_bool('require_approval', true)
 
-    title = "🌾 Colheita de #{TZ.today.strftime('%B/%Y')} pronta — #{planned} leads aguardando sua aprovação"
-    return if account.tasks.where(title: title).exists?
+    prefix = "🌾 Colheita de #{TZ.today.strftime('%B/%Y')} pronta"
+    title = "#{prefix} — #{planned} leads aguardando sua aprovação"
+    same_month = account.tasks.where('title LIKE ?', "#{ActiveRecord::Base.sanitize_sql_like(prefix)}%")
+    if same_month.exists?
+      same_month.where.not(status: :done).find_each { |task| task.update(title: title) }
+      return
+    end
 
     account.tasks.create!(
       title: title,
@@ -478,5 +582,73 @@ class Crm::HarvestService
       settings.update_column(:ai_config, ai) # rubocop:disable Rails/SkipsModelValidations
     end
     @ai_config = nil # força releitura do estado na próxima consulta
+  end
+
+  # ── marca POR LEAD, dentro da trava (achado #44) ──────────────────────
+  # Altera UM lead do estado: relê o estado FRESCO dentro da trava da linha,
+  # aplica o bloco e grava. Nunca grava a lista inteira de uma vez — a
+  # alteração de uma rodada não apaga o que outra (ou o admin) acabou de
+  # gravar. O bloco recebe o lead e o estado fresco da colheita (status etc.).
+  # Devolve true se o lead existe na colheita.
+  def update_lead!(contact_id)
+    settings = CrmSetting.find_by(account: account)
+    return false unless settings
+
+    found = false
+    settings.with_lock do
+      ai = (settings.reload.ai_config || {}).deep_dup
+      fresh_state = ai['harvest_state'] || {}
+      lead = (fresh_state['selected'] || []).find { |l| l['contact_id'] == contact_id.to_i }
+      next unless lead
+
+      found = true
+      yield lead, fresh_state
+      settings.update_column(:ai_config, ai) # rubocop:disable Rails/SkipsModelValidations
+    end
+    @ai_config = nil # força releitura do estado na próxima consulta
+    found
+  end
+
+  # Reserva o lead ANTES de enviar: se outra rodada já reservou (sent_at), o
+  # admin pulou (skipped) ou clicou em "Pausar" enquanto este lote rodava,
+  # devolve false e ninguém manda a mensagem. Mesmo desenho do claim do lembrete.
+  def claim_lead!(contact_id)
+    claimed = false
+    update_lead!(contact_id) do |lead, fresh_state|
+      next if fresh_state['status'] != 'approved' # pausou no meio do lote: o resto não sai
+      next if lead['sent_at'].present? || lead['skipped']
+
+      claimed = true
+      lead['sent_at'] = Time.current.iso8601
+    end
+    claimed
+  end
+
+  # enviado: guarda a conversa e o id da mensagem (a rodada seguinte confere se a Meta recusou, #45)
+  def mark_sent!(contact_id, conversation, message)
+    update_lead!(contact_id) do |l|
+      l['conversation_id'] = conversation.display_id
+      l['message_id'] = message&.id
+    end
+  end
+
+  # a Meta recusou a mensagem: sai de "enviado" e vira pulado com o motivo (#45)
+  def refuse_lead!(contact_id, error)
+    update_lead!(contact_id) do |l|
+      l['sent_at'] = nil
+      l['conversation_id'] = nil
+      l['message_id'] = nil
+      l['skipped'] = true
+      l['skip_reason'] = "a Meta recusou: #{error.to_s.truncate(160)}"
+    end
+  end
+
+  # Envio não saiu: devolve a reserva e marca o lead como pulado
+  def release_lead!(contact_id)
+    update_lead!(contact_id) do |lead|
+      lead['sent_at'] = nil
+      lead['conversation_id'] = nil
+      lead['skipped'] = true
+    end
   end
 end

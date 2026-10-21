@@ -8,6 +8,8 @@ import draggable from 'vuedraggable';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import EmojiFx from 'dashboard/components-next/cevico/EmojiFx.vue';
 import CrmAPI from 'dashboard/api/crm';
@@ -15,6 +17,9 @@ import CrmAPI from 'dashboard/api/crm';
 const store = useStore();
 const teamAgents = useMapGetter('agents/getAgents');
 const { isAdmin } = useAdmin();
+// 🔐 rodada 334: quem só VÊ o planejamento não cria, move nem apaga peça
+const { canEdit } = useCevicoAccess();
+const canEditContent = computed(() => canEdit('marketing.paginas'));
 
 const isLoading = ref(true);
 const items = ref([]);
@@ -263,7 +268,7 @@ onMounted(() => {
           <span class="i-lucide-kanban text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Planejamento de conteúdos</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Planejamento de conteúdos <CevicoViewOnlyPill v-if="!canEditContent" /></h1>
           <p class="text-xs text-n-slate-10">o fluxo das peças de marketing: ideia → copy → produção → revisão → publicado</p>
         </div>
         <!-- item 95: tudo publicado → o quadro se renova sozinho -->
@@ -328,6 +333,7 @@ onMounted(() => {
               :model-value="byStage[stage.key]"
               group="cevico-content"
               item-key="id"
+              :disabled="!canEditContent"
               :animation="150"
               :empty-insert-threshold="80"
               ghost-class="opacity-40"
@@ -405,7 +411,7 @@ onMounted(() => {
                     avançar →
                   </button>
                   <button
-                    v-if="isAdmin"
+                    v-if="isAdmin && canEditContent"
                     class="ml-auto w-6 h-6 rounded-md flex items-center justify-center text-red-500 hover:bg-red-500/10"
                     @click="deleteItem(item)"
                   >

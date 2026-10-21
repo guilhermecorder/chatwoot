@@ -18,8 +18,12 @@ class BulkActionsJob < ApplicationJob
   end
 
   def bulk_update
-    bulk_remove_labels
-    bulk_conversation_update
+    # CEVICO Rodada 5 (#17): etiqueta em lote (que sobe da conversa ao
+    # contato) não dispara as automações "Etiqueta adicionada/removida"
+    Contact.without_label_triggers do
+      bulk_remove_labels
+      bulk_conversation_update
+    end
   end
 
   def bulk_conversation_update

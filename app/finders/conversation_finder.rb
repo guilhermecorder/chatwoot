@@ -1,4 +1,4 @@
-class ConversationFinder
+class ConversationFinder # rubocop:disable Metrics/ClassLength
   attr_reader :current_user, :current_account, :params
 
   DEFAULT_STATUS = 'open'.freeze
@@ -85,6 +85,8 @@ class ConversationFinder
     filter_by_team
     filter_by_labels
     filter_by_crm_stage
+    filter_by_crm_pipeline
+    filter_by_assignee_ids
     filter_by_query
     filter_by_source_id
   end
@@ -143,7 +145,8 @@ class ConversationFinder
       conversation_ids = current_account.mentions.where(user: current_user).pluck(:conversation_id)
       @conversations = @conversations.where(id: conversation_ids)
     when 'participating'
-      @conversations = current_user.participating_conversations.where(account_id: current_account.id)
+      participant_conversation_ids = ConversationParticipant.where(account_id: current_account.id, user_id: current_user.id).select(:conversation_id)
+      @conversations = @conversations.where(id: participant_conversation_ids)
     when 'unattended'
       @conversations = @conversations.unattended
     end
@@ -184,6 +187,38 @@ class ConversationFinder
 
     @conversations = @conversations.joins(contact: :crm_contacts)
                                    .where(crm_contacts: { stage_id: params[:crm_stage_id] })
+    exclude_foreign_inboxes(Crm::Stage.where(id: params[:crm_stage_id]).pick(:pipeline_id))
+  end
+
+  # 🧭 item 341 (Ambientes do CRM): filtro por funil/coluna não mostra conversa
+  # de caixa de OUTRO ambiente (ex.: caixa 12 Oftalmofácil no funil da CEVICO)
+  def exclude_foreign_inboxes(pipeline_id)
+    return if pipeline_id.blank?
+
+    foreign = Crm::Environments.foreign_inbox_ids(current_account, pipeline_id.to_i)
+    @conversations = @conversations.where.not(inbox_id: foreign) if foreign.any?
+  end
+
+  # item 212 (23/09): filtro "quem cuida" da lista de Conversas — os avatares
+  # coloridos no topo; assignee_ids = ids de pessoas (0 = sem responsável)
+  def filter_by_assignee_ids
+    ids = Array(params[:assignee_ids]).map(&:to_i)
+    return if ids.empty?
+
+    @conversations = if ids.include?(0)
+                       @conversations.where(assignee_id: [nil] + ids.reject(&:zero?))
+                     else
+                       @conversations.where(assignee_id: ids)
+                     end
+  end
+
+  # filtro da jornada CEVICO: conversas cujo contato está em QUALQUER coluna do funil
+  def filter_by_crm_pipeline
+    return if params[:crm_pipeline_id].blank? || params[:crm_stage_id].present?
+
+    @conversations = @conversations.joins(contact: :crm_contacts)
+                                   .where(crm_contacts: { pipeline_id: params[:crm_pipeline_id] })
+    exclude_foreign_inboxes(params[:crm_pipeline_id])
   end
 
   def filter_by_source_id
@@ -200,7 +235,7 @@ class ConversationFinder
     # tem assignee_id e a referência solta fica ambígua no Postgres
     counts = @conversations.unscope(:order).pick(
       Arel.sql("COUNT(*) FILTER (WHERE conversations.assignee_id = #{current_user.id.to_i})"),
-      Arel.sql('COUNT(*) FILTER (WHERE conversations.assignee_id IS NULL)'),
+      Arel.sql('COUNT(*) FILTER (WHERE conversations.assignee_id IS NULL AND conversations.assignee_agent_bot_id IS NULL)'),
       Arel.sql('COUNT(*)')
     )
     counts || [0, 0, 0]

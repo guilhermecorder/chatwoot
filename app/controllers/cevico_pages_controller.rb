@@ -6,22 +6,28 @@
 # responde na RAIZ desse domínio (www.cevico.com.br/preoperatorio) e os
 # endereços antigos redirecionam 301 pro oficial — um endereço só aos
 # olhos do Google e da Meta.
-class CevicoPagesController < ActionController::Base # rubocop:disable Rails/ApplicationController
+class CevicoPagesController < ActionController::Base # rubocop:disable Rails/ApplicationController, Metrics/ClassLength
   layout false
+  include Cevico::PublicSecurity # 🔐 CSP só-relatar + sem iframe (rodada 171)
 
-  def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  def show # rubocop:disable Metrics/AbcSize
     @page = CevicoPage.published.find_by(slug: params[:slug])
     return render plain: 'Página não encontrada.', status: :not_found if @page.nil?
 
-    # endereço antigo (/p/slug ou host da VPS) → 301 pro oficial
-    if Cevico::PublicSite.configured? && request.path != "/#{@page.slug}"
-      official = Cevico::PublicSite.page_url(@page.slug)
+    # endereço antigo (/p/slug ou host da VPS) → 301 pro oficial (rodada 334:
+    # o oficial é o domínio da EMPRESA dona da página, quando ela tem um)
+    if Cevico::PublicSite.host_for(@page.account).present? && request.path != "/#{@page.slug}"
+      official = Cevico::PublicSite.page_url(@page.slug, account: @page.account)
       official += "?de=#{origin_slug}" if origin_slug.present?
       return redirect_to official, status: :moved_permanently, allow_other_host: true
     end
 
-    # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela)
-    @page.serving_variant = requested_variant(@page) || (@page.ab_test_running? ? @page.pick_variant : nil)
+    @cevico_tracking = Cevico::PublicSite.tracking_config_for(@page.account)
+    request.env['cevico.gzip'] = true # 🗜️ 20/10: resposta comprimida (Rack::Deflater em config/application.rb)
+
+    # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela);
+    # item 306: quem volta à página vê a MESMA variação
+    @page.serving_variant = requested_variant(@page) || sticky_variant(@page)
 
     # contador simples de visitas por dia (sem cookie, sem rastreio);
     # ?de=slug marca de qual página do funil o visitante veio
@@ -45,12 +51,14 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     return render plain: 'Prévia não encontrada.', status: :not_found if @page.nil?
 
     @preview = true
+    @cevico_tracking = Cevico::PublicSite.tracking_config_for(@page.account)
     @can_edit = @page.valid_edit_token?(params[:edit]) && !@page.published?
     @build_status = Crm::PageGenerateJob.page_status(@page.id)
     @building = @build_status&.dig('status') == 'running'
     @build_error = @build_status&.dig('status') == 'error' ? @build_status['error'] : nil
     @just_built = params[:pronta].present?
-    @page.serving_variant = nil
+    # item 306: ?v=b na prévia mostra a variação (ativa ou pausada) antes de ir ao ar
+    @page.serving_variant = params[:v].to_s[/\A[a-z0-9]{1,3}\z/]
     # página HTML anexada: prévia serve o arquivo como veio, só com a tarja
     # de rascunho por cima (retoque inline/chat são do Construtor)
     return render_custom_page(preview_banner: render_to_string(partial: 'cevico_pages/draft_banner')) if @page.custom_html.present?
@@ -140,10 +148,14 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
 
     trk = Cevico::TrafficSource.classify(params, referer: request.referer)
     CevicoPageTraffic.bump!(page: page, kind: 'cta', source: trk[:source], campaign: trk[:campaign])
-    page.track_hit!('cta')
-    ref = CevicoPageRef.mint!(page: page, source_data: Cevico::TrafficSource.snapshot(params, page: page))
+    # item 306: o clique conta para a variação que o visitante viu, e a letra
+    # viaja no Protocolo — é ela que diz qual headline trouxe o LEAD
+    variant = requested_variant(page)
+    page.track_hit!('cta', variant: variant)
+    ref = CevicoPageRef.mint!(page: page, source_data: click_snapshot(params, page).merge('variant' => variant))
     return render json: { token: nil } if ref.nil?
 
+    send_contact_event(ref)
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
   end
 
@@ -157,7 +169,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     @page.track_hit!('next', variant: requested_variant(@page))
     # a origem (utm/gclid/ref_host) viaja junto pro próximo passo do funil —
     # senão o Google Ads viraria "funil" na segunda página
-    redirect_to "#{Cevico::PublicSite.page_url(target.slug)}?de=#{@page.slug}#{tracking_query_suffix}",
+    redirect_to "#{Cevico::PublicSite.page_url(target.slug, account: target.account)}?de=#{@page.slug}#{tracking_query_suffix}",
                 allow_other_host: true
   end
 
@@ -177,40 +189,48 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # Raiz do domínio oficial: o HUB — porta de entrada do atendimento.
   # Três caminhos em destaque (Refrativa | Catarata | Lente Trifocal),
   # botão de WhatsApp com Protocolo e o índice das demais páginas.
+  # 🏢 rodada 334: no domínio de uma EMPRESA, o hub é dela — só as páginas
+  # publicadas daquela conta, o WhatsApp/frase/rastreio dela e o nome dela no
+  # lugar da marca. Sem host casado: tudo como sempre (todas as páginas, hub global).
   def home
-    @pages_by_category = CevicoPage.published
-                                   .order(:title)
-                                   .group_by(&:category)
-    @hub = Cevico::PublicSite.hub_config
-    @hub_whatsapp = Cevico::PublicSite.hub_whatsapp_url
-    @doors = hub_doors
+    account = host_account
+    scope = account ? CevicoPage.published.where(account: account) : CevicoPage.published
+    @pages_by_category = scope.order(:title).group_by(&:category)
+    @hub = Cevico::PublicSite.hub_config_for(account)
+    @hub_whatsapp = Cevico::PublicSite.hub_whatsapp_url(account)
+    @company = account && Cevico::Company.for(account)
+    @cevico_tracking = Cevico::PublicSite.tracking_config_for(account)
+    # as 3 portas da clínica só fazem sentido numa clínica
+    @doors = @company && !@company.clinic? ? [] : hub_doors(scope)
     render :home
   end
 
   # Protocolo do HUB: clique no WhatsApp da porta de entrada — liga o
-  # paciente da caixa à origem (Google Ads/SEO/Meta) mesmo sem página
+  # paciente da caixa à origem (Google Ads/SEO/Meta) mesmo sem página.
+  # Rodada 334: no domínio de uma empresa, o Protocolo nasce na conta dela.
   def hub_ref
-    account = CevicoPage.published.order(:id).first&.account || Account.first
+    account = host_account || CevicoPage.published.order(:id).first&.account || Account.first
     return head :not_found if account.nil?
 
     ref = CevicoPageRef.mint!(page: nil, account: account,
-                              source_data: Cevico::TrafficSource.snapshot(params, page: nil))
+                              source_data: click_snapshot(params, nil))
     return render json: { token: nil } if ref.nil?
 
+    send_contact_event(ref)
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
   end
 
   private
 
   WHATSAPP_URL = %r{\A(https?://(wa\.me|api\.whatsapp\.com)|whatsapp:)}i
-  TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_content utm_term gclid fbclid ref_host].freeze
+  TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_id utm_content utm_term gclid gbraid wbraid fbclid ref_host].freeze
 
   # destino WhatsApp → gera o Protocolo e o anexa ao texto pré-preenchido;
   # qualquer falha = redireciona pro cta_url original (clique nunca quebra)
   def url_with_protocol(page) # rubocop:disable Metrics/AbcSize
     return nil unless page.cta_url.to_s.match?(WHATSAPP_URL)
 
-    ref = CevicoPageRef.mint!(page: page, source_data: Cevico::TrafficSource.snapshot(request.query_parameters, page: page))
+    ref = CevicoPageRef.mint!(page: page, source_data: click_snapshot(request.query_parameters, page))
     return nil if ref.nil?
 
     uri = URI.parse(page.cta_url)
@@ -224,6 +244,37 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     nil
   end
 
+  # clique no WhatsApp → "Contact" na Meta pelo servidor (o do Pixel se perde
+  # quando o celular abre o WhatsApp). O Protocolo é o event_id: sem duplicar.
+  # Nunca atrapalha o clique: falha aqui só vai para o log.
+  def send_contact_event(ref)
+    Cevico::PageContactEventJob.perform_later(ref.id, { ip: request.remote_ip, user_agent: request.user_agent.to_s[0, 400],
+                                                        url: request.referer.to_s[0, 500] }.compact_blank)
+  rescue StandardError => e
+    Rails.logger.error "[CevicoPages#ref] Contact não enfileirado: #{e.message}"
+  end
+
+  # origem do clique para o Protocolo. Item 313: os cookies do navegador
+  # levam a identidade do Google Analytics e do Pixel — sem ela a conversão
+  # volta "solta" e o anúncio não leva o crédito
+  def click_snapshot(prm, page)
+    Cevico::TrafficSource.snapshot(prm, page: page, cookies: request.cookies, ga4_id: send_measurement_id(page))
+  end
+
+  # propriedade do Analytics que recebe as conversões do CRM (Integrações → Google).
+  # Sem página (hub): a conta do domínio da empresa; senão a primeira publicada
+  def send_measurement_id(page)
+    account_id = page&.account_id || host_account&.id || CevicoPage.published.order(:id).pick(:account_id)
+    CrmSetting.find_by(account_id: account_id)&.google_ads_config&.dig('measurement_id')
+  end
+
+  # 🏢 a conta cuja empresa tem o domínio desta requisição (nil = nenhuma)
+  def host_account
+    return @host_account if defined?(@host_account)
+
+    @host_account = Cevico::PublicSite.account_for_host(request.host)
+  end
+
   # &utm_...&gclid=... presentes na URL atual, prontos pra viajar no funil
   def tracking_query_suffix
     kept = request.query_parameters.slice(*TRACKING_PARAMS).compact_blank
@@ -235,7 +286,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # Google Tag Manager NOS LUGARES que o Google pede (script no <head>,
   # noscript logo após o <body>) — é o que o "Testar" do GTM confere
   def render_custom_page(preview_banner: nil)
-    html = @page.custom_html.to_s
+    html = @page.custom_html_for_serving # item 306: headline da variação no lugar do <h1>
     if preview_banner.nil? # ao vivo: injeta o rastreio; prévia fica limpa
       html = Cevico::Gtm.inject(html)
       snippet = render_to_string(partial: 'cevico_pages/analytics_snippet', locals: { page: @page, include_gtm: false }) +
@@ -258,8 +309,8 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
       match: /trifocal|galaxy|premium/i, whats: 'Olá! Quero saber mais sobre a lente trifocal.' }
   ].freeze
 
-  def hub_doors
-    published = CevicoPage.published.to_a
+  def hub_doors(scope = CevicoPage.published)
+    published = scope.to_a
     HUB_DOORS.map do |door|
       page = published.find { |pg| pg.slug.match?(door[:match]) || pg.title.match?(door[:match]) }
       door.merge(page_slug: page&.slug)
@@ -269,6 +320,19 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # slug da página de origem do funil (?de=...), saneado
   def origin_slug
     params[:de].to_s.gsub(/[^a-z0-9-]/, '')[0, 60].presence
+  end
+
+  # item 306: mesma pessoa, mesma headline — a variação sorteada fica 30 dias
+  # num cookie só desta página; recarregar ou voltar não troca o título (e o
+  # clique é contado na variação que a pessoa realmente leu)
+  def sticky_variant(page)
+    return nil unless page.ab_test_running?
+
+    name = "cv_ab_#{page.id}"
+    saved = cookies[name].to_s
+    variant = saved == 'a' || page.active_variants.any? { |var| var['key'] == saved } ? saved : page.pick_variant
+    cookies[name] = { value: variant, expires: 30.days.from_now, same_site: :lax, httponly: true }
+    variant
   end
 
   # variação pedida no ?v= — só vale se for uma variação REAL da página

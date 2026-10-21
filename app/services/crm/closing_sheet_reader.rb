@@ -16,10 +16,19 @@ class Crm::ClosingSheetReader
     'data' => :date,
     'paciente' => :name,
     'nome' => :name,
+    'telefone' => :phone,
+    'celular' => :phone,
+    'whatsapp' => :phone,
+    'fone' => :phone,
     'procedimento' => :procedure,
     'valor total' => :value,
     'valor' => :value
   }.freeze
+
+  # Célula NUMÉRICA do Excel (sem t="s"): o XML traz o número cru com ponto
+  # decimal ("162.375" = 162,375). Marcamos para o valor NÃO passar pela
+  # regra brasileira do milhar, que leria 162.375 como 162 mil (Rodada 5).
+  NumberCell = Class.new(String)
 
   def initialize(io_path)
     @path = io_path
@@ -96,14 +105,23 @@ class Crm::ClosingSheetReader
   def parse_sheet(doc, shared)
     doc.xpath('//m:sheetData/m:row', 'm' => M).map do |row|
       row.xpath('m:c', 'm' => M).each_with_object({}) do |cell, h|
-        value = cell.at_xpath('m:v', 'm' => M)&.text
+        value = cell_value(cell, shared)
         next if value.nil?
 
-        value = shared[value.to_i].to_s if cell['t'] == 's'
         col = cell['r'].to_s.gsub(/\d/, '')
         h[col] = value
       end
     end
+  end
+
+  # texto compartilhado (t="s") → o texto; célula numérica → NumberCell
+  def cell_value(cell, shared)
+    value = cell.at_xpath('m:v', 'm' => M)&.text
+    return nil if value.nil?
+    return shared[value.to_i].to_s if cell['t'] == 's'
+    return NumberCell.new(value) if cell['t'].nil? || cell['t'] == 'n'
+
+    value
   end
 
   # acha a linha de cabeçalho e mapeia coluna → campo
@@ -123,15 +141,15 @@ class Crm::ClosingSheetReader
     name = fields[:name].to_s.strip
     return :sem_nome if name.blank? # linha de totais/vazia
 
-    status = fields[:status].to_s.strip.downcase
-    return :duplicada if status.include?('duplicad')
-    return :cancelada if status.include?('cancelad')
+    skip = status_skip(fields[:status])
+    return skip if skip
 
     value = parse_value(fields[:value])
     return :sem_valor unless value.positive?
 
     {
       name: name,
+      phone: parse_phone(fields[:phone]),
       date: parse_date(fields[:date]),
       procedure: fields[:procedure].to_s.strip.presence,
       value: value,
@@ -139,15 +157,39 @@ class Crm::ClosingSheetReader
     }
   end
 
-  # no XML o número vem cru ('3900', '24187.8'); só cai no formato BRL
-  # ("R$ 3.900,00") se a célula for texto formatado
-  def parse_value(raw)
-    str = raw.to_s.strip
-    return 0.0 if str.blank?
+  def status_skip(raw)
+    status = raw.to_s.strip.downcase
+    return :duplicada if status.include?('duplicad')
+    return :cancelada if status.include?('cancelad')
 
-    Float(str).round(2)
+    nil
+  end
+
+  # coluna Telefone/Celular/WhatsApp (opcional — pedido 01/09: casar pelo
+  # telefone). Célula numérica do Excel pode vir '11987654321.0' ou em
+  # notação científica — normaliza pra só dígitos antes de devolver.
+  def parse_phone(raw)
+    str = raw.to_s.strip
+    return nil if str.blank?
+
+    str = format('%.0f', Float(str)) if str.match?(/\A-?\d+(\.\d+)?([eE][+-]?\d+)?\z/) && str.match?(/[.eE]/)
+    digits = str.gsub(/\D/, '')
+    digits.length >= 8 ? digits : nil
   rescue ArgumentError
-    str.gsub(/[R$\s]/, '').gsub('.', '').tr(',', '.').to_f.round(2)
+    digits = str.gsub(/\D/, '')
+    digits.length >= 8 ? digits : nil
+  end
+
+  # Célula NUMÉRICA vem crua do XML ('3900', '24187.8', '162.375') e é lida
+  # como número de verdade, com ponto decimal. Célula de TEXTO pode vir
+  # "R$ 3.900,00" ou "5.000": achado #192, antes Float('5.000') dava 5.0
+  # (R$ 5,00) — agora a regra única do Cevico::Money lê 5000,00.
+  # Anotação depois do número ("5.000,00 (pago)") é ignorada; se o texto
+  # tiver dois números ("2x 2.500,00"), a linha fica "sem valor" em vez de
+  # entrar com valor errado (decisão segura; o Guilherme pode rever).
+  def parse_value(raw)
+    value = raw.is_a?(NumberCell) ? Float(raw, exception: false) : Cevico::Money.parse_with_note(raw)
+    Cevico::Money.parse(value) || 0.0
   end
 
   # '01/07/2026 17:00' | '01/07/2026' | serial do Excel (46202.33)

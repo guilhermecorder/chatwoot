@@ -45,6 +45,8 @@ const accountId = useMapGetter('getCurrentAccountId');
           :account-id="accountId"
           :thumbnail="contact.thumbnail"
           :updated-at="contact.lastActivityAt"
+          :crm-journeys="contact.crmJourneys || []"
+          :last-conversation-id="contact.lastConversationId"
         />
       </li>
     </ul>

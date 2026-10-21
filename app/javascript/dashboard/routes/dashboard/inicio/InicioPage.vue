@@ -1,13 +1,16 @@
 <script setup>
+import { useAlert } from 'dashboard/composables';
 // Meu Painel (tela inicial) — visível para admin E atendentes.
 // Boas-vindas, avisos do Radar, indicadores por período (régua padrão:
 // hoje/ontem/últimos 7/mês/ano/personalizado) e a saúde da agenda —
 // com atalhos para agir rápido.
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
 import EmojiFx from 'dashboard/components-next/cevico/EmojiFx.vue';
 import TileAura from 'dashboard/components-next/radar/TileAura.vue';
@@ -17,17 +20,58 @@ import CustomPanelGrid from 'dashboard/components-next/cevico/CustomPanelGrid.vu
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboardCore.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { PERIOD_PRESETS } from 'dashboard/helper/cevicoPeriod';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
+import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
 import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
-import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
-import draggable from 'vuedraggable';
-import { evaluateFormula, variablesIn, formatKpi } from 'dashboard/helper/cevicoFormula';
+import { IMAC_PALETTES, FRUIT_PALETTES } from 'dashboard/helper/cevicoPalettes';
+// 🧭 item 336: vitrine giratória do guia arejado (frase do dia + equipe)
+import CvVitrine from 'dashboard/components-next/cevico/guia/CvVitrine.vue';
+import VisaoGeral from 'dashboard/components-next/cevico/guia/VisaoGeral.vue';
+import { fraseDoDia } from 'dashboard/helper/cevicoFrases';
 import {
-  resolveDoctors, resolveGoal, resolveWindows, resolveBlocked,
-  resolveBlockedDays, resolveSurgeryWindows, blockKey, scanAgenda,
+  PANEL_PRESETS,
+  PRESET_BY_KEY,
+  buildPreset,
+} from 'dashboard/helper/cevicoPanelPresets';
+import TileLine from 'dashboard/components-next/cevico/TileLine.vue';
+import { trendOf, trendText } from 'dashboard/components-next/cevico/trend';
+import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import CevicoPalettePicker from 'dashboard/components-next/cevico/CevicoPalettePicker.vue';
+import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
+import FunnelSteps from 'dashboard/components-next/cevico/FunnelSteps.vue';
+import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
+import PatientListPopup from 'dashboard/components-next/cevico/PatientListPopup.vue';
+import {
+  classifyKpi,
+  kpiGrad,
+  kpiInkDark,
+  kpiInk,
+  KPI_LEGEND,
+  KPI_FAMILIES,
+} from 'dashboard/helper/cevicoKpiPalette';
+import MagnetBoard from 'dashboard/routes/dashboard/business/MagnetBoard.vue';
+import {
+  mergeLayout,
+  place as placeBlock,
+} from 'dashboard/routes/dashboard/business/magnetLayout';
+import {
+  evaluateFormula,
+  variablesIn,
+  formatKpi,
+} from 'dashboard/helper/cevicoFormula';
+import {
+  DOCTORS,
+  resolveWindows,
+  resolveBlocked,
+  resolveBlockedDays,
+  resolveSurgeryWindows,
+  blockKey,
+  scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
-import { termo, termoCap, frase, meta as metaSegmento, painelQuem, nomeSistemaHero, isClinica } from 'dashboard/helper/segmento';
 
 const router = useRouter();
 const store = useStore();
@@ -35,10 +79,22 @@ const { accountId } = useAccount();
 const currentUser = useMapGetter('getCurrentUser');
 const allTasks = useMapGetter('tasks/getTasks');
 const crmSettings = useMapGetter('crm/getSettings');
-// profissionais da conta (Personalização) > segmento > preset clínica
-const DOCTORS = computed(() => resolveDoctors(crmSettings.value));
 const teamAgents = useMapGetter('agents/getAgents');
 const { isAdmin } = useAdmin();
+// 🔒 auditoria R2 (#350, 12/10): quem não tem a área Financeiro (EDITAR, a
+// mesma régua do servidor em home#kpis) não vê card de dinheiro no Meu Painel
+// (o servidor já tira revenue/wa_cost do cesto; aqui o card nem aparece, em
+// vez de ficar vazio). Gasto do WhatsApp = só admin.
+// DECISÃO PENDENTE (Guilherme): se "só ver" o Financeiro também deve abrir o
+// faturamento, trocar 'edit' por 'view' aqui e em can_see_revenue? no servidor.
+const { can: cevicoCan } = useCevicoAccess();
+const canSeeRevenue = computed(
+  () => isAdmin.value || cevicoCan('financeiro', 'edit')
+);
+const MONEY_VARS = ['revenue', 'wa_cost', 'wa_cost_meta'];
+const canSeeMoneyVar = v =>
+  v === 'revenue' ? canSeeRevenue.value : isAdmin.value;
+// (hiddenMoneyKpi fica junto de withCustomVars, mais abaixo)
 
 const isLoading = ref(true);
 const data = ref(null);
@@ -54,31 +110,65 @@ const hojeStr = (() => {
 })();
 const period = ref({ preset: 'today', from: hojeStr, to: hojeStr });
 
+// 🔎 item 328 (Fase 2 das Fontes): a chavinha CEVICO | Oftalmofácil | Tudo.
+// Vale para os indicadores do painel (o servidor filtra pelo carimbo de
+// origem); a escolha fica salva por PESSOA. Listas de trabalho (tarefas,
+// próximas consultas, Radar) e desempenho das pessoas não mudam com ela.
+const { uiSettings, updateUISettings } = useUISettings();
+const sourceLens = ref(uiSettings.value?.cevico_home_source || 'cevico');
+// 🧭 item 338 (12/10 noite): DUAS VERSÕES do Meu Painel, escolha por pessoa.
+//   classico = a tela de sempre (hero em degradê, salada de frutas, blocos)
+//   novo     = guia arejado (hero chapado + vitrine + Visão geral, sem os
+//              blocos antigos de conteúdo nem Tarefas)
+// Padrão: clássico — ninguém muda de tela sem escolher.
+const estiloPainel = ref(uiSettings.value?.cevico_home_estilo || 'classico');
+const estiloClassico = computed(() => estiloPainel.value !== 'novo');
+const setEstiloPainel = key => {
+  estiloPainel.value = key;
+  updateUISettings({ cevico_home_estilo: key });
+};
+const sourceParams = () => ({ source: sourceLens.value });
+
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
 const BASE_PANELS = [
   {
-    key: 'agendamento', label: isClinica ? 'Agendamento' : 'Captação', who: '',
-    icon: 'i-lucide-calendar-check', desc: isClinica ? 'do lead ao agendamento' : 'do lead ao cliente marcado',
+    key: 'agendamento',
+    label: 'Agendamento',
+    who: '',
+    icon: 'i-lucide-calendar-check',
+    desc: 'do lead ao agendamento',
     grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
   },
   {
-    key: 'conducao', label: 'Condução', who: '',
-    icon: 'i-lucide-route', desc: isClinica ? 'do agendamento à indicação' : 'da chegada à proposta',
+    key: 'conducao',
+    label: 'Condução',
+    who: '',
+    icon: 'i-lucide-route',
+    desc: 'do agendamento à indicação',
     grad: 'linear-gradient(135deg, #0F766E 0%, #2DD4BF 100%)',
   },
   {
-    key: 'cirurgia', label: termoCap('vendas'), who: '',
-    icon: 'i-lucide-heart-pulse', desc: frase('desc_painel_fechamento', 'fechamento e pós-operatório'),
+    key: 'cirurgia',
+    label: 'Cirurgias',
+    who: '',
+    icon: 'i-lucide-heart-pulse',
+    desc: 'fechamento e pós-operatório',
     grad: 'linear-gradient(135deg, #9D174D 0%, #F472B6 100%)',
   },
   {
-    key: 'medico', label: termoCap('profissionais'), who: '',
-    icon: 'i-lucide-stethoscope', desc: `a agenda de cada ${termo('profissional')}`,
+    key: 'medico',
+    label: 'Médicos',
+    who: '',
+    icon: 'i-lucide-stethoscope',
+    desc: 'a agenda de cada médico',
     grad: 'linear-gradient(135deg, #0369A1 0%, #38BDF8 100%)',
   },
   {
-    key: 'gestor', label: 'Gestor', who: '',
-    icon: 'i-lucide-line-chart', desc: 'indicadores-chave do processo inteiro',
+    key: 'gestor',
+    label: 'Gestor',
+    who: '',
+    icon: 'i-lucide-line-chart',
+    desc: 'indicadores-chave do processo inteiro',
     grad: 'linear-gradient(135deg, #111827 0%, #475569 60%, #94A3B8 100%)',
   },
 ];
@@ -93,6 +183,22 @@ const ownerFirstName = key =>
 // (key 'custom:<id>' — o backend do home já entende esse formato)
 const allPanels = computed(() => [
   ...BASE_PANELS.map(p => ({ ...p, who: ownerFirstName(p.key) || p.who })),
+  // 🧑‍🤝‍🧑 painéis POR PESSOA (rodada 160): versão de um painel-base com
+  // layout próprio — mesma cor/ícone do base, nome escolhido pelo admin
+  ...(crmSettings.value?.panel_variants || []).map(v => {
+    const base = BASE_PANELS.find(b => b.key === v.base) || BASE_PANELS[0];
+    return {
+      key: `variant:${v.id}`,
+      label: v.name,
+      who: '',
+      icon: base.icon,
+      desc: base.desc,
+      grad: base.grad,
+      base: base.key,
+      variant: true,
+      variantDef: v,
+    };
+  }),
   ...(crmSettings.value?.custom_panels || []).map(p => ({
     key: `custom:${p.id}`,
     label: p.name,
@@ -146,14 +252,28 @@ const saveAssignments = async () => {
 const storedPanel = localStorage.getItem('cevico_meu_painel');
 const selectedPanel = ref(storedPanel || 'agendamento');
 watch(assignedPanel, key => {
-  if (key && selectedPanel.value !== key && allPanels.value.some(p => p.key === key)) {
+  if (
+    key &&
+    selectedPanel.value !== key &&
+    allPanels.value.some(p => p.key === key)
+  ) {
     selectedPanel.value = key;
     fetchData();
   }
 });
-const selectedDoctor = ref(localStorage.getItem('cevico_meu_painel_medico') || '');
+const selectedDoctor = ref(
+  localStorage.getItem('cevico_meu_painel_medico') || ''
+);
 const currentPanel = computed(
-  () => allPanels.value.find(p => p.key === selectedPanel.value) || BASE_PANELS[0]
+  () =>
+    allPanels.value.find(p => p.key === selectedPanel.value) || BASE_PANELS[0]
+);
+// chave-BASE do painel escolhido: a variante por pessoa herda tudo do base
+// (cards, metas, cores semânticas, blocos) — só o layout é dela
+const panelBase = computed(
+  () =>
+    currentPanel.value.base ||
+    (currentPanel.value.custom ? 'custom' : selectedPanel.value)
 );
 
 // settings chegaram: (1) aplica o painel principal UMA vez — só se a
@@ -166,15 +286,19 @@ watch(crmSettings, settings => {
     mainPanelApplied = true;
     const main = settings.main_panel;
     if (
-      !storedPanel && !assignedPanel.value && main &&
-      main !== selectedPanel.value && allPanels.value.some(p => p.key === main)
+      !storedPanel &&
+      !assignedPanel.value &&
+      main &&
+      main !== selectedPanel.value &&
+      allPanels.value.some(p => p.key === main)
     ) {
       selectedPanel.value = main;
       fetchData();
     }
   }
   if (
-    selectedPanel.value.startsWith('custom:') &&
+    (selectedPanel.value.startsWith('custom:') ||
+      selectedPanel.value.startsWith('variant:')) &&
     !allPanels.value.some(p => p.key === selectedPanel.value)
   ) {
     selectedPanel.value = 'agendamento';
@@ -182,40 +306,363 @@ watch(crmSettings, settings => {
   }
 });
 
+// ⚡ item 237: o cesto vai em PARALELO com o home (antes esperava o home
+// voltar) e uma resposta atrasada de "este ano" não atropela o período que a
+// pessoa escolheu depois (contador de sequência)
+let homeSeq = 0;
 const fetchData = async () => {
+  const seq = ++homeSeq;
+  fetchKpiBag();
+  fetchFunnels(); // item 271 (só no Gestor)
   try {
     const { preset, from, to } = period.value;
     const { data: payload } = await CrmAPI.getHome({
       preset,
+      ...sourceParams(),
       panel: selectedPanel.value,
-      doctor: selectedPanel.value === 'medico' ? selectedDoctor.value || undefined : undefined,
+      doctor:
+        panelBase.value === 'medico'
+          ? selectedDoctor.value || undefined
+          : undefined,
       // só o Personalizado manda De/Até; nos presets o backend resolve
       ...(preset === 'custom' ? { from, to } : {}),
     });
+    if (seq !== homeSeq) return;
     data.value = payload;
-    fetchKpiBag();
   } catch {
+    if (seq !== homeSeq) return;
     data.value = data.value || {};
   } finally {
-    isLoading.value = false;
+    if (seq === homeSeq) isLoading.value = false;
   }
 };
+
+// ── 🌪️ item 271 (28/09): os DOIS FUNIS do Gestor — aquisição por TURMA de
+// chegada (horizonte 90 dias, decisão dele) e "da porta pra dentro" (por
+// consulta com data no período). Cada etapa abre a lista de pacientes. ──
+const acqFunnel = ref(null);
+const clinicFunnel = ref(null);
+const funnelLoading = ref(false);
+const funnelHorizon = ref(90);
+const funnelPopup = ref(null);
+let funnelSeq = 0;
+const fetchFunnels = async () => {
+  if (panelBase.value !== 'gestor') return;
+  const seq = ++funnelSeq;
+  funnelLoading.value = true;
+  const { preset, from, to } = period.value;
+  const params = { preset, ...(preset === 'custom' ? { from, to } : {}) };
+  try {
+    const [a, c] = await Promise.all([
+      CrmAPI.getAcquisitionFunnel({ ...params, horizon: funnelHorizon.value }),
+      CrmAPI.getClinicFunnel(params),
+    ]);
+    if (seq !== funnelSeq) return;
+    acqFunnel.value = a.data;
+    clinicFunnel.value = c.data;
+  } catch {
+    if (seq !== funnelSeq) return;
+    acqFunnel.value = acqFunnel.value || null;
+  } finally {
+    if (seq === funnelSeq) funnelLoading.value = false;
+  }
+};
+watch(funnelHorizon, fetchFunnels);
+const FUNNEL_HORIZONS = [30, 60, 90, 180];
+const funnelPerson = p => ({
+  id: p.id,
+  contact_id: p.id > 0 ? p.id : null,
+  task_id: p.task_id,
+  name: p.name,
+  phone: p.phone,
+  origin: p.origin,
+  when: p.arrived_at || p.due_at,
+  meta: p.doctor ? `${p.doctor} · ${p.unit}` : undefined,
+});
+const funnelStepsOf = (bag, blockId) => {
+  const fam = blockFamily(blockId);
+  return (bag?.steps || []).map((st, i) => ({
+    key: st.key,
+    label: st.label,
+    value: st.count,
+    hint: st.hint,
+    color: fam[i % fam.length] || undefined,
+    sub:
+      st.median_days !== null && st.median_days !== undefined && i > 0
+        ? `≈ ${String(st.median_days).replace('.', ',')} dias`
+        : '',
+  }));
+};
+const acqSteps = computed(() =>
+  funnelStepsOf(acqFunnel.value, 'funil_aquisicao')
+);
+const clinicSteps = computed(() =>
+  funnelStepsOf(clinicFunnel.value, 'porta_dentro')
+);
+// cabeçalho do popup na cor FUNDA do bloco (a família pode ser clara; o
+// texto do cabeçalho é branco)
+const funnelGrad = blockId => {
+  const v = blockVars(blockId) || {};
+  return `linear-gradient(135deg, ${v['--cv-deep'] || '#1e3a8a'}, ${v['--cv'] || '#1d4ed8'})`;
+};
+const openFunnelList = (bag, blockId, key, which, title, subtitle) => {
+  const list = bag?.lists?.[key]?.[which] || [];
+  funnelPopup.value = {
+    title,
+    subtitle,
+    people: list.map(funnelPerson),
+    grad: funnelGrad(blockId),
+    icon: which === 'stopped' ? 'i-lucide-octagon-pause' : 'i-lucide-users',
+  };
+};
+const pickAcq = c =>
+  openFunnelList(
+    acqFunnel.value,
+    'funil_aquisicao',
+    c.key,
+    'reached',
+    `${c.label} · turma do período`,
+    c.hint
+  );
+const pickClinic = c =>
+  openFunnelList(
+    clinicFunnel.value,
+    'porta_dentro',
+    c.key,
+    'reached',
+    `${c.label} · consultas do período`,
+    c.hint
+  );
+const stoppedChips = bag =>
+  (bag?.steps || [])
+    .map((st, i, arr) => ({
+      key: st.key,
+      label: st.label,
+      n: bag?.lists?.[st.key]?.stopped?.length || 0,
+      next: arr[i + 1]?.label,
+    }))
+    .filter(x => x.n && x.next);
+const openSideList = (key, title) => {
+  const list = clinicFunnel.value?.lists?.[key] || [];
+  funnelPopup.value = {
+    title,
+    subtitle: 'consultas com data no período',
+    people: list.map(funnelPerson),
+    grad: funnelGrad('porta_dentro'),
+    icon: 'i-lucide-calendar-x',
+  };
+};
+const funnelPct = (a, b) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
 
 // cesto de indicadores (item 141): série + período anterior — alimenta os
 // gráficos dos popups e os cards do "+"; carrega em paralelo, sem travar
 const kpiBag = ref(null);
+let kpiSeq = 0;
 const fetchKpiBag = async () => {
+  const seq = ++kpiSeq;
   try {
     const { preset, from, to } = period.value;
-    const { data: bag } = await CrmAPI.getKpiBag({ preset, ...(preset === 'custom' ? { from, to } : {}) });
+    const { data: bag } = await CrmAPI.getKpiBag({
+      preset,
+      ...sourceParams(),
+      ...(preset === 'custom' ? { from, to } : {}),
+    });
+    if (seq !== kpiSeq) return;
     kpiBag.value = bag;
+    fetchTrendBag(preset);
+    fetchHistBag();
   } catch {
     kpiBag.value = kpiBag.value || null;
   }
 };
 
+// ── item 248: o gráfico do card GRANDE mostra no MÍNIMO 7 dias (em "hoje" /
+// "ontem" o cesto da régua tem 1 balde só) e o julgamento pela MÉDIA
+// HISTÓRICA usa os últimos 90 dias (média por dia de cada indicador) ──
+const trendBag = ref(null);
+const fetchTrendBag = async preset => {
+  if (!['today', 'yesterday'].includes(preset)) {
+    trendBag.value = null;
+    return;
+  }
+  try {
+    const { data } = await CrmAPI.getKpiBag({
+      preset: 'last7',
+      ...sourceParams(),
+    });
+    trendBag.value = data;
+  } catch {
+    trendBag.value = null;
+  }
+};
+const histBag = ref(null);
+let histLoadedAt = 0;
+const fetchHistBag = async () => {
+  if (
+    histBag.value &&
+    histBag.value.source === sourceLens.value &&
+    Date.now() - histLoadedAt < 30 * 60 * 1000
+  )
+    return;
+  const d = new Date();
+  const ymd = x => x.toLocaleDateString('sv-SE');
+  const to = new Date(d);
+  to.setDate(to.getDate() - 1);
+  const from = new Date(d);
+  from.setDate(from.getDate() - 90);
+  try {
+    const { data } = await CrmAPI.getKpiBag({
+      preset: 'custom',
+      ...sourceParams(),
+      from: ymd(from),
+      to: ymd(to),
+      granularity: 'day',
+    });
+    histBag.value = data;
+    histLoadedAt = Date.now();
+  } catch {
+    histBag.value = null;
+  }
+};
+
 // régua nova: qualquer mudança (preset ou De/Até) recarrega o painel
 watch(period, fetchData);
+
+// 🔎 item 328: as opções da chavinha vêm do servidor (as fontes cadastradas
+// em Integrações → Fontes de pacientes) + "Tudo"; com uma fonte só, não aparece
+const lensOptions = computed(() => {
+  const sources = data.value?.sources || [];
+  if (sources.length < 2) return [];
+  return [
+    ...sources.map(s => ({ key: s.key, label: s.name, color: s.color })),
+    { key: 'all', label: 'Tudo' },
+  ];
+});
+// a fonte que os números da tela estão mostrando (a que o servidor aplicou)
+const activeLens = computed(() => data.value?.source || sourceLens.value);
+const activeLensLabel = computed(
+  () =>
+    lensOptions.value.find(o => o.key === activeLens.value)?.label || 'CEVICO'
+);
+const setSourceLens = key => {
+  if (key === sourceLens.value) return;
+  sourceLens.value = key;
+  isLoading.value = true;
+  fetchData();
+  updateUISettings({ cevico_home_source: key });
+};
+// 🎂 item 331 (06/10): ANIVERSÁRIOS DA EQUIPE — quem ainda não informou vê o
+// convite no topo (some ao preencher); no dia, o aviso "aniversariante do
+// dia" para todo mundo + a lista do mês. Admin vê quem falta e pode informar por alguém.
+const birthdays = computed(() => data.value?.birthdays || null);
+const MONTHS_PT = [
+  'janeiro',
+  'fevereiro',
+  'março',
+  'abril',
+  'maio',
+  'junho',
+  'julho',
+  'agosto',
+  'setembro',
+  'outubro',
+  'novembro',
+  'dezembro',
+];
+const bdayForm = ref({ day: '', month: '', year: '', user_id: '' });
+const bdaySaving = ref(false);
+const bdayLater = ref(false); // "depois": esconde o convite só nesta visita
+const bdayFx = ref(null);
+const bdayNeeded = computed(
+  () => birthdays.value && !birthdays.value.mine && !bdayLater.value
+);
+const bdayToday = computed(() => birthdays.value?.today || []);
+const bdayMonth = computed(() => birthdays.value?.month || []);
+const bdayMissing = computed(() => birthdays.value?.missing);
+
+// 🧭 item 336: VITRINE GIRATÓRIA — frase do dia (a mesma para todos) e o
+// destaque da equipe (aniversário de hoje ou o próximo do mês). Sem destaque,
+// a vitrine fica só com a frase.
+const vitrinePaineis = computed(() => {
+  const frase = fraseDoDia();
+  const paineis = [
+    {
+      etiqueta: 'Frase do dia',
+      titulo: `“${frase.texto}”`,
+      texto: frase.fonte,
+      tom: 'dia',
+    },
+  ];
+  const hoje = new Date().getDate();
+  const first = n => String(n || '').split(' ')[0];
+  if (bdayToday.value.length) {
+    const nomes = bdayToday.value.map(e => first(e.name)).join(' e ');
+    paineis.push({
+      etiqueta: 'Equipe',
+      titulo: `Hoje é aniversário de ${nomes}`,
+      texto: 'Um abraço da equipe. Vale um café.',
+      tom: 'apoio',
+    });
+  } else {
+    const proximo = bdayMonth.value.find(e => e.day > hoje);
+    if (proximo) {
+      paineis.push({
+        etiqueta: 'Equipe',
+        titulo: `Dia ${proximo.day} é aniversário de ${first(proximo.name)}`,
+        texto: 'Já anota para não passar em branco.',
+        tom: 'apoio',
+      });
+    }
+  }
+  return paineis;
+});
+const bdayLabel = e =>
+  `${String(e.day).padStart(2, '0')}/${String(e.month).padStart(2, '0')}`;
+const bdayFirst = name =>
+  String(name || '')
+    .trim()
+    .split(/\s+/)[0];
+const bdayTodayText = computed(() => {
+  const names = bdayToday.value.map(e => e.name);
+  if (!names.length) return '';
+  if (names.length === 1) return `Hoje é aniversário de ${names[0]}!`;
+  return `Hoje é aniversário de ${names.slice(0, -1).join(', ')} e ${names.at(-1)}!`;
+});
+const saveBirthday = async () => {
+  if (!bdayForm.value.day || !bdayForm.value.month || bdaySaving.value) return;
+  bdaySaving.value = true;
+  try {
+    const payload = { day: bdayForm.value.day, month: bdayForm.value.month };
+    if (bdayForm.value.year) payload.year = bdayForm.value.year;
+    if (bdayForm.value.user_id) payload.user_id = bdayForm.value.user_id;
+    const { data: out } = await CrmAPI.saveBirthday(payload);
+    data.value = { ...data.value, birthdays: out.birthdays };
+    bdayForm.value = { day: '', month: '', year: '', user_id: '' };
+    useAlert('Aniversário guardado! 🎂');
+  } catch (error) {
+    useAlert(
+      error?.response?.data?.error || 'Não consegui guardar o aniversário.'
+    );
+  } finally {
+    bdaySaving.value = false;
+  }
+};
+let bdayCelebrated = '';
+watch(bdayTodayText, text => {
+  // confete uma vez por carga quando há aniversariante
+  if (!text || bdayCelebrated === text || !bdayFx.value) return;
+  bdayCelebrated = text;
+  bdayFx.value.rain(['🎂', '🎉', '🎈', '✨'], 26);
+});
+
+// frase que entra no "sobre" dos indicadores: de quem são os números
+const lensScope = computed(() => {
+  if (activeLens.value === 'all')
+    return 'Chavinha de fonte em TUDO: todas as fontes de pacientes juntas.';
+  if (activeLens.value === 'cevico')
+    return 'Só pacientes da CEVICO — as outras fontes (Oftalmofácil) ficam fora; para ver, mude a chavinha de fonte no topo.';
+  return `Só pacientes da fonte ${activeLensLabel.value} (chavinha de fonte no topo).`;
+});
 
 const setPanel = key => {
   selectedPanel.value = key;
@@ -235,182 +682,978 @@ const rawPanelTiles = computed(() => {
   // painel do Construtor tem grade própria (CustomPanelGrid) — sem tiles fixas
   if (currentPanel.value.custom) return [];
   const d = pd.value;
-  if (selectedPanel.value === 'conducao') {
+  if (panelBase.value === 'conducao') {
     return [
-      { label: frase('atendimentos_periodo', 'Consultas no período'), icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: 'agenda das unidades',
+      {
+        label: 'Consultas no período',
+        icon: 'i-lucide-calendar-days',
+        value: d.consultations ?? 0,
+        gk: 'consultations',
+        chartKey: 'appointments_due',
+        sub: 'agenda das unidades',
+        units: d.by_unit,
         details: [
           { label: 'Compareceram', value: `${d.attended ?? 0}` },
           { label: 'Faltaram', value: `${d.missed ?? 0}` },
           { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` },
         ],
-        about: 'Consultas marcadas na Agenda com data dentro do período (canceladas ficam fora). O gráfico mostra quantas caíram em cada dia/semana/mês.' },
-      { label: 'Compareceram', icon: 'i-lucide-user-check', value: d.attended ?? 0, gk: 'attended', chartKey: 'appointments_attended', sub: 'conferência do dia (Agenda)',
-        details: [{ label: 'Faltaram', value: `${d.missed ?? 0}` }, { label: 'Taxa de comparecimento', value: `${d.show_rate ?? 0}%` }],
-        about: 'Marcadas como "Compareceu" na conferência do dia da Agenda — a base da taxa de comparecimento e do funil de indicações.' },
-      { label: 'Comparecimento', icon: 'i-lucide-percent', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, sub: `${d.missed ?? 0} falta(s) no período`,
+        about:
+          'Consultas marcadas na Agenda com data dentro do período (canceladas ficam fora). O gráfico mostra quantas caíram em cada dia/semana/mês.',
+      },
+      {
+        label: 'Compareceram',
+        icon: 'i-lucide-user-check',
+        value: d.attended ?? 0,
+        gk: 'attended',
+        chartKey: 'appointments_attended',
+        sub: 'conferência do dia (Agenda)',
+        details: [
+          { label: 'Faltaram', value: `${d.missed ?? 0}` },
+          { label: 'Taxa de comparecimento', value: `${d.show_rate ?? 0}%` },
+        ],
+        about:
+          'Marcadas como "Compareceu" na conferência do dia da Agenda — a base da taxa de comparecimento e do funil de indicações.',
+      },
+      {
+        label: 'Comparecimento',
+        icon: 'i-lucide-percent',
+        value: `${d.show_rate ?? 0}%`,
+        gk: 'show_rate',
+        pct: true,
+        sub: `${d.missed ?? 0} falta(s) no período`,
+        units: d.by_unit,
         components: ['appointments_attended', 'appointments_missed'],
-        compare: [{ label: 'compareceram', value: d.attended ?? 0 }, { label: 'faltaram', value: d.missed ?? 0 }],
-        details: [{ label: 'Compareceram ÷ (compareceram + faltaram)', value: `${d.attended ?? 0} ÷ ${(d.attended ?? 0) + (d.missed ?? 0)} = ${d.show_rate ?? 0}%` }],
-        about: 'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).' },
-      { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: frase('sub_saidos_indicados', 'saíram da consulta indicados'),
-        details: [{ label: 'Indicados ÷ compareceram', value: `${d.indications ?? 0} de ${d.attended ?? 0}` }],
-        about: isClinica ? 'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.' : 'Atendimentos do período em que saiu proposta de venda. Começa aqui o funil de fechamento.' },
+        compare: [
+          { label: 'compareceram', value: d.attended ?? 0 },
+          { label: 'faltaram', value: d.missed ?? 0 },
+        ],
+        details: [
+          {
+            label: 'Compareceram ÷ (compareceram + faltaram)',
+            value: `${d.attended ?? 0} ÷ ${(d.attended ?? 0) + (d.missed ?? 0)} = ${d.show_rate ?? 0}%`,
+          },
+        ],
+        about:
+          'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).',
+      },
+      {
+        label: 'Indicações de cirurgia',
+        icon: 'i-lucide-stethoscope',
+        value: d.indications ?? 0,
+        gk: 'indications',
+        chartKey: 'indications',
+        sub: 'saíram da consulta indicados',
+        details: [
+          {
+            label: 'Indicados ÷ compareceram',
+            value: `${d.indications ?? 0} de ${d.attended ?? 0}`,
+          },
+        ],
+        about:
+          'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.',
+      },
     ];
   }
-  if (selectedPanel.value === 'cirurgia') {
+  if (panelBase.value === 'cirurgia') {
     return [
-      { label: frase('indicacoes_venda', 'Indicações de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${termo('clientes')} indicados no período`,
-        details: [{ label: isClinica ? 'Viraram cirurgia agendada' : 'Viraram venda fechada', value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%` }],
-        about: isClinica ? 'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.' : 'Clientes que saíram do atendimento com proposta no período — é a matéria-prima do fechamento.' },
-      { label: frase('vendas_agendadas', 'Cirurgias agendadas'), icon: 'i-lucide-calendar-plus', value: d.surgeries_booked ?? 0, gk: 'surgeries_booked', chartKey: 'surgeries_booked', sub: 'fechadas no período',
-        details: [{ label: 'Realizadas', value: `${d.surgeries_done ?? 0}` }, { label: 'Não vieram', value: `${d.surgeries_missed ?? 0}` }],
-        about: isClinica ? 'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.' : 'Vendas fechadas no período (o fechamento de fato). O gráfico mostra o ritmo ao longo do período.' },
-      { label: 'Taxa de fechamento', icon: 'i-lucide-percent', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, sub: 'agendadas ÷ indicações',
+      {
+        label: 'Indicações de cirurgia',
+        icon: 'i-lucide-stethoscope',
+        value: d.indications ?? 0,
+        gk: 'indications',
+        chartKey: 'indications',
+        sub: 'pacientes indicados no período',
+        details: [
+          {
+            label: 'Viraram cirurgia agendada',
+            value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%`,
+          },
+        ],
+        about:
+          'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.',
+      },
+      {
+        label: 'Cirurgias agendadas',
+        icon: 'i-lucide-calendar-plus',
+        value: d.surgeries_booked ?? 0,
+        gk: 'surgeries_booked',
+        chartKey: 'surgeries_booked',
+        sub: 'fechadas no período',
+        details: [
+          { label: 'Realizadas', value: `${d.surgeries_done ?? 0}` },
+          { label: 'Não vieram', value: `${d.surgeries_missed ?? 0}` },
+        ],
+        about:
+          'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.',
+      },
+      {
+        label: 'Taxa de fechamento',
+        icon: 'i-lucide-percent',
+        value: `${d.closing_rate ?? 0}%`,
+        gk: 'closing_rate',
+        pct: true,
+        sub: 'agendadas ÷ indicações',
         components: ['indications', 'surgeries_booked'],
-        compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
-        details: [{ label: 'Agendadas ÷ indicações', value: `${d.surgeries_booked ?? 0} ÷ ${d.indications ?? 0} = ${d.closing_rate ?? 0}%` }],
-        about: isClinica ? 'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).' : 'De cada 100 clientes com proposta, quantos fecharam. É o indicador do trabalho de fechamento.' },
-      { label: frase('vendas_realizadas', 'Cirurgias realizadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_done ?? 0, gk: 'surgeries_done', chartKey: 'surgeries_done', sub: `${d.surgeries_missed ?? 0} não vieram`,
-        compare: [{ label: 'realizadas', value: d.surgeries_done ?? 0 }, { label: 'não vieram', value: d.surgeries_missed ?? 0 }],
-        about: isClinica ? 'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.' : 'Vendas realizadas (entregues) no período. "Não vieram" = marcou e não apareceu.' },
+        compare: [
+          { label: 'indicações', value: d.indications ?? 0 },
+          { label: 'agendadas', value: d.surgeries_booked ?? 0 },
+          { label: 'realizadas', value: d.surgeries_done ?? 0 },
+        ],
+        details: [
+          {
+            label: 'Agendadas ÷ indicações',
+            value: `${d.surgeries_booked ?? 0} ÷ ${d.indications ?? 0} = ${d.closing_rate ?? 0}%`,
+          },
+        ],
+        about:
+          'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).',
+      },
+      {
+        label: 'Cirurgias realizadas',
+        icon: 'i-lucide-heart-pulse',
+        value: d.surgeries_done ?? 0,
+        gk: 'surgeries_done',
+        chartKey: 'surgeries_done',
+        sub: `${d.surgeries_missed ?? 0} não vieram`,
+        compare: [
+          { label: 'realizadas', value: d.surgeries_done ?? 0 },
+          { label: 'não vieram', value: d.surgeries_missed ?? 0 },
+        ],
+        about:
+          'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.',
+      },
     ];
   }
-  if (selectedPanel.value === 'medico') {
-    const docNote = 'O número é do médico escolhido; o gráfico mostra a clínica inteira no período (a série por médico fica no Dashboard dos Médicos).';
+  if (panelBase.value === 'medico') {
+    const docNote =
+      'O número é do médico escolhido; o gráfico mostra a clínica inteira no período (a série por médico fica no Dashboard dos Médicos).';
     return [
-      { label: frase('atendimentos_periodo', 'Consultas no período'), icon: 'i-lucide-calendar-days', value: d.consultations ?? 0, gk: 'consultations', chartKey: 'appointments_due', sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`,
-        details: [{ label: 'Faltas', value: `${d.missed ?? 0}` }, { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` }],
-        about: `Consultas deste médico com data no período. ${docNote}` },
-      { label: frase('com_indicacao_venda', 'Com indicação de cirurgia'), icon: 'i-lucide-stethoscope', value: d.indications ?? 0, gk: 'indications', chartKey: 'indications', sub: `${d.indication_rate ?? 0}% de quem compareceu`,
-        compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
-        about: isClinica ? `Consultas em que o médico indicou cirurgia. ${docNote}` : `Atendimentos que saíram com proposta de venda. ${docNote}` },
-      { label: 'Sem indicação', icon: 'i-lucide-user-minus', value: d.no_indication ?? 0, sub: `${d.no_indication_rate ?? 0}% de quem compareceu`,
-        compare: [{ label: 'com indicação', value: d.indications ?? 0 }, { label: 'sem indicação', value: d.no_indication ?? 0 }],
-        about: isClinica ? 'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).' : 'Atendimentos que não resultaram em proposta — não é perda: vira acompanhamento e proposta futura.' },
-      { label: frase('conversao_venda', 'Conversão em cirurgia'), icon: 'i-lucide-percent', value: `${d.conversion_rate ?? 0}%`, gk: 'conversion_rate', pct: true, sub: `${d.conversions ?? 0} viraram ${termo('venda')} · NPS ${d.nps_avg ?? '—'}`,
-        compare: [{ label: 'indicados', value: d.indications ?? 0 }, { label: isClinica ? 'viraram cirurgia' : 'viraram venda', value: d.conversions ?? 0 }],
-        details: [{ label: 'NPS médio dos pacientes deste médico', value: `${d.nps_avg ?? '—'}` }],
-        about: isClinica ? 'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).' : 'Dos clientes que este profissional atendeu no período, quantos chegaram à venda.' },
+      {
+        label: 'Consultas no período',
+        icon: 'i-lucide-calendar-days',
+        value: d.consultations ?? 0,
+        gk: 'consultations',
+        chartKey: 'appointments_due',
+        sub: `${d.missed ?? 0} falta(s) · ${d.show_rate ?? 0}% comparecimento`,
+        details: [
+          { label: 'Faltas', value: `${d.missed ?? 0}` },
+          { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` },
+        ],
+        about: `Consultas deste médico com data no período. ${docNote}`,
+      },
+      {
+        label: 'Com indicação de cirurgia',
+        icon: 'i-lucide-stethoscope',
+        value: d.indications ?? 0,
+        gk: 'indications',
+        chartKey: 'indications',
+        sub: `${d.indication_rate ?? 0}% de quem compareceu`,
+        compare: [
+          { label: 'com indicação', value: d.indications ?? 0 },
+          { label: 'sem indicação', value: d.no_indication ?? 0 },
+        ],
+        about: `Consultas em que o médico indicou cirurgia. ${docNote}`,
+      },
+      {
+        label: 'Sem indicação',
+        icon: 'i-lucide-user-minus',
+        value: d.no_indication ?? 0,
+        sub: `${d.no_indication_rate ?? 0}% de quem compareceu`,
+        compare: [
+          { label: 'com indicação', value: d.indications ?? 0 },
+          { label: 'sem indicação', value: d.no_indication ?? 0 },
+        ],
+        about:
+          'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).',
+      },
+      {
+        label: 'Conversão em cirurgia',
+        icon: 'i-lucide-percent',
+        value: `${d.conversion_rate ?? 0}%`,
+        gk: 'conversion_rate',
+        pct: true,
+        sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`,
+        compare: [
+          { label: 'indicados', value: d.indications ?? 0 },
+          { label: 'viraram cirurgia', value: d.conversions ?? 0 },
+        ],
+        details: [
+          {
+            label: 'NPS médio dos pacientes deste médico',
+            value: `${d.nps_avg ?? '—'}`,
+          },
+        ],
+        about:
+          'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).',
+      },
     ];
   }
-  if (selectedPanel.value === 'gestor') {
+  if (panelBase.value === 'gestor') {
     const inboxesG = d.leads_by_inbox || [];
     return [
-      { label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', chartKey: 'new_leads', sub: leadsInboxSub.value,
-        compareInboxes: inboxesG.map(i => ({ label: shortInboxName(i.name), value: i.count })),
-        details: inboxesG.map(i => ({ label: i.name, value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%` })),
-        about: 'Contatos novos do período pelas caixas de captação. A conversão por caixa mostra qual porta de entrada traz lead que decide.' },
-      { label: 'Taxa de agendamento', icon: 'i-lucide-percent', value: `${d.booking_conversion ?? 0}%`, gk: 'booking_conversion', pct: true, sub: `${d.appointments_created ?? 0} dos ${d.new_leads ?? 0} leads do período`,
-        components: ['new_leads', 'appointments_booked'],
-        compare: [{ label: 'leads', value: d.new_leads ?? 0 }, { label: 'avançaram a Agendamento', value: d.appointments_created ?? 0 }],
-        about: 'Dos leads que chegaram no período, quantos já avançaram até "Agendamento de Consulta" no CRM (coorte). A taxa madura é a de períodos já fechados — a de hoje ainda amadurece.' },
-      { label: 'Comparecimento', icon: 'i-lucide-user-check', value: `${d.show_rate ?? 0}%`, gk: 'show_rate', pct: true, chartKey: 'appointments_attended', sub: `${d.indications ?? 0} indicação(ões) de ${termo('venda')}`,
-        details: [{ label: `${frase('indicacoes_venda', 'Indicações de cirurgia')} no período`, value: `${d.indications ?? 0}` }],
-        about: 'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.' },
-      { label: frase('fechamento_vendas', 'Fechamento de cirurgias'), icon: 'i-lucide-heart-pulse', value: `${d.closing_rate ?? 0}%`, gk: 'closing_rate', pct: true, chartKey: 'surgeries_done', sub: `${d.surgeries_booked ?? 0} agendada(s) · ${d.surgeries_done ?? 0} realizada(s)`,
-        components: ['indications', 'surgeries_booked'],
-        compare: [{ label: 'indicações', value: d.indications ?? 0 }, { label: 'agendadas', value: d.surgeries_booked ?? 0 }, { label: 'realizadas', value: d.surgeries_done ?? 0 }],
-        about: isClinica ? 'Agendadas ÷ indicações: a eficiência do fechamento. O gráfico mostra as cirurgias realizadas ao longo do período.' : 'Fechadas ÷ propostas: a eficiência do fechamento. O gráfico mostra as vendas realizadas ao longo do período.' },
+      {
+        label: 'Novos contatos (leads)',
+        icon: 'i-lucide-user-plus',
+        value: d.new_leads ?? 0,
+        gk: 'new_leads',
+        chartKey: 'new_leads',
+        sub: leadsInboxSub.value,
+        compareInboxes: inboxesG.map(i => ({
+          label: shortInboxName(i.name),
+          value: i.count,
+        })),
+        details: inboxesG.map(i => ({
+          label: i.name,
+          value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%`,
+        })),
+        about:
+          'Contatos novos do período pelas caixas de captação. A conversão por caixa mostra qual porta de entrada traz lead que decide.',
+      },
+      {
+        label: 'Taxa de agendamento · leads novos',
+        icon: 'i-lucide-percent',
+        value: `${d.booking_conversion ?? 0}%`,
+        gk: 'booking_conversion',
+        pct: true,
+        sub: `${d.appointments_created ?? 0} entraram na coluna Agendamento ÷ ${d.new_leads ?? 0} leads novos`,
+        // item 342: primeiro as PESSOAS (somam o número de cima), depois a Agenda
+        breakdowns: [
+          ...peopleSections(d.booking_people),
+          ...bdSections(d.booked_breakdown, 'Na Agenda (outra régua)'),
+        ],
+        components: ['new_leads', 'appointments_created'],
+        compare: [
+          { label: 'leads', value: d.new_leads ?? 0 },
+          {
+            label: 'entraram em Agendamento',
+            value: d.appointments_created ?? 0,
+          },
+        ],
+        about: `Taxa oficial (item 233): pacientes que MUDARAM DE COLUNA para "Agendamento de Consulta" no CRM no período ÷ leads do período. Só a mudança de coluna conta — exame, pós-operatório e teleconsulta ficam fora. ${lensScope.value}`,
+      },
+      ...cutsTiles(d.booking_cuts),
+      {
+        label: 'Comparecimento',
+        icon: 'i-lucide-user-check',
+        value: `${d.show_rate ?? 0}%`,
+        gk: 'show_rate',
+        pct: true,
+        chartKey: 'appointments_attended',
+        sub: `${d.indications ?? 0} indicação(ões) de cirurgia`,
+        units: d.by_unit,
+        details: [
+          {
+            label: 'Indicações de cirurgia no período',
+            value: `${d.indications ?? 0}`,
+          },
+        ],
+        about:
+          'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.',
+      },
+      {
+        label: 'Fechamento de cirurgias (indicação → marcada)',
+        icon: 'i-lucide-heart-pulse',
+        value: `${d.closing_rate ?? 0}%`,
+        gk: 'closing_rate',
+        pct: true,
+        chartKey: 'surgeries_done',
+        sub: `${d.surgeries_booked ?? 0} marcadas após indicação ÷ ${d.indications ?? 0} indicações · ${d.surgeries_booked_all ?? 0} marcadas no total`,
+        components: ['indications', 'surgeries_booked_indicated'],
+        compare: [
+          { label: 'indicações', value: d.indications ?? 0 },
+          { label: 'marcadas após indicação', value: d.surgeries_booked ?? 0 },
+          { label: 'realizadas', value: d.surgeries_done ?? 0 },
+        ],
+        breakdowns: surgerySections(d.surgery_breakdown),
+        about:
+          'Item 267: só conta cirurgia marcada de paciente que teve INDICAÇÃO em consulta (antes entravam todas as cirurgias, inclusive da base e do Oftalmofácil, e a taxa passava de 100%). "Marcadas no total" mostra o número cheio, para comparar.',
+      },
     ];
   }
   // agendamento (padrão) — macro no card, detalhe no popup (item 140)
   const inboxes = d.leads_by_inbox || [];
+  const bookedInboxes = d.appointments_booked_by_inbox || [];
   const dt = d.decision_time;
   const ch = d.booking_cohorts || {};
   return [
     {
-      label: 'Novos contatos (leads)', icon: 'i-lucide-user-plus', value: d.new_leads ?? 0, gk: 'new_leads', chartKey: 'new_leads',
+      label: 'Novos contatos (leads)',
+      icon: 'i-lucide-user-plus',
+      value: d.new_leads ?? 0,
+      gk: 'new_leads',
+      chartKey: 'new_leads',
       sub: leadsInboxSub.value,
-      details: inboxes.map(i => ({ label: `${i.name}`, value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%` })),
-      compareInboxes: inboxes.map(i => ({ label: shortInboxName(i.name), value: i.count })),
-      about: 'Contatos novos do período que chegaram pelas caixas de captação (Google, Instagram…). A conversão de cada caixa é: dos que chegaram por ela, quantos já avançaram até "Agendamento de Consulta" no CRM.',
+      details: inboxes.map(i => ({
+        label: `${i.name}`,
+        value: `${i.count} lead(s) · ${i.booked} agendaram · ${i.rate}%`,
+      })),
+      compareInboxes: inboxes.map(i => ({
+        label: shortInboxName(i.name),
+        value: i.count,
+      })),
+      about:
+        'Contatos novos do período que chegaram pelas caixas de captação (Google, Instagram…). A conversão de cada caixa é: dos que chegaram por ela, quantos já avançaram até "Agendamento de Consulta" no CRM.',
     },
     {
       // 🌟 % de agendamento em EVIDÊNCIA (item 143): o indicador da linha
       // compacta da Saúde da Agenda promovido pra fileira principal
-      label: isClinica ? '% de agendamento' : '% de marcação', icon: 'i-lucide-percent', id: 'booking_rate_30',
-      value: bookingRate30.value === null ? '—' : `${String(bookingRate30.value).replace('.', ',')}%`,
-      judged: true, chip: booking30Chip.value, grad: booking30Chip.value.grad,
-      sub: `${data.value?.appointments_30d ?? 0} consultas ÷ ${data.value?.new_contacts_30d ?? 0} leads · 30 dias`,
-      compare: [
-        { label: 'leads (30d)', value: data.value?.new_contacts_30d ?? 0 },
-        { label: 'consultas (30d)', value: data.value?.appointments_30d ?? 0 },
-      ],
+      label: 'Taxa de agendamento · leads novos (30 dias)',
+      icon: 'i-lucide-percent',
+      id: 'booking_rate_30',
+      value:
+        bookingRate30.value === null
+          ? '—'
+          : `${String(bookingRate30.value).replace('.', ',')}%`,
+      judged: true,
+      chip: booking30Chip.value,
+      grad: booking30Chip.value.grad,
+      sub: `${data.value?.appointments_30d ?? 0} leads novos entraram em Agendamento ÷ ${data.value?.new_contacts_30d ?? 0} que chegaram · 30 dias`,
+      // item 267: o funil em 3 colunas (chegaram → orçamento → agendamento) no popup
+      funnel: funnel30Steps.value,
+      breakdowns: funnel30Sections.value,
       details: [
-        { label: 'Consultas ÷ leads (Google+Instagram)', value: `${data.value?.appointments_30d ?? 0} ÷ ${data.value?.new_contacts_30d ?? 0} = ${bookingRate30.value ?? '—'}%` },
+        {
+          label: 'Leads novos que entraram em Agendamento ÷ leads novos',
+          value: `${data.value?.appointments_30d ?? 0} ÷ ${data.value?.new_contacts_30d ?? 0} = ${bookingRate30.value ?? '—'}%`,
+        },
         { label: 'Referência', value: '15% muito bom · 10% bom · 5% fraco' },
       ],
-      about: 'Dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos viraram consulta agendada. É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência.',
+      about: `SÓ LEADS NOVOS: dos contatos que chegaram nos últimos 30 dias pelas caixas de captação, quantos mudaram de coluna para "Agendamento de Consulta" no CRM (só a mudança de coluna conta — pacientes da base, exame, pós-op e tele ficam fora). É fixo em 30 dias (não segue a régua) pra taxa ser sempre madura e comparável com a referência. ${lensScope.value}`,
     },
     {
-      label: frase('atendimentos_agendados', 'Consultas agendadas'), icon: 'i-lucide-calendar-check', value: d.appointments_booked ?? 0, gk: 'appointments_booked', chartKey: 'appointments_booked',
-      sub: 'registradas no período',
+      // item 267: "não podemos chamar tudo de agendamento" — o card diz quantas
+      // são de LEAD NOVO e quantas de PACIENTE DA BASE; o popup abre caixa de
+      // origem, unidade, procedimento, médico e robô × equipe
+      label: 'Consultas marcadas',
+      icon: 'i-lucide-calendar-check',
+      value: d.appointments_booked ?? 0,
+      gk: 'appointments_booked',
+      chartKey: 'appointments_booked',
+      // item 332: a linha do card já diz a fonte e por onde chegaram
+      sub: d.booked_breakdown
+        ? bookedSub(d.booked_breakdown)
+        : bookedInboxSub.value,
+      breakdowns: bdSections(
+        d.booked_breakdown,
+        'Consultas marcadas no período'
+      ),
       details: [
-        { label: '⚡ Chegaram e agendaram no mesmo período', value: `${d.appointments_same_day ?? 0}` },
-        ...(dt ? [
-          { label: '🤔 Tempo médio de decisão (chegar → agendar)', value: `${String(dt.avg_days).replace('.', ',')} dia(s) · ${dt.count} consulta(s)` },
-          { label: 'Decidiram no mesmo dia', value: `${dt.same_day}` },
-          { label: 'Em 1 dia', value: `${dt.next_day}` },
-          { label: 'Em 2 a 7 dias', value: `${dt.within_week}` },
-          { label: 'Demoraram 8 dias ou mais', value: `${dt.later}` },
-        ] : []),
+        {
+          label: '⚡ Chegaram e agendaram no mesmo período',
+          value: `${d.appointments_same_day ?? 0}`,
+        },
+        ...(dt
+          ? [
+              {
+                label: '🤔 Tempo médio de decisão (chegar → agendar)',
+                value: `${String(dt.avg_days).replace('.', ',')} dia(s) · ${dt.count} consulta(s)`,
+              },
+              { label: 'Decidiram no mesmo dia', value: `${dt.same_day}` },
+              { label: 'Em 1 dia', value: `${dt.next_day}` },
+              { label: 'Em 2 a 7 dias', value: `${dt.within_week}` },
+              { label: 'Demoraram 8 dias ou mais', value: `${dt.later}` },
+            ]
+          : []),
       ],
-      about: 'Consultas registradas na Agenda no período (consulta marcada para o passado = preenchimento de histórico, fica fora). O tempo de decisão mede quantos dias o paciente levou entre chegar e marcar — mostra se o funil converte por impulso ou por insistência.',
+      about: `Consultas novas registradas na Agenda no período, de QUALQUER paciente: lead novo (chegou há até 30 dias) ou paciente da base (retorno, pós-op, quem já estava no funil). Consulta para o passado, exame, tele e cancelada ficam fora. A caixa mostrada é a por onde o paciente CHEGOU (primeira conversa), não a da conversa mais recente. Não é taxa de conversão: para isso, veja "Taxa de agendamento · leads novos". ${lensScope.value}`,
     },
+    ...cutsTiles(d.booking_cuts),
     {
-      label: isClinica ? 'Agendamentos hoje' : 'Marcações de hoje', icon: 'i-lucide-calendar-plus', value: d.booked_today ?? 0, chip: bookingDayVerdict.value, judged: true, grad: bookingDayVerdict.value.grad,
+      label: 'Consultas marcadas hoje',
+      icon: 'i-lucide-calendar-plus',
+      value: d.booked_today ?? 0,
+      chip: bookingDayVerdict.value,
+      judged: true,
+      grad: bookingDayVerdict.value.grad,
       pct: true,
+      // item 267: primeiro o que importa (caixa, unidade, procedimento, robô × equipe)
+      breakdowns: bdSections(
+        d.booked_today_breakdown,
+        'Consultas marcadas hoje'
+      ),
       compare: [
-        { label: `hoje (${ch.today?.booked ?? 0}/${ch.today?.leads ?? 0})`, value: ch.today?.rate ?? 0 },
-        { label: `ontem (${ch.yesterday?.booked ?? 0}/${ch.yesterday?.leads ?? 0})`, value: ch.yesterday?.rate ?? 0 },
+        {
+          label: `hoje (${ch.today?.booked ?? 0}/${ch.today?.leads ?? 0})`,
+          value: ch.today?.rate ?? 0,
+        },
+        {
+          label: `ontem (${ch.yesterday?.booked ?? 0}/${ch.yesterday?.leads ?? 0})`,
+          value: ch.yesterday?.rate ?? 0,
+        },
         { label: 'período', value: d.booking_conversion ?? 0 },
       ],
-      sub: `hoje ${ch.today?.rate ?? 0}% · ontem ${ch.yesterday?.rate ?? 0}% agendaram`,
+      sub: d.booked_today_breakdown
+        ? `${d.booked_today_breakdown.new_leads} de leads novos · ${d.booked_today_breakdown.base} da base · ${d.booked_today_breakdown.by_source?.ia ?? 0} pelo Atendente de IA`
+        : `hoje ${ch.today?.rate ?? 0}% · ontem ${ch.yesterday?.rate ?? 0}% agendaram`,
       details: [
-        { label: 'Chegaram HOJE e já agendaram', value: `${ch.today?.booked ?? 0} de ${ch.today?.leads ?? 0} · ${ch.today?.rate ?? 0}%` },
-        { label: 'Chegaram ONTEM e agendaram', value: `${ch.yesterday?.booked ?? 0} de ${ch.yesterday?.leads ?? 0} · ${ch.yesterday?.rate ?? 0}%` },
-        { label: 'Taxa do período (leads do período → Agendamento)', value: `${d.appointments_created ?? 0} de ${d.new_leads ?? 0} · ${d.booking_conversion ?? 0}%` },
+        {
+          label: 'Chegaram HOJE e já agendaram',
+          value: `${ch.today?.booked ?? 0} de ${ch.today?.leads ?? 0} · ${ch.today?.rate ?? 0}%`,
+        },
+        {
+          label: 'Chegaram ONTEM e agendaram',
+          value: `${ch.yesterday?.booked ?? 0} de ${ch.yesterday?.leads ?? 0} · ${ch.yesterday?.rate ?? 0}%`,
+        },
+        {
+          label: 'Taxa do período (leads do período → Agendamento)',
+          value: `${d.appointments_created ?? 0} de ${d.new_leads ?? 0} · ${d.booking_conversion ?? 0}%`,
+        },
       ],
-      about: 'O número grande é quantas consultas foram registradas HOJE, julgado contra a fatia diária da meta do mês (Painel de Metas ÷ dias do mês). As taxas abaixo dizem quem decidiu: a de hoje ainda amadurece; a de ontem é a taxa justa pra avaliar o atendimento.',
+      about:
+        'Consultas registradas HOJE na Agenda (leads novos + pacientes da base), julgado contra a fatia diária da meta do mês. Em cima, de onde vieram e quem marcou; embaixo, as taxas de quem chegou hoje/ontem (a de ontem é a justa para avaliar o atendimento).',
     },
     {
-      label: frase('vendas_fechadas', 'Cirurgias fechadas'), icon: 'i-lucide-heart-pulse', value: d.surgeries_closed ?? 0, gk: 'surgeries_closed', chartKey: 'auto', chartMatch: /cirurgia agendada/i,
-      sub: frase('sub_coluna_venda', 'coluna Cirurgia Agendada (CRM)'),
-      about: isClinica ? 'Leads do período que chegaram à coluna "Cirurgia Agendada" no CRM — o fechamento que nasceu dos contatos deste período.' : 'Leads do período que chegaram à coluna de venda fechada no CRM — o fechamento que nasceu dos contatos deste período.',
+      label: 'Cirurgias marcadas · leads do período',
+      icon: 'i-lucide-heart-pulse',
+      value: d.surgeries_closed ?? 0,
+      gk: 'surgeries_closed',
+      chartKey: 'auto',
+      chartMatch: /cirurgia agendada/i,
+      sub: 'leads que chegaram no período e já estão em Cirurgia Agendada',
+      breakdowns: surgerySections(d.surgery_breakdown),
+      about: `Só LEADS DO PERÍODO: contatos que chegaram neste período e já alcançaram a coluna "Cirurgia Agendada" no CRM. Pacientes da base não entram aqui (estão em "Cirurgias marcadas"). ${lensScope.value}`,
     },
   ];
 });
 
+// ── 🧭 item 328 (05/10): TUDO O QUE FOI MARCADO, em três cortes — o que foi
+// (avaliação, retorno, pós-op… × só mudança de coluna), de onde veio (fonte,
+// caixa por onde o paciente chegou, particular) e quem fez (paciente, robô,
+// equipe, sincronização). Cada fatia abre a lista de pacientes. ──
+const CUT_WHAT_SHORT = {
+  avaliacao: ['avaliação', 'avaliações'],
+  retorno: ['retorno', 'retornos'],
+  pos_op: ['pós-op', 'pós-op'],
+  exames: ['exame', 'exames'],
+  teleconsulta: ['teleconsulta', 'teleconsultas'],
+  cirurgia: ['cirurgia', 'cirurgias'],
+  consulta: ['consulta sem tipo', 'consultas sem tipo'],
+  coluna: ['só mudança de coluna', 'só mudança de coluna'],
+};
+const cutShort = sl => {
+  const names = CUT_WHAT_SHORT[sl.key];
+  if (!names) return `${sl.count} ${sl.label}`;
+  return `${sl.count} ${sl.count === 1 ? names[0] : names[1]}`;
+};
+// cada fatia com a SUA cor (dopamina): o tipo e o "quem fez" têm cor fixa,
+// as caixas de entrada rodam a paleta e "sem cadastro / sem conversa" é cinza
+const CUT_COLORS = {
+  avaliacao: '#2563EB',
+  retorno: '#0D9488',
+  pos_op: '#7C3AED',
+  exames: '#EAB308',
+  teleconsulta: '#0891B2',
+  cirurgia: '#DB2777',
+  consulta: '#64748B',
+  coluna: '#EA580C',
+  paciente: '#16A34A',
+  robo: '#7C3AED',
+  equipe: '#2563EB',
+  sync: '#0D9488',
+  carga: '#64748B',
+  integracao: '#EA580C',
+  antes: '#94A3B8',
+  sem_cadastro: '#94A3B8',
+  sem_conversa: '#64748B',
+};
+const CUT_WHEEL = [
+  '#2563EB',
+  '#DB2777',
+  '#16A34A',
+  '#EAB308',
+  '#7C3AED',
+  '#0891B2',
+  '#EA580C',
+];
+const cutItems = list =>
+  (list || []).map((sl, i) => ({
+    key: sl.key,
+    label: sl.label,
+    value: sl.count,
+    color: sl.color || CUT_COLORS[sl.key] || CUT_WHEEL[i % CUT_WHEEL.length],
+  }));
+const cutGroups = cuts => {
+  if (!cuts?.total) return [];
+  const particular = cuts.particular?.yes
+    ? [
+        {
+          field: 'particular',
+          title: 'Consulta particular',
+          items: [
+            {
+              key: true,
+              label: 'Particular',
+              value: cuts.particular.yes,
+              color: '#D4AF37',
+            },
+            {
+              key: false,
+              label: 'Demais consultas e cirurgias',
+              value: cuts.particular.no,
+              color: '#94A3B8',
+            },
+          ],
+        },
+      ]
+    : [];
+  return [
+    {
+      n: 1,
+      title: 'O que foi',
+      hint: 'Agendamento novo na Agenda, por tipo. "Só mudança de coluna" = o card entrou na coluna de agendamento do CRM sem consulta na Agenda naqueles dias.',
+      bars: [{ field: 'what', title: '', items: cutItems(cuts.what) }],
+    },
+    {
+      n: 2,
+      title: 'De onde veio',
+      hint: 'A fonte é o carimbo de origem; a caixa é a da PRIMEIRA conversa do paciente (por onde ele chegou).',
+      bars: [
+        {
+          field: 'source',
+          title: 'Fonte de pacientes',
+          items: cutItems(cuts.sources),
+        },
+        {
+          field: 'inbox',
+          title: 'Caixa por onde o paciente chegou',
+          items: cutItems(cuts.inboxes),
+        },
+        ...particular,
+      ],
+    },
+    {
+      n: 3,
+      title: 'Quem fez',
+      hint: cuts.deduced
+        ? `O carimbo de "quem fez" existe desde 05/10/2026. Em ${cuts.deduced} agendamento(s) anteriores, robô × equipe foi deduzido pela marca do Atendente de IA na consulta.`
+        : 'Pelo carimbo gravado na hora em que o agendamento nasceu.',
+      bars: [{ field: 'via', title: '', items: cutItems(cuts.who) }],
+    },
+  ];
+};
+const cutsTiles = cuts => {
+  if (!cuts) return [];
+  const top = (cuts.what || []).slice(0, 3).map(cutShort).join(' · ');
+  const outside = [
+    cuts.outside?.registered
+      ? `${cuts.outside.registered} lançada(s) (já estavam marcadas fora do sistema)`
+      : '',
+    cuts.outside?.history
+      ? `${cuts.outside.history} lançamento(s) de histórico (a data já tinha passado)`
+      : '',
+  ].filter(Boolean);
+  return [
+    {
+      label: 'Tudo o que foi marcado',
+      id: 'booking_cuts',
+      icon: 'i-lucide-layers',
+      value: cuts.total ?? 0,
+      sub: top || 'nada marcado no período',
+      cuts,
+      details: [
+        {
+          label: 'Agendamentos novos na Agenda (consultas e cirurgias)',
+          value: `${cuts.agenda ?? 0}`,
+        },
+        {
+          label: 'Só mudança de coluna no CRM (sem consulta na Agenda)',
+          value: `${cuts.column_only ?? 0}`,
+        },
+        ...(outside.length
+          ? [{ label: 'Fora desta conta', value: outside.join(' · ') }]
+          : []),
+      ],
+      about: `O VOLUME TOTAL do que foi marcado no período, aberto em três cortes: o que foi, de onde veio e quem fez. Soma os agendamentos novos da Agenda (consulta ou cirurgia, marcados para a frente e não cancelados) com os cards que entraram na coluna de agendamento do CRM sem consulta na Agenda naqueles dias. Toque numa fatia para ver os pacientes. Não é a taxa de agendamento: para isso, veja "Taxa de agendamento · leads novos". ${lensScope.value}`,
+    },
+  ];
+};
+const openCutList = (cuts, bar, slice) => {
+  if (!cuts || slice?.other) return;
+  const rows = (cuts.rows || []).filter(r =>
+    bar.field === 'particular'
+      ? r.task_id && r.particular === slice.key
+      : String(r[bar.field]) === String(slice.key)
+  );
+  funnelPopup.value = {
+    title: `${slice.label}`,
+    subtitle: cuts.truncated
+      ? `marcados no período · só os ${cuts.rows.length} mais recentes de ${cuts.rows_total} entram na lista`
+      : 'marcados no período',
+    people: rows.map(r => ({
+      id: r.id,
+      task_id: r.task_id,
+      contact_id: r.contact_id,
+      conversation_id: r.conversation_id,
+      name: r.name,
+      phone: r.phone,
+      origin: r.origin,
+      when: r.when,
+      meta: [r.what_label, r.via_label].filter(Boolean).join(' · '),
+    })),
+    grad: 'linear-gradient(135deg, #0F5FA6 0%, #7C3AED 100%)',
+    icon: 'i-lucide-layers',
+  };
+};
+
+// ── item 267 (28/09): o que importa em cada indicador, em seções ──────────
+const bdRows = list =>
+  (list || []).map(r => ({ label: r.label, value: r.count }));
+// item 332 (06/10): a linha de baixo de "Consultas marcadas" com a fonte
+// (carimbo) e as 2 caixas por onde mais chegaram
+const bookedSub = bd => {
+  const parts = [`${bd.new_leads} de leads novos · ${bd.base} da base`];
+  const stamp = (bd.by_stamp || []).filter(r => r.count > 0);
+  if (stamp.length > 1)
+    parts.push(stamp.map(r => `${r.label} ${r.count}`).join(' · '));
+  const inboxes = (bd.by_origin_inbox || [])
+    .filter(r => r.count > 0 && !/^sem /.test(r.label))
+    .slice(0, 2)
+    .map(r => `${shortInboxName(r.label)} ${r.count}`);
+  if (inboxes.length) parts.push(inboxes.join(' · '));
+  return parts.join(' · ');
+};
+// 🧹 item 342 (13/10): "Entrou em Agendamento" conta PESSOAS (mudança de
+// coluna) — esta quebra soma exatamente o número de cima. As consultas da
+// Agenda (bdSections) são OUTRA régua e dizem quantas pessoas são.
+const peopleSections = bp => {
+  if (!bp || !bp.total) return [];
+  return [
+    {
+      title: `Quem entrou na coluna de agendamento: ${bp.total} pessoa(s)`,
+      items: [
+        { label: 'Lead novo (chegou no período)', value: bp.new_leads },
+        { label: 'Paciente da base (chegou antes)', value: bp.base },
+      ],
+    },
+    {
+      title: 'De qual caixa de entrada a pessoa chegou',
+      items: bdRows(bp.by_origin_inbox),
+    },
+  ].filter(sec => sec.items.some(i => Number(i.value) > 0));
+};
+const bdSections = (bd, title = 'Consultas marcadas') => {
+  if (!bd || !bd.total) return [];
+  // item 342: o total é de CONSULTAS — diz quantas pessoas são
+  const quantas = bd.people
+    ? ` (${bd.total} consulta(s) de ${bd.people} pessoa(s))`
+    : ` (${bd.total} consulta(s))`;
+  return [
+    {
+      title: `${title}${quantas}: quem é o paciente`,
+      items: [
+        { label: 'Leads novos (chegaram há até 30 dias)', value: bd.new_leads },
+        {
+          label: 'Pacientes da base (há mais de 30 dias ou sem cadastro)',
+          value: bd.base,
+        },
+      ],
+    },
+    {
+      // item 332: a FONTE pelo carimbo de origem (CEVICO × Oftalmofácil…)
+      // item 342: contada SEM a chavinha de fonte — com ela dava 100% da fonte escolhida
+      title: bd.by_stamp_all_sources
+        ? 'Fonte de pacientes (todas as fontes, para comparar)'
+        : 'Fonte de pacientes (carimbo de origem)',
+      items: bdRows(bd.by_stamp),
+    },
+    {
+      title: 'De qual caixa de entrada o paciente chegou',
+      items: bdRows(bd.by_origin_inbox),
+    },
+    { title: 'Unidade', items: bdRows(bd.by_unit) },
+    {
+      title: 'Procedimento / tipo de consulta',
+      items: bdRows(bd.by_procedure),
+    },
+    { title: 'Médico', items: bdRows(bd.by_doctor) },
+    {
+      // item 332: quem fez pelo carimbo (paciente, robô, equipe, sincronização);
+      // sem carimbo (antes de 05/10) cai na regra antiga Atendente de IA × equipe
+      title: bd.via_deduced
+        ? `Quem fez (${bd.via_deduced} anteriores ao carimbo, deduzidos pela marca do Atendente)`
+        : 'Quem fez',
+      items: bd.by_via?.length
+        ? bdRows(bd.by_via)
+        : [
+            { label: 'Atendente de IA', value: bd.by_source?.ia ?? 0 },
+            { label: 'Equipe', value: bd.by_source?.equipe ?? 0 },
+          ],
+    },
+    {
+      title: 'Onde foi marcada',
+      items: [
+        {
+          label: 'No sistema CEVICO (Agenda / Atendente)',
+          value: bd.by_channel?.cevico ?? 0,
+        },
+        {
+          label: 'No Oftalmofácil (equipe, via Agenda unificada)',
+          value: bd.by_channel?.oftalmofacil ?? 0,
+        },
+      ],
+    },
+  ].filter(sec => sec.items.some(i => Number(i.value) > 0));
+};
+const surgerySections = sb => {
+  if (!sb || !sb.total) return [];
+  return [
+    {
+      title: 'Cirurgias do período: como terminaram',
+      items: [
+        { label: 'Realizadas', value: sb.done },
+        { label: 'Faltaram', value: sb.missed },
+        { label: 'Canceladas', value: sb.canceled },
+        { label: 'Já passaram, sem conferência', value: sb.pending },
+      ],
+    },
+    {
+      title: 'De onde vêm',
+      items: [
+        { label: 'Oftalmofácil (parceiros)', value: sb.from_oftalmofacil },
+        { label: 'Agenda da clínica', value: sb.total - sb.from_oftalmofacil },
+      ],
+    },
+    { title: 'Procedimentos realizados', items: bdRows(sb.by_procedure) },
+    { title: 'Unidade (realizadas)', items: bdRows(sb.by_unit) },
+    { title: 'Médico (realizadas)', items: bdRows(sb.by_doctor) },
+  ].filter(sec => sec.items.some(i => Number(i.value) > 0));
+};
+// funil de leads novos (30 dias): chegaram → orçamento → agendamento
+const funnel30Steps = computed(() => {
+  const f = data.value?.funnel_30d;
+  if (!f) return null;
+  return [
+    {
+      label: 'Novos contatos',
+      value: f.leads,
+      color: '#2563eb',
+      hint: 'chegaram nos últimos 30 dias',
+    },
+    {
+      label: f.quote_stage || 'Envio de orçamento',
+      value: f.quotes ?? 0,
+      color: '#7c3aed',
+    },
+    {
+      label: f.booking_stage || 'Agendamento de consulta',
+      value: f.booked ?? 0,
+      color: '#059669',
+    },
+  ];
+});
+const funnel30Sections = computed(() => {
+  const f = data.value?.funnel_30d;
+  if (!f?.by_inbox?.length) return [];
+  return [
+    {
+      title: 'Por caixa de entrada: leads novos → entraram em Agendamento',
+      items: f.by_inbox.map(i => ({
+        label: `${i.name} · ${i.booked} de ${i.count} (${i.rate}%)`,
+        value: i.count,
+      })),
+    },
+  ];
+});
+// quebras do popup: as do card ou, para cards do "+" (colunas do CRM), as do painel
+const modalBreakdowns = computed(() => {
+  const m = kpiModal.value;
+  if (!m) return [];
+  if (m.breakdowns?.length) return m.breakdowns;
+  const pd = data.value?.panel_data || {};
+  const label = String(m.label || '');
+  if (/cirurgia/i.test(label)) return surgerySections(pd.surgery_breakdown);
+  if (/consultas marcadas/i.test(label))
+    return bdSections(pd.booked_breakdown, 'Consultas marcadas no período');
+  // item 342: "Entrou em Agendamento" = pessoas; a Agenda vem depois, como outra régua
+  if (/agendamento/i.test(label))
+    return [
+      ...peopleSections(pd.booking_people),
+      ...bdSections(pd.booked_breakdown, 'Na Agenda (outra régua)'),
+    ];
+  return [];
+});
+
+// ── item 241: fórmula com os SEUS indicadores — cada card do "+" vira uma
+// variável `kpi_<id>` que outras fórmulas podem usar (ex.: kpi_ka / kpi_kb *
+// 100). Resolve em cadeia, com trava de ciclo (A usa B que usa A = "—"). ──
+const customVarName = def =>
+  `kpi_${String(def.id || '').replace(/[^a-zA-Z0-9_]/g, '_')}`;
+const withCustomVars = (base, skipId = null) => {
+  const defs = (crmSettings.value?.custom_kpis || []).filter(
+    d => d.id && d.id !== skipId
+  );
+  if (!defs.length) return base;
+  const byVar = Object.fromEntries(defs.map(d => [customVarName(d), d]));
+  const out = { ...base };
+  const visiting = new Set();
+  const resolve = name => {
+    if (name in out) return out[name];
+    const d = byVar[name];
+    if (!d) return undefined;
+    if (visiting.has(name)) return null;
+    visiting.add(name);
+    variablesIn(d.expr).forEach(v => {
+      if (!(v in out) && byVar[v]) out[v] = resolve(v);
+    });
+    visiting.delete(name);
+    out[name] = evaluateFormula(d.expr, out);
+    return out[name];
+  };
+  Object.keys(byVar).forEach(resolve);
+  return out;
+};
+
+// 🔒 auditoria R2 (#350): true = card de dinheiro que ESTA pessoa não pode
+// ver (marcado "só finance" pelo modelo pronto, ou cuja fórmula cita
+// faturamento/gasto do WhatsApp). Item 241: a fórmula pode citar outro card
+// (`kpi_<id>`); se esse card for de dinheiro, este também some — resolve em
+// cadeia, com trava de ciclo.
+const hiddenMoneyKpi = (def, visiting = new Set()) => {
+  if (!def) return false;
+  if (def.finance === true && !canSeeRevenue.value) return true;
+  const defs = crmSettings.value?.custom_kpis || [];
+  const byVar = Object.fromEntries(
+    defs.filter(d => d.id).map(d => [customVarName(d), d])
+  );
+  return variablesIn(def.expr || '').some(v => {
+    if (MONEY_VARS.includes(v)) return !canSeeMoneyVar(v);
+    const dep = byVar[v];
+    if (!dep || dep === def || visiting.has(v)) return false;
+    visiting.add(v);
+    const hidden = hiddenMoneyKpi(dep, visiting);
+    visiting.delete(v);
+    return hidden;
+  });
+};
+
 // ── CARDS DO "+" (item 141): indicador pronto ou FÓRMULA sobre o cesto ──
 const bagMetrics = computed(() => kpiBag.value?.metrics || {});
-const bagTotals = computed(() =>
-  Object.fromEntries(Object.entries(bagMetrics.value).map(([k, m]) => [k, m.value]))
+// só o cesto (sem os seus indicadores) — base da prévia do construtor
+const bagTotalsRaw = computed(() =>
+  Object.fromEntries(
+    Object.entries(bagMetrics.value).map(([k, m]) => [k, m.value])
+  )
 );
-const bagPrev = computed(() =>
-  Object.fromEntries(Object.entries(bagMetrics.value).map(([k, m]) => [k, m.prev]))
+const bagPrevRaw = computed(() =>
+  Object.fromEntries(
+    Object.entries(bagMetrics.value).map(([k, m]) => [k, m.prev])
+  )
 );
+const bagTotals = computed(() => withCustomVars(bagTotalsRaw.value));
+const bagPrev = computed(() => withCustomVars(bagPrevRaw.value));
 const bagAt = i =>
-  Object.fromEntries(Object.entries(bagMetrics.value).map(([k, m]) => [k, m.series?.[i] ?? 0]));
+  withCustomVars(
+    Object.fromEntries(
+      Object.entries(bagMetrics.value).map(([k, m]) => [k, m.series?.[i] ?? 0])
+    )
+  );
 // variação vs período anterior (texto curto pro card)
 const deltaLine = (value, prev, format, bag = null) => {
-  if (value === null || value === undefined || prev === null || prev === undefined) return '';
+  if (
+    value === null ||
+    value === undefined ||
+    prev === null ||
+    prev === undefined
+  )
+    return '';
   if (!prev) return `anterior: ${formatKpi(prev, format)}`;
   const pct = ((value - prev) / Math.abs(prev)) * 100;
   const arrow = pct >= 0 ? '▲' : '▼';
   return `${arrow} ${Math.abs(pct).toFixed(0)}% vs ${(bag || kpiBag.value)?.previous_label || 'período anterior'} (${formatKpi(prev, format)})`;
 };
 const customKpiDefs = computed(() =>
-  (crmSettings.value?.custom_kpis || []).filter(k => k.panel === 'all' || k.panel === selectedPanel.value)
+  (crmSettings.value?.custom_kpis || []).filter(
+    k =>
+      (k.panel === 'all' || k.panel === panelBase.value) && !hiddenMoneyKpi(k)
+  )
 );
+// ── item 241: ÍCONE que combina com o nome e a intenção do indicador. O NOME
+// decide (os ícones antigos vinham da fórmula pronta e não seguiam o nome);
+// só a escolha À MÃO no construtor (icon_manual) vence ──
+const ICON_RULES = [
+  [/faturamento|receita|ticket|valor|r\$/, 'i-lucide-banknote'],
+  [/orcamento/, 'i-lucide-receipt'],
+  [/nps|satisf/, 'i-lucide-smile'],
+  [/tempo|resposta|demora/, 'i-lucide-timer'],
+  [/falta|nao vier|faltou|ausen/, 'i-lucide-user-x'],
+  [/comparec|presen/, 'i-lucide-user-check'],
+  [/confirm/, 'i-lucide-check-check'],
+  [/pos.?opera|pos-op/, 'i-lucide-bandage'],
+  [/fechament/, 'i-lucide-handshake'],
+  [/indica/, 'i-lucide-target'],
+  [/cirurgi/, 'i-lucide-heart-pulse'],
+  [/exame/, 'i-lucide-scan-eye'],
+  [/tele/, 'i-lucide-video'],
+  [/retorno/, 'i-lucide-rotate-ccw'],
+  [/agendament|agendad|marcad/, 'i-lucide-calendar-check'],
+  [/consulta|avalia/, 'i-lucide-stethoscope'],
+  [/novos contatos|lead|contato|chegad/, 'i-lucide-user-plus'],
+  [/conversa|mensage/, 'i-lucide-message-circle'],
+  [/ligac|chamad/, 'i-lucide-phone-call'],
+  [/campanha|anuncio|marketing/, 'i-lucide-megaphone'],
+  [/perd|desist|recupera/, 'i-lucide-user-minus'],
+  [/paulista|tatuape|unidade/, 'i-lucide-building'],
+  [/meta/, 'i-lucide-flag'],
+];
+const AUTO_ICON = 'i-lucide-sparkles';
+// ícone pelo nome (null = nenhuma regra bateu)
+const iconByName = label => {
+  const t = String(label || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return ICON_RULES.find(([re]) => re.test(t))?.[1] || null;
+};
+const iconForKpi = (label, format) => {
+  const hit = iconByName(label);
+  if (hit) return hit;
+  if (format === 'percent') return 'i-lucide-percent';
+  if (format === 'currency') return 'i-lucide-banknote';
+  return 'i-lucide-activity';
+};
+const kpiIcon = def =>
+  def.icon_manual && def.icon && def.icon !== AUTO_ICON
+    ? def.icon
+    : iconForKpi(def.label, def.format);
+// ícones para escolher à mão no construtor (o 1º = automático pelo nome)
+const KPI_ICON_CHOICES = [
+  'i-lucide-user-plus',
+  'i-lucide-message-circle',
+  'i-lucide-receipt',
+  'i-lucide-calendar-check',
+  'i-lucide-check-check',
+  'i-lucide-stethoscope',
+  'i-lucide-user-check',
+  'i-lucide-user-x',
+  'i-lucide-target',
+  'i-lucide-heart-pulse',
+  'i-lucide-handshake',
+  'i-lucide-bandage',
+  'i-lucide-scan-eye',
+  'i-lucide-video',
+  'i-lucide-rotate-ccw',
+  'i-lucide-banknote',
+  'i-lucide-percent',
+  'i-lucide-timer',
+  'i-lucide-smile',
+  'i-lucide-phone-call',
+  'i-lucide-megaphone',
+  'i-lucide-building',
+  'i-lucide-flag',
+  'i-lucide-trending-up',
+  'i-lucide-activity',
+];
 const customTiles = computed(() =>
   customKpiDefs.value.map(def => {
     const value = evaluateFormula(def.expr, bagTotals.value);
     const prev = evaluateFormula(def.expr, bagPrev.value);
-    const series = (kpiBag.value?.points || []).map((_, i) => evaluateFormula(def.expr, bagAt(i)) ?? 0);
+    const series = (kpiBag.value?.points || []).map(
+      (_, i) => evaluateFormula(def.expr, bagAt(i)) ?? 0
+    );
     const isReady = Object.keys(bagMetrics.value).includes(def.expr.trim());
     return {
       label: def.label,
-      icon: def.icon || 'i-lucide-sparkles',
+      icon: kpiIcon(def),
       value: formatKpi(value, def.format),
       rawValue: value,
       prevValue: prev,
@@ -418,34 +1661,152 @@ const customTiles = computed(() =>
       kpi: true,
       def,
       grad: def.color || null,
-      sub: deltaLine(value, prev, def.format),
+      // a variação virou a pílula ▲/▼ do card (varredura 12/09); aqui fica o valor anterior
+      sub:
+        prev === null || prev === undefined
+          ? ''
+          : `anterior: ${formatKpi(prev, def.format)} · ${kpiBag.value?.previous_label || 'período anterior'}`,
       series,
       details: [
         { label: 'Neste período', value: formatKpi(value, def.format) },
-        { label: `Período anterior (${kpiBag.value?.previous_label || '—'})`, value: formatKpi(prev, def.format) },
-        { label: isReady ? 'Indicador' : 'Fórmula', value: isReady ? bagMetrics.value[def.expr.trim()]?.label : def.expr },
+        {
+          label: `Período anterior (${kpiBag.value?.previous_label || '—'})`,
+          value: formatKpi(prev, def.format),
+        },
+        // fórmula traduzida pros nomes do cesto — ninguém precisa ler
+        // "appointments_booked / new_leads" (item 152)
+        {
+          label: isReady ? 'Indicador' : 'Fórmula',
+          value: isReady
+            ? bagMetrics.value[def.expr.trim()]?.label
+            : prettyFormula(def.expr),
+        },
       ],
-      about: def.note || (isReady ? 'Indicador pronto do cesto do sistema, no período da régua.' : 'Calculado pela fórmula acima sobre os indicadores do período; a série do gráfico aplica a fórmula balde a balde.'),
+      about:
+        def.note ||
+        (isReady
+          ? 'Indicador pronto do cesto do sistema, no período da régua.'
+          : 'Calculado pela fórmula acima sobre os indicadores do período; a série do gráfico aplica a fórmula balde a balde.'),
     };
   })
 );
 
-const chartFormat = tile => v => formatKpi(v, tile?.format || (tile?.pct ? 'percent' : 'number'));
+const chartFormat = tile => v =>
+  formatKpi(v, tile?.format || (tile?.pct ? 'percent' : 'number'));
+
+// ── varredura 12/09: cada card conta a HISTÓRIA do número ──
+// o indicador do cesto que alimenta o gráfico deste card (chartKey)
+const bagMetricFor = tile => {
+  if (!tile?.chartKey || !kpiBag.value?.metrics) return null;
+  const key =
+    tile.chartKey === 'auto'
+      ? bagMetricByLabelOf(kpiBag.value, tile.chartMatch)
+      : tile.chartKey;
+  return key ? bagMetrics.value[key] || null : null;
+};
+// ▲/▼ vs período anterior: card de fórmula usa o próprio valor; card fixo
+// usa o indicador do cesto (só contagens — taxa não tem série comparável).
+// No painel Médicos o número é do médico e a série é da clínica: sem tendência.
+const tileTrend = tile => {
+  if (panelBase.value === 'medico') return null;
+  let value = null;
+  let prev = null;
+  let format = tile.format || 'number';
+  if (tile.def) {
+    value = tile.rawValue;
+    prev = tile.prevValue;
+  } else if (tile.chartKey && !tile.pct && !tile.compare) {
+    const m = bagMetricFor(tile);
+    if (!m) return null;
+    value = m.value;
+    prev = m.prev;
+    format = m.unit === 'brl' ? 'currency' : 'number';
+  } else {
+    return null;
+  }
+  if (value === null || value === undefined || !prev) return null;
+  const pct = ((value - prev) / Math.abs(prev)) * 100;
+  const up = pct >= 0;
+  return {
+    up,
+    text: `${up ? '▲' : '▼'} ${Math.abs(pct).toFixed(0)}%`,
+    title: `vs ${kpiBag.value?.previous_label || 'período anterior'}: ${formatKpi(prev, format)}`,
+  };
+};
+// sparkline do card (série do período): linha + área, em coordenadas 100×24
+const tileSpark = tile => {
+  if (panelBase.value === 'medico') return null;
+  const series = tile.def ? tile.series : bagMetricFor(tile)?.series;
+  if (!series || series.length < 3 || !series.some(v => Number(v) > 0))
+    return null;
+  const n = series.length;
+  const max = Math.max(1, ...series.map(v => Number(v) || 0));
+  const pts = series.map((v, i) => [
+    (i / (n - 1)) * 100,
+    22 - ((Number(v) || 0) / max) * 20,
+  ]);
+  const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  // 27/09: média dos baldes com valor → tracinho de referência
+  const filled = series.map(v => Number(v) || 0).filter(v => v > 0);
+  const avg =
+    filled.length >= 2
+      ? filled.reduce((a, v) => a + v, 0) / filled.length
+      : null;
+  const avgY = avg === null ? null : 22 - (avg / max) * 20;
+  // 28/09 (item 266): reta de tendência (regressão sobre os baldes com valor)
+  const t = trendOn.value ? trendOf(series) : null;
+  const trend = t
+    ? {
+        x1: (t.first / (n - 1)) * 100,
+        y1: 22 - (Math.min(max, t.y0) / max) * 20,
+        x2: (t.last / (n - 1)) * 100,
+        y2: 22 - (Math.min(max, t.y1) / max) * 20,
+      }
+    : null;
+  return { line, area: `0,24 ${line} 100,24`, avgY, trend };
+};
+// primeira cor de um gradiente CSS (o gráfico do popup na cor do card)
+const hexFromGrad = grad =>
+  (String(grad || '').match(/#[0-9a-f]{6}/gi) || [])[0] || null;
 
 // ── 📊 GRÁFICO DO POPUP v2 (item 144): mini-régua própria, período anterior
 // sobreposto balde a balde, linha de meta, ações da empresa 📌 e a
 // DECOMPOSIÇÃO das taxas (as séries que formam a conta) ──
 // leitores genéricos sobre QUALQUER cesto (o da página ou o do recorte)
 const bagTotalsOf = bag =>
-  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.value]));
+  withCustomVars(
+    Object.fromEntries(
+      Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.value])
+    )
+  );
 const bagPrevTotalsOf = bag =>
-  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.prev]));
+  withCustomVars(
+    Object.fromEntries(
+      Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.prev])
+    )
+  );
 const bagAtOf = (bag, i) =>
-  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.series?.[i] ?? 0]));
+  withCustomVars(
+    Object.fromEntries(
+      Object.entries(bag?.metrics || {}).map(([k, m]) => [
+        k,
+        m.series?.[i] ?? 0,
+      ])
+    )
+  );
 const bagPrevAtOf = (bag, i) =>
-  Object.fromEntries(Object.entries(bag?.metrics || {}).map(([k, m]) => [k, m.prev_series?.[i] ?? 0]));
+  withCustomVars(
+    Object.fromEntries(
+      Object.entries(bag?.metrics || {}).map(([k, m]) => [
+        k,
+        m.prev_series?.[i] ?? 0,
+      ])
+    )
+  );
 const bagMetricByLabelOf = (bag, re) =>
-  Object.keys(bag?.metrics || {}).find(k => re.test(bag.metrics[k].label || ''));
+  Object.keys(bag?.metrics || {}).find(k =>
+    re.test(bag.metrics[k].label || '')
+  );
 
 // recorte escolhido DENTRO do popup (null = segue a régua da página)
 const kpiModalPreset = ref(null);
@@ -463,7 +1824,9 @@ const fetchKpiModalBag = async () => {
     const params = kpiModalPreset.value
       ? { preset: kpiModalPreset.value }
       : { preset, ...(preset === 'custom' ? { from, to } : {}) };
-    if (kpiModalGranularity.value) params.granularity = kpiModalGranularity.value;
+    Object.assign(params, sourceParams());
+    if (kpiModalGranularity.value)
+      params.granularity = kpiModalGranularity.value;
     const { data: bag } = await CrmAPI.getKpiBag(params);
     kpiModalBag.value = bag;
   } catch {
@@ -480,11 +1843,10 @@ const setModalGranularity = g => {
   kpiModalGranularity.value = g;
   fetchKpiModalBag();
 };
+// item 321: a mesma lista de períodos do sistema inteiro (helper/cevicoPeriod.js)
 const MODAL_PRESETS = [
   [null, 'Régua de cima'],
-  ['last7', '7 dias'],
-  ['month', 'Este mês'],
-  ['year', 'Este ano'],
+  ...PERIOD_PRESETS.map(p => [p.key, p.label]),
 ];
 const MODAL_GRAINS = [
   [null, 'Auto'],
@@ -501,7 +1863,11 @@ const goalPerBucket = tile => {
   const target = officialTargetFor(tile.gk);
   if (!target) return null;
   const now = new Date();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysInMonth = new Date(
+    now.getFullYear(),
+    now.getMonth() + 1,
+    0
+  ).getDate();
   const daily = target / daysInMonth;
   const g = modalBag.value?.granularity;
   if (g === 'week') return Math.round(daily * 7 * 10) / 10;
@@ -515,9 +1881,11 @@ const modalMarkers = computed(() => {
   if (!bag?.points?.length || !actions.length) return [];
   const keys = bag.points.map(p => p.key);
   const idxFor = date => {
-    if (bag.granularity === 'month') return keys.findIndex(k => k.slice(0, 7) === date.slice(0, 7));
+    if (bag.granularity === 'month')
+      return keys.findIndex(k => k.slice(0, 7) === date.slice(0, 7));
     if (bag.granularity === 'week') {
-      for (let i = keys.length - 1; i >= 0; i -= 1) if (keys[i] <= date) return i;
+      for (let i = keys.length - 1; i >= 0; i -= 1)
+        if (keys[i] <= date) return i;
       return -1;
     }
     return keys.indexOf(date);
@@ -532,13 +1900,21 @@ const modalChart = computed(() => {
   const bag = modalBag.value;
   if (!tile) return null;
   if (tile.compare?.length && !tile.def && !tile.chartKey) {
-    return { values: tile.compare.map(c => c.value), labels: tile.compare.map(c => c.label), compare: true };
+    return {
+      values: tile.compare.map(c => c.value),
+      labels: tile.compare.map(c => c.label),
+      compare: true,
+    };
   }
   if (!bag) return null;
   const labels = (bag.points || []).map(p => p.label);
   if (tile.def) {
-    const values = (bag.points || []).map((_, i) => evaluateFormula(tile.def.expr, bagAtOf(bag, i)) ?? 0);
-    const prevValues = (bag.prev_points || []).map((_, i) => evaluateFormula(tile.def.expr, bagPrevAtOf(bag, i)) ?? 0);
+    const values = (bag.points || []).map(
+      (_, i) => evaluateFormula(tile.def.expr, bagAtOf(bag, i)) ?? 0
+    );
+    const prevValues = (bag.prev_points || []).map(
+      (_, i) => evaluateFormula(tile.def.expr, bagPrevAtOf(bag, i)) ?? 0
+    );
     return {
       values,
       labels,
@@ -549,10 +1925,18 @@ const modalChart = computed(() => {
       isFormula: true,
     };
   }
-  const key = tile.chartKey === 'auto' ? bagMetricByLabelOf(bag, tile.chartMatch) : tile.chartKey;
+  const key =
+    tile.chartKey === 'auto'
+      ? bagMetricByLabelOf(bag, tile.chartMatch)
+      : tile.chartKey;
   const m = key && bag.metrics?.[key];
   if (!m) {
-    if (tile.compare?.length) return { values: tile.compare.map(c => c.value), labels: tile.compare.map(c => c.label), compare: true };
+    if (tile.compare?.length)
+      return {
+        values: tile.compare.map(c => c.value),
+        labels: tile.compare.map(c => c.label),
+        compare: true,
+      };
     return null;
   }
   return {
@@ -588,11 +1972,87 @@ const modalComponents = computed(() => {
       };
     });
 });
-const componentFormat = comp => v => formatKpi(v, comp.unit === 'brl' ? 'currency' : 'number');
+const componentFormat = comp => v =>
+  formatKpi(v, comp.unit === 'brl' ? 'currency' : 'number');
 // rótulo curto do recorte ativo (cabeçalho do gráfico)
 const modalRangeLabel = computed(() => {
   const found = MODAL_PRESETS.find(p => p[0] === kpiModalPreset.value);
   return found && found[0] ? found[1] : 'período da régua';
+});
+
+// ── varredura 12/09: tendência no cabeçalho, cor do gráfico e leitura em 1 frase ──
+const modalDelta = computed(() => {
+  const c = modalChart.value;
+  if (!c || c.compare || c.prev === undefined || c.prev === null || !c.prev)
+    return null;
+  const total = c.total ?? 0;
+  const pct = ((total - c.prev) / Math.abs(c.prev)) * 100;
+  const fmt =
+    kpiModal.value?.format ||
+    (c.unit === 'brl'
+      ? 'currency'
+      : kpiModal.value?.pct
+        ? 'percent'
+        : 'number');
+  return {
+    up: pct >= 0,
+    text: `${pct >= 0 ? '▲' : '▼'} ${Math.abs(pct).toFixed(0)}%`,
+    sub: `vs ${modalBag.value?.previous_label || 'período anterior'} · ${formatKpi(c.prev, fmt)}`,
+  };
+});
+const modalChartColor = computed(
+  () =>
+    (kpiModal.value && hexFromGrad(tileVisual(kpiModal.value).grad)) ||
+    '#0F5FA6'
+);
+const BUCKET_WORD = {
+  day: ['dia', 'dias'],
+  week: ['semana', 'semanas'],
+  month: ['mês', 'meses'],
+};
+// item 309: no gráfico por SEMANA a etiqueta é o 1º dia da semana — dizer "pico
+// em 06/07" fazia parecer que tudo aconteceu naquele dia
+const peakWhen = (label, granularity) => {
+  if (!label) return '';
+  return granularity === 'week' ? `na semana de ${label}` : `em ${label}`;
+};
+// item 266: a tendência do gráfico do popup em palavras
+const modalTrendWords = computed(() =>
+  modalChart.value && !modalChart.value.compare
+    ? trendText(
+        modalChart.value.values || [],
+        modalBag.value?.granularity || 'day'
+      )
+    : null
+);
+const modalInsight = computed(() => {
+  const c = modalChart.value;
+  if (!c || c.compare || isLoadingModalBag.value) return '';
+  const vals = (c.values || []).map(v => Number(v) || 0);
+  if (!vals.length || !vals.some(v => v > 0)) return '';
+  const fmt = chartFormat(kpiModal.value);
+  const [one, many] =
+    BUCKET_WORD[modalBag.value?.granularity] || BUCKET_WORD.day;
+  const maxV = Math.max(...vals);
+  const maxI = vals.indexOf(maxV);
+  // item 267: a MESMA média da linha do gráfico (só os baldes com valor)
+  const filled = vals.filter(v => v > 0);
+  const avg =
+    Math.round((filled.reduce((a, b) => a + b, 0) / filled.length) * 10) / 10;
+  const parts = [
+    `pico ${peakWhen(c.labels?.[maxI], modalBag.value?.granularity)}: ${fmt(maxV)}`.replace(
+      'pico : ',
+      'pico: '
+    ),
+    `média ${fmt(avg)} por ${one} com movimento`,
+  ];
+  if (!c.isFormula && c.total !== undefined && c.total !== null)
+    parts.push(`total ${fmt(c.total)}`);
+  // "sem movimento" só faz sentido pra contagem (taxa zerada não é ausência)
+  const zeros = vals.filter(v => v === 0).length;
+  if (!c.isFormula && zeros && vals.length > 3)
+    parts.push(`${zeros} ${zeros > 1 ? many : one} sem movimento`);
+  return parts.join(' · ');
 });
 
 // ── CONSTRUTOR DO "+" (admin): indicador pronto ou fórmula, cor, painel ──
@@ -607,17 +2067,26 @@ const newKpiDef = () => ({
   format: 'number',
   color: '',
   icon: 'i-lucide-sparkles',
-  panel: selectedPanel.value.startsWith('custom:') ? 'all' : selectedPanel.value,
+  panel: currentPanel.value.custom ? 'all' : panelBase.value,
   note: '',
 });
 const openKpiBuilder = def => {
   kpiBuilder.value = def ? { ...def } : newKpiDef();
-  kpiBuilderMode.value = def && !Object.keys(bagMetrics.value).includes(def.expr?.trim()) ? 'formula' : 'ready';
+  kpiMulti.value = [];
+  kpiVarQuery.value = '';
+  kpiBuilderMode.value =
+    def && !Object.keys(bagMetrics.value).includes(def.expr?.trim())
+      ? 'formula'
+      : 'ready';
   kpiHexColor.value = '';
   kpiModal.value = null;
 };
 const kpiCatalog = computed(() =>
-  Object.entries(bagMetrics.value).map(([key, m]) => ({ key, label: m.label, value: formatKpi(m.value, m.unit === 'brl' ? 'currency' : 'number') }))
+  Object.entries(bagMetrics.value).map(([key, m]) => ({
+    key,
+    label: m.label,
+    value: formatKpi(m.value, m.unit === 'brl' ? 'currency' : 'number'),
+  }))
 );
 // ── 📚 INDICADORES JÁ FORMULADOS (item 143): taxas e contas importantes
 // prontas pra virar card com 1 clique, separadas por categoria ──
@@ -625,27 +2094,115 @@ const READY_FORMULAS = [
   {
     cat: '🎯 Taxas do funil',
     items: [
-      { label: 'Taxa de agendamento', expr: 'appointments_booked / new_leads * 100', format: 'percent', icon: 'i-lucide-percent', note: 'consultas agendadas ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco' },
-      { label: 'Comparecimento', expr: 'appointments_attended / (appointments_attended + appointments_missed) * 100', format: 'percent', icon: 'i-lucide-user-check', note: 'quem confirmou e veio · referência de clínica boa: acima de 80%' },
-      { label: 'Taxa de indicação', expr: 'indications / appointments_attended * 100', format: 'percent', icon: 'i-lucide-stethoscope', note: isClinica ? 'de quem compareceu, quantos saíram da consulta indicados pra cirurgia' : 'de quem compareceu, quantos saíram com proposta' },
-      { label: frase('fechamento_vendas', 'Fechamento de cirurgias'), expr: 'surgeries_booked / indications * 100', format: 'percent', icon: 'i-lucide-heart-pulse', note: isClinica ? 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento' : 'das propostas, quantas fecharam — o trabalho de fechamento' },
-      { label: isClinica ? 'Lead → cirurgia' : 'Lead → venda', expr: 'surgeries_booked / new_leads * 100', format: 'percent', icon: 'i-lucide-trending-up', note: isClinica ? 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram cirurgia' : 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram venda' },
+      {
+        label: 'Taxa de agendamento',
+        expr: 'appointments_created / new_leads * 100',
+        format: 'percent',
+        icon: 'i-lucide-percent',
+        note: 'entradas em Agendamento de Consulta (mudança de coluna no CRM) ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco',
+      },
+      {
+        label: 'Comparecimento',
+        expr: 'appointments_attended / (appointments_attended + appointments_missed) * 100',
+        format: 'percent',
+        icon: 'i-lucide-user-check',
+        note: 'quem confirmou e veio · referência de clínica boa: acima de 80%',
+      },
+      {
+        label: 'Taxa de indicação',
+        expr: 'indications / appointments_attended * 100',
+        format: 'percent',
+        icon: 'i-lucide-stethoscope',
+        note: 'de quem compareceu, quantos saíram da consulta indicados pra cirurgia',
+      },
+      {
+        label: 'Fechamento de cirurgias',
+        expr: 'surgeries_booked_indicated / indications * 100',
+        format: 'percent',
+        icon: 'i-lucide-heart-pulse',
+        note: 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento',
+      },
+      {
+        label: 'Lead → cirurgia',
+        expr: 'surgeries_booked / new_leads * 100',
+        format: 'percent',
+        icon: 'i-lucide-trending-up',
+        note: 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram cirurgia',
+      },
     ],
   },
   {
     cat: '💰 Financeiro',
     items: [
-      { label: isClinica ? 'Ticket médio por cirurgia' : 'Ticket médio por venda', expr: 'revenue / surgeries_done', format: 'currency', icon: 'i-lucide-badge-dollar-sign', note: isClinica ? 'faturamento fechado ÷ cirurgias realizadas no período' : 'faturamento fechado ÷ vendas realizadas no período' },
-      { label: 'Faturamento por lead', expr: 'revenue / new_leads', format: 'currency', icon: 'i-lucide-coins', note: 'quanto cada contato que chega vale em faturamento — norteia quanto pagar por lead' },
-      { label: 'Faturamento por consulta', expr: 'revenue / appointments_attended', format: 'currency', icon: 'i-lucide-wallet', note: 'faturamento fechado ÷ consultas com presença' },
+      {
+        label: 'Ticket médio por cirurgia',
+        expr: 'revenue / surgeries_done',
+        format: 'currency',
+        icon: 'i-lucide-badge-dollar-sign',
+        note: 'faturamento fechado ÷ cirurgias realizadas no período',
+      },
+      {
+        label: 'Faturamento por lead',
+        expr: 'revenue / new_leads',
+        format: 'currency',
+        icon: 'i-lucide-coins',
+        note: 'quanto cada contato que chega vale em faturamento — norteia quanto pagar por lead',
+      },
+      {
+        label: 'Faturamento por consulta',
+        expr: 'revenue / appointments_attended',
+        format: 'currency',
+        icon: 'i-lucide-wallet',
+        note: 'faturamento fechado ÷ consultas com presença',
+      },
     ],
   },
   {
     cat: '📅 Agenda',
     items: [
-      { label: 'Faltas em consultas (%)', expr: 'appointments_missed / (appointments_attended + appointments_missed) * 100', format: 'percent', icon: 'i-lucide-user-minus', note: 'o inverso do comparecimento: acima de 20% é hora de reforçar a confirmação' },
-      { label: isClinica ? 'Realização de cirurgias' : 'Realização de vendas', expr: 'surgeries_done / surgeries_booked * 100', format: 'percent', icon: 'i-lucide-check-circle-2', note: isClinica ? 'das cirurgias agendadas, quantas aconteceram de fato' : 'das vendas fechadas, quantas foram entregues de fato' },
-      { label: isClinica ? 'Cirurgias perdidas (%)' : 'Vendas perdidas (%)', expr: 'surgeries_missed / (surgeries_done + surgeries_missed) * 100', format: 'percent', icon: 'i-lucide-alert-triangle', note: isClinica ? 'agendou e não veio — cada uma vale um resgate imediato' : 'fechou e não aconteceu — cada uma vale um resgate imediato' },
+      {
+        label: 'Faltas em consultas (%)',
+        expr: 'appointments_missed / (appointments_attended + appointments_missed) * 100',
+        format: 'percent',
+        icon: 'i-lucide-user-minus',
+        note: 'o inverso do comparecimento: acima de 20% é hora de reforçar a confirmação',
+      },
+      {
+        label: 'Realização de cirurgias',
+        expr: 'surgeries_done / surgeries_booked * 100',
+        format: 'percent',
+        icon: 'i-lucide-check-circle-2',
+        note: 'das cirurgias agendadas, quantas aconteceram de fato',
+      },
+      {
+        label: 'Cirurgias perdidas (%)',
+        expr: 'surgeries_missed / (surgeries_done + surgeries_missed) * 100',
+        format: 'percent',
+        icon: 'i-lucide-alert-triangle',
+        note: 'agendou e não veio — cada uma vale um resgate imediato',
+      },
+    ],
+  },
+  // 🏥 por unidade (pedido 02/09): cada casa com o próprio card — os
+  // números-base Consultas/Presenças/Faltas de cada unidade também estão
+  // na lista de indicadores prontos logo abaixo
+  {
+    cat: '🏥 Por unidade',
+    items: [
+      {
+        label: 'Comparecimento · Av. Paulista',
+        expr: 'appointments_attended_paulista / (appointments_attended_paulista + appointments_missed_paulista) * 100',
+        format: 'percent',
+        icon: 'i-lucide-building-2',
+        note: 'só a casa da Paulista — coloque ao lado do Tatuapé e compare no mesmo olhar',
+      },
+      {
+        label: 'Comparecimento · Tatuapé',
+        expr: 'appointments_attended_tatuape / (appointments_attended_tatuape + appointments_missed_tatuape) * 100',
+        format: 'percent',
+        icon: 'i-lucide-building',
+        note: 'só a casa do Tatuapé — coloque ao lado da Paulista e compare no mesmo olhar',
+      },
     ],
   },
 ];
@@ -659,6 +2216,41 @@ const readyFormulaSections = computed(() =>
     })),
   }))
 );
+// ── item 279 (28/09): "criar mais de um indicador pré-selecionado" — marca
+// vários prontos e salva todos de uma vez (um card por item) ──
+const kpiMulti = ref([]); // [{ key, label, expr, format, icon, note }]
+const kpiMultiHas = key => kpiMulti.value.some(m => m.key === key);
+const toggleKpiMulti = item => {
+  const i = kpiMulti.value.findIndex(m => m.key === item.key);
+  if (i >= 0) kpiMulti.value.splice(i, 1);
+  else kpiMulti.value.push(item);
+};
+const saveKpiMulti = async () => {
+  if (!kpiMulti.value.length || isSavingKpi.value) return;
+  isSavingKpi.value = true;
+  try {
+    const base = kpiBuilder.value || newKpiDef();
+    const list = []; // Rodada 4 (#351): só os cards novos; o servidor junta pelo id
+    kpiMulti.value.forEach((m, i) => {
+      list.push({
+        ...base,
+        id: `k${(Date.now() + i).toString(36)}`,
+        label: m.label,
+        expr: m.expr,
+        format: m.format || 'number',
+        icon: m.icon || 'auto',
+        note: m.note || '',
+        color: base.color || '',
+      });
+    });
+    await CrmAPI.patchCustomKpis({ upsert: list });
+    await store.dispatch('crm/fetchSettings');
+    kpiMulti.value = [];
+    kpiBuilder.value = null;
+  } finally {
+    isSavingKpi.value = false;
+  }
+};
 const applyReadyFormula = f => {
   kpiBuilder.value.expr = f.expr;
   kpiBuilder.value.format = f.format;
@@ -670,53 +2262,201 @@ const applyReadyFormula = f => {
 const KPI_CAT = key => {
   if (key.startsWith('stage_')) return '🧭 Funil (entrou na coluna)';
   if (key === 'revenue') return '💰 Financeiro';
-  if (key.startsWith('surgeries_')) return isClinica ? '🔪 Cirurgias' : '💰 Vendas';
-  if (key.startsWith('appointments_') || key === 'indications') return '📅 Consultas';
+  if (key.startsWith('surgeries_')) return '🔪 Cirurgias';
+  if (key.startsWith('appointments_') || key === 'indications')
+    return '📅 Consultas';
   return '👥 Chegada';
 };
 const kpiCatalogSections = computed(() => {
-  const order = ['👥 Chegada', '📅 Consultas', isClinica ? '🔪 Cirurgias' : '💰 Vendas', '🧭 Funil (entrou na coluna)', '💰 Financeiro'];
+  const order = [
+    '👥 Chegada',
+    '📅 Consultas',
+    '🔪 Cirurgias',
+    '🧭 Funil (entrou na coluna)',
+    '💰 Financeiro',
+  ];
   const bySec = {};
   kpiCatalog.value.forEach(m => {
     const cat = KPI_CAT(m.key);
     (bySec[cat] ||= []).push(m);
   });
-  return order.filter(cat => bySec[cat]?.length).map(cat => ({ cat, items: bySec[cat] }));
+  return order
+    .filter(cat => bySec[cat]?.length)
+    .map(cat => ({ cat, items: bySec[cat] }));
 });
+// item 241: a prévia enxerga os seus indicadores, menos o que está sendo
+// editado (senão ele se usaria — ciclo)
+const builderTotals = computed(() =>
+  withCustomVars(bagTotalsRaw.value, kpiBuilder.value?.id)
+);
+const builderPrev = computed(() =>
+  withCustomVars(bagPrevRaw.value, kpiBuilder.value?.id)
+);
 const kpiPreview = computed(() => {
   if (!kpiBuilder.value) return { ok: false, text: '—' };
-  const unknown = variablesIn(kpiBuilder.value.expr).filter(v => !(v in bagTotals.value));
-  if (unknown.length) return { ok: false, text: `não conheço: ${unknown.join(', ')}` };
-  const v = evaluateFormula(kpiBuilder.value.expr, bagTotals.value);
-  if (v === null) return { ok: false, text: kpiBuilder.value.expr ? 'fórmula inválida (ou divisão por zero)' : 'prévia aparece aqui' };
-  const prev = evaluateFormula(kpiBuilder.value.expr, bagPrev.value);
-  return { ok: true, text: formatKpi(v, kpiBuilder.value.format), delta: deltaLine(v, prev, kpiBuilder.value.format) };
+  const unknown = variablesIn(kpiBuilder.value.expr).filter(
+    v => !(v in builderTotals.value)
+  );
+  if (unknown.length)
+    return { ok: false, text: `não conheço: ${unknown.join(', ')}` };
+  const v = evaluateFormula(kpiBuilder.value.expr, builderTotals.value);
+  if (v === null)
+    return {
+      ok: false,
+      text: kpiBuilder.value.expr
+        ? 'fórmula inválida (ou divisão por zero)'
+        : 'prévia aparece aqui',
+    };
+  const prev = evaluateFormula(kpiBuilder.value.expr, builderPrev.value);
+  return {
+    ok: true,
+    text: formatKpi(v, kpiBuilder.value.format),
+    delta: deltaLine(v, prev, kpiBuilder.value.format),
+  };
 });
+// item 241: grupos do construtor de fórmula — colunas do CRM, indicadores do
+// sistema e os SEUS indicadores (com o valor do período), com busca
+const kpiVarQuery = ref('');
+const norm = t =>
+  String(t || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+const myKpiItems = computed(() =>
+  (crmSettings.value?.custom_kpis || [])
+    .filter(d => d.id && d.id !== kpiBuilder.value?.id)
+    .map(d => ({
+      key: customVarName(d),
+      label: d.label,
+      icon: kpiIcon(d),
+      value: formatKpi(builderTotals.value[customVarName(d)], d.format),
+    }))
+);
+const kpiFormulaGroups = computed(() => {
+  const q = norm(kpiVarQuery.value);
+  const match = m => !q || norm(m.label).includes(q);
+  const cols = kpiCatalog.value.filter(m => m.key.startsWith('stage_'));
+  const sys = kpiCatalog.value.filter(m => !m.key.startsWith('stage_'));
+  return [
+    { title: '⭐ Seus indicadores', items: myKpiItems.value.filter(match) },
+    {
+      title: '🧭 Colunas do CRM (entrou na coluna)',
+      items: cols.filter(match),
+    },
+    { title: '📊 Indicadores do sistema', items: sys.filter(match) },
+  ].filter(g => g.items.length);
+});
+const KPI_OPS = [
+  { op: '+', label: '+' },
+  { op: '-', label: '−' },
+  { op: '*', label: '×' },
+  { op: '/', label: '÷' },
+  { op: '(', label: '(' },
+  { op: ')', label: ')' },
+  { op: '* 100', label: '× 100 (%)' },
+];
+const insertKpiOp = op => {
+  const cur = (kpiBuilder.value.expr || '').replace(/\s+$/, '');
+  kpiBuilder.value.expr = cur ? `${cur} ${op} ` : `${op} `;
+};
+const clearKpiExpr = () => {
+  kpiBuilder.value.expr = '';
+};
 const insertKpiVar = key => {
   const cur = kpiBuilder.value.expr || '';
-  kpiBuilder.value.expr = cur && !/[\s(+\-*/]$/.test(cur) ? `${cur} ${key}` : `${cur}${key}`;
+  kpiBuilder.value.expr =
+    cur && !/[\s(+\-*/]$/.test(cur) ? `${cur} ${key}` : `${cur}${key}`;
 };
+// item 239: as NOSSAS paletas também nos cards — iMac G3, frutas da Apple
+// (tom principal, degrau claro e a complementar) e a marca CEVICO
+const OUR_PALETTE_GROUPS = [
+  { title: 'iMac G3', list: IMAC_PALETTES },
+  { title: 'Frutas da Apple', list: FRUIT_PALETTES },
+];
+const BRAND_COLORS = [
+  {
+    key: 'navy',
+    grad: 'linear-gradient(135deg, #0B1A3D, #152C61)',
+    title: 'CEVICO · navy',
+  },
+  {
+    key: 'navy2',
+    grad: 'linear-gradient(135deg, #152C61, #2A4A94)',
+    title: 'CEVICO · navy claro',
+  },
+  {
+    key: 'ouro',
+    grad: 'linear-gradient(135deg, #A8841F, #D4AF37)',
+    title: 'CEVICO · ouro',
+  },
+];
+const kpiColorGroups = computed(() => [
+  {
+    title: 'Família deste painel',
+    items: panelFamily.value.map((g, i) => ({
+      key: `fam${i}`,
+      grad: g,
+      title: `família do painel · ${i + 1}`,
+    })),
+  },
+  { title: 'Marca CEVICO', items: BRAND_COLORS },
+  ...OUR_PALETTE_GROUPS.map(g => ({
+    title: g.title,
+    items: g.list.flatMap(p => [
+      { key: `${p.key}-1`, grad: p.family[1], title: `${p.label}` },
+      { key: `${p.key}-3`, grad: p.family[3], title: `${p.label} · claro` },
+      {
+        key: `${p.key}-alt`,
+        grad: p.altFamily[1],
+        title: `${p.label} · complementar`,
+      },
+    ]),
+  })),
+  {
+    title: 'Temas e sinais',
+    items: kpiColorOptions.value.filter(c => !c.key.startsWith('fam')),
+  },
+]);
 const kpiColorOptions = computed(() => [
-  ...panelFamily.value.map((g, i) => ({ key: `fam${i}`, grad: g, title: `família do painel · ${i + 1}` })),
+  ...panelFamily.value.map((g, i) => ({
+    key: `fam${i}`,
+    grad: g,
+    title: `família do painel · ${i + 1}`,
+  })),
   ...ALL_THEMES.map(t => ({ key: t.key, grad: t.primary, title: t.label })),
-  { key: 'ok', grad: 'linear-gradient(135deg, #065F46, #10B981)', title: 'verde' },
-  { key: 'gold', grad: 'linear-gradient(135deg, #B8860B, #D4A017)', title: 'ouro' },
-  { key: 'red', grad: 'linear-gradient(135deg, #991B1B, #EF4444)', title: 'vermelho' },
+  {
+    key: 'ok',
+    grad: 'linear-gradient(135deg, #065F46, #10B981)',
+    title: 'verde',
+  },
+  {
+    key: 'gold',
+    grad: 'linear-gradient(135deg, #B8860B, #D4A017)',
+    title: 'ouro',
+  },
+  {
+    key: 'red',
+    grad: 'linear-gradient(135deg, #991B1B, #EF4444)',
+    title: 'vermelho',
+  },
 ]);
 const applyHexColor = () => {
   const hex = (kpiHexColor.value || '').trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(hex)) kpiBuilder.value.color = `linear-gradient(135deg, ${hex}, ${hex}CC)`;
+  if (/^#[0-9a-fA-F]{6}$/.test(hex))
+    kpiBuilder.value.color = `linear-gradient(135deg, ${hex}, ${hex}CC)`;
 };
 const saveKpiBuilder = async () => {
   const def = kpiBuilder.value;
   if (!def?.label?.trim() || !kpiPreview.value.ok) return;
   isSavingKpi.value = true;
   try {
-    const list = [...(crmSettings.value?.custom_kpis || [])];
-    const idx = def.id ? list.findIndex(k => k.id === def.id) : -1;
-    if (idx >= 0) list[idx] = def;
-    else list.push({ ...def, id: `k${Date.now().toString(36)}` });
-    await CrmAPI.updateCustomKpis(list);
+    // Rodada 4 (#351): manda só este card (editado ou novo); o servidor junta
+    // pelo id em cima da lista do banco
+    const exists =
+      def.id &&
+      (crmSettings.value?.custom_kpis || []).some(k => k.id === def.id);
+    const card = exists ? def : { ...def, id: `k${Date.now().toString(36)}` };
+    await CrmAPI.patchCustomKpis({ upsert: [card] });
     await store.dispatch('crm/fetchSettings');
     kpiBuilder.value = null;
   } finally {
@@ -724,10 +2464,22 @@ const saveKpiBuilder = async () => {
   }
 };
 const deleteKpi = async def => {
-  const list = (crmSettings.value?.custom_kpis || []).filter(k => k.id !== def.id);
+  // item 241: outro indicador usa este na fórmula? avisa antes de apagar
+  const users = (crmSettings.value?.custom_kpis || []).filter(
+    k => k.id !== def.id && variablesIn(k.expr).includes(customVarName(def))
+  );
+  if (
+    users.length &&
+    // eslint-disable-next-line no-alert
+    !window.confirm(
+      `"${users.map(u => u.label).join('", "')}" usa este indicador na fórmula e vai mostrar "—". Apagar mesmo assim?`
+    )
+  )
+    return;
   isSavingKpi.value = true;
   try {
-    await CrmAPI.updateCustomKpis(list);
+    // Rodada 4 (#351): apaga só este card pelo id
+    await CrmAPI.patchCustomKpis({ remove: [def.id] });
     await store.dispatch('crm/fetchSettings');
     kpiBuilder.value = null;
     kpiModal.value = null;
@@ -743,45 +2495,143 @@ const deleteKpi = async def => {
 // degraus (escuro → claro); a cor SEMÂNTICA (verde/âmbar/vermelho) fica
 // reservada pro card que está sendo JULGADO — o olho vai direto nele.
 // O admin pode trocar a família por um tema (Configurações → Painéis).
-const PANEL_FAMILY = {
-  agendamento: [
-    'linear-gradient(135deg, #152C61, #0F5FA6)',
-    'linear-gradient(135deg, #0F5FA6, #3B82F6)',
-    'linear-gradient(135deg, #1D4ED8, #60A5FA)',
-    'linear-gradient(135deg, #2563EB, #93C5FD)',
-  ],
-  conducao: [
-    'linear-gradient(135deg, #134E4A, #0F766E)',
-    'linear-gradient(135deg, #0F766E, #14B8A6)',
-    'linear-gradient(135deg, #0D9488, #2DD4BF)',
-    'linear-gradient(135deg, #14B8A6, #99F6E4)',
-  ],
-  cirurgia: [
-    'linear-gradient(135deg, #831843, #9D174D)',
-    'linear-gradient(135deg, #9D174D, #DB2777)',
-    'linear-gradient(135deg, #BE185D, #F472B6)',
-    'linear-gradient(135deg, #DB2777, #F9A8D4)',
-  ],
-  medico: [
-    'linear-gradient(135deg, #0C4A6E, #0369A1)',
-    'linear-gradient(135deg, #0369A1, #0284C7)',
-    'linear-gradient(135deg, #0284C7, #38BDF8)',
-    'linear-gradient(135deg, #0EA5E9, #7DD3FC)',
-  ],
-  gestor: [
-    'linear-gradient(135deg, #152C61, #0F5FA6)',
-    'linear-gradient(135deg, #0B4A82, #1D4ED8)',
-    'linear-gradient(135deg, #1E3A8A, #3B82F6)',
-    'linear-gradient(135deg, #B8860B, #D4A017)',
-  ],
+// os BLOCOS do Meu Painel (item 143): nome, ícone e a posição padrão de
+// cada um — as paletas por bloco (abaixo) e o modo edição leem daqui
+// rodada 161: barrinhas do modo edição com ícone lucide (sem emoji)
+const BLOCK_LABELS = {
+  whatsapp: 'Status do WhatsApp',
+  briefing: 'Briefing do gestor',
+  campanhas: 'Agente de Campanhas',
+  paginas: 'Agente de Páginas',
+  radar: 'Radar de Oportunidades',
+  tarefas: 'Tarefas esperando você',
+  mentor: 'Feedback da semana',
+  indicadores: 'Indicadores do período',
+  funil_aquisicao: 'Funil de aquisição · por turma',
+  porta_dentro: 'Da porta pra dentro',
+  desempenho: 'Meu desempenho',
+  agenda_dashboard: 'Dashboard da Agenda',
+  saude_agenda: 'Saúde da Agenda',
+  metas_strip: 'Metas · Rotinas · Ferramentas',
+  atalhos: 'Acesso rápido',
+  termometro: 'Termômetro do momento',
 };
-const panelFamily = computed(() => {
-  const key = selectedPanel.value;
-  const themeKey = crmSettings.value?.panel_themes?.[key];
+const BLOCK_ICONS = {
+  whatsapp: 'i-lucide-phone',
+  briefing: 'i-lucide-gauge',
+  campanhas: 'i-lucide-target',
+  paginas: 'i-lucide-file-text',
+  radar: 'i-lucide-radar',
+  tarefas: 'i-lucide-list-checks',
+  mentor: 'i-lucide-graduation-cap',
+  indicadores: 'i-lucide-layout-grid',
+  funil_aquisicao: 'i-lucide-filter',
+  porta_dentro: 'i-lucide-door-open',
+  desempenho: 'i-lucide-target',
+  agenda_dashboard: 'i-lucide-calendar-days',
+  saude_agenda: 'i-lucide-activity',
+  metas_strip: 'i-lucide-flag',
+  atalhos: 'i-lucide-rocket',
+  termometro: 'i-lucide-thermometer',
+};
+const TASKS_FIRST_PANELS = ['agendamento', 'conducao', 'cirurgia'];
+const TOP_BLOCKS_DEFAULT = [
+  'whatsapp',
+  'briefing',
+  'campanhas',
+  'paginas',
+  'radar',
+  'tarefas',
+  'mentor',
+];
+const MAIN_BLOCKS_DEFAULT = [
+  'indicadores',
+  'funil_aquisicao',
+  'porta_dentro',
+  'desempenho',
+  'agenda_dashboard',
+  'saude_agenda',
+  'metas_strip',
+  'atalhos',
+  'termometro',
+];
+// 🍎🍊 PALETAS (rodadas 162/163): as 7 cores dos iMac G3 (uma por dia da
+// semana) + as 10 frutas da Apple + a salada de frutas. O motor mora no
+// composable useCevicoPalette (compartilhado com os Relatórios): por painel,
+// o admin escolhe o painel inteiro (cor do dia / fixa / salada) e cada bloco
+// por cima; salvo em crm settings panel_palettes[painel].
+// Tema legado de Configurações → Painéis (item 140) vira uma paleta: vale
+// quando o admin ainda não escolheu nada aqui.
+const themePalette = computed(() => {
+  const themeKey = crmSettings.value?.panel_themes?.[panelBase.value];
   const theme = themeKey && ALL_THEMES.find(t => t.key === themeKey);
-  if (theme) return [theme.primary, theme.pill, theme.action, theme.accent];
-  return PANEL_FAMILY[key] || PANEL_FAMILY.agendamento;
+  if (!theme) return null;
+  return {
+    key: `tema:${theme.key}`,
+    label: theme.label,
+    emoji: theme.emoji || '',
+    dot: hexFromGrad(theme.accent) || hexFromGrad(theme.pill) || '#152C61',
+    hero: theme.primary,
+    family: [theme.primary, theme.pill, theme.action, theme.accent],
+  };
 });
+// 🌈 nota "Seu painel, as suas cores" — aparece UMA vez por PESSOA (22/09):
+// a dispensa fica em ui_settings (servidor), então some em todo aparelho;
+// o localStorage é só reforço para o caso de a gravação falhar.
+const DOPAMINE_NOTE_KEY = 'cevico_note_dopamine_colors_v1';
+const dopamineDismissedLocally = () => {
+  try {
+    return !!localStorage.getItem(DOPAMINE_NOTE_KEY);
+  } catch {
+    return false;
+  }
+};
+const showDopamineNote = computed(() => {
+  const dismissed = uiSettings.value?.cevico_notes_dismissed || {};
+  return !dismissed.dopamine_colors_v1 && !dopamineDismissedLocally();
+});
+const dismissDopamineNote = () => {
+  try {
+    localStorage.setItem(DOPAMINE_NOTE_KEY, '1');
+  } catch {
+    /* sem armazenamento: o servidor resolve */
+  }
+  updateUISettings({
+    cevico_notes_dismissed: {
+      ...(uiSettings.value?.cevico_notes_dismissed || {}),
+      dopamine_colors_v1: true,
+    },
+  });
+};
+const pal = useCevicoPalette({
+  scope: selectedPanel,
+  // a variante por pessoa herda a paleta do painel-base
+  fallbackScope: computed(() =>
+    currentPanel.value.variant ? panelBase.value : null
+  ),
+  blocks: [...TOP_BLOCKS_DEFAULT, ...MAIN_BLOCKS_DEFAULT].map(id => ({
+    id,
+    label: BLOCK_LABELS[id],
+    icon: BLOCK_ICONS[id],
+  })),
+  themePalette,
+});
+const {
+  dayFlavor,
+  flavorPreview,
+  cycleFlavor,
+  pagePalette,
+  blockPalette,
+  blockVars,
+  blockFamily,
+  cvVars,
+  tileGradAt,
+  openPalettePicker,
+  paletteLabel,
+} = pal;
+// família dos CARDS da fileira (= bloco "indicadores"); a cor escolhida por
+// card (item 143) e o alerta de meta continuam por cima
+const panelFamily = computed(() => blockPalette('indicadores').family);
 
 // 🔍 POPUP do card de KPI (item 140): o card mostra só o macro; o detalhe
 // (linhas completas + "como é calculado") abre aqui
@@ -794,21 +2644,69 @@ const openKpi = tile => {
   kpiModalBag.value = null;
 };
 
+// ── UX do popup (item 152): Esc fecha, a rolagem fica presa no popup
+// (a página atrás não anda junto) e a transição respeita reduzir-movimento
+const closeKpiModal = () => {
+  kpiModal.value = null;
+};
+watch(kpiModal, open => {
+  document.body.style.overflow = open ? 'hidden' : '';
+});
+const onKpiModalKey = e => {
+  if (e.key === 'Escape' && kpiModal.value) closeKpiModal();
+};
+// gráfico sem nenhum movimento no recorte = mensagem gentil no lugar do vazio
+const modalChartIsEmpty = computed(() => {
+  const c = modalChart.value;
+  if (!c || isLoadingModalBag.value) return false;
+  return (c.values || []).every(v => !v) && !(c.prevValues || []).some(v => v);
+});
+// fórmula em PORTUGUÊS: troca as chaves técnicas pelos nomes do cesto
+// (appointments_booked / new_leads → Consultas agendadas ÷ Novos contatos)
+const prettyFormula = expr => {
+  let out = ` ${String(expr || '')} `;
+  // item 241: os SEUS indicadores aparecem pelo nome, entre « »
+  const mine = (crmSettings.value?.custom_kpis || []).map(d => [
+    customVarName(d),
+    { label: `«${d.label}»` },
+  ]);
+  [...Object.entries(bagMetrics.value), ...mine]
+    .sort((a, b) => b[0].length - a[0].length)
+    .forEach(([k, m]) => {
+      if (m?.label) out = out.split(k).join(m.label);
+    });
+  return out
+    .replaceAll('*', '×')
+    .replaceAll('/', '÷')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 // ids ESTÁVEIS por card (item 142): indicador de meta (gk) ou o nome em
 // slug; cards do "+" usam o id salvo — é por eles que ordem/ocultos valem
 const slugId = label =>
-  String(label || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').slice(0, 40);
+  String(label || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .slice(0, 40);
 const allPanelTiles = computed(() => {
-  const fam = panelFamily.value;
   const fixed = rawPanelTiles.value.map((t, i) => ({
     ...t,
+    // item 241: os cards fixos seguem a MESMA regra de ícone pelo nome
+    icon: iconByName(t.label) || t.icon,
     id: t.id || t.gk || slugId(t.label),
-    grad: t.judged ? t.grad : currentPanel.value?.custom ? t.grad : fam[i % fam.length],
+    grad: t.judged
+      ? t.grad
+      : currentPanel.value?.custom
+        ? t.grad
+        : tileGradAt(i),
   }));
   const custom = customTiles.value.map((t, i) => ({
     ...t,
     id: `kpi:${t.def.id}`,
-    grad: t.grad || fam[(fixed.length + i) % fam.length],
+    grad: t.grad || tileGradAt(fixed.length + i),
   }));
   return [...fixed, ...custom];
 });
@@ -822,16 +2720,38 @@ const toggleEditMode = () => {
   // saiu da edição: busca o que a pausa do auto-refresh segurou
   if (!organizeMode.value) refreshAll();
 };
+// 🔒 Rodada 4 (#351c): o layout que a tela JÁ MANDOU e o servidor ainda não
+// devolveu ({ [painel]: layout }). O próximo ajuste parte dele, não da foto
+// velha do store — senão clicar ✕ em dois cards seguidos fazia o 1º voltar.
+const kpiLayoutDraft = ref({});
+// variante por pessoa sem layout próprio ainda NASCE com o layout do base
 const kpiLayout = computed(
-  () => crmSettings.value?.kpi_layout?.[selectedPanel.value] || { order: [], hidden: [], colors: {} }
+  () =>
+    kpiLayoutDraft.value[selectedPanel.value] ||
+    crmSettings.value?.kpi_layout?.[selectedPanel.value] ||
+    (currentPanel.value.variant
+      ? crmSettings.value?.kpi_layout?.[panelBase.value]
+      : null) || { order: [], hidden: [], colors: {}, sizes: {}, spacers: [] }
 );
 // ordem padrão = a do sistema; a ordem salva reorganiza; card novo entra no
 // fim; a COR escolhida pelo admin (item 143) veste o card por cima da família
+// item 239: ESPAÇOS vazios ("gap:…") entram na ordem como um card qualquer
+// e o card GRANDE (2×2) vira um resumo do indicador — dashboard simétrico
 const panelTiles = computed(() => {
   const order = kpiLayout.value.order || [];
   const hidden = new Set(kpiLayout.value.hidden || []);
   const colors = kpiLayout.value.colors || {};
-  const all = allPanelTiles.value;
+  const sizes = kpiLayout.value.sizes || {};
+  const spacers = (kpiLayout.value.spacers || []).map(id => ({
+    id,
+    spacer: true,
+  }));
+  // item 275: DIVISÓRIAS com título ("Início da jornada"…) — faixa de
+  // largura inteira que separa seções do painel; arrasta como um card
+  const dividers = Object.entries(kpiLayout.value.dividers || {}).map(
+    ([id, label]) => ({ id, divider: true, label })
+  );
+  const all = [...allPanelTiles.value, ...spacers, ...dividers];
   const rank = t => {
     const i = order.indexOf(t.id);
     return i === -1 ? 1000 + all.indexOf(t) : i;
@@ -839,46 +2759,424 @@ const panelTiles = computed(() => {
   return all
     .filter(t => !hidden.has(t.id))
     .sort((a, b) => rank(a) - rank(b))
-    .map(t => (colors[t.id] ? { ...t, customGrad: colors[t.id] } : t));
+    .map(t => {
+      if (t.spacer || t.divider) return t;
+      const out = colors[t.id] ? { ...t, customGrad: colors[t.id] } : { ...t };
+      // item 266b: com a grade do ímã salva, "grande" = largura ≥ metade
+      // lê a grade SALVA (não a viva: a viva depende desta lista → laço)
+      const cell = (kpiLayout.value.grid || []).find(g => g && g.id === t.id);
+      const big = cell
+        ? kpiLayout.value.grid_units
+          ? cell.w >= 2 && cell.h >= TILE_BIG_H // fase "quadrados"
+          : isBigCell(cell)
+        : sizes[t.id] === 'lg';
+      if (big) out.big = true;
+      return out;
+    });
 });
 const hiddenTiles = computed(() => {
   const hidden = new Set(kpiLayout.value.hidden || []);
   return allPanelTiles.value.filter(t => hidden.has(t.id));
 });
-// lista viva do arrasto (vuedraggable precisa de v-model próprio)
-const dragTiles = ref([]);
-// o watcher nasce DENTRO do onMounted: registrar watch(panelTiles) no setup
-// avaliaria os tiles antes de várias consts lá de baixo existirem (TDZ) e
-// envenenaria os computeds com undefined
-onMounted(() => {
-  dragTiles.value = [...panelTiles.value];
-  watch(panelTiles, v => { dragTiles.value = [...v]; });
-});
 const isSavingLayout = ref(false);
+// 🔒 Rodada 4 (#351c): os saves de layout (cards e blocos) saem UM DE CADA VEZ,
+// na ordem dos cliques — cada um espera o anterior e o fetchSettings dele.
+let layoutQueue = Promise.resolve();
+let layoutSaves = 0;
+const queueLayoutSave = async job => {
+  layoutSaves += 1;
+  isSavingLayout.value = true;
+  const run = layoutQueue.then(job);
+  layoutQueue = run.catch(() => {}); // um save que falhou não trava a fila
+  try {
+    return await run;
+  } finally {
+    layoutSaves -= 1;
+    isSavingLayout.value = layoutSaves > 0;
+  }
+};
 const saveKpiLayout = async patch => {
-  const all = { ...(crmSettings.value?.kpi_layout || {}) };
-  const cur = all[selectedPanel.value] || { order: [], hidden: [], colors: {} };
-  all[selectedPanel.value] = {
+  // 🔒 Rodada 4 (#351): manda SÓ o painel editado — o servidor mescla painel a
+  // painel, então dois admins (ou duas abas) em painéis diferentes não se apagam
+  const panel = selectedPanel.value;
+  // variante sem layout próprio ainda: parte do que ela está MOSTRANDO (o do
+  // painel base), senão o 1º ajuste apagaria tamanhos/espaços herdados.
+  // Save ainda no ar: parte do que já foi mandado (rascunho), não do store.
+  const cur =
+    kpiLayoutDraft.value[panel] ||
+    crmSettings.value?.kpi_layout?.[panel] ||
+    kpiLayout.value;
+  const layout = {
     order: patch.order ?? cur.order ?? [],
     hidden: patch.hidden ?? cur.hidden ?? [],
     colors: patch.colors ?? cur.colors ?? {},
+    sizes: patch.sizes ?? cur.sizes ?? {},
+    spacers: patch.spacers ?? cur.spacers ?? [],
+    preset: patch.preset !== undefined ? patch.preset : cur.preset || null,
+    judge: patch.judge ?? cur.judge ?? false,
+    trend: patch.trend ?? cur.trend ?? false,
+    grid: patch.grid ?? cur.grid ?? [],
+    auto_palette: patch.auto_palette ?? cur.auto_palette ?? true,
+    dividers: patch.dividers ?? cur.dividers ?? {},
+    cols: patch.cols ?? cur.cols ?? 12,
+    grid_units: patch.grid_units ?? cur.grid_units ?? false,
+    grid_free: patch.grid_free ?? cur.grid_free ?? false,
   };
-  isSavingLayout.value = true;
+  // a tela já mostra o ajuste e o PRÓXIMO clique parte dele
+  kpiLayoutDraft.value = { ...kpiLayoutDraft.value, [panel]: layout };
+  const dropDraft = () => {
+    // só se ninguém mandou outro ajuste depois deste (aí o rascunho é o dele)
+    if (kpiLayoutDraft.value[panel] !== layout) return;
+    const rest = { ...kpiLayoutDraft.value };
+    delete rest[panel];
+    kpiLayoutDraft.value = rest;
+  };
   try {
-    await CrmAPI.updateKpiLayout(all);
-    await store.dispatch('crm/fetchSettings');
+    await queueLayoutSave(async () => {
+      await CrmAPI.updateKpiLayout({ [panel]: layout });
+      await store.dispatch('crm/fetchSettings');
+    });
   } finally {
-    isSavingLayout.value = false;
+    // deu certo: o store já tem este layout; deu erro: volta ao que está salvo
+    dropDraft();
   }
 };
-const onKpiReorder = () => saveKpiLayout({ order: dragTiles.value.map(t => t.id) });
+// ── 🧲 item 266b (28/09, pedido: "o recurso de mudar de tamanho e etc. deve ser
+// aplicável ao ambiente de indicadores"): os CARDS também vivem num MagnetBoard
+// (grade de 12 colunas, linha de 16 px): pega e arrasta, puxa a borda/canto
+// para esticar; card com metade da largura ou mais vira o "grande" (resumo com
+// gráfico). Salvo em kpi_layout.grid ({id,x,y,w,h}); `order`/`sizes` seguem
+// gravados (derivados) para quem lê o formato antigo. ──
+// 28/09 (item 277, depois de ver no ar: "o meu painel deve ter a mesma
+// tecnologia do Painel do empresário, em que eu posso mudar horizontal e
+// verticalmente os cards"): os cards vivem no MESMO quadro do empresário —
+// grade livre de 12 colunas, arrasta para qualquer lado, estica largura E
+// altura pela borda/canto (altura em linhas de 16 px, mínimo 4), sem
+// quadrados nem frações forçadas. Card normal nasce com 3 colunas × 6 linhas;
+// o grande (resumo) com 6 × 12.
+const TILE_W = 3;
+const TILE_H = 6;
+const TILE_BIG_W = 6;
+const TILE_BIG_H = 12;
+const tileCols = computed(() => 12);
+const tileSnap = computed(() => 1);
+const isBigCell = cell =>
+  !!cell && cell.w >= TILE_BIG_W && cell.h >= TILE_BIG_H;
+// posição de fábrica = a fileira de hoje: da esquerda para a direita em 4
+// colunas, card grande ocupando 2×2 (o ímã arruma o resto)
+const tileDefaults = computed(() => {
+  let x = 0;
+  let y = 0;
+  let rowH = TILE_H;
+  return panelTiles.value.map(t => {
+    const cols = tileCols.value;
+    const w = t.divider ? cols : t.big ? TILE_BIG_W : TILE_W;
+    const h = t.divider ? 2 : t.big ? TILE_BIG_H : TILE_H;
+    if (x + w > cols) {
+      x = 0;
+      y += rowH;
+      rowH = TILE_H;
+    }
+    const cell = { id: t.id, x, y, w, h, hidden: false, free: !!t.divider };
+    x += w;
+    rowH = Math.max(rowH, h);
+    if (x >= cols) {
+      x = 0;
+      y += rowH;
+      rowH = TILE_H;
+    }
+    return cell;
+  });
+});
+// 28/09: grade de 4 colunas (snap 3) — o card nunca fica "meia coluna" torto
+// item 276: ALTURA PADRÃO sempre — 1 altura; 2 alturas só no card grande
+// (metade da linha ou mais); divisória = 2 linhas. Também conserta grades
+// salvas na fase "altura pelo conteúdo" (270), que guardavam alturas em
+// linhas de 4 px
+// grades salvas em outras épocas → a grade livre de 12 colunas de hoje:
+//   grid_free  = já é a livre (x/w em 12 colunas, h livre em linhas)
+//   grid_units = fase "quadrados" (cols N): multiplica por 12/N
+//   nenhuma    = fase antiga (12 colunas; alturas podem estar em linhas de
+//                4 px da fase "pelo conteúdo") → 1 ou 2 alturas
+const toFreeGrid = (cell, layout) => {
+  const isDiv = String(cell.id).startsWith('div:');
+  if (layout.grid_free) return { ...cell, h: isDiv ? 2 : Math.max(4, cell.h) };
+  if (layout.grid_units) {
+    const cols = Number(layout.cols) || 4;
+    const f = 12 / cols;
+    const w = isDiv ? 12 : Math.max(2, Math.round(cell.w * f));
+    const x = Math.max(0, Math.min(12 - w, Math.round(cell.x * f)));
+    return { ...cell, x, w, h: isDiv ? 2 : Math.max(4, cell.h) };
+  }
+  const h = isDiv
+    ? 2
+    : cell.h >= TILE_BIG_H && cell.w >= 6
+      ? TILE_BIG_H
+      : TILE_H;
+  return { ...cell, h };
+};
+const tileGridComputed = computed(() => {
+  const layout = kpiLayout.value || {};
+  const saved = (layout.grid || [])
+    .filter(g => g && g.id)
+    .map(g => ({
+      ...toFreeGrid(g, layout),
+      hidden: false,
+      free: String(g.id).startsWith('div:'),
+    }));
+  return mergeLayout(saved, tileDefaults.value, tileSnap.value);
+});
+const tileGrid = ref([]);
+onMounted(() => {
+  tileGrid.value = [...tileGridComputed.value];
+  watch(tileGridComputed, v => {
+    tileGrid.value = [...v];
+  });
+});
+const tileById = computed(() =>
+  Object.fromEntries(panelTiles.value.map(t => [t.id, t]))
+);
+const tileCellsOrdered = () =>
+  [...tileGrid.value].sort((a, b) => a.y - b.y || a.x - b.x);
+const stripCells = list =>
+  list.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
+const saveTileGrid = () => {
+  const ordered = tileCellsOrdered();
+  const sizes = {};
+  ordered.forEach(c => {
+    if (isBigCell(c)) sizes[c.id] = 'lg';
+  });
+  return saveKpiLayout({
+    grid: stripCells(ordered),
+    grid_free: true,
+    grid_units: false,
+    cols: 12,
+    order: ordered.map(c => c.id),
+    sizes,
+  });
+};
+const onKpiReorder = saveTileGrid;
 const hideTile = tile =>
-  saveKpiLayout({ hidden: [...new Set([...(kpiLayout.value.hidden || []), tile.id])] });
+  saveKpiLayout({
+    hidden: [...new Set([...(kpiLayout.value.hidden || []), tile.id])],
+  });
 const restoreTile = tile =>
-  saveKpiLayout({ hidden: (kpiLayout.value.hidden || []).filter(id => id !== tile.id) });
+  saveKpiLayout({
+    hidden: (kpiLayout.value.hidden || []).filter(id => id !== tile.id),
+  });
 const resetKpiLayout = () => {
-  saveKpiLayout({ order: [], hidden: [], colors: {} });
+  saveKpiLayout({
+    order: [],
+    hidden: [],
+    colors: {},
+    sizes: {},
+    spacers: [],
+    grid: [],
+    dividers: {},
+    cols: 12,
+    grid_units: false,
+    grid_free: true,
+  });
   resetBlockLayout();
+};
+// ── item 239 → 266b: tamanho do card (pequeno ↔ grande 2×2) agora é a grade
+// do ímã; espaços vazios continuam existindo (um quadrado que você arrasta) ──
+const toggleTileSize = tile => {
+  const cell = tileGrid.value.find(c => c.id === tile.id);
+  if (!cell) return;
+  const big = isBigCell(cell);
+  tileGrid.value = placeBlock(
+    tileGrid.value,
+    tile.id,
+    big ? { w: TILE_W, h: TILE_H } : { w: TILE_BIG_W, h: TILE_BIG_H },
+    tileSnap.value
+  );
+  saveTileGrid();
+};
+const addSpacer = () => {
+  const id = `gap:${Date.now().toString(36)}`;
+  const ordered = tileCellsOrdered();
+  const bottom = ordered.reduce((m, c) => Math.max(m, c.y + c.h), 0);
+  saveKpiLayout({
+    spacers: [...(kpiLayout.value.spacers || []), id],
+    // entra no FIM da fileira (a ordem atual + ele)
+    order: [...ordered.map(c => c.id), id],
+    grid: [...stripCells(ordered), { id, x: 0, y: bottom, w: 1, h: TILE_H }],
+  });
+};
+// item 275: divisória com título — entra no fim, largura inteira
+const addDivider = () => {
+  const id = `div:${Date.now().toString(36)}`;
+  const ordered = tileCellsOrdered();
+  const bottom = ordered.reduce((m, c) => Math.max(m, c.y + c.h), 0);
+  saveKpiLayout({
+    dividers: { ...(kpiLayout.value.dividers || {}), [id]: 'Nova seção' },
+    order: [...ordered.map(c => c.id), id],
+    grid: [
+      ...stripCells(ordered),
+      { id, x: 0, y: bottom, w: 12, h: 2, free: true },
+    ],
+    grid_free: true,
+  });
+};
+const renameDivider = (tile, label) => {
+  const text = String(label || '')
+    .trim()
+    .slice(0, 60);
+  if (!text || text === tile.label) return;
+  saveKpiLayout({
+    dividers: { ...(kpiLayout.value.dividers || {}), [tile.id]: text },
+  });
+};
+const removeDivider = tile => {
+  const dividers = { ...(kpiLayout.value.dividers || {}) };
+  delete dividers[tile.id];
+  saveKpiLayout({
+    dividers,
+    order: (kpiLayout.value.order || []).filter(id => id !== tile.id),
+    grid: stripCells(tileGrid.value.filter(c => c.id !== tile.id)),
+  });
+};
+const removeSpacer = tile =>
+  saveKpiLayout({
+    spacers: (kpiLayout.value.spacers || []).filter(id => id !== tile.id),
+    order: (kpiLayout.value.order || []).filter(id => id !== tile.id),
+    grid: stripCells(tileGrid.value.filter(c => c.id !== tile.id)),
+  });
+// resumo do card GRANDE: a mesma série do popup + período anterior, pico,
+// média e as primeiras linhas de detalhe
+const tileBigSummary = tile => {
+  if (!tile?.big || panelBase.value === 'medico') return null;
+  // item 248: no mínimo 7 dias — em "hoje"/"ontem" usa o cesto dos últimos 7
+  const base = kpiBag.value;
+  const bag =
+    (base?.points || []).length >= 7 || !trendBag.value ? base : trendBag.value;
+  const points = bag?.points || [];
+  let values;
+  let prevValues = null;
+  if (tile.def) {
+    values = points.map(
+      (_, i) => evaluateFormula(tile.def.expr, bagAtOf(bag, i)) ?? 0
+    );
+    prevValues = points.map(
+      (_, i) => evaluateFormula(tile.def.expr, bagPrevAtOf(bag, i)) ?? 0
+    );
+  } else {
+    const key =
+      tile.chartKey === 'auto'
+        ? bagMetricByLabelOf(bag, tile.chartMatch)
+        : tile.chartKey;
+    const m = key ? bag?.metrics?.[key] : null;
+    values = m?.series || [];
+    prevValues = m?.prev_series || null;
+  }
+  const fmt = chartFormat(tile);
+  const nums = values.map(v => Number(v) || 0);
+  const hasData = nums.some(v => v > 0);
+  const peak = hasData ? Math.max(...nums) : 0;
+  const peakAt = nums.indexOf(peak);
+  const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+  const trendWords = trendOn.value
+    ? trendText(nums, bag?.granularity || 'day')
+    : null;
+  return {
+    values: nums,
+    labels: points.map(p => p.label),
+    prevValues: prevValues?.length === nums.length ? prevValues : null,
+    format: fmt,
+    hasData,
+    granularity: bag?.granularity || 'day',
+    trendWords,
+    widened: bag !== base,
+    peakText: hasData
+      ? `pico ${peakWhen(points[peakAt]?.label, bag?.granularity)}: ${fmt(peak)} · média ${fmt(avg)}${bag !== base ? ' · últimos 7 dias' : ''}`
+      : '',
+    details: (tile.details || []).slice(0, 3),
+  };
+};
+
+// ── item 248: JULGAMENTO PELA MÉDIA HISTÓRICA (90 dias) — liga no modo edição
+// ("média histórica") e nos modelos prontos. Contagem: compara o ritmo por
+// dia do período com a média por dia dos 90 dias; taxa (%): compara a taxa
+// do período com a taxa dos 90 dias. ±10% = acima/abaixo (cor + brilho). ──
+const periodDays = computed(() => {
+  const n = (kpiBag.value?.points || []).length || 1;
+  const per = { day: 1, week: 7, month: 30 }[kpiBag.value?.granularity] || 1;
+  return Math.max(1, n * per);
+});
+const histJudgeOn = computed(() => Boolean(kpiLayout.value?.judge));
+// ── item 266 (28/09): LINHA DE TENDÊNCIA nos indicadores — regressão sobre
+// os baldes com valor, no gráfico do popup, no card grande e na sparkline.
+// Fica salva por painel (kpi_layout.trend); enquanto não salva, vale o toque
+// local (quem não é admin também consegue ligar para olhar) ──
+const trendLocal = ref(null);
+const trendOn = computed(() =>
+  trendLocal.value === null ? Boolean(kpiLayout.value?.trend) : trendLocal.value
+);
+const toggleTrend = async () => {
+  const next = !trendOn.value;
+  trendLocal.value = next;
+  try {
+    await saveKpiLayout({ trend: next });
+    trendLocal.value = null;
+  } catch {
+    // sem permissão de salvar: fica ligado só nesta visita
+  }
+};
+const tileHist = tile => {
+  if (
+    !histJudgeOn.value ||
+    !histBag.value?.metrics ||
+    tile.spacer ||
+    tile.divider
+  )
+    return null;
+  const hb = histBag.value;
+  const HIST_DAYS = Math.max(1, (hb.points || []).length || 90);
+  let value = null;
+  let expected = null;
+  let fmt = 'number';
+  if (tile.def) {
+    value = tile.rawValue;
+    fmt = tile.def.format;
+    const histVal = evaluateFormula(tile.def.expr, bagTotalsOf(hb));
+    if (histVal === null || histVal === undefined) return null;
+    expected =
+      fmt === 'percent' ? histVal : (histVal / HIST_DAYS) * periodDays.value;
+  } else if (tile.chartKey && !tile.pct && !tile.compare) {
+    const key =
+      tile.chartKey === 'auto'
+        ? bagMetricByLabelOf(kpiBag.value, tile.chartMatch)
+        : tile.chartKey;
+    const m = key ? bagMetrics.value[key] : null;
+    const h = key ? hb.metrics[key] : null;
+    if (!m || !h) return null;
+    value = m.value;
+    expected = (h.value / HIST_DAYS) * periodDays.value;
+    fmt = m.unit === 'brl' ? 'currency' : 'number';
+  } else {
+    return null;
+  }
+  if (value === null || value === undefined || !expected) return null;
+  // hoje: compara com a média PROPORCIONAL às horas já passadas do expediente
+  // (07h–19h) — de manhã, "0 até agora" não é "100% abaixo"
+  if (fmt !== 'percent' && period.value?.preset === 'today') {
+    const h = new Date().getHours() + new Date().getMinutes() / 60;
+    expected *= Math.min(1, Math.max(0, (h - 7) / 12));
+  }
+  // pouco volume esperado = sem julgamento (evita ruído)
+  if (fmt !== 'percent' && expected < 3) return null;
+  const ratio = value / expected;
+  const pct = Math.round((ratio - 1) * 100);
+  const dir = ratio >= 1.1 ? 'up' : ratio <= 0.9 ? 'down' : 'flat';
+  return {
+    dir,
+    text:
+      dir === 'flat'
+        ? 'na média dos 90 dias'
+        : `${dir === 'up' ? '▲' : '▼'} ${Math.abs(pct)}% ${dir === 'up' ? 'acima' : 'abaixo'} da média`,
+    title: `média histórica (90 dias) para este período: ${formatKpi(expected, fmt)}`,
+  };
 };
 
 // ── 🎨 COR DE QUALQUER CARD (item 143): no modo organizar, o pincel do
@@ -899,72 +3197,290 @@ const setTileColor = grad => {
 };
 const applyTileHexColor = () => {
   const hex = (tileHexColor.value || '').trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(hex)) setTileColor(`linear-gradient(135deg, ${hex}, ${hex}CC)`);
+  if (/^#[0-9a-fA-F]{6}$/.test(hex))
+    setTileColor(`linear-gradient(135deg, ${hex}, ${hex}CC)`);
 };
 
 // ── ⠿ ORGANIZAR OS BLOCOS (item 143): TODOS os blocos do Meu Painel se
 // movem com o mesmo arrasto magnético dos cards — duas áreas (avisos em
 // cima do seletor de painel, conteúdo embaixo) e dá pra cruzar entre elas ──
-const BLOCK_LABELS = {
-  whatsapp: '💬 Status do WhatsApp',
-  briefing: '📊 Briefing do gestor',
-  radar: '💚 Radar de Oportunidades',
-  tarefas: '📋 Tarefas esperando você',
-  mentor: '🧭 Feedback da semana',
-  indicadores: '📌 Indicadores do período',
-  desempenho: '🎯 Meu desempenho',
-  agenda_dashboard: '📅 Dashboard da Agenda',
-  saude_agenda: '🩺 Saúde da Agenda',
-  metas_strip: '🎯 Metas · Rotinas · Ferramentas',
-  atalhos: '🚀 Acesso rápido',
-  termometro: '🌡️ Termômetro do momento',
-};
-const TOP_BLOCKS_DEFAULT = ['whatsapp', 'briefing', 'radar', 'tarefas', 'mentor'];
-const MAIN_BLOCKS_DEFAULT = ['indicadores', 'desempenho', 'agenda_dashboard', 'saude_agenda', 'metas_strip', 'atalhos', 'termometro'];
 const blockLayout = computed(
-  () => crmSettings.value?.block_layout?.[selectedPanel.value] || {}
+  () =>
+    crmSettings.value?.block_layout?.[selectedPanel.value] ||
+    (currentPanel.value.variant
+      ? crmSettings.value?.block_layout?.[panelBase.value]
+      : null) ||
+    {}
 );
 // ordem salva + blocos novos (que ainda não estavam salvos) no lugar padrão;
 // cada área só aceita os SEUS blocos (sem cruzar — o conteúdo de cada bloco
 // só existe na área dele, então cruzar deixaria a barrinha vazia)
 const orderedBlocks = computed(() => {
-  const savedTop = (blockLayout.value.top || []).filter(id => TOP_BLOCKS_DEFAULT.includes(id));
-  const savedMain = (blockLayout.value.main || []).filter(id => MAIN_BLOCKS_DEFAULT.includes(id));
+  const savedTop = (blockLayout.value.top || []).filter(id =>
+    TOP_BLOCKS_DEFAULT.includes(id)
+  );
+  const savedMain = (blockLayout.value.main || []).filter(id =>
+    MAIN_BLOCKS_DEFAULT.includes(id)
+  );
   const placed = new Set([...savedTop, ...savedMain]);
+  let top = [...savedTop, ...TOP_BLOCKS_DEFAULT.filter(id => !placed.has(id))];
+  // item 211 (pedido 23/09): nos painéis Agendamento, Condução e Cirurgias a
+  // caixa de tarefas e notas fica ACIMA DE TUDO, logo abaixo do banner
+  if (TASKS_FIRST_PANELS.includes(panelBase.value))
+    top = ['tarefas', ...top.filter(id => id !== 'tarefas')];
   return {
-    top: [...savedTop, ...TOP_BLOCKS_DEFAULT.filter(id => !placed.has(id))],
+    top,
     main: [...savedMain, ...MAIN_BLOCKS_DEFAULT.filter(id => !placed.has(id))],
   };
 });
-const dragTopBlocks = ref([]);
-const dragMainBlocks = ref([]);
-// mesmo cuidado do dragTiles: o watch nasce dentro do onMounted (TDZ)
-onMounted(() => {
-  dragTopBlocks.value = [...orderedBlocks.value.top];
-  dragMainBlocks.value = [...orderedBlocks.value.main];
-  watch(orderedBlocks, v => {
-    dragTopBlocks.value = [...v.top];
-    dragMainBlocks.value = [...v.main];
+// ── item 248: blocos em MEIA largura (lado a lado) + modo edição DESTRAVADO
+// (os blocos ficam abertos; "recolher" é opcional, só pra reordenar) ──
+const collapseBlocks = ref(false);
+const halfBlocks = computed(() => new Set(blockLayout.value?.half || []));
+
+// ── 🧲 item 266 (28/09): o ÍMÃ do Painel do empresário chega ao Meu Painel.
+// Cada área (avisos em cima, conteúdo embaixo) é um MagnetBoard em modo
+// "altura pelo conteúdo": pega pela alça ⠿ (ou pela barrinha do modo edição)
+// e arrasta a qualquer hora; puxa a borda direita para esticar; larguras
+// rápidas ⅓ ½ ⅔ inteira na barrinha. Salvo por painel em
+// block_layout[painel].grid_top / grid_main ({id,x,y,w}); quem ainda só tinha
+// a ordem antiga + "metade" ganha a grade a partir dela. ──
+const BLOCK_ROWS = 8; // altura provisória até o quadro ser medido
+const gridFromLegacy = (ids, half) => {
+  let x = 0;
+  let y = 0;
+  return ids.map(id => {
+    const w = half.has(id) ? 6 : 12;
+    if (x + w > 12) {
+      x = 0;
+      y += BLOCK_ROWS;
+    }
+    const cell = { id, x, y, w, h: BLOCK_ROWS, hidden: false };
+    x += w;
+    if (x >= 12) {
+      x = 0;
+      y += BLOCK_ROWS;
+    }
+    return cell;
   });
+};
+const blockGrids = computed(() => {
+  const bl = blockLayout.value || {};
+  const make = (key, ids) => {
+    const saved = Array.isArray(bl[key]) ? bl[key] : null;
+    const base = saved
+      ? saved
+          .filter(g => g && ids.includes(g.id))
+          .map(g => ({ ...g, h: g.h || BLOCK_ROWS, hidden: false }))
+      : gridFromLegacy(ids, halfBlocks.value);
+    return mergeLayout(
+      base,
+      ids.map((id, i) => ({
+        id,
+        x: 0,
+        y: i * BLOCK_ROWS,
+        w: 12,
+        h: BLOCK_ROWS,
+        hidden: false,
+      }))
+    );
+  };
+  return {
+    top: make('grid_top', orderedBlocks.value.top),
+    main: make('grid_main', orderedBlocks.value.main),
+  };
 });
-const saveBlockLayout = async () => {
-  const all = { ...(crmSettings.value?.block_layout || {}) };
-  all[selectedPanel.value] = { top: [...dragTopBlocks.value], main: [...dragMainBlocks.value] };
-  isSavingLayout.value = true;
+const topGrid = ref([]);
+const mainGrid = ref([]);
+const blocksLocked = ref(false);
+onMounted(() => {
+  topGrid.value = [...blockGrids.value.top];
+  mainGrid.value = [...blockGrids.value.main];
+  blocksLocked.value = Boolean(blockLayout.value?.locked);
+  watch(blockGrids, v => {
+    topGrid.value = [...v.top];
+    mainGrid.value = [...v.main];
+  });
+  watch(
+    () => blockLayout.value?.locked,
+    v => {
+      blocksLocked.value = Boolean(v);
+    }
+  );
+});
+const gridOf = area => (area === 'top' ? topGrid : mainGrid);
+const blockAreaOf = id =>
+  topGrid.value.some(i => i.id === id) ? 'top' : 'main';
+const blockWidth = id => {
+  const g = [...topGrid.value, ...mainGrid.value].find(i => i.id === id);
+  return g ? g.w : 12;
+};
+const BLOCK_WIDTHS = [
+  { w: 4, label: '⅓' },
+  { w: 6, label: '½' },
+  { w: 8, label: '⅔' },
+  { w: 12, label: 'inteira' },
+];
+const setBlockWidth = (id, w) => {
+  const grid = gridOf(blockAreaOf(id));
+  grid.value = placeBlock(grid.value, id, { w });
+  saveBlockLayout();
+};
+const toggleBlocksLock = () => {
+  blocksLocked.value = !blocksLocked.value;
+  saveBlockLayout();
+};
+const toggleHistJudge = () => saveKpiLayout({ judge: !histJudgeOn.value });
+
+// ── item 248: MODELOS PRONTOS (cevicoPanelPresets.js) — aplicar monta os cards
+// do "+" do modelo (ids <painel>_p_…), oculta o resto e grava ordem, tamanhos,
+// cores e a média histórica ligada; "restaurar modelo" reaplica o último ──
+const showPresets = ref(false);
+const isApplyingPreset = ref(false);
+const panelPresets = computed(() => {
+  const mine = PANEL_PRESETS.filter(p => p.panels.includes(panelBase.value));
+  const others = PANEL_PRESETS.filter(p => !p.panels.includes(panelBase.value));
+  return [...mine, ...others];
+});
+const currentPreset = computed(
+  () => PRESET_BY_KEY[kpiLayout.value?.preset] || null
+);
+const applyPreset = async preset => {
+  if (!preset || isApplyingPreset.value) return;
+  isApplyingPreset.value = true;
   try {
-    await CrmAPI.updateBlockLayout(all);
+    const base = panelBase.value;
+    const fixedIds = rawPanelTiles.value.map(
+      t => t.id || t.gk || slugId(t.label)
+    );
+    const { defs, layout } = buildPreset(preset, {
+      panel: base,
+      metrics: bagMetrics.value,
+      fixedIds,
+    });
+    // Rodada 4 (#351): troca só os cards do modelo pronto deste painel
+    // (prefixo) — os cards criados à mão por outro admin ficam
+    await CrmAPI.patchCustomKpis({
+      remove_prefix: `${base}_p_`,
+      upsert: defs,
+    });
     await store.dispatch('crm/fetchSettings');
+    const keep = new Set(layout.order);
+    const hidden = allPanelTiles.value
+      .map(t => t.id)
+      .filter(id => !keep.has(id));
+    await saveKpiLayout({ ...layout, hidden });
+    showPresets.value = false;
   } finally {
-    isSavingLayout.value = false;
+    isApplyingPreset.value = false;
   }
 };
-const resetBlockLayout = async () => {
-  const all = { ...(crmSettings.value?.block_layout || {}) };
-  if (!all[selectedPanel.value]) return;
-  delete all[selectedPanel.value];
+const restorePreset = () => applyPreset(currentPreset.value);
+const presetSwatch = t => {
+  const [key, step] = t.color || ['bondi', 1];
+  const pal = [...IMAC_PALETTES, ...FRUIT_PALETTES].find(p => p.key === key);
+  return pal?.family?.[step] || '#94a3b8';
+};
+// excluir de vez um card do "+" (os fixos só ocultam — voltam pelos chips)
+const deleteTileKpi = tile => {
+  if (!tile?.def) return;
+  // eslint-disable-next-line no-alert
+  if (
+    !window.confirm(
+      `Excluir o indicador "${tile.label}"? (dá pra recriar no "+" ou restaurando o modelo)`
+    )
+  )
+    return;
+  deleteKpi(tile.def);
+};
+// ── 🖱️ item 283 (29/09): MENU DO BOTÃO DIREITO do card de indicador ──
+// Os mesmos botões do card: fora da edição, ver detalhes e copiar; no modo
+// edição, tamanho, cor, ocultar e excluir (com a confirmação que já existe).
+const copyTile = async tile => {
   try {
+    await copyTextToClipboard(`${tile.label}: ${tile.value}`);
+    useAlert('Indicador copiado ✓');
+  } catch {
+    useAlert('Não foi possível copiar.');
+  }
+};
+const tileMenu = tile => {
+  if (!tile) return null;
+  const editing = organizeMode.value;
+  return {
+    title: tile.label,
+    subtitle: editing ? 'modo edição' : String(tile.value ?? ''),
+    items: [
+      !editing &&
+        (tile.details?.length || tile.about) && {
+          label: 'Ver detalhes',
+          icon: 'i-lucide-maximize-2',
+          action: () => openKpi(tile),
+        },
+      {
+        label: 'Copiar o número',
+        icon: 'i-lucide-copy',
+        action: () => copyTile(tile),
+      },
+      { separator: true },
+      editing && {
+        label: tile.big ? 'Voltar ao tamanho normal' : 'Deixar o card grande',
+        icon: tile.big ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2',
+        action: () => toggleTileSize(tile),
+      },
+      editing && {
+        label: 'Trocar a cor',
+        icon: 'i-lucide-paintbrush',
+        action: () => openColorPicker(tile),
+      },
+      editing && {
+        label: 'Ocultar este card',
+        icon: 'i-lucide-eye-off',
+        hint: 'dá pra restaurar',
+        action: () => hideTile(tile),
+      },
+      editing &&
+        tile.def && {
+          label: 'Excluir o indicador…',
+          icon: 'i-lucide-trash-2',
+          danger: true,
+          action: () => deleteTileKpi(tile),
+        },
+    ],
+  };
+};
+const saveBlockLayout = async () => {
+  const all = {}; // Rodada 4 (#351): só o painel editado; o servidor mescla por painel
+  const orderOf = list =>
+    [...list].sort((a, b) => a.y - b.y || a.x - b.x).map(i => i.id);
+  const strip = list => list.map(({ id, x, y, w }) => ({ id, x, y, w }));
+  all[selectedPanel.value] = {
+    top: orderOf(topGrid.value),
+    main: orderOf(mainGrid.value),
+    // compatibilidade com quem lê "metade": largura até meia página
+    half: [...topGrid.value, ...mainGrid.value]
+      .filter(i => i.w <= 6)
+      .map(i => i.id),
+    grid_top: strip(topGrid.value),
+    grid_main: strip(mainGrid.value),
+    locked: blocksLocked.value,
+  };
+  // na fila dos saves de layout (#351c): dois arrastos seguidos chegam ao
+  // servidor na ordem certa
+  await queueLayoutSave(async () => {
     await CrmAPI.updateBlockLayout(all);
     await store.dispatch('crm/fetchSettings');
+  });
+};
+const resetBlockLayout = async () => {
+  if (!crmSettings.value?.block_layout?.[selectedPanel.value]) return;
+  try {
+    // Rodada 4 (#351): null = apaga só o layout deste painel (os outros ficam)
+    const panel = selectedPanel.value;
+    await queueLayoutSave(async () => {
+      await CrmAPI.updateBlockLayout({ [panel]: null });
+      await store.dispatch('crm/fetchSettings');
+    });
   } catch {
     // sem drama: o padrão volta no próximo carregamento
   }
@@ -972,10 +3488,10 @@ const resetBlockLayout = async () => {
 const layoutTouched = computed(() =>
   Boolean(
     (kpiLayout.value.order || []).length ||
-    (kpiLayout.value.hidden || []).length ||
-    Object.keys(kpiLayout.value.colors || {}).length ||
-    (blockLayout.value.top || []).length ||
-    (blockLayout.value.main || []).length
+      (kpiLayout.value.hidden || []).length ||
+      Object.keys(kpiLayout.value.colors || {}).length ||
+      (blockLayout.value.top || []).length ||
+      (blockLayout.value.main || []).length
   )
 );
 
@@ -983,7 +3499,9 @@ const layoutTouched = computed(() =>
 // Meta é MENSAL (config do admin na mira 🎯); o backend manda o fator do
 // período. Status: 🔴 <40% do esperado · 🟠 40-70% · cores do painel
 // 70-100% · 🟢 meta batida · 🏆 recorde = aura de átomos orbitando.
-const goalsInfo = computed(() => data.value?.goals || { targets: {}, factor: 1, records: {} });
+const goalsInfo = computed(
+  () => data.value?.goals || { targets: {}, factor: 1, records: {} }
+);
 
 // 🎯 METAS OFICIAIS (Painel de Metas) como FALLBACK dos alvos da mira —
 // a régua de cores (abaixo/dentro/acima da meta) vale em TODOS os painéis
@@ -1008,11 +3526,31 @@ const officialTargetFor = gk => {
 
 // paleta de "bom e mau resultado" POR PAINEL (o mau alerta, o meta celebra)
 const STATUS_GRADS = {
-  agendamento: { bad: 'linear-gradient(135deg, #7F1D1D, #B91C1C)', warn: 'linear-gradient(135deg, #92400E, #D97706)', meta: 'linear-gradient(135deg, #065F46, #10B981)' },
-  conducao: { bad: 'linear-gradient(135deg, #7F1D1D, #B91C1C)', warn: 'linear-gradient(135deg, #92400E, #D97706)', meta: 'linear-gradient(135deg, #0F766E, #2DD4BF)' },
-  cirurgia: { bad: 'linear-gradient(135deg, #831843, #4C0519)', warn: 'linear-gradient(135deg, #9A3412, #EA580C)', meta: 'linear-gradient(135deg, #047857, #34D399)' },
-  medico: { bad: 'linear-gradient(135deg, #7F1D1D, #991B1B)', warn: 'linear-gradient(135deg, #A16207, #EAB308)', meta: 'linear-gradient(135deg, #065F46, #14B8A6)' },
-  gestor: { bad: 'linear-gradient(135deg, #450A0A, #991B1B)', warn: 'linear-gradient(135deg, #78350F, #F59E0B)', meta: 'linear-gradient(135deg, #064E3B, #10B981)' },
+  agendamento: {
+    bad: 'linear-gradient(135deg, #7F1D1D, #B91C1C)',
+    warn: 'linear-gradient(135deg, #92400E, #D97706)',
+    meta: 'linear-gradient(135deg, #065F46, #10B981)',
+  },
+  conducao: {
+    bad: 'linear-gradient(135deg, #7F1D1D, #B91C1C)',
+    warn: 'linear-gradient(135deg, #92400E, #D97706)',
+    meta: 'linear-gradient(135deg, #0F766E, #2DD4BF)',
+  },
+  cirurgia: {
+    bad: 'linear-gradient(135deg, #831843, #4C0519)',
+    warn: 'linear-gradient(135deg, #9A3412, #EA580C)',
+    meta: 'linear-gradient(135deg, #047857, #34D399)',
+  },
+  medico: {
+    bad: 'linear-gradient(135deg, #7F1D1D, #991B1B)',
+    warn: 'linear-gradient(135deg, #A16207, #EAB308)',
+    meta: 'linear-gradient(135deg, #065F46, #14B8A6)',
+  },
+  gestor: {
+    bad: 'linear-gradient(135deg, #450A0A, #991B1B)',
+    warn: 'linear-gradient(135deg, #78350F, #F59E0B)',
+    meta: 'linear-gradient(135deg, #064E3B, #10B981)',
+  },
 };
 
 const tileState = tile => {
@@ -1037,21 +3575,65 @@ const tileState = tile => {
   // fatos (não julgamento de ritmo) e continuam aparecendo.
   if (['bad', 'warn'].includes(status) && new Date().getHours() < 12)
     status = 'neutral';
-  return { status, ratio, expected, isRecord: !!rec?.is_record, best: rec?.best || 0 };
+  return {
+    status,
+    ratio,
+    expected,
+    isRecord: !!rec?.is_record,
+    best: rec?.best || 0,
+  };
+};
+
+// ── 🎨 item 269: PALETA DOS INDICADORES — cor por família (o que mede) e por
+// nível (primário / secundário / terciário), sem escolher cor a cor; o card
+// ENCHE do fundo para cima ao longo do dia (07h → 19h). Ligada por padrão;
+// a chavinha do modo edição desliga (voltam as cores do dia / escolhidas). ──
+const autoPalette = computed(() => kpiLayout.value?.auto_palette !== false);
+const toggleAutoPalette = () =>
+  saveKpiLayout({ auto_palette: !autoPalette.value });
+const isDarkUi = computed(() =>
+  typeof document !== 'undefined'
+    ? document.documentElement.classList.contains('dark')
+    : false
+);
+const tierWord = tier => {
+  if (tier === 'primary') return 'resultado principal';
+  if (tier === 'secondary') return 'volume';
+  return 'apoio';
+};
+const tilePalette = tile => {
+  if (!autoPalette.value || tile?.spacer || tile?.divider) return null;
+  const { family, tier } = classifyKpi(tile);
+  // item 326: cor CHEIA o dia inteiro (sem vidro/transparência)
+  return {
+    family,
+    tier,
+    label: `${KPI_FAMILIES[family]?.label || 'Outros'} · ${tierWord(tier)}`,
+    grad: kpiGrad(family, tier, isDarkUi.value),
+    darkText: kpiInkDark(tier, isDarkUi.value),
+    ink: kpiInk(family),
+  };
 };
 
 const tileVisual = tile => {
   const st = tileState(tile);
-  const grads = STATUS_GRADS[selectedPanel.value] || STATUS_GRADS.agendamento;
+  const grads = STATUS_GRADS[panelBase.value] || STATUS_GRADS.agendamento;
+  const pal = tilePalette(tile);
+  const alert = ['bad', 'warn', 'meta'].includes(st.status);
+  let grad = tile.customGrad || tile.chip?.grad || tile.grad;
+  if (alert) grad = grads[st.status];
+  else if (pal) grad = pal.grad;
   return {
     ...st,
-    // sem status de meta mandando, um chip "Muito bom" pinta o card de
-    // verde (pedido 22/07 — o dourado confundia com "neutro"); a cor
-    // ESCOLHIDA pelo admin (item 143) vence o chip e a família, mas o
-    // alerta de meta (vermelho/âmbar/verde-meta) continua por cima
-    grad: ['bad', 'warn', 'meta'].includes(st.status)
-      ? grads[st.status]
-      : tile.customGrad || tile.chip?.grad || tile.grad,
+    // alerta de meta (vermelho/âmbar/verde-meta) por cima de tudo; depois a
+    // paleta automática (item 269); desligada, a cor escolhida (item 143),
+    // o chip "Muito bom" e a família do dia
+    grad,
+    // item 326: sem vidro — o card é sempre cor cheia; no card claro (apoio)
+    // o número usa o tom mais intenso da família
+    darkText: !alert && !!pal?.darkText,
+    ink: pal?.ink || '#0f172a',
+    palette: pal,
     aura: st.isRecord,
     auraIntensity: Math.max(0.5, Math.min(1.2, st.ratio ?? 0.7)),
     pulse: st.status === 'meta' || st.isRecord,
@@ -1065,9 +3647,9 @@ const isSavingGoals = ref(false);
 const GOAL_FIELDS = {
   agendamento: [
     { gk: 'new_leads', label: 'Novos contatos no mês' },
-    { gk: 'appointments_booked', label: isClinica ? 'Consultas agendadas no mês' : 'Clientes marcados no mês' },
+    { gk: 'appointments_booked', label: 'Marcadas na Agenda no mês' },
     { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
-    { gk: 'surgeries_closed', label: isClinica ? 'Cirurgias fechadas no mês' : 'Vendas fechadas no mês' },
+    { gk: 'surgeries_closed', label: 'Cirurgias fechadas no mês' },
   ],
   conducao: [
     { gk: 'consultations', label: 'Consultas no mês' },
@@ -1077,26 +3659,27 @@ const GOAL_FIELDS = {
   ],
   cirurgia: [
     { gk: 'indications', label: 'Indicações no mês' },
-    { gk: 'surgeries_booked', label: isClinica ? 'Cirurgias agendadas no mês' : 'Vendas fechadas no mês' },
+    { gk: 'surgeries_booked', label: 'Cirurgias agendadas no mês' },
     { gk: 'closing_rate', label: 'Taxa de fechamento (%)', pct: true },
-    { gk: 'surgeries_done', label: isClinica ? 'Cirurgias realizadas no mês' : 'Vendas realizadas no mês' },
+    { gk: 'surgeries_done', label: 'Cirurgias realizadas no mês' },
   ],
   medico: [
     { gk: 'consultations', label: 'Consultas no mês' },
     { gk: 'indications', label: 'Indicações no mês' },
-    { gk: 'conversion_rate', label: isClinica ? 'Conversão em cirurgia (%)' : 'Conversão em venda (%)', pct: true },
+    { gk: 'conversion_rate', label: 'Conversão em cirurgia (%)', pct: true },
   ],
   gestor: [
     { gk: 'new_leads', label: 'Novos contatos no mês' },
     { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
     { gk: 'show_rate', label: 'Comparecimento (%)', pct: true },
-    { gk: 'closing_rate', label: isClinica ? 'Fechamento de cirurgias (%)' : 'Fechamento de vendas (%)', pct: true },
+    { gk: 'closing_rate', label: 'Fechamento de cirurgias (%)', pct: true },
   ],
 };
 const openGoalsModal = () => {
   const all = crmSettings.value?.panel_goals || {};
   goalsDraft.value = JSON.parse(JSON.stringify(all));
-  if (!goalsDraft.value[selectedPanel.value]) goalsDraft.value[selectedPanel.value] = {};
+  if (!goalsDraft.value[panelBase.value])
+    goalsDraft.value[panelBase.value] = {};
   showGoalsModal.value = true;
 };
 const saveGoals = async () => {
@@ -1105,7 +3688,9 @@ const saveGoals = async () => {
   try {
     const clean = {};
     Object.entries(goalsDraft.value).forEach(([panel, goals]) => {
-      const g = Object.fromEntries(Object.entries(goals || {}).filter(([, v]) => Number(v) > 0));
+      const g = Object.fromEntries(
+        Object.entries(goals || {}).filter(([, v]) => Number(v) > 0)
+      );
       if (Object.keys(g).length) clean[panel] = g;
     });
     await CrmAPI.updatePanelGoals(clean);
@@ -1121,63 +3706,160 @@ const saveGoals = async () => {
 // agrega metas em vermelho, radar, sem resposta e pendências num
 // semáforo único com os motivos prontos para agir
 const gestorSignals = computed(() => {
-  if (selectedPanel.value !== 'gestor' || !data.value) return [];
+  if (panelBase.value !== 'gestor' || !data.value) return [];
   const sigs = [];
-  (panelTiles.value || []).forEach(tile => {
-    const st = tileState(tile);
-    if (st.status === 'bad') sigs.push({ level: 'red', icon: 'i-lucide-trending-down', text: `${tile.label}: muito abaixo da meta (${tile.value})` });
-    else if (st.status === 'warn') sigs.push({ level: 'amber', icon: 'i-lucide-alert-triangle', text: `${tile.label}: abaixo do ritmo da meta (${tile.value})` });
-  });
+  (panelTiles.value || [])
+    .filter(t => !t.spacer && !t.divider)
+    .forEach(tile => {
+      const st = tileState(tile);
+      if (st.status === 'bad')
+        sigs.push({
+          level: 'red',
+          icon: 'i-lucide-trending-down',
+          text: `${tile.label}: muito abaixo da meta (${tile.value})`,
+        });
+      else if (st.status === 'warn')
+        sigs.push({
+          level: 'amber',
+          icon: 'i-lucide-alert-triangle',
+          text: `${tile.label}: abaixo do ritmo da meta (${tile.value})`,
+        });
+    });
   const alerts = radarAlerts.value.length;
-  if (alerts) sigs.push({ level: 'red', icon: 'i-lucide-radar', text: `${alerts} ${termo('cliente')}(s) quente(s) sem atendimento (Radar)` });
+  if (alerts)
+    sigs.push({
+      level: 'red',
+      icon: 'i-lucide-radar',
+      text: `${alerts} paciente(s) quente(s) sem atendimento (Radar)`,
+    });
   const waiting = data.value.unanswered ?? 0;
-  if (waiting > 8) sigs.push({ level: 'amber', icon: 'i-lucide-message-circle', text: `${waiting} conversas abertas aguardando resposta` });
+  if (waiting > 8)
+    sigs.push({
+      level: 'amber',
+      icon: 'i-lucide-message-circle',
+      text: `${waiting} conversas abertas aguardando resposta`,
+    });
   const unconfirmed = data.value.panel_data?.unconfirmed ?? 0;
-  if (unconfirmed > 0) sigs.push({ level: 'amber', icon: 'i-lucide-clipboard-alert', text: `${unconfirmed} ${termo('atendimento')}(s) sem conferência na Agenda` });
+  if (unconfirmed > 0)
+    sigs.push({
+      level: 'amber',
+      icon: 'i-lucide-clipboard-alert',
+      text: `${unconfirmed} consulta(s) sem conferência na Agenda`,
+    });
   const bugs = data.value.my_tasks?.count ?? 0;
-  if (bugs > 0) sigs.push({ level: 'info', icon: 'i-lucide-list-todo', text: `${bugs} tarefa(s) esperando você no board` });
+  if (bugs > 0)
+    sigs.push({
+      level: 'info',
+      icon: 'i-lucide-list-todo',
+      text: `${bugs} tarefa(s) esperando você no board`,
+    });
   return sigs;
 });
 const gestorVerdict = computed(() => {
   const sigs = gestorSignals.value;
   if (sigs.some(x => x.level === 'red')) {
-    return { key: 'red', title: 'Ação imediata ⚠️', sub: 'Tem coisa precisando de você agora — os motivos estão aqui embaixo.', grad: 'linear-gradient(135deg, #7F1D1D, #DC2626)' };
+    return {
+      key: 'red',
+      title: 'Ação imediata ⚠️',
+      sub: 'Tem coisa precisando de você agora — os motivos estão aqui embaixo.',
+      grad: 'linear-gradient(135deg, #7F1D1D, #DC2626)',
+    };
   }
   if (sigs.some(x => x.level === 'amber')) {
-    return { key: 'amber', title: 'Atenção hoje 🟠', sub: 'Nada crítico, mas vale um olho antes de desligar.', grad: 'linear-gradient(135deg, #92400E, #F59E0B)' };
+    return {
+      key: 'amber',
+      title: 'Atenção hoje 🟠',
+      sub: 'Nada crítico, mas vale um olho antes de desligar.',
+      grad: 'linear-gradient(135deg, #92400E, #F59E0B)',
+    };
   }
-  return { key: 'green', title: 'Tudo bem — pode viajar ✈️', sub: 'Metas no ritmo, ninguém esperando, nada travado. A operação está rodando.', grad: 'linear-gradient(135deg, #065F46, #10B981)' };
+  return {
+    key: 'green',
+    title: 'Tudo bem — pode viajar ✈️',
+    sub: 'Metas no ritmo, ninguém esperando, nada travado. A operação está rodando.',
+    grad: 'linear-gradient(135deg, #065F46, #10B981)',
+  };
 });
+
+// ── item 240: o quadro de avisos do Gestor MINIMIZA numa barrinha (clique
+// abre de novo) e REAPARECE aberto sozinho quando surge um tipo de aviso novo,
+// o semáforo muda de cor ou vira o dia. Guardado no navegador de cada pessoa.
+const VERDICT_KEY = 'cevico_gestor_verdict_min';
+const todayKey = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-DD no fuso local
+// "impressão digital" dos avisos: a COR + os TIPOS (não os números — 62 → 63
+// conversas não é novidade; aparecer "sem conferência" é)
+const verdictPrint = computed(() =>
+  [
+    gestorVerdict.value.key,
+    ...[...new Set(gestorSignals.value.map(x => x.icon))].sort(),
+  ].join('|')
+);
+const verdictMinSaved = ref(null);
+try {
+  verdictMinSaved.value = JSON.parse(
+    localStorage.getItem(VERDICT_KEY) || 'null'
+  );
+} catch {
+  verdictMinSaved.value = null;
+}
+const verdictMinimized = computed(() => {
+  const m = verdictMinSaved.value;
+  return !!m && m.day === todayKey() && m.print === verdictPrint.value;
+});
+const setVerdictMinimized = on => {
+  verdictMinSaved.value = on
+    ? { day: todayKey(), print: verdictPrint.value }
+    : null;
+  try {
+    if (on)
+      localStorage.setItem(VERDICT_KEY, JSON.stringify(verdictMinSaved.value));
+    else localStorage.removeItem(VERDICT_KEY);
+  } catch {
+    // navegador sem armazenamento: minimiza só nesta visita
+  }
+};
 
 // linha de destaque abaixo dos tiles — muda com o painel
 const panelHighlight = computed(() => {
   const d = pd.value;
-  if (selectedPanel.value === 'conducao') {
+  if (panelBase.value === 'conducao') {
     return {
-      icon: 'i-lucide-clipboard-alert', color: '#D97706', value: d.unconfirmed ?? 0,
+      icon: 'i-lucide-clipboard-alert',
+      color: '#D97706',
+      value: d.unconfirmed ?? 0,
       label: 'Consultas sem conferência',
       sub: 'já passaram e ninguém marcou Compareceu/Faltou — confira na Agenda',
     };
   }
-  if (selectedPanel.value === 'cirurgia') {
+  if (panelBase.value === 'cirurgia') {
     return {
-      icon: 'i-lucide-hourglass', color: '#BE185D', value: d.awaiting_closing ?? 0,
+      icon: 'i-lucide-hourglass',
+      color: '#BE185D',
+      value: d.awaiting_closing ?? 0,
       label: 'Indicados aguardando fechamento',
-      sub: isClinica ? `indicações do período ainda sem cirurgia marcada · ${d.upcoming_surgeries ?? 0} cirurgia(s) futura(s) na agenda` : 'propostas do período ainda sem fechamento',
+      sub: `indicações do período ainda sem cirurgia marcada · ${d.upcoming_surgeries ?? 0} cirurgia(s) futura(s) na agenda`,
     };
   }
-  if (selectedPanel.value === 'medico') {
+  if (panelBase.value === 'medico') {
     return {
-      icon: 'i-lucide-slice', color: '#0369A1', value: d.surgeries ?? 0,
-      label: isClinica ? 'Cirurgias no período' : 'Vendas no período',
-      sub: d.doctor ? (isClinica ? `realizadas/agendadas por ${d.doctor}` : `realizadas/fechadas por ${d.doctor}`) : (isClinica ? 'todos os médicos' : `todos os ${termo('profissionais')}`),
+      icon: 'i-lucide-slice',
+      color: '#0369A1',
+      value: d.surgeries ?? 0,
+      label: 'Cirurgias no período',
+      sub: d.doctor
+        ? `realizadas/agendadas por ${d.doctor}`
+        : 'todos os médicos',
     };
   }
-  if (selectedPanel.value === 'gestor') {
+  if (panelBase.value === 'gestor') {
     const nps = d.nps || {};
     return {
-      icon: 'i-lucide-smile', color: '#0D9488',
-      value: nps.satisfaction === null || nps.satisfaction === undefined ? '—' : `${nps.satisfaction}%`,
+      icon: 'i-lucide-smile',
+      color: '#0D9488',
+      value:
+        nps.satisfaction === null || nps.satisfaction === undefined
+          ? '—'
+          : `${nps.satisfaction}%`,
       label: 'Satisfação (NPS)',
       sub: nps.total
         ? `${nps.promoters} promotores (9-10) · ${nps.passives} notas 7-8 · ${nps.detractors} detratores (1-4)`
@@ -1185,16 +3867,26 @@ const panelHighlight = computed(() => {
     };
   }
   return {
-    icon: 'i-lucide-stethoscope', color: '#EA580C', value: d.surgery_indications ?? 0,
-    label: frase('indicacoes_venda', 'Indicações de cirurgia'),
-    sub: isClinica ? 'leads do período que chegaram à coluna "Indicação de Cirurgia"' : 'leads do período que chegaram à coluna de proposta',
+    icon: 'i-lucide-stethoscope',
+    color: '#EA580C',
+    value: d.surgery_indications ?? 0,
+    label: 'Indicações de cirurgia',
+    sub: 'leads do período que chegaram à coluna "Indicação de Cirurgia"',
   };
 });
 
 // ── Saudação ────────────────────────────────────────────────
 const firstName = computed(() => {
-  const name = currentUser.value?.available_name || currentUser.value?.name || '';
-  return name.split(' ')[0];
+  const name =
+    currentUser.value?.available_name || currentUser.value?.name || '';
+  // só letras: vírgula, emoji ou símbolo no cadastro viravam "Guilherme,!"
+  // no cabeçalho (bug real de produção, 12/09)
+  const first =
+    name
+      .replace(/[^\p{L}\p{M}\s'-]/gu, ' ')
+      .trim()
+      .split(/\s+/)[0] || '';
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : '';
 });
 const greeting = computed(() => {
   const h = new Date().getHours();
@@ -1203,21 +3895,104 @@ const greeting = computed(() => {
   return 'Boa noite';
 });
 const todayLabel = computed(() => {
-  const label = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+  const label = new Date().toLocaleDateString('pt-BR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
   return label.charAt(0).toUpperCase() + label.slice(1);
 });
 
-// ── Tarefas esperando VOCÊ (aviso dourado) ──────────────────
+// ── Tarefas esperando VOCÊ + notas dos pacientes (item 211) ──────
 const myTasks = computed(() => data.value?.my_tasks?.items || []);
+const noteInitials = name =>
+  (name || '?')
+    .trim()
+    .split(/\s+/)
+    .map(w => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 const myTasksCount = computed(() => data.value?.my_tasks?.count || 0);
-const TASK_PRIORITY_LABEL = { low: 'baixa', medium: 'média', high: 'ALTA', urgent: 'URGENTE' };
+const patientNotes = computed(() => data.value?.patient_notes || []);
+// 27/09: uma lista por vez — abre em "Esperando você" se houver tarefa, senão nas notas
+const tasksTab = ref('tarefas');
+const tasksTabPicked = ref(false);
+watch(
+  [myTasks, patientNotes],
+  ([tasks, notes]) => {
+    if (tasksTabPicked.value) return;
+    tasksTab.value = tasks.length || !notes.length ? 'tarefas' : 'notas';
+  },
+  { immediate: true }
+);
+const pickTasksTab = tab => {
+  tasksTab.value = tab;
+  tasksTabPicked.value = true;
+};
+// a caixa fica sempre à mostra nos painéis em que é a primeira coisa
+const tasksBoxAlways = computed(() =>
+  TASKS_FIRST_PANELS.includes(panelBase.value)
+);
+const showNoteForm = ref(false);
+const onPanelNoteSaved = () => {
+  showNoteForm.value = false;
+  fetchData();
+};
+const deletePanelNote = async note => {
+  try {
+    await CrmAPI.deletePatientNote(note.id);
+    if (data.value?.patient_notes)
+      data.value.patient_notes = data.value.patient_notes.filter(
+        n => n.id !== note.id
+      );
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Não consegui apagar a nota.');
+  }
+};
+const openPatientFromNote = note => {
+  if (!note.contact?.id) return;
+  router.push({
+    name: 'patient_space',
+    params: { accountId: accountId.value, contactId: note.contact.id },
+  });
+};
+const fmtNoteAt = iso =>
+  new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+const TASK_DOT = {
+  urgent: '#dc2626',
+  high: '#d97706',
+  medium: 'var(--cv)',
+  low: '#94a3b8',
+};
+const TASK_PRIORITY_LABEL = {
+  low: 'baixa',
+  medium: 'média',
+  high: 'ALTA',
+  urgent: 'URGENTE',
+};
 const goToTasks = () =>
   router.push({ name: 'tasks_board', params: { accountId: accountId.value } });
 // atalho pro Dashboard da Agenda em TODOS os painéis (item 86 — equipe vê)
 const goToAgendaDashboard = () =>
-  router.push({ name: 'agenda_dashboard_reports', params: { accountId: accountId.value } });
+  router.push({
+    name: 'agenda_dashboard_reports',
+    params: { accountId: accountId.value },
+  });
 const fmtTaskDue = iso =>
-  iso ? new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
+  iso
+    ? new Date(iso).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
 
 // ── Radar de Oportunidades ──────────────────────────────────
 // pausa manual pela atendente (fica registrado quem desligou e quando)
@@ -1234,7 +4009,13 @@ const loadRadarStatus = async () => {
 const toggleRadarManual = async () => {
   const turningOff = radarStatus.value?.enabled;
   // eslint-disable-next-line no-alert
-  if (turningOff && !window.confirm('Desativar o Radar de Oportunidades? Fica registrado que foi você.')) return;
+  if (
+    turningOff &&
+    !window.confirm(
+      'Desativar o Radar de Oportunidades? Fica registrado que foi você.'
+    )
+  )
+    return;
   togglingRadar.value = true;
   try {
     const { data: res } = await CrmAPI.toggleRadar();
@@ -1246,17 +4027,30 @@ const toggleRadarManual = async () => {
 const radarLastActionLabel = computed(() => {
   const a = radarStatus.value?.last_action;
   if (!a) return '';
-  const when = new Date(a.at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const when = new Date(a.at).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   return `${a.action} por ${a.user} às ${when}`;
 });
 
-const radarAlerts = computed(() => data.value?.opportunity_alerts?.alerts || []);
+const radarAlerts = computed(
+  () => data.value?.opportunity_alerts?.alerts || []
+);
 
 // ── Radar em CARROSSEL pulsante (item 63 — 19/07): um card por vez com
 // tudo; os de trás só espiam (nome + tempo). "Atender agora" = 3 ✅
 // pipocam do toque, -1 na contagem, o próximo assume — até zerar.
 const radarQueue = ref([]);
-watch(radarAlerts, list => { radarQueue.value = [...(list || [])]; }, { immediate: true });
+watch(
+  radarAlerts,
+  list => {
+    radarQueue.value = [...(list || [])];
+  },
+  { immediate: true }
+);
 const radarFront = computed(() => radarQueue.value[0] || null);
 const radarPeek = computed(() => radarQueue.value.slice(1, 4));
 const radarFx = ref(null);
@@ -1264,6 +4058,8 @@ const radarFx = ref(null);
 // dali mesmo, sem precisar ir até Conversas
 const radarChat = ref(null);
 const openChatBalloon = alert => {
+  // aviso de robô parado (#217) não tem conversa: o card só informa
+  if (alert?.kind === 'robo_parado') return;
   radarChat.value = {
     contact_id: alert.contact_id,
     name: alert.contact_name,
@@ -1282,7 +4078,8 @@ const openChatBalloon = alert => {
 // servidor (a eficácia do Radar continua contando normalmente)
 const onRadarChatReplied = () => {
   const convId = radarChat.value?.last_conversation_id;
-  if (!convId || !radarQueue.value.some(a => a.conversation_id === convId)) return;
+  if (!convId || !radarQueue.value.some(a => a.conversation_id === convId))
+    return;
   radarQueue.value = radarQueue.value.filter(a => a.conversation_id !== convId);
   CrmAPI.radarAttend(convId).catch(() => {});
 };
@@ -1290,6 +4087,12 @@ const onRadarChatResolved = ({ status }) => {
   if (status === 'resolved') onRadarChatReplied();
 };
 const attendNow = (alert, event) => {
+  // aviso de robô parado (#217): "Ok, vi" só tira o cartão da fila desta tela —
+  // não é atendimento (não chama o servidor nem conta na eficácia do Radar)
+  if (alert?.kind === 'robo_parado') {
+    radarQueue.value = radarQueue.value.filter(a => a !== alert);
+    return;
+  }
   if (radarFx.value && event) {
     radarFx.value.burstAt(event.clientX, event.clientY, ['✅'], 3);
   }
@@ -1307,19 +4110,94 @@ const rotateRadar = () => {
 };
 const radarLastRun = computed(() => {
   const iso = data.value?.opportunity_alerts?.last_run_at;
-  return iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null;
+  return iso
+    ? new Date(iso).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
 });
 // item 83 — eficácia: consultas agendadas DEPOIS do aviso atendido (30d)
-const radarEfficacy = computed(() => data.value?.opportunity_alerts?.efficacy || null);
+const radarEfficacy = computed(
+  () => data.value?.opportunity_alerts?.efficacy || null
+);
 const waitingLabel = alert => {
   if (!alert.waiting_since) return '';
-  const min = Math.round((Date.now() - new Date(alert.waiting_since).getTime()) / 60000);
+  const min = Math.round(
+    (Date.now() - new Date(alert.waiting_since).getTime()) / 60000
+  );
   if (min < 60) return `${min} min sem resposta`;
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')} sem resposta`;
 };
 // atalhos no formato do card do CRM (iniciais + Espaço do Paciente)
+// 🔧 rodada 192: avisos que não vêm do Radar de IA têm rótulo próprio —
+// ligação perdida (167), "não vou" da jornada (168) e as ações do Atendente
+// Pós-agendamento ao vivo (remarcou / cancelou na Agenda)
+const ALERT_KIND_META = {
+  missed_call: {
+    icon: 'i-lucide-phone-missed',
+    label: 'Ligação perdida',
+    color: '#dc2626',
+  },
+  journey_reply: {
+    icon: 'i-lucide-calendar-x',
+    label: 'Respondeu "não vou"',
+    color: '#d97706',
+  },
+  agente_remarcou: {
+    icon: 'i-lucide-calendar-clock',
+    label: 'Agente remarcou a consulta',
+    color: '#0f5fa6',
+  },
+  agente_cancelou: {
+    icon: 'i-lucide-calendar-off',
+    label: 'Agente cancelou a consulta',
+    color: '#b91c1c',
+  },
+  // item 217: paciente respondeu NÃO ao lembrete da véspera (consulta segue na Agenda)
+  nao_confirmou: {
+    icon: 'i-lucide-message-circle-x',
+    label: 'Respondeu NÃO ao lembrete da consulta',
+    color: '#db2777',
+  },
+  // item 251: sintoma de alerta no pós-operatório (tarefa urgente aberta pelo Atendente de Pós-operatório)
+  pos_op_atencao: {
+    icon: 'i-lucide-heart-pulse',
+    label: 'Pós-operatório: atenção agora',
+    color: '#be123c',
+  },
+  // auditoria 10/2026 (#458): Atendente de Agendamento / Pós-agendamento chamou a equipe (o agente fica pausado)
+  atendimento_atencao: {
+    icon: 'i-lucide-hand',
+    label: 'Atendimento: a equipe precisa assumir',
+    color: '#be123c',
+  },
+  // auditoria 10/2026 (#217): um robô (lembretes, NPS, jornada…) parou ou deu erro 2× seguidas — só o admin vê
+  robo_parado: {
+    icon: 'i-lucide-bot-off',
+    label: 'Robô parado — avise quem cuida do sistema',
+    color: '#b91c1c',
+  },
+};
+const alertKindMeta = alert => ALERT_KIND_META[alert?.kind] || null;
+const isAgentAlert = alert =>
+  String(alert?.kind || '').startsWith('agente_') ||
+  alert?.kind === 'nao_confirmou' ||
+  alert?.kind === 'pos_op_atencao' ||
+  alert?.kind === 'atendimento_atencao';
+const openAgendaFromAlert = alert =>
+  router.push({
+    name: 'agenda_board',
+    params: { accountId: accountId.value },
+    query: alert?.task_id ? { task: alert.task_id } : {},
+  });
 const alertInitials = alert =>
-  (alert.contact_name || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  (alert.contact_name || '?')
+    .split(' ')
+    .map(w => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 const openPatientSpace = alert =>
   router.push(`/app/accounts/${accountId.value}/patient/${alert.contact_id}`);
 
@@ -1335,7 +4213,9 @@ const loadGoalsStrip = async () => {
 };
 const goalTargets = computed(() => goalsData.value?.plan?.targets || {});
 const goalCurrent = computed(() => {
-  const h = (goalsData.value?.history || []).find(x => x.month === goalsData.value?.month);
+  const h = (goalsData.value?.history || []).find(
+    x => x.month === goalsData.value?.month
+  );
   return h?.values || {};
 });
 // só indicadores COM meta definida (até 3, os de maior alvo)
@@ -1358,9 +4238,11 @@ const teamRoutines = computed(() => goalsData.value?.routines || []);
 const importantTools = computed(() => goalsData.value?.tools || []);
 const goToGoals = () => router.push(`/app/accounts/${accountId.value}/goals`);
 const goToTools = () => router.push(`/app/accounts/${accountId.value}/tools`);
-const openTool = tool => tool.url && window.open(tool.url, '_blank', 'noopener');
+const openTool = tool =>
+  tool.url && window.open(tool.url, '_blank', 'noopener');
 // abre a gaveta global de feedback de bugs (BugReportDrawer no Dashboard.vue)
-const reportBug = () => window.dispatchEvent(new CustomEvent('cevico:report-bug'));
+const reportBug = () =>
+  window.dispatchEvent(new CustomEvent('cevico:report-bug'));
 
 // ── Mentor do Time: feedback semanal individual ──
 // Cada pessoa vê o seu; admin navega pelo time (pílulas com os nomes).
@@ -1370,7 +4252,10 @@ const teamFeedbacks = computed(() => weeklyFeedback.value?.team || []);
 const feedbackViewUserId = ref(null);
 const visibleFeedback = computed(() => {
   if (feedbackViewUserId.value) {
-    return teamFeedbacks.value.find(f => f.user_id === feedbackViewUserId.value) || myFeedback.value;
+    return (
+      teamFeedbacks.value.find(f => f.user_id === feedbackViewUserId.value) ||
+      myFeedback.value
+    );
   }
   return myFeedback.value || teamFeedbacks.value[0] || null;
 });
@@ -1379,7 +4264,8 @@ const fbWeekLabel = fb => {
   const d = new Date(`${fb.week_start}T12:00:00`);
   const end = new Date(d);
   end.setDate(d.getDate() + 6);
-  const f = x => x.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  const f = x =>
+    x.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   return `semana de ${f(d)} a ${f(end)}`;
 };
 
@@ -1390,12 +4276,32 @@ const fbWeekLabel = fb => {
 // ── Início do funil detalhado (item 138) ──
 // card 1: total + quebra por caixa de captação
 const shortInboxName = n =>
-  (n || '').replace(/caixa/i, '').replace(/\(teste\)/i, '').trim().split(' ')[0] || n;
+  (n || '')
+    .replace(/caixa/i, '')
+    .replace(/\(teste\)/i, '')
+    .trim()
+    .split(' ')[0] || n;
 const leadsInboxSub = computed(() => {
   const list = data.value?.leads_by_inbox || [];
-  if (!list.length) return 'caixas Google + Instagram';
+  if (!list.length)
+    return activeLens.value === 'cevico'
+      ? 'caixas Google + Instagram'
+      : `pacientes novos · ${activeLensLabel.value}`;
   return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
 });
+// item 238: "Marcadas na Agenda" por caixa de entrada (linha de baixo do card)
+const bookedInboxSub = computed(() => {
+  const list = (data.value?.appointments_booked_by_inbox || []).filter(
+    i => i.count > 0
+  );
+  if (!list.length)
+    return 'consultas novas no período (sem exame, tele ou cancelada)';
+  return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
+});
+const pctOf = (part, total) =>
+  total
+    ? String(Math.round((part / total) * 1000) / 10).replace('.', ',')
+    : '0';
 // conversão POR CAIXA: dos que chegaram por ela, % que avançou a Agendamento
 const leadsInboxConversion = computed(() => {
   const list = (data.value?.leads_by_inbox || []).filter(i => i.count > 0);
@@ -1418,13 +4324,29 @@ const bookingDayVerdict = computed(() => {
   const booked = data.value?.booked_today ?? 0;
   const target = officialGoals.goalFor('appointments_booked')?.target || 0;
   if (!target)
-    return { label: 'defina a meta no Painel de Metas', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' };
+    return {
+      label: 'defina a meta no Painel de Metas',
+      grad: 'linear-gradient(135deg, #B8860B, #D4A017)',
+    };
   const now = new Date();
-  const daily = target / new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daily =
+    target / new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const ratio = daily > 0 ? booked / daily : 1;
-  if (ratio >= 1) return { label: 'Muito bom 🚀', grad: 'linear-gradient(135deg, #065F46, #10B981)' };
-  if (ratio >= 0.6) return { label: 'Bom 👍', grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)' };
-  if (ratio >= 0.3) return { label: 'Regular', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' };
+  if (ratio >= 1)
+    return {
+      label: 'Muito bom 🚀',
+      grad: 'linear-gradient(135deg, #065F46, #10B981)',
+    };
+  if (ratio >= 0.6)
+    return {
+      label: 'Bom 👍',
+      grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)',
+    };
+  if (ratio >= 0.3)
+    return {
+      label: 'Regular',
+      grad: 'linear-gradient(135deg, #B8860B, #D4A017)',
+    };
   return { label: 'Fraco', grad: 'linear-gradient(135deg, #B91C1C, #EF4444)' };
 });
 
@@ -1433,7 +4355,7 @@ const perf = computed(() => data.value?.my_performance || null);
 const perfCols = computed(() => {
   if (!perf.value) return [];
   // painel do GESTOR (item 140): a equipe inteira que trabalhou no período
-  if (selectedPanel.value === 'gestor' && perf.value.team?.length) {
+  if (panelBase.value === 'gestor' && perf.value.team?.length) {
     return perf.value.team.map(r => ({
       key: `u${r.id}`,
       title: r.is_ai ? `🤖 ${r.name} (Atendimento IA)` : r.name,
@@ -1441,23 +4363,39 @@ const perfCols = computed(() => {
     }));
   }
   const cols = [{ key: 'me', title: 'Você', row: perf.value.me }];
-  if (perf.value.ai) cols.push({ key: 'ai', title: '🤖 Atendimento IA', row: perf.value.ai });
+  if (perf.value.ai)
+    cols.push({ key: 'ai', title: '🤖 Atendimento IA', row: perf.value.ai });
   return cols.filter(c => c.row);
 });
 const perfFmtMin = m => {
   if (m === null || m === undefined) return '—';
-  if (m >= 60) return `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}`;
+  if (m >= 60)
+    return `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}`;
   return `${String(m).replace('.', ',')}min`;
 };
 const perfBrl = v =>
-  (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+  (v || 0).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    maximumFractionDigits: 0,
+  });
 // você × você: setinha vs o período anterior (invert = menor é melhor)
 const perfDelta = (curr, prevVal, invert = false) => {
-  if (prevVal === null || prevVal === undefined || curr === null || curr === undefined) return null;
+  if (
+    prevVal === null ||
+    prevVal === undefined ||
+    curr === null ||
+    curr === undefined
+  )
+    return null;
   if (curr === prevVal) return null;
   const up = curr > prevVal;
   const good = invert ? !up : up;
-  return { arrow: up ? '▲' : '▼', color: good ? '#059669' : '#DC2626', prev: prevVal };
+  return {
+    arrow: up ? '▲' : '▼',
+    color: good ? '#059669' : '#DC2626',
+    prev: prevVal,
+  };
 };
 // item 139: cada pessoa tem SUAS métricas (o admin propõe em Configurações
 // → Painéis); row.metrics traz as chaves escolhidas (ou o padrão)
@@ -1469,29 +4407,105 @@ const perfTilesFor = col => {
   const mk = key => {
     switch (key) {
       case 'touched':
-        return { key, display: r.conversations_touched ?? 0, label: 'conversas em que atuou', delta: perfDelta(r.conversations_touched, prev.conversations_touched) };
+        return {
+          key,
+          display: r.conversations_touched ?? 0,
+          label: 'conversas em que atuou',
+          delta: perfDelta(r.conversations_touched, prev.conversations_touched),
+        };
       case 'assigned':
-        return { key, display: r.conversations_assigned ?? 0, label: 'conversas atribuídas' };
+        return {
+          key,
+          display: r.conversations_assigned ?? 0,
+          label: 'conversas atribuídas',
+        };
       case 'messages':
-        return { key, display: r.messages_sent ?? 0, label: 'mensagens enviadas', delta: perfDelta(r.messages_sent, prev.messages_sent) };
+        return {
+          key,
+          display: r.messages_sent ?? 0,
+          label: 'mensagens enviadas',
+          delta: perfDelta(r.messages_sent, prev.messages_sent),
+        };
       case 'reply_commercial': {
         const v = r.commercial?.avg_minutes ?? null;
-        return { key, display: perfFmtMin(v), label: `resposta média (08–17h) · ${r.commercial?.within_rate ?? 0}% na meta`, color: v === null ? '' : v <= goal ? '#059669' : '#DC2626', delta: perfDelta(v, prev.avg_reply_min, true) };
+        return {
+          key,
+          display: perfFmtMin(v),
+          label: `resposta média (08–17h) · ${r.commercial?.within_rate ?? 0}% na meta`,
+          color: v === null ? '' : v <= goal ? '#059669' : '#DC2626',
+          delta: perfDelta(v, prev.avg_reply_min, true),
+        };
       }
       case 'first_response':
-        return { key, display: perfFmtMin(r.avg_first_response_min), label: '1ª resposta (média)' };
+        return {
+          key,
+          display: perfFmtMin(r.avg_first_response_min),
+          label: '1ª resposta (média)',
+        };
       case 'resolved':
-        return { key, display: r.conversations_resolved ?? 0, label: 'resolvidas', delta: perfDelta(r.conversations_resolved, prev.conversations_resolved) };
+        return {
+          key,
+          display: r.conversations_resolved ?? 0,
+          label: 'resolvidas',
+          delta: perfDelta(
+            r.conversations_resolved,
+            prev.conversations_resolved
+          ),
+        };
       case 'appointments':
-        return { key, display: r.appointments_created ?? 0, label: 'consultas agendadas', delta: perfDelta(r.appointments_created, prev.appointments_created) };
+        return {
+          key,
+          display: r.appointments_created ?? 0,
+          label: 'consultas agendadas',
+          delta: perfDelta(r.appointments_created, prev.appointments_created),
+        };
       case 'surgeries_created':
-        return { key, display: r.surgeries_created ?? 0, label: isClinica ? 'cirurgias agendadas' : 'vendas fechadas' };
+        return {
+          key,
+          display: r.surgeries_created ?? 0,
+          label: 'cirurgias agendadas',
+        };
       case 'surgeries_closed':
-        return { key, display: r.surgeries?.count ?? 0, label: `${isClinica ? 'cirurgias' : 'vendas'} fechadas · ${perfBrl(r.surgeries?.revenue)}` };
+        return {
+          key,
+          display: r.surgeries?.count ?? 0,
+          // 🔒 auditoria R2: o servidor só manda `revenue` para quem pode ver
+          // dinheiro; sem ele, a linha fica só com a contagem
+          label:
+            r.surgeries?.revenue === undefined || r.surgeries?.revenue === null
+              ? 'cirurgias fechadas'
+              : `cirurgias fechadas · ${perfBrl(r.surgeries.revenue)}`,
+        };
       case 'attendance':
-        return { key, display: `${clinic.rate ?? 0}%`, label: `comparecimento (clínica) · ${clinic.attended ?? 0} vieram · ${clinic.missed ?? 0} faltaram`, color: (clinic.rate ?? 0) >= 80 ? '#059669' : (clinic.rate ?? 0) >= 60 ? '#D4A017' : '#DC2626' };
+        return {
+          key,
+          display: `${clinic.rate ?? 0}%`,
+          label: `comparecimento (clínica) · ${clinic.attended ?? 0} vieram · ${clinic.missed ?? 0} faltaram`,
+          color:
+            (clinic.rate ?? 0) >= 80
+              ? '#059669'
+              : (clinic.rate ?? 0) >= 60
+                ? '#D4A017'
+                : '#DC2626',
+        };
       case 'days_worked':
-        return { key, display: r.workday?.days_active ?? 0, label: 'dias trabalhados' };
+        return {
+          key,
+          display: r.workday?.days_active ?? 0,
+          label: 'dias trabalhados',
+        };
+      case 'calls_answered':
+        return {
+          key,
+          display: r.calls_answered ?? 0,
+          label: 'ligações atendidas',
+        };
+      case 'calls_talk':
+        return {
+          key,
+          display: `${r.calls_talk_minutes ?? 0} min`,
+          label: 'ao telefone',
+        };
       default:
         return null;
     }
@@ -1501,20 +4515,28 @@ const perfTilesFor = col => {
 
 // ── Saúde da agenda (janelas × consultas, calculada aqui) ───
 const consultaTasks = computed(() =>
-  allTasks.value.filter(t => (t.task_type === 'consulta' || t.unit) && t.due_at && !t.canceled_at)
+  allTasks.value.filter(
+    t => (t.task_type === 'consulta' || t.unit) && t.due_at && !t.canceled_at
+  )
 );
 const scan = opts =>
   scanAgenda({
     windows: resolveWindows(crmSettings.value),
     tasks: consultaTasks.value,
-    blockedSet: new Set(resolveBlocked(crmSettings.value).map(b => blockKey(b.date, b.time, b.unit))),
+    blockedSet: new Set(
+      resolveBlocked(crmSettings.value).map(b =>
+        blockKey(b.date, b.time, b.unit)
+      )
+    ),
     blockedDays: new Set(resolveBlockedDays(crmSettings.value)),
     ...opts,
   });
 
 // ── Saúde da Agenda de CIRURGIAS (janelas da sala cirúrgica) ──
 const surgeryTasks = computed(() =>
-  allTasks.value.filter(t => t.task_type === 'cirurgia' && t.due_at && !t.canceled_at)
+  allTasks.value.filter(
+    t => t.task_type === 'cirurgia' && t.due_at && !t.canceled_at
+  )
 );
 const scanSurgery = opts =>
   scanAgenda({
@@ -1524,7 +4546,9 @@ const scanSurgery = opts =>
     blockedDays: new Set(resolveBlockedDays(crmSettings.value)),
     ...opts,
   });
-const surgFillNext7 = computed(() => scanSurgery({ from: new Date(), days: 7, futureOnly: true }));
+const surgFillNext7 = computed(() =>
+  scanSurgery({ from: new Date(), days: 7, futureOnly: true })
+);
 const surgUsageLast7 = computed(() => {
   const from = new Date();
   from.setDate(from.getDate() - 7);
@@ -1533,33 +4557,47 @@ const surgUsageLast7 = computed(() => {
 // bloco de cirurgias SEMPRE lado a lado com o de consultas (pedido
 // 2026-07-15) — meta do mês e próxima cirurgia valem mesmo sem janelas
 // da sala configuradas (as barras mostram "—" até configurar)
-const showSurgeryHealth = computed(() => isClinica);
+const showSurgeryHealth = computed(() => true);
 
-// 🎯 META DO MÊS (conta > segmento; clínica = 100 cirurgias) — barra
-const SURGERY_GOAL = computed(() =>
-  resolveGoal(crmSettings.value, 'vendas_mes', metaSegmento('vendas_mes', 100))
+// 🎯 META DO MÊS: 100 cirurgias — barra de progresso no retângulo
+const SURGERY_GOAL = 100;
+// a meta OFICIAL do Painel de Metas manda quando existe (varredura 12/09);
+// sem ela, a referência histórica de 100
+const surgeryGoalTarget = computed(
+  () => officialTargetFor('surgeries_done') || SURGERY_GOAL
 );
 const surgeriesDoneMonth = computed(() => {
   const now = new Date();
   return surgeryTasks.value.filter(t => {
     const d = new Date(t.due_at);
-    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() &&
-      (t.attendance === 'attended' || t.status === 'done');
+    return (
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      (t.attendance === 'attended' || t.status === 'done')
+    );
   }).length;
 });
 const goalPct = computed(() =>
-  Math.min(Math.round((surgeriesDoneMonth.value / SURGERY_GOAL.value) * 100), 100)
+  Math.min(
+    Math.round((surgeriesDoneMonth.value / surgeryGoalTarget.value) * 100),
+    100
+  )
 );
-const nextSurgery = computed(() =>
-  surgeryTasks.value
-    .filter(t => new Date(t.due_at) > new Date() && !t.attendance)
-    .sort((a, b) => new Date(a.due_at) - new Date(b.due_at))[0] || null
+const nextSurgery = computed(
+  () =>
+    surgeryTasks.value
+      .filter(t => new Date(t.due_at) > new Date() && !t.attendance)
+      .sort((a, b) => new Date(a.due_at) - new Date(b.due_at))[0] || null
 );
 
-const nextFreeSlots = computed(() =>
-  scan({ from: new Date(), days: 14, freeLimit: 4, futureOnly: true }).freeSlots
+const nextFreeSlots = computed(
+  () =>
+    scan({ from: new Date(), days: 14, freeLimit: 4, futureOnly: true })
+      .freeSlots
 );
-const fillNext7 = computed(() => scan({ from: new Date(), days: 7, futureOnly: true }));
+const fillNext7 = computed(() =>
+  scan({ from: new Date(), days: 7, futureOnly: true })
+);
 const usageLast7 = computed(() => {
   const from = new Date();
   from.setDate(from.getDate() - 7);
@@ -1573,13 +4611,17 @@ const attendance = computed(() => {
     return d < now && d > cutoff;
   });
   if (!past.length) return null;
-  return Math.round((past.filter(t => t.status === 'done').length / past.length) * 100);
+  return Math.round(
+    (past.filter(t => t.status === 'done').length / past.length) * 100
+  );
 });
 // % de agendamento 30d (consultas ÷ novos contatos) com referência fixa
 const bookingRate30 = computed(() => {
   const contacts = data.value?.new_contacts_30d || 0;
   if (!contacts) return null;
-  return Math.round(((data.value?.appointments_30d || 0) / contacts) * 1000) / 10;
+  return (
+    Math.round(((data.value?.appointments_30d || 0) / contacts) * 1000) / 10
+  );
 });
 const booking30Verdict = computed(() => {
   const r = bookingRate30.value;
@@ -1593,30 +4635,255 @@ const booking30Verdict = computed(() => {
 // semântica pinta o card "% de agendamento" da fileira
 const booking30Chip = computed(() => {
   const r = bookingRate30.value;
-  if (r === null) return { label: 'sem dados de 30 dias', grad: 'linear-gradient(135deg, #334155, #64748B)' };
-  if (r >= 15) return { label: 'Muito bom 🚀', grad: 'linear-gradient(135deg, #065F46, #10B981)' };
-  if (r >= 10) return { label: 'Bom 👍', grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)' };
-  if (r >= 5) return { label: 'Regular', grad: 'linear-gradient(135deg, #B8860B, #D4A017)' };
-  return { label: 'Fraco — hora de agir', grad: 'linear-gradient(135deg, #B91C1C, #EF4444)' };
+  if (r === null)
+    return {
+      label: 'sem dados de 30 dias',
+      grad: 'linear-gradient(135deg, #334155, #64748B)',
+    };
+  if (r >= 15)
+    return {
+      label: 'Muito bom 🚀',
+      grad: 'linear-gradient(135deg, #065F46, #10B981)',
+    };
+  if (r >= 10)
+    return {
+      label: 'Bom 👍',
+      grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)',
+    };
+  if (r >= 5)
+    return {
+      label: 'Regular',
+      grad: 'linear-gradient(135deg, #B8860B, #D4A017)',
+    };
+  return {
+    label: 'Fraco — hora de agir',
+    grad: 'linear-gradient(135deg, #B91C1C, #EF4444)',
+  };
 });
 
 const slotLabel = f =>
   `${f.day.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' })} ${f.slot}`;
-const slotDoctorShort = f => DOCTORS.value.find(d => d.name === f.win.doctor)?.short || '';
-const slotColor = f => DOCTORS.value.find(d => d.name === f.win.doctor)?.color || '#64748B';
+const slotDoctorShort = f =>
+  DOCTORS.find(d => d.name === f.win.doctor)?.short || '';
+const slotColor = f =>
+  DOCTORS.find(d => d.name === f.win.doctor)?.color || '#64748B';
 
-const nextAppointment = computed(() => (data.value?.next_appointments || [])[0] || null);
+const nextAppointment = computed(
+  () => (data.value?.next_appointments || [])[0] || null
+);
 const apptTime = iso =>
-  new Date(iso).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  new Date(iso).toLocaleString('pt-BR', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
 // ── Atalhos ─────────────────────────────────────────────────
 const shortcuts = [
-  { label: 'CRM', icon: 'i-lucide-rocket', route: 'crm_board', color: '#0F5FA6' },
-  { label: 'Conversas', icon: 'i-lucide-message-circle', route: 'home', color: '#7C3AED' },
-  { label: 'Agenda', icon: 'i-lucide-calendar-days', route: 'agenda_board', color: '#EA580C' },
-  { label: 'Tarefas', icon: 'i-lucide-list-checks', route: 'tasks_board', color: '#D4A017' },
+  {
+    label: 'CRM',
+    icon: 'i-lucide-rocket',
+    route: 'crm_board',
+    color: '#0F5FA6',
+  },
+  {
+    label: 'Conversas',
+    icon: 'i-lucide-message-circle',
+    route: 'home',
+    color: '#7C3AED',
+  },
+  {
+    label: 'Agenda',
+    icon: 'i-lucide-calendar-days',
+    route: 'agenda_board',
+    color: '#EA580C',
+  },
+  {
+    label: 'Tarefas',
+    icon: 'i-lucide-list-checks',
+    route: 'tasks_board',
+    color: '#D4A017',
+  },
 ];
-const go = route => router.push({ name: route, params: { accountId: accountId.value } });
+const go = route =>
+  router.push({ name: route, params: { accountId: accountId.value } });
+
+// ── 🧑‍🤝‍🧑 PAINÉIS POR PESSOA (rodada 160) ──
+// O admin cria uma versão de um painel-base para uma ou mais pessoas:
+// mesmos números e metas do base, layout PRÓPRIO (blocos, cards, cores)
+// organizado no Modo edição com o arrasto magnético. Quem está na lista
+// abre o Meu Painel já nele (atribuição sincronizada no servidor).
+const showVariantModal = ref(false);
+const variantDraft = ref({
+  id: '',
+  name: '',
+  base: 'agendamento',
+  user_ids: [],
+});
+const isSavingVariant = ref(false);
+const variantDeleteArmed = ref(false);
+const openVariantModal = (existing = null) => {
+  if (!teamAgents.value.length) store.dispatch('agents/get');
+  variantDeleteArmed.value = false;
+  variantDraft.value = existing
+    ? {
+        id: existing.id,
+        name: existing.name,
+        base: existing.base,
+        user_ids: [...(existing.user_ids || [])],
+      }
+    : {
+        id: '',
+        name: '',
+        base: BASE_PANELS.some(b => b.key === panelBase.value)
+          ? panelBase.value
+          : 'agendamento',
+        user_ids: [],
+      };
+  showVariantModal.value = true;
+};
+const variantBaseLabel = key =>
+  BASE_PANELS.find(b => b.key === key)?.label || key;
+// nome sugerido = primeiros nomes de quem vai ver ("Natália · Elizangela")
+const suggestedVariantName = () =>
+  variantDraft.value.user_ids
+    .map(
+      id => (teamAgents.value.find(a => a.id === id)?.name || '').split(' ')[0]
+    )
+    .filter(Boolean)
+    .join(' · ');
+const toggleVariantUser = id => {
+  const list = variantDraft.value.user_ids;
+  const i = list.indexOf(id);
+  if (i === -1) list.push(id);
+  else list.splice(i, 1);
+};
+const saveVariant = async () => {
+  if (isSavingVariant.value) return;
+  const d = variantDraft.value;
+  const name =
+    d.name.trim() ||
+    suggestedVariantName() ||
+    `${variantBaseLabel(d.base)} · pessoa`;
+  const others = (crmSettings.value?.panel_variants || []).filter(
+    v => v.id !== d.id
+  );
+  isSavingVariant.value = true;
+  try {
+    const { data: saved } = await CrmAPI.updatePanelVariants([
+      ...others,
+      { id: d.id || '', name, base: d.base, user_ids: d.user_ids },
+    ]);
+    await store.dispatch('crm/fetchSettings');
+    showVariantModal.value = false;
+    // abre o painel recém-criado (o id nasce no servidor)
+    const list = saved?.panel_variants || [];
+    const mine = d.id
+      ? list.find(v => v.id === d.id)
+      : list.find(v => !others.some(o => o.id === v.id));
+    if (mine) setPanel(`variant:${mine.id}`);
+  } catch {
+    useAlert('Não deu pra salvar o painel. Tente de novo.');
+  } finally {
+    isSavingVariant.value = false;
+  }
+};
+const deleteVariant = async () => {
+  const d = variantDraft.value;
+  if (!d.id || isSavingVariant.value) return;
+  const list = (crmSettings.value?.panel_variants || []).filter(
+    v => v.id !== d.id
+  );
+  isSavingVariant.value = true;
+  try {
+    await CrmAPI.updatePanelVariants(list);
+    await store.dispatch('crm/fetchSettings');
+    showVariantModal.value = false;
+    if (selectedPanel.value === `variant:${d.id}`) setPanel(d.base);
+  } catch {
+    useAlert('Não deu pra excluir o painel. Tente de novo.');
+  } finally {
+    isSavingVariant.value = false;
+    variantDeleteArmed.value = false;
+  }
+};
+
+// ── cabeçalho (varredura 12/09) ──
+// o olho CEVICO (public/brand-assets) como marca d'água — binding dinâmico
+// de propósito: src fixo com barra inicial vira import de módulo no Vite
+const HERO_EYE = '/brand-assets/cevico-eye.svg';
+// o que este painel acompanha, em uma frase
+const HERO_LEADS = {
+  agendamento:
+    'Do lead ao agendamento: quem chegou, quem marcou e o que ainda espera resposta.',
+  conducao:
+    'Do agendamento à indicação: consultas do período, comparecimento e indicações de cirurgia.',
+  cirurgia:
+    'Fechamento e pós-operatório: indicações, cirurgias agendadas e realizadas.',
+  medico:
+    'A agenda de cada médico: consultas, indicações e conversão em cirurgia.',
+  gestor:
+    'O processo inteiro num olhar: chegada, agendamento, comparecimento e fechamento.',
+};
+const heroLead = computed(() => {
+  const p = currentPanel.value || {};
+  if (p.custom)
+    return 'Painel montado no Construtor — os seus indicadores, do seu jeito.';
+  // variante por pessoa herda a frase do painel-base
+  return (
+    HERO_LEADS[p.base || p.key] ||
+    `Boas-vindas ao CEVICO S.I — ${p.desc || ''}.`
+  );
+});
+// 🌡️ o PULSO do momento no cabeçalho: responde "como está agora?" antes de
+// qualquer rolagem — conversas abertas, quem espera resposta, consultas de
+// hoje e, quando existe, a fila do Radar
+const heroPulse = computed(() => {
+  const d = data.value;
+  if (!d) return [];
+  const waiting = d.unanswered ?? 0;
+  const hot = radarQueue.value.length;
+  const items = [
+    {
+      key: 'open',
+      icon: 'i-lucide-inbox',
+      value: d.open_conversations ?? 0,
+      label: 'conversas abertas',
+      route: 'home',
+      title: 'Abrir as conversas',
+    },
+    {
+      key: 'waiting',
+      icon: 'i-lucide-clock-alert',
+      value: waiting,
+      label: 'aguardando resposta',
+      route: 'home',
+      alert: waiting > 0,
+      title: 'Conversas em que o paciente falou por último',
+    },
+    {
+      key: 'today',
+      icon: 'i-lucide-calendar-check',
+      value: d.appointments_today ?? 0,
+      label: 'consultas hoje',
+      route: 'agenda_board',
+      title: 'Abrir a Agenda',
+    },
+  ];
+  if (hot)
+    items.push({
+      key: 'radar',
+      icon: 'i-lucide-radar',
+      value: hot,
+      label: hot === 1 ? 'paciente quente' : 'pacientes quentes',
+      route: 'crm_board',
+      alert: true,
+      title: 'Radar de Oportunidades: pacientes quentes sem atendimento',
+    });
+  return items;
+});
 
 // mantém o painel VIVO: atualiza sozinho a cada 2 min e sempre que a
 // pessoa volta para a aba (sem precisar recarregar a página)
@@ -1625,7 +4892,25 @@ const refreshAll = () => {
   // no MODO EDIÇÃO a atualização automática pausa: um refresh no meio do
   // arrasto trocava as listas do vuedraggable e quebrava o movimento
   if (organizeMode.value) return;
-  store.dispatch('tasks/fetch').catch(() => {});
+  // 🐢 Rodada 7: versão LEVE e sem canceladas, desde 35 dias atrás — cobre
+  // o que o painel calcula (comparecimento 30 dias, cirurgias do mês,
+  // ocupação ±7/14 dias, próxima cirurgia); cards do quadro vêm sempre.
+  // Sem 'to' de propósito: o fim fica no padrão do servidor (+365 dias)
+  // para a "próxima cirurgia" nunca sumir; cada linha vem enxuta (leve)
+  const since = new Date();
+  since.setDate(since.getDate() - 35);
+  store
+    .dispatch('tasks/fetch', {
+      light: 1,
+      canceled: 0,
+      from: since.toISOString(),
+    })
+    .catch(() => {});
+  // item 237: mês/ano/personalizado mudam devagar e custam caro — a
+  // atualização automática só refaz os períodos curtos (o servidor guarda
+  // os longos por 10 min de qualquer forma)
+  if (['month', 'last_month', 'year', 'custom'].includes(period.value?.preset))
+    return;
   fetchData();
 };
 const onVisible = () => {
@@ -1635,35 +4920,55 @@ const onVisible = () => {
 // ── ✓ dar CHECK num aviso: a janelinha some da tela e só volta quando
 // houver NOVIDADE (a assinatura muda: outra semana de feedback, outros
 // pacientes no Radar, outras tarefas). Por pessoa, neste aparelho. ──
-const dismissStorageKey = computed(() => `cevico_avisos_checados_${currentUser.value?.id || 0}`);
+const dismissStorageKey = computed(
+  () => `cevico_avisos_checados_${currentUser.value?.id || 0}`
+);
 const dismissedAvisos = ref({});
 const loadDismissedAvisos = () => {
   try {
-    dismissedAvisos.value = JSON.parse(localStorage.getItem(dismissStorageKey.value) || '{}');
+    dismissedAvisos.value = JSON.parse(
+      localStorage.getItem(dismissStorageKey.value) || '{}'
+    );
   } catch {
     dismissedAvisos.value = {};
   }
 };
 const checkAviso = signature => {
   if (!signature) return;
-  const entries = Object.entries({ ...dismissedAvisos.value, [signature]: Date.now() })
+  const entries = Object.entries({
+    ...dismissedAvisos.value,
+    [signature]: Date.now(),
+  })
     .sort((a, b) => b[1] - a[1])
     .slice(0, 40); // guarda só os últimos, não cresce pra sempre
   dismissedAvisos.value = Object.fromEntries(entries);
-  localStorage.setItem(dismissStorageKey.value, JSON.stringify(dismissedAvisos.value));
+  localStorage.setItem(
+    dismissStorageKey.value,
+    JSON.stringify(dismissedAvisos.value)
+  );
 };
 const avisoChecado = signature => Boolean(dismissedAvisos.value[signature]);
 // assinaturas de conteúdo de cada janelinha
 const fbSignature = computed(() =>
-  visibleFeedback.value ? `fb:${myFeedback.value?.week_start || visibleFeedback.value.week_start}` : ''
+  visibleFeedback.value
+    ? `fb:${myFeedback.value?.week_start || visibleFeedback.value.week_start}`
+    : ''
 );
 // item 88 v2 (pedido 20/07): números de WhatsApp MINI e discreto no
 // painel do gestor, mostrando o STATUS DA CONTA na Meta (qualidade +
 // limite de envio), não um "funcionando" genérico
 const whatsappStatus = computed(() => data.value?.whatsapp_status || null);
+// 🚨 #217: robôs parados/com erro (o servidor lê do Redis pelo web — aparece
+// mesmo com a fila dos robôs parada inteira); só vem para o admin
+const robotProblems = computed(() =>
+  Array.isArray(data.value?.robot_problems) ? data.value.robot_problems : []
+);
 const waProblem = computed(() =>
   (whatsappStatus.value || []).some(
-    w => w.reauthorization_required || ['RED', 'FLAGGED'].includes(w.quality) || w.name_status === 'DECLINED'
+    w =>
+      w.reauthorization_required ||
+      ['RED', 'FLAGGED'].includes(w.quality) ||
+      w.name_status === 'DECLINED'
   )
 );
 const WA_QUALITY = {
@@ -1673,10 +4978,17 @@ const WA_QUALITY = {
   FLAGGED: { dot: '#EF4444', label: 'conta sinalizada pela Meta' },
 };
 const waQuality = w =>
-  WA_QUALITY[(w.quality || '').toUpperCase()] || { dot: '#94A3B8', label: 'status indisponível' };
+  WA_QUALITY[(w.quality || '').toUpperCase()] || {
+    dot: '#94A3B8',
+    label: 'status indisponível',
+  };
 const WA_TIERS = {
-  TIER_50: '50/dia', TIER_250: '250/dia', TIER_1K: '1 mil/dia',
-  TIER_10K: '10 mil/dia', TIER_100K: '100 mil/dia', TIER_UNLIMITED: 'sem limite',
+  TIER_50: '50/dia',
+  TIER_250: '250/dia',
+  TIER_1K: '1 mil/dia',
+  TIER_10K: '10 mil/dia',
+  TIER_100K: '100 mil/dia',
+  TIER_UNLIMITED: 'sem limite',
 };
 const waTier = tier => WA_TIERS[tier] || null;
 
@@ -1692,20 +5004,106 @@ const managerBriefText = computed(() => {
   return sentences.slice(0, 4).join('').trim();
 });
 const managerFindings = computed(() => managerBrief.value?.findings || []);
+// ── 🎯 Agente de Campanhas (item 352): a leitura do dia + o que espera ok ──
+// (null para quem não vê o ambiente Campanhas)
+const campaignAgent = computed(() => data.value?.campaign_agent || null);
+const campaignSummary = computed(() => campaignAgent.value?.summary?.all || {});
+const campaignMoney = v =>
+  v === null || v === undefined
+    ? '—'
+    : `R$ ${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
+// a estrela-guia contra a nossa média: acima = pior (custo), abaixo = melhor
+const campaignVerdict = computed(() => {
+  const s = campaignSummary.value;
+  if (!s.goal_cost || !s.baseline_goal_cost) return null;
+  const ratio = s.goal_cost / s.baseline_goal_cost;
+  if (ratio <= 0.9) return { tone: 'cv-green', text: 'abaixo da nossa média' };
+  if (ratio >= 1.1) return { tone: 'cv-red', text: 'acima da nossa média' };
+  return { tone: 'cv-amber', text: 'na nossa média' };
+});
+const campaignLastRunTime = computed(() => {
+  const iso = campaignAgent.value?.last_run_at;
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+});
+const openCampaignAgent = () =>
+  router.push({
+    name: 'campaign_agent_reports',
+    params: { accountId: accountId.value },
+  });
+// linha dos últimos 14 dias (polyline simples, sem lib): [n, n, …] → "x,y x,y"
+const sparkPath = (values, w = 140, h = 28) => {
+  const list = (values || []).map(v => Number(v) || 0);
+  if (list.length < 2) return '';
+  const max = Math.max(...list, 1);
+  const step = w / (list.length - 1);
+  return list
+    .map(
+      (v, i) =>
+        `${(i * step).toFixed(1)},${(h - (v / max) * (h - 2) - 1).toFixed(1)}`
+    )
+    .join(' ');
+};
+const campaignSeries = computed(() => campaignAgent.value?.series || null);
+// ── 📄 Agente de Páginas (item 353): a leitura do dia das páginas ──
+const pageAgent = computed(() => data.value?.page_agent || null);
+const pageSummary = computed(() => pageAgent.value?.summary || {});
+const pagePct = v =>
+  v === null || v === undefined
+    ? '—'
+    : `${(Number(v) * 100).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+// lead por visita da janela contra a média das próprias páginas (90 dias)
+const pageVerdict = computed(() => {
+  const s = pageSummary.value;
+  if (!s.lead_rate || !s.avg_lead_rate) return null;
+  const ratio = s.lead_rate / s.avg_lead_rate;
+  if (ratio >= 1.1)
+    return { tone: 'cv-green', text: 'acima da média das páginas' };
+  if (ratio <= 0.9)
+    return { tone: 'cv-red', text: 'abaixo da média das páginas' };
+  return { tone: 'cv-amber', text: 'na média das páginas' };
+});
+const pageLastRunTime = computed(() => {
+  const iso = pageAgent.value?.last_run_at;
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+});
+const openPageAgent = () =>
+  router.push({
+    name: 'cevico_pages_analytics',
+    params: { accountId: accountId.value },
+  });
 // chip do desvio: "Taxa de comparecimento −38%"
 const managerFindingLabel = f =>
   `${f.label || f.indicator} ${Number(f.deviation_pct) < 0 ? '−' : '+'}${Math.abs(Math.round(f.deviation_pct || 0))}%`;
 const managerLastRunTime = computed(() => {
   const iso = managerBrief.value?.last_run_at;
   if (!iso) return '';
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 });
 
 const radarSignature = computed(
-  () => `radar:${radarAlerts.value.map(a => a.conversation_id).sort((a, b) => a - b).join(',')}`
+  () =>
+    `radar:${radarAlerts.value
+      .map(a => a.conversation_id)
+      .sort((a, b) => a - b)
+      .join(',')}`
 );
 const tasksSignature = computed(
-  () => `tasks:${myTasks.value.map(t => t.id).sort((a, b) => a - b).join(',')}`
+  () =>
+    `tasks:${myTasks.value
+      .map(t => t.id)
+      .sort((a, b) => a - b)
+      .join(',')}`
 );
 
 onMounted(() => {
@@ -1718,43 +5116,147 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisible);
 });
 
+onMounted(() => window.addEventListener('keydown', onKpiModalKey));
 onUnmounted(() => {
   clearInterval(refreshTimer);
   document.removeEventListener('visibilitychange', onVisible);
+  window.removeEventListener('keydown', onKpiModalKey);
+  document.body.style.overflow = '';
 });
 </script>
 
 <template>
-  <div class="h-full w-full overflow-y-auto bg-n-surface-1">
-    <div class="max-w-5xl mx-auto p-4 sm:p-8">
-      <!-- Boas-vindas -->
+  <div
+    class="cv-page h-full w-full overflow-y-auto bg-n-surface-1"
+    :class="estiloClassico ? '' : 'cvg-arejado'"
+    :style="cvVars"
+  >
+    <!-- 28/09 (pedido: "no desktop quero poder usar todo esse espaço para
+         montar meus dashboards"): sem teto de largura — o painel ocupa a tela -->
+    <div class="max-w-none mx-auto p-4 sm:p-8 2xl:px-12">
+      <!-- Boas-vindas (varredura de design 12/09): cabeçalho moderno — chips
+           de vidro com o dia e o painel, saudação grande, lead do painel, o
+           PULSO do momento em vidros clicáveis e o olho CEVICO como marca
+           d'água. A cor continua sendo a do painel escolhido. -->
+      <!-- 🧭 item 336 (guia arejado): fundo CHAPADO na cor do dia (os 60%),
+           um brilho só, sem o degradê — o olho CEVICO continua -->
       <div
-        class="rounded-3xl p-6 sm:p-9 text-white shadow-lg mb-6 relative overflow-hidden transition-all"
-        :style="{ background: currentPanel.grad }"
+        class="cevico-hero rounded-3xl p-6 sm:p-8 text-white mb-6 relative overflow-hidden transition-all"
+        :class="estiloClassico ? 'shadow-lg' : 'cvg-cab-inicio'"
+        :style="{ background: estiloClassico ? pagePalette.hero : 'var(--cv)' }"
       >
-        <div class="relative z-10" style="color: #fff">
-          <div class="flex items-start justify-between gap-2 mb-1">
-            <p class="text-sm font-medium" style="color: rgba(255,255,255,0.75)">{{ todayLabel }}</p>
+        <template v-if="estiloClassico">
+          <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
+          <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
+        </template>
+        <img
+          :src="HERO_EYE"
+          alt=""
+          aria-hidden="true"
+          class="cevico-hero-eye"
+        />
+        <div class="relative z-10 flex flex-col gap-4" style="color: #fff">
+          <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="cevico-hero-chip"
+                ><span class="i-lucide-calendar-days text-xs" />{{
+                  todayLabel
+                }}</span
+              >
+              <!-- 🍎🍊 a paleta do painel: cor do dia (iMac G3), uma fruta ou a
+                   salada — o admin escolhe aqui; quem não é admin passeia
+                   pelas cores do dia só nesta tela -->
+              <button
+                class="cevico-hero-chip cevico-hero-chip-btn"
+                :title="
+                  isAdmin
+                    ? 'Paleta do painel: cor do dia, iMac G3, frutas da Apple ou salada de frutas — e a cor de cada bloco'
+                    : 'Cada dia da semana tem a sua cor, inspirada nos iMac G3 (1998–99). Clique para experimentar as outras — só nesta tela.'
+                "
+                @click="openPalettePicker('panel')"
+              >
+                <span
+                  class="w-2 h-2 rounded-full flex-shrink-0"
+                  :style="{
+                    background: pagePalette.swatch || pagePalette.dot,
+                    boxShadow: '0 0 0 2px rgba(255,255,255,0.6)',
+                  }"
+                />
+                {{ paletteLabel(pagePalette)
+                }}<span
+                  v-if="flavorPreview !== null && pagePalette === dayFlavor"
+                  class="opacity-75 font-normal"
+                >
+                  · prévia</span
+                >
+                <span
+                  v-if="isAdmin"
+                  class="i-lucide-palette text-[10px] opacity-80"
+                />
+              </button>
+              <span class="cevico-hero-chip" :title="currentPanel.desc">
+                <span :class="currentPanel.icon" class="text-xs" />
+                Painel de {{ currentPanel.label
+                }}<template v-if="currentPanel.who">
+                  · {{ currentPanel.who }}</template
+                >
+              </span>
+              <!-- 🧭 item 338: chavinha das DUAS VERSÕES (clássico × novo), por pessoa -->
+              <span class="cevico-hero-chip cevico-hero-chip-seg" title="Duas versões do Meu Painel para comparar: a clássica (colorida, blocos de sempre) e a nova (visão geral com gráficos). Cada pessoa escolhe a sua.">
+                <button
+                  type="button"
+                  class="cevico-hero-seg-btn"
+                  :class="estiloClassico ? 'cevico-hero-seg-on' : ''"
+                  @click="setEstiloPainel('classico')"
+                >
+                  Clássico
+                </button>
+                <button
+                  type="button"
+                  class="cevico-hero-seg-btn"
+                  :class="!estiloClassico ? 'cevico-hero-seg-on' : ''"
+                  @click="setEstiloPainel('novo')"
+                >
+                  Novo
+                </button>
+              </span>
+              <!-- 🧑‍🤝‍🧑 painel por pessoa: o admin edita nome/pessoas daqui -->
+              <button
+                v-if="isAdmin && currentPanel.variant"
+                class="cevico-hero-chip cevico-hero-chip-btn"
+                title="Editar este painel por pessoa: nome, painel-base e quem vê"
+                @click="openVariantModal(currentPanel.variantDef)"
+              >
+                <span class="i-lucide-pencil text-xs" />
+                Editar painel
+              </button>
+            </div>
             <div class="flex items-center gap-1.5 flex-shrink-0">
               <!-- ✏️ MODO EDIÇÃO (item 143): o botão vive AQUI no topo, num
                    lugar fixo — liga o modo que reordena blocos, muda cor e
                    oculta cards; a barra grudada logo abaixo segura os controles -->
               <button
                 v-if="isAdmin && !currentPanel.custom"
-                class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors"
-                :style="organizeMode
-                  ? 'background: #fff; color: #152C61; border: 1px solid #fff'
-                  : 'background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)'"
-                :title="organizeMode ? 'Concluir a edição do painel' : 'Personalizar este painel: arrastar blocos e cards, trocar cores, ocultar'"
+                class="cevico-hero-btn"
+                :class="organizeMode ? 'cevico-hero-btn-on' : ''"
+                :title="
+                  organizeMode
+                    ? 'Concluir a edição do painel'
+                    : 'Personalizar este painel: arrastar blocos e cards, trocar cores, ocultar'
+                "
                 @click="toggleEditMode"
               >
-                <span :class="organizeMode ? 'i-lucide-check' : 'i-lucide-pencil-ruler'" class="text-xs" />
+                <span
+                  :class="
+                    organizeMode ? 'i-lucide-check' : 'i-lucide-pencil-ruler'
+                  "
+                  class="text-xs"
+                />
                 {{ organizeMode ? 'Concluir edição' : 'Modo edição' }}
               </button>
               <!-- 🐞 Reportar problema — padrão no painel de TODOS (pedido 17/07) -->
               <button
-                class="flex items-center gap-1.5 px-2.5 h-7 rounded-lg text-[11px] font-semibold transition-colors"
-                style="background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.25)"
+                class="cevico-hero-btn"
                 title="Algo não funcionou? Vira um card no board do Guilherme e você recebe o aviso quando resolver."
                 @click="reportBug"
               >
@@ -1763,52 +5265,226 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
-          <h1 class="text-2xl sm:text-4xl font-bold leading-tight" style="color: #fff">{{ greeting }}, {{ firstName }}! 👋</h1>
-          <p class="text-sm mt-2" style="color: rgba(255,255,255,0.85)">
-            Boas-vindas ao {{ nomeSistemaHero() }} —
-            <b>Painel de {{ currentPanel.label }}</b><template v-if="currentPanel.who"> ({{ currentPanel.who }})</template>: {{ currentPanel.desc }}.
-          </p>
+          <div>
+            <h1
+              v-if="estiloClassico"
+              class="text-3xl sm:text-[40px] font-bold leading-none tracking-tight"
+              style="color: #fff"
+            >
+              {{ greeting
+              }}<template v-if="firstName">, {{ firstName }}</template
+              >! 👋
+            </h1>
+            <h1 v-else class="cvg-titulo-ambiente cvg-cab-h1">
+              {{ greeting
+              }}<template v-if="firstName">, {{ firstName }}</template>
+            </h1>
+            <p
+              class="text-sm sm:text-[15px] mt-2.5 max-w-2xl leading-relaxed"
+              style="color: rgba(255, 255, 255, 0.86)"
+            >
+              {{ heroLead }}
+            </p>
+          </div>
+          <!-- 🌡️ o pulso do momento: números vivos em vidro, cada um leva
+               pro lugar certo (conversas, agenda, radar) -->
+          <div
+            v-if="heroPulse.length"
+            class="flex items-stretch gap-2 flex-wrap"
+          >
+            <button
+              v-for="p in heroPulse"
+              :key="p.key"
+              class="cevico-hero-glass flex items-center gap-2.5 text-left"
+              :class="p.alert ? 'cevico-hero-glass-alert' : ''"
+              :title="p.title"
+              @click="go(p.route)"
+            >
+              <span
+                class="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+                style="background: rgba(255, 255, 255, 0.16)"
+              >
+                <span :class="p.icon" class="text-base" />
+              </span>
+              <span class="flex flex-col leading-none">
+                <span class="text-lg font-bold tabular-nums">{{
+                  p.value
+                }}</span>
+                <span
+                  class="text-[13px] mt-1"
+                  style="color: rgba(255, 255, 255, 0.82)"
+                  >{{ p.label }}</span
+                >
+              </span>
+            </button>
+          </div>
         </div>
-        <span class="absolute -right-6 -bottom-8 text-[160px] text-white/10" :class="isClinica ? 'i-lucide-eye' : 'i-lucide-briefcase'" />
       </div>
+
+      <!-- 🧭 item 336: VITRINE GIRATÓRIA (frase do dia + equipe), some no modo edição -->
+      <div v-if="!organizeMode && !estiloClassico" class="cvg-arejado-vitrine">
+        <CvVitrine :paineis="vitrinePaineis" lembrar="cevico:vitrine:inicio" />
+      </div>
+
+      <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin) -->
+      <VisaoGeral
+        v-if="!organizeMode && !estiloClassico"
+        :source="sourceLens"
+        :vars="cvVars"
+      />
 
       <!-- ✏️ BARRA DO MODO EDIÇÃO (item 143): gruda no topo enquanto o modo
            está ativo — dicas, cards ocultos, voltar ao padrão e Concluir
            sempre à mão, em qualquer ponto da rolagem -->
       <div
         v-if="organizeMode"
-        class="sticky top-0 z-40 rounded-2xl border-2 border-n-brand/50 bg-n-solid-1 shadow-lg px-4 py-3 mb-6"
+        class="cv-editbar sticky top-0 z-40 px-4 py-3 mb-6"
       >
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="i-lucide-pencil-ruler text-sm text-n-brand" />
+          <span class="cv-icon cv-icon-sm"
+            ><span class="i-lucide-pencil-ruler text-xs"
+          /></span>
           <b class="text-xs text-n-slate-12">Modo edição</b>
-          <span class="text-[11px] text-n-slate-10">⠿ arraste as barrinhas e os cards · 🖌 troca a cor · ✕ oculta</span>
-          <span v-if="isSavingLayout" class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10" />
+          <span class="text-[11px] text-n-slate-10"
+            >🧲 pegue um bloco e arraste (os vizinhos abrem espaço) · puxe a
+            borda direita para esticar · 🖌 troca a cor · ✕ oculta</span
+          >
+          <button
+            class="cv-btn cv-btn-sm"
+            :class="blocksLocked ? '' : 'cv-btn-ghost'"
+            :title="
+              blocksLocked
+                ? 'Destravar: os blocos voltam a se mover pela alça ⠿'
+                : 'Travar: nenhum bloco se move sem querer (as alças somem)'
+            "
+            @click="toggleBlocksLock"
+          >
+            <span
+              :class="blocksLocked ? 'i-lucide-lock' : 'i-lucide-lock-open'"
+              class="text-xs"
+            />
+            blocos {{ blocksLocked ? 'travados' : 'soltos' }}
+          </button>
+          <button
+            class="cv-btn cv-btn-ghost cv-btn-sm"
+            title="Cores do painel: cor do dia, uma paleta fixa (iMac G3 ou frutas da Apple) ou salada de frutas — e a paleta de cada bloco"
+            @click="openPalettePicker('panel')"
+          >
+            <span class="i-lucide-palette text-xs" />
+            Paleta
+          </button>
+          <button
+            class="cv-btn cv-btn-sm"
+            :class="autoPalette ? '' : 'cv-btn-ghost'"
+            title="Paleta dos indicadores: cada família (captação, agendamento, presença, cirurgia, financeiro, satisfação) tem a sua cor; resultado principal em cor cheia, volume em cor média, apoio em cor clara; o card enche ao longo do dia (07h → 19h). Desligada, valem as cores do dia e as escolhidas por card."
+            @click="toggleAutoPalette"
+          >
+            <span class="i-lucide-swatch-book text-xs" />
+            cores por indicador {{ autoPalette ? 'ligadas' : 'desligadas' }}
+          </button>
+          <!-- item 248: modelos prontos · média histórica · recolher blocos -->
+          <button
+            v-if="isAdmin"
+            class="cv-btn cv-btn-sm"
+            title="Painéis prontos com os nossos indicadores, cores e a média histórica"
+            @click="showPresets = true"
+          >
+            <span class="i-lucide-layout-template text-xs" />
+            Modelos
+          </button>
+          <button
+            v-if="isAdmin && currentPreset"
+            class="cv-btn cv-btn-ghost cv-btn-sm"
+            :title="`Volta este painel ao modelo &quot;${currentPreset.label}&quot; (cards, tamanhos e cores)`"
+            @click="restorePreset"
+          >
+            <span class="i-lucide-rotate-ccw text-xs" />
+            restaurar modelo
+          </button>
+          <button
+            class="cv-btn cv-btn-sm"
+            :class="histJudgeOn ? '' : 'cv-btn-ghost'"
+            title="Cada card compara o período com a média dos últimos 90 dias: acima brilha, abaixo fica âmbar"
+            @click="toggleHistJudge"
+          >
+            <span class="i-lucide-activity text-xs" />
+            média histórica {{ histJudgeOn ? 'ligada' : 'desligada' }}
+          </button>
+          <button
+            class="cv-btn cv-btn-sm"
+            :class="trendOn ? '' : 'cv-btn-ghost'"
+            title="Linha de tendência nos gráficos (card grande, popup e sparkline): reta que mostra para onde o indicador está indo"
+            @click="toggleTrend"
+          >
+            <span class="i-lucide-trending-up text-xs" />
+            tendência {{ trendOn ? 'ligada' : 'desligada' }}
+          </button>
+          <button
+            class="cv-btn cv-btn-ghost cv-btn-sm"
+            title="Recolhe os blocos em barrinhas (mais fácil pra reordenar)"
+            @click="collapseBlocks = !collapseBlocks"
+          >
+            <span
+              :class="
+                collapseBlocks
+                  ? 'i-lucide-unfold-vertical'
+                  : 'i-lucide-fold-vertical'
+              "
+              class="text-xs"
+            />
+            {{ collapseBlocks ? 'abrir blocos' : 'recolher blocos' }}
+          </button>
+          <span
+            v-if="isSavingLayout"
+            class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10"
+          />
           <span v-else class="text-[10px] text-n-slate-9">salva sozinho</span>
           <span class="flex-1" />
           <button
             v-if="layoutTouched"
-            class="h-8 px-3 rounded-lg text-[11px] font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
+            class="cv-btn cv-btn-ghost cv-btn-sm"
             title="Ordem dos blocos, cards, cores e ocultos voltam ao padrão do sistema neste painel"
             @click="resetKpiLayout"
           >
             voltar ao padrão
           </button>
-          <button
-            class="h-8 px-4 rounded-lg text-[11px] font-bold text-white flex items-center gap-1.5"
-            :style="{ background: panelFamily[0] }"
-            @click="toggleEditMode"
-          >
+          <button class="cv-btn cv-btn-sm" @click="toggleEditMode">
             <span class="i-lucide-check text-xs" />
             Concluir
           </button>
         </div>
-        <div v-if="hiddenTiles.length" class="flex items-center gap-1.5 flex-wrap mt-2 text-[11px]">
+        <!-- item 269: legenda das famílias de cor -->
+        <div
+          v-if="autoPalette"
+          class="flex items-center gap-x-3 gap-y-1 flex-wrap mt-2 text-[11px] text-n-slate-10"
+        >
+          <span
+            v-for="f in KPI_LEGEND"
+            :key="f.key"
+            class="inline-flex items-center gap-1"
+          >
+            <span
+              class="w-3 h-3 rounded-full"
+              :style="{
+                background: `linear-gradient(135deg, ${f.c1}, ${f.c2})`,
+              }"
+            />
+            {{ f.label }}
+          </span>
+          <span class="text-n-slate-9"
+            >· tom intenso = resultado principal · tom vivo = volume · tom claro
+            = apoio</span
+          >
+        </div>
+        <div
+          v-if="hiddenTiles.length"
+          class="flex items-center gap-1.5 flex-wrap mt-2 text-[11px]"
+        >
           <span class="text-n-slate-9">cards ocultos:</span>
           <button
             v-for="t in hiddenTiles"
             :key="t.id"
-            class="h-7 px-2.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1"
+            class="cv-chip"
             title="Mostrar de novo"
             @click="restoreTile(t)"
           >
@@ -1826,41 +5502,290 @@ onUnmounted(() => {
           <SkeletonPiece variant="block" class="h-36" :order="3" />
         </div>
         <div class="flex items-center gap-2 flex-wrap">
-          <SkeletonPiece v-for="i in 5" :key="`pp${i}`" variant="pill" :order="3 + i" />
+          <SkeletonPiece
+            v-for="i in 5"
+            :key="`pp${i}`"
+            variant="pill"
+            :order="3 + i"
+          />
         </div>
         <div class="flex items-center gap-2 flex-wrap">
-          <SkeletonPiece v-for="i in 6" :key="`per${i}`" variant="pill" class="!h-7 !w-20" :order="8 + i" />
+          <SkeletonPiece
+            v-for="i in 6"
+            :key="`per${i}`"
+            variant="pill"
+            class="!h-7 !w-20"
+            :order="8 + i"
+          />
         </div>
         <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <SkeletonPiece v-for="i in 4" :key="`t${i}`" variant="tile" class="!h-36" :order="14 + i" />
+          <SkeletonPiece
+            v-for="i in 4"
+            :key="`t${i}`"
+            variant="tile"
+            class="!h-36"
+            :order="14 + i"
+          />
         </div>
         <SkeletonPiece variant="block" class="h-64" :order="19" />
       </div>
 
       <template v-else>
+        <!-- 🌈 Novidade: cada pessoa pode escolher as cores do seu painel (nota
+             dispensável; some ao clicar e não volta neste navegador) -->
+        <!-- 🎂 item 331: aniversariante do dia (todo mundo vê) -->
+        <EmojiFx ref="bdayFx" />
+        <div
+          v-if="bdayToday.length"
+          class="cv-modal-head w-full rounded-2xl shadow-md mb-4 !px-5 !py-4 flex items-center gap-4 flex-wrap"
+          style="background: linear-gradient(135deg, #db2777, #f59e0b)"
+        >
+          <span class="text-4xl leading-none">🎂</span>
+          <div class="min-w-0 flex-1">
+            <p class="text-base sm:text-lg font-bold">
+              Aniversariante do dia · {{ bdayTodayText }}
+            </p>
+            <p class="text-xs opacity-90">
+              {{
+                bdayToday.some(e => e.age)
+                  ? bdayToday
+                      .filter(e => e.age)
+                      .map(e => `${bdayFirst(e.name)} faz ${e.age}`)
+                      .join(' · ') + ' · '
+                  : ''
+              }}um abraço da equipe CEVICO 🎉
+            </p>
+          </div>
+        </div>
+
+        <!-- 🎂 item 331: convite para informar o próprio aniversário (some ao preencher) -->
+        <div
+          v-if="bdayNeeded"
+          class="cv-sub px-4 py-3 mb-4 flex items-center gap-3 flex-wrap"
+        >
+          <span class="text-2xl leading-none">🎈</span>
+          <div class="min-w-0">
+            <p class="text-sm font-bold text-n-slate-12">
+              Qual é o dia do seu aniversário?
+            </p>
+            <p class="text-[11px] text-n-slate-10">
+              A equipe quer comemorar com você. Só dia e mês; o ano é opcional.
+            </p>
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap ml-auto">
+            <select
+              v-model="bdayForm.day"
+              class="cv-input !h-8 !w-[4.5rem] text-xs"
+            >
+              <option value="">dia</option>
+              <option v-for="d in 31" :key="d" :value="d">{{ d }}</option>
+            </select>
+            <select
+              v-model="bdayForm.month"
+              class="cv-input !h-8 !w-32 text-xs"
+            >
+              <option value="">mês</option>
+              <option v-for="(m, mi) in MONTHS_PT" :key="m" :value="mi + 1">
+                {{ m }}
+              </option>
+            </select>
+            <input
+              v-model="bdayForm.year"
+              class="cv-input !h-8 !w-20 text-xs"
+              placeholder="ano"
+              inputmode="numeric"
+              maxlength="4"
+            />
+            <button
+              class="cv-btn cv-btn-sm cv-blue"
+              :disabled="!bdayForm.day || !bdayForm.month || bdaySaving"
+              @click="saveBirthday"
+            >
+              <span class="i-lucide-cake text-xs" /> Guardar
+            </button>
+            <button
+              class="cv-btn cv-btn-sm cv-btn-ghost"
+              @click="bdayLater = true"
+            >
+              depois
+            </button>
+          </div>
+        </div>
+
+        <!-- 🚨 #217: faixa vermelha de robôs parados (só o admin recebe a lista) -->
+        <div
+          v-if="robotProblems.length"
+          class="mb-4 px-4 py-3 rounded-xl text-xs"
+          style="background: #fef2f2; border: 1px solid #fecaca; color: #7f1d1d"
+        >
+          <p class="font-semibold text-sm mb-1" style="color: #b91c1c">
+            <span class="i-lucide-bot-off align-middle mr-1" />Robôs parados ou
+            com erro ({{ robotProblems.length }})
+          </p>
+          <p v-for="r in robotProblems" :key="r.job" class="leading-snug">
+            <b>{{ r.label }}:</b> {{ r.message }}
+          </p>
+          <p class="mt-1" style="color: #991b1b">
+            O que fazer: avise quem cuida do sistema e, enquanto isso, confira à
+            mão o que esse robô faria hoje.
+          </p>
+        </div>
+
+        <!-- 🎂 item 331: aniversariantes do mês -->
+        <div
+          v-if="
+            bdayMonth.length ||
+            (isAdmin && Array.isArray(bdayMissing) && bdayMissing.length)
+          "
+          class="flex items-center gap-2 flex-wrap mb-4 text-xs text-n-slate-11"
+        >
+          <template v-if="bdayMonth.length">
+            <span class="font-semibold text-n-slate-12">
+              <span
+                class="i-lucide-cake text-xs align-middle mr-1"
+              />Aniversariantes do mês
+            </span>
+            <span
+              v-for="e in bdayMonth"
+              :key="e.user_id"
+              class="cv-chip"
+              :class="
+                bdayToday.some(t => t.user_id === e.user_id) ? 'cv-chip-on' : ''
+              "
+            >
+              {{ e.name }} <b>{{ bdayLabel(e) }}</b>
+            </span>
+          </template>
+          <span
+            v-if="isAdmin && Array.isArray(bdayMissing) && bdayMissing.length"
+            class="text-n-slate-10 ml-auto"
+            :title="bdayMissing.join(', ')"
+          >
+            ainda não informaram: {{ bdayMissing.length }}
+            <select
+              v-model="bdayForm.user_id"
+              class="cv-input !h-7 !w-40 text-[11px] ml-1"
+              title="Admin: informar o aniversário de alguém"
+            >
+              <option value="">informar por alguém…</option>
+              <option v-for="p in birthdays.people" :key="p.id" :value="p.id">
+                {{ p.name }}
+              </option>
+            </select>
+          </span>
+        </div>
+        <div
+          v-if="isAdmin && bdayForm.user_id"
+          class="cv-sub px-4 py-3 mb-4 flex items-center gap-2 flex-wrap text-xs"
+        >
+          <span class="font-semibold text-n-slate-12">
+            Aniversário de
+            {{ birthdays.people.find(p => p.id === bdayForm.user_id)?.name }}:
+          </span>
+          <select
+            v-model="bdayForm.day"
+            class="cv-input !h-8 !w-[4.5rem] text-xs"
+          >
+            <option value="">dia</option>
+            <option v-for="d in 31" :key="d" :value="d">{{ d }}</option>
+          </select>
+          <select v-model="bdayForm.month" class="cv-input !h-8 !w-32 text-xs">
+            <option value="">mês</option>
+            <option v-for="(m, mi) in MONTHS_PT" :key="m" :value="mi + 1">
+              {{ m }}
+            </option>
+          </select>
+          <input
+            v-model="bdayForm.year"
+            class="cv-input !h-8 !w-20 text-xs"
+            placeholder="ano"
+            inputmode="numeric"
+            maxlength="4"
+          />
+          <button
+            class="cv-btn cv-btn-sm cv-blue"
+            :disabled="!bdayForm.day || !bdayForm.month || bdaySaving"
+            @click="saveBirthday"
+          >
+            Guardar
+          </button>
+          <button
+            class="cv-btn cv-btn-sm cv-btn-ghost"
+            @click="bdayForm.user_id = ''"
+          >
+            cancelar
+          </button>
+        </div>
+
+        <div v-if="showDopamineNote" class="cv-block cv-notice-dopamine mb-10">
+          <div class="p-6 sm:p-8 flex items-start gap-4">
+            <span
+              class="cv-notice-dopamine-orb flex-shrink-0"
+              aria-hidden="true"
+              >🌈</span
+            >
+            <div class="min-w-0 flex-1">
+              <h2
+                class="text-xl sm:text-2xl font-bold text-n-slate-12 tracking-tight leading-tight"
+              >
+                Seu painel, as suas cores
+              </h2>
+              <p class="text-sm text-n-slate-11 mt-2 leading-relaxed max-w-2xl">
+                Novidade fofa: agora cada pessoa escolhe a paleta do próprio
+                painel. Toque na bolinha colorida ali em cima, no cabeçalho, e
+                experimente as cores dos iMac G3, as frutas da Apple ou a salada
+                de frutas. É só seu, ninguém mais vê — e dá pra trocar quantas
+                vezes quiser. Cor boa é dopamina de graça. 💜🍊🍋
+              </p>
+              <div class="flex items-center gap-2 flex-wrap mt-4">
+                <button
+                  class="cv-btn cv-btn-sm"
+                  @click="openPalettePicker('panel')"
+                >
+                  <span class="i-lucide-palette text-xs" />
+                  Escolher minhas cores
+                </button>
+                <button
+                  class="cv-btn cv-btn-sm cv-btn-ghost"
+                  @click="dismissDopamineNote"
+                >
+                  Entendi, valeu!
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- 🎉 Seus reports de bug resolvidos (notificação p/ quem reportou) -->
         <div
           v-if="data?.bug_reports?.resolved?.length"
-          class="rounded-2xl border-2 border-green-500/40 bg-green-500/5 overflow-hidden mb-6"
+          class="cv-block cv-green mb-6"
         >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #059669, #34D399)" />
           <div class="p-4 sm:p-5">
             <div class="flex items-center gap-2 mb-2">
-              <span class="text-xl">🎉</span>
+              <span class="cv-icon"
+                ><span class="i-lucide-party-popper text-base"
+              /></span>
               <h2 class="text-sm font-bold text-n-slate-12">
-                {{ data.bug_reports.resolved.length === 1
-                  ? 'Um problema que você reportou foi resolvido!'
-                  : `${data.bug_reports.resolved.length} problemas que você reportou foram resolvidos!` }}
+                {{
+                  data.bug_reports.resolved.length === 1
+                    ? 'Um problema que você reportou foi resolvido!'
+                    : `${data.bug_reports.resolved.length} problemas que você reportou foram resolvidos!`
+                }}
               </h2>
             </div>
             <div class="space-y-1.5">
               <p
                 v-for="r in data.bug_reports.resolved"
                 :key="r.id"
-                class="text-xs text-n-slate-11 bg-n-solid-1 border border-green-500/25 rounded-lg px-3 py-2"
+                class="cv-sub text-xs text-n-slate-11 px-3 py-2"
               >
                 ✅ {{ r.title }}
-                <span class="text-n-slate-9">— resolvido {{ new Date(r.completed_at).toLocaleDateString('pt-BR') }}. Obrigado por avisar! 💙</span>
+                <span class="text-n-slate-9"
+                  >— resolvido
+                  {{ new Date(r.completed_at).toLocaleDateString('pt-BR') }}.
+                  Obrigado por avisar! 💙</span
+                >
               </p>
             </div>
           </div>
@@ -1870,407 +5795,1119 @@ onUnmounted(() => {
              de painel): no modo organizar, cada bloco ganha a barrinha de
              arrasto e pode trocar de lugar — inclusive cruzar pra área de
              conteúdo lá embaixo (mesmo grupo do vuedraggable) -->
-        <draggable
-          v-model="dragTopBlocks"
-          :item-key="id => id"
-          handle=".cevico-block-handle"
-          :animation="220"
-          :disabled="!organizeMode"
-          ghost-class="opacity-30"
-          @end="saveBlockLayout"
+        <MagnetBoard
+          v-model:layout="topGrid"
+          :locked="blocksLocked"
+          auto-height
+          :stack-below="700"
+          handle="[data-drag-handle], .cevico-block-handle"
+          @moved="saveBlockLayout"
         >
-          <template #item="{ element: blockId }">
-          <section>
-            <div
-              v-if="organizeMode"
-              class="cevico-block-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 rounded-xl border-2 border-dashed border-n-brand/40 bg-n-solid-2 text-xs font-semibold text-n-slate-12"
+          <template #card="{ item: { id: blockId } }">
+            <section
+              :style="blockVars(blockId)"
+              class="min-w-0 relative cv-mb-block"
             >
-              <span class="i-lucide-grip-vertical text-sm text-n-slate-9" />
-              {{ BLOCK_LABELS[blockId] }}
-              <span class="text-n-slate-9 font-normal ml-auto hidden sm:inline">⠿ arraste pra mudar a ordem</span>
-            </div>
+              <span
+                v-if="!blocksLocked"
+                class="cv-mb-grip"
+                data-drag-handle
+                :title="`Mover “${BLOCK_LABELS[blockId]}”: pegue aqui e arraste`"
+                ><span class="i-lucide-grip-vertical"
+              /></span>
+              <div
+                v-if="organizeMode"
+                class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
+              >
+                <span class="i-lucide-grip-vertical text-sm opacity-60" />
+                <span class="cv-icon cv-icon-sm"
+                  ><span :class="BLOCK_ICONS[blockId]" class="text-xs"
+                /></span>
+                {{ BLOCK_LABELS[blockId] }}
+                <button
+                  v-if="isAdmin"
+                  class="cv-chip"
+                  :title="`Paleta deste bloco (hoje: ${paletteLabel(blockPalette(blockId))}) — clique para trocar`"
+                  @pointerdown.stop
+                  @mousedown.stop
+                  @click.stop="openPalettePicker(blockId)"
+                >
+                  <span
+                    class="w-2 h-2 rounded-full flex-shrink-0"
+                    :style="{
+                      background:
+                        blockPalette(blockId).swatch ||
+                        blockPalette(blockId).dot,
+                      boxShadow: '0 0 0 1.5px rgba(255,255,255,0.8)',
+                    }"
+                  />
+                  <span class="i-lucide-palette text-[10px]" />
+                  {{ blockPalette(blockId).label }}
+                </button>
+                <span
+                  class="cv-seg cv-seg-sm"
+                  title="Largura do bloco (ou puxe a borda direita)"
+                  @pointerdown.stop
+                  @mousedown.stop
+                >
+                  <button
+                    v-for="o in BLOCK_WIDTHS"
+                    :key="o.w"
+                    class="cv-seg-item !h-6 !px-2"
+                    :class="blockWidth(blockId) === o.w ? 'cv-seg-on' : ''"
+                    @click.stop="setBlockWidth(blockId, o.w)"
+                  >
+                    {{ o.label }}
+                  </button>
+                </span>
+                <span
+                  class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
+                  >⠿ pegue e arraste · puxe a borda direita para esticar</span
+                >
+              </div>
 
-            <!-- no modo edição os blocos RECOLHEM em barrinhas: arrasto curto,
+              <!-- no modo edição os blocos RECOLHEM em barrinhas: arrasto curto,
                  sem rolagem infinita no meio do movimento -->
-            <template v-if="!organizeMode">
-            <template v-if="blockId === 'whatsapp'">
-        <!-- 💬 Números de WhatsApp (item 88 v2 — pedido 20/07): faixa MINI
+              <template v-if="!organizeMode || !collapseBlocks">
+                <template v-if="blockId === 'whatsapp'">
+                  <!-- 💬 Números de WhatsApp (item 88 v2 — pedido 20/07): faixa MINI
              e discreta com o STATUS DA CONTA na Meta; fica vermelha só
              quando existe problema de verdade -->
-        <div
-          v-if="whatsappStatus"
-          class="flex items-center gap-x-3 gap-y-1 flex-wrap mb-6 px-3 py-1.5 rounded-xl border text-[11px]"
-          :class="waProblem ? 'border-red-500/40 bg-red-500/5' : 'border-n-weak bg-n-solid-2'"
-          title="Status das contas de WhatsApp na Meta (atualiza a cada 10 min) — detalhes em Relatórios → Saúde do WhatsApp"
-        >
-          <span class="i-lucide-phone text-xs flex-shrink-0" :class="waProblem ? 'text-red-500' : 'text-n-slate-9'" />
-          <span
-            v-for="w in whatsappStatus"
-            :key="w.id"
-            class="inline-flex items-center gap-1.5 text-n-slate-11 min-w-0"
-          >
-            <span
-              class="w-2 h-2 rounded-full flex-shrink-0"
-              :style="{ background: w.reauthorization_required ? '#EF4444' : waQuality(w).dot }"
-            />
-            <b class="text-n-slate-12 truncate">{{ w.verified_name || w.name }}</b>
-            <span v-if="w.reauthorization_required" class="text-red-500 font-bold whitespace-nowrap">precisa reautorizar</span>
-            <template v-else>
-              <span class="text-n-slate-9 whitespace-nowrap">{{ waQuality(w).label }}</span>
-              <span v-if="waTier(w.limit_tier)" class="text-n-slate-9 whitespace-nowrap">· limite {{ waTier(w.limit_tier) }}</span>
-              <span v-if="w.failed_24h" class="text-amber-600 whitespace-nowrap">· {{ w.failed_24h }} falha(s) 24h</span>
-            </template>
-          </span>
-        </div>
-            </template>
+                  <div
+                    v-if="whatsappStatus"
+                    class="cv-block cv-strip flex items-center gap-x-3 gap-y-1 flex-wrap mb-6 px-3.5 py-2 text-[11px]"
+                    :class="waProblem ? 'cv-red' : ''"
+                    title="Status das contas de WhatsApp na Meta (atualiza a cada 10 min) — detalhes em Relatórios → Saúde do WhatsApp"
+                  >
+                    <span class="cv-icon cv-icon-sm"
+                      ><span class="i-lucide-phone text-xs"
+                    /></span>
+                    <span
+                      v-for="w in whatsappStatus"
+                      :key="w.id"
+                      class="inline-flex items-center gap-1.5 text-n-slate-11 min-w-0"
+                    >
+                      <span
+                        class="w-2 h-2 rounded-full flex-shrink-0"
+                        :style="{
+                          background: w.reauthorization_required
+                            ? '#EF4444'
+                            : waQuality(w).dot,
+                        }"
+                      />
+                      <b class="text-n-slate-12 truncate">{{
+                        w.verified_name || w.name
+                      }}</b>
+                      <span
+                        v-if="w.reauthorization_required"
+                        class="text-red-500 font-bold whitespace-nowrap"
+                        >precisa reautorizar</span
+                      >
+                      <template v-else>
+                        <span class="text-n-slate-9 whitespace-nowrap">{{
+                          waQuality(w).label
+                        }}</span>
+                        <span
+                          v-if="waTier(w.limit_tier)"
+                          class="text-n-slate-9 whitespace-nowrap"
+                          >· limite {{ waTier(w.limit_tier) }}</span
+                        >
+                        <span
+                          v-if="w.failed_24h"
+                          class="text-amber-600 whitespace-nowrap"
+                          >· {{ w.failed_24h }} falha(s) 24h</span
+                        >
+                      </template>
+                    </span>
+                  </div>
+                </template>
 
-            <template v-else-if="blockId === 'briefing'">
-        <!-- 📊 Briefing do Gestor Autônomo (só admin): o resumo do dia +
+                <template v-else-if="blockId === 'briefing'">
+                  <!-- 📊 Briefing do Gestor Autônomo (só admin): o resumo do dia +
              os desvios do funil vs a média de 12 semanas. Sem briefing
              escrito, o card fica discreto e mostra só os desvios. -->
-        <div
-          v-if="managerBrief && (managerBriefText || managerFindings.length)"
-          class="rounded-xl border border-n-weak bg-n-solid-2 overflow-hidden mb-6"
-        >
-          <div class="h-1 w-full" style="background: linear-gradient(90deg, #0F5FA6, #3B82F6)" />
-          <div class="p-4">
-            <div class="flex items-center gap-2 mb-2 flex-wrap">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #0F5FA6, #3B82F6)">
-                <span class="i-lucide-gauge text-white text-sm" />
-              </span>
-              <h2 class="text-sm font-bold text-n-slate-12">📊 Briefing do Gestor</h2>
-              <span class="text-[11px] text-n-slate-9 ml-auto">funil de hoje vs a média de 12 semanas</span>
-            </div>
+                  <div
+                    v-if="
+                      managerBrief &&
+                      (managerBriefText || managerFindings.length)
+                    "
+                    class="cv-block mb-6"
+                  >
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-gauge text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Briefing do Gestor
+                        </h2>
+                        <span class="text-[11px] text-n-slate-9 ml-auto"
+                          >funil de hoje vs a média de 12 semanas</span
+                        >
+                      </div>
 
-            <p v-if="managerBriefText" class="text-sm text-n-slate-11 leading-relaxed mb-2">
-              {{ managerBriefText }}
-            </p>
+                      <p
+                        v-if="managerBriefText"
+                        class="text-sm text-n-slate-11 leading-relaxed mb-2"
+                      >
+                        {{ managerBriefText }}
+                      </p>
 
-            <div v-if="managerFindings.length" class="flex flex-wrap gap-1.5 mb-2">
-              <span
-                v-for="(f, fi) in managerFindings"
-                :key="fi"
-                class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/25"
-                :title="f.window ? `janela: ${f.window}` : ''"
-              >
-                {{ managerFindingLabel(f) }}
-              </span>
-            </div>
+                      <div
+                        v-if="managerFindings.length"
+                        class="flex flex-wrap gap-1.5 mb-2"
+                      >
+                        <span
+                          v-for="(f, fi) in managerFindings"
+                          :key="fi"
+                          class="cv-chip cv-red"
+                          :title="f.window ? `janela: ${f.window}` : ''"
+                        >
+                          {{ managerFindingLabel(f) }}
+                        </span>
+                      </div>
 
-            <p class="text-[11px] text-n-slate-9">
-              abriu {{ managerBrief.tasks_opened || 0 }} tarefa(s) hoje<template v-if="managerLastRunTime"> · {{ managerLastRunTime }}</template>
-            </p>
-          </div>
-        </div>
-            </template>
+                      <p class="text-[11px] text-n-slate-9">
+                        abriu {{ managerBrief.tasks_opened || 0 }} tarefa(s)
+                        hoje<template v-if="managerLastRunTime">
+                          · {{ managerLastRunTime }}
+                        </template>
+                      </p>
+                    </div>
+                  </div>
+                </template>
 
-            <template v-else-if="blockId === 'radar'">
-        <!-- 💚 Avisos do Radar de Oportunidades — cartão BRANCO (contraste
+                <template v-else-if="blockId === 'campanhas'">
+                  <!-- 🎯 Agente de Campanhas (item 352): a leitura de hoje (estrela-guia
+                       vs nossa média) + as recomendações esperando ok. Só para quem vê
+                       o ambiente Campanhas; some quando o agente ainda não leu. -->
+                  <div v-if="campaignAgent" class="cv-block mb-6">
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-target text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Agente de Campanhas
+                        </h2>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          últimos {{ campaignSummary.window_days || 7 }} dias vs
+                          nossa média de
+                          {{ campaignSummary.baseline_days || 30 }} dias
+                        </span>
+                      </div>
+
+                      <div
+                        class="flex flex-wrap items-end gap-x-5 gap-y-2 mb-2"
+                      >
+                        <div>
+                          <p class="text-[10px] text-n-slate-9 uppercase">
+                            {{ campaignAgent.goal_label }}
+                          </p>
+                          <p class="text-xl font-bold text-n-slate-12">
+                            {{ campaignMoney(campaignSummary.goal_cost) }}
+                            <span
+                              v-if="campaignVerdict"
+                              class="cv-chip ml-1 align-middle"
+                              :class="campaignVerdict.tone"
+                            >
+                              {{ campaignVerdict.text }}
+                              ({{
+                                campaignMoney(
+                                  campaignSummary.baseline_goal_cost
+                                )
+                              }})
+                            </span>
+                          </p>
+                        </div>
+                        <div class="text-xs text-n-slate-11">
+                          gasto
+                          <b>{{ campaignMoney(campaignSummary.spend) }}</b> ·
+                          leads <b>{{ campaignSummary.leads ?? '—' }}</b> ·
+                          agendamentos
+                          <b>{{ campaignSummary.booked ?? '—' }}</b> · cirurgias
+                          <b>{{ campaignSummary.surgeries ?? '—' }}</b>
+                        </div>
+                      </div>
+
+                      <p
+                        v-if="campaignAgent.brief"
+                        class="text-sm text-n-slate-11 leading-relaxed mb-2"
+                      >
+                        {{ campaignAgent.brief }}
+                      </p>
+
+                      <!-- 14 dias: gasto (linha cheia) e leads (linha tracejada) -->
+                      <div
+                        v-if="campaignSeries?.spend?.length"
+                        class="flex items-center gap-3 mb-2"
+                      >
+                        <svg
+                          viewBox="0 0 140 28"
+                          class="w-36 h-7 flex-shrink-0"
+                          aria-hidden="true"
+                        >
+                          <polyline
+                            :points="sparkPath(campaignSeries.spend)"
+                            fill="none"
+                            stroke="var(--cv)"
+                            stroke-width="2"
+                            stroke-linejoin="round"
+                          />
+                          <polyline
+                            :points="sparkPath(campaignSeries.leads)"
+                            fill="none"
+                            stroke="var(--cv-deep)"
+                            stroke-width="1.5"
+                            stroke-dasharray="3 2"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                        <span class="text-[10px] text-n-slate-9">
+                          14 dias · gasto (cheia) e leads (tracejada)
+                        </span>
+                      </div>
+
+                      <div
+                        v-if="campaignAgent.top?.length"
+                        class="space-y-1 mb-2"
+                      >
+                        <button
+                          v-for="a in campaignAgent.top"
+                          :key="a.id"
+                          class="cv-sub w-full text-left px-3 py-1.5 text-xs flex items-center gap-2"
+                          @click="openCampaignAgent"
+                        >
+                          <span
+                            class="cv-chip"
+                            :class="
+                              a.severity === 'alerta'
+                                ? 'cv-red'
+                                : a.severity === 'oportunidade'
+                                  ? 'cv-green'
+                                  : 'cv-amber'
+                            "
+                          >
+                            {{ a.channel === 'meta' ? 'Meta' : 'Google' }}
+                          </span>
+                          <span class="font-medium text-n-slate-12 truncate">
+                            {{ a.title }}
+                          </span>
+                          <span
+                            class="text-n-slate-9 truncate hidden sm:inline"
+                          >
+                            · {{ a.ref_name }}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button
+                          class="cv-btn cv-btn-sm"
+                          @click="openCampaignAgent"
+                        >
+                          <span class="i-lucide-target text-xs" />
+                          {{
+                            campaignAgent.open
+                              ? `${campaignAgent.open} esperando seu ok`
+                              : 'Abrir Campanhas'
+                          }}
+                        </button>
+                        <span
+                          v-if="campaignAgent.approved"
+                          class="text-[11px] text-n-slate-9"
+                        >
+                          {{ campaignAgent.approved }} aprovada(s) para aplicar
+                        </span>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          leitura de hoje<template v-if="campaignLastRunTime">
+                            · {{ campaignLastRunTime }}
+                          </template>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else-if="blockId === 'paginas'">
+                  <!-- 📄 Agente de Páginas (item 353): a leitura de hoje das páginas
+                       (lead por visita vs a média das próprias páginas), a campeã e os
+                       pontos a melhorar esperando ok. Só para quem vê Resultados de tráfego. -->
+                  <div v-if="pageAgent" class="cv-block mb-6">
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-file-text text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Agente de Páginas
+                        </h2>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          últimos {{ pageSummary.window_days || 7 }} dias vs a
+                          média das páginas em
+                          {{ pageSummary.baseline_days || 90 }} dias
+                        </span>
+                      </div>
+
+                      <div
+                        class="flex flex-wrap items-end gap-x-5 gap-y-2 mb-2"
+                      >
+                        <div>
+                          <p class="text-[10px] text-n-slate-9 uppercase">
+                            visita → lead
+                          </p>
+                          <p class="text-xl font-bold text-n-slate-12">
+                            {{ pagePct(pageSummary.lead_rate) }}
+                            <span
+                              v-if="pageVerdict"
+                              class="cv-chip ml-1 align-middle"
+                              :class="pageVerdict.tone"
+                            >
+                              {{ pageVerdict.text }}
+                              ({{ pagePct(pageSummary.avg_lead_rate) }})
+                            </span>
+                          </p>
+                        </div>
+                        <div class="text-xs text-n-slate-11">
+                          visitas <b>{{ pageSummary.views ?? '—' }}</b> ·
+                          cliques no WhatsApp
+                          <b>{{ pageSummary.cta ?? '—' }}</b> · leads
+                          <b>{{ pageSummary.leads ?? '—' }}</b> · agendaram
+                          <b>{{ pageSummary.booked ?? '—' }}</b>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="pageAgent.series?.views?.length"
+                        class="flex items-center gap-3 mb-2"
+                      >
+                        <svg
+                          viewBox="0 0 140 28"
+                          class="w-36 h-7 flex-shrink-0"
+                          aria-hidden="true"
+                        >
+                          <polyline
+                            :points="sparkPath(pageAgent.series.views)"
+                            fill="none"
+                            stroke="var(--cv)"
+                            stroke-width="2"
+                            stroke-linejoin="round"
+                          />
+                          <polyline
+                            :points="sparkPath(pageAgent.series.leads)"
+                            fill="none"
+                            stroke="var(--cv-deep)"
+                            stroke-width="1.5"
+                            stroke-dasharray="3 2"
+                            stroke-linejoin="round"
+                          />
+                        </svg>
+                        <span class="text-[10px] text-n-slate-9">
+                          14 dias · visitas (cheia) e leads (tracejada)
+                        </span>
+                      </div>
+
+                      <p
+                        v-if="pageAgent.champion"
+                        class="text-xs text-n-slate-11 mb-2"
+                      >
+                        🏆 campeã da semana:
+                        <b>
+                          {{ pageAgent.champion.emoji }}
+                          {{ pageAgent.champion.title }}
+                        </b>
+                        · {{ pagePct(pageAgent.champion.lead_rate) }} das
+                        visitas viraram lead
+                      </p>
+
+                      <div v-if="pageAgent.top?.length" class="space-y-1 mb-2">
+                        <button
+                          v-for="a in pageAgent.top"
+                          :key="a.id"
+                          class="cv-sub w-full text-left px-3 py-1.5 text-xs flex items-center gap-2"
+                          @click="openPageAgent"
+                        >
+                          <span
+                            class="cv-chip"
+                            :class="
+                              a.severity === 'alerta'
+                                ? 'cv-red'
+                                : a.severity === 'oportunidade'
+                                  ? 'cv-green'
+                                  : 'cv-amber'
+                            "
+                          >
+                            {{ a.severity === 'seo' ? 'SEO' : a.severity }}
+                          </span>
+                          <span class="font-medium text-n-slate-12 truncate">
+                            {{ a.title }}
+                          </span>
+                          <span
+                            class="text-n-slate-9 truncate hidden sm:inline"
+                          >
+                            · {{ a.ref_name }}
+                          </span>
+                        </button>
+                      </div>
+
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <button class="cv-btn cv-btn-sm" @click="openPageAgent">
+                          <span class="i-lucide-file-text text-xs" />
+                          {{
+                            pageAgent.open
+                              ? `${pageAgent.open} esperando seu ok`
+                              : 'Abrir Análise de Páginas'
+                          }}
+                        </button>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          leitura de hoje<template v-if="pageLastRunTime">
+                            · {{ pageLastRunTime }}
+                          </template>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else-if="blockId === 'radar'">
+                  <!-- 💚 Avisos do Radar de Oportunidades — cartão BRANCO (contraste
              nos dois temas) + verde dopamine + botão que emana energia
              (pedido 17/07: convite, não bronca) -->
-        <div
-          v-if="radarQueue.length && !avisoChecado(radarSignature)"
-          class="rounded-2xl overflow-hidden mb-6 bg-white shadow-lg"
-          style="border: 2px solid rgba(16, 185, 129, 0.35)"
-        >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #059669, #4ADE80)" />
-          <div class="p-4 sm:p-5">
-            <div class="flex items-center gap-2 mb-3 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #059669, #4ADE80)">
-                <span class="i-lucide-radar text-white text-base" />
-              </span>
-              <h2 class="text-sm font-bold" style="color: #0f172a">
-                {{ radarQueue.length === 1
-                  ? '1 paciente quente sem atendimento'
-                  : `${radarQueue.length} pacientes quentes sem atendimento` }}
-              </h2>
-              <!-- 📈 eficácia (item 83): o Radar gerando consulta de verdade -->
-              <span
-                v-if="radarEfficacy"
-                class="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                style="background: rgba(16, 185, 129, 0.12); color: #047857; border: 1px solid rgba(16, 185, 129, 0.3)"
-                :title="`Dos ${radarEfficacy.attended_30d} avisos atendidos nos últimos 30 dias, ${radarEfficacy.converted_30d} paciente(s) agendaram consulta depois do aviso`"
-              >
-                📈 {{ radarEfficacy.converted_30d }} consulta(s) geradas · {{ radarEfficacy.rate }}%
-              </span>
-              <span v-if="radarLastRun" class="text-[11px] ml-auto" style="color: #94a3b8">auditoria às {{ radarLastRun }}</span>
-              <button
-                v-if="radarStatus && isAdmin"
-                class="text-[11px] font-medium px-2.5 py-1 rounded-lg border disabled:opacity-50"
-                style="border-color: #e2e8f0; color: #64748b"
-                :title="radarLastActionLabel"
-                :disabled="togglingRadar"
-                @click="toggleRadarManual"
-              >
-                {{ radarStatus.enabled ? '⏸ Pausar radar' : '▶️ Reativar radar' }}
-              </button>
-              <button
-                class="w-7 h-7 rounded-lg border flex items-center justify-center transition-colors flex-shrink-0"
-                style="border-color: #e2e8f0; color: #059669"
-                title="Dar check: esconder este aviso (volta quando o Radar tiver novidade)"
-                @click="checkAviso(radarSignature)"
-              >
-                <span class="i-lucide-check text-sm" />
-              </button>
-            </div>
-            <!-- CARROSSEL pulsante (item 63): a pilha espia atrás (nome +
+                  <div
+                    v-if="radarQueue.length && !avisoChecado(radarSignature)"
+                    class="cv-block mb-6"
+                  >
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-3 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-radar text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          {{
+                            radarQueue.length === 1
+                              ? '1 paciente quente sem atendimento'
+                              : `${radarQueue.length} pacientes quentes sem atendimento`
+                          }}
+                        </h2>
+                        <!-- 📈 eficácia (item 83): o Radar gerando consulta de verdade -->
+                        <span
+                          v-if="radarEfficacy"
+                          class="cv-chip cv-green"
+                          :title="`Dos ${radarEfficacy.attended_30d} avisos atendidos nos últimos 30 dias, ${radarEfficacy.converted_30d} paciente(s) agendaram consulta depois do aviso`"
+                        >
+                          <span class="i-lucide-trending-up text-xs" />{{
+                            radarEfficacy.converted_30d
+                          }}
+                          consulta(s) geradas · {{ radarEfficacy.rate }}%
+                        </span>
+                        <span
+                          v-if="radarLastRun"
+                          class="text-[11px] ml-auto text-n-slate-9"
+                          >auditoria às {{ radarLastRun }}</span
+                        >
+                        <button
+                          v-if="radarStatus && isAdmin"
+                          class="cv-btn cv-btn-ghost cv-btn-sm"
+                          :title="radarLastActionLabel"
+                          :disabled="togglingRadar"
+                          @click="toggleRadarManual"
+                        >
+                          <span
+                            :class="
+                              radarStatus.enabled
+                                ? 'i-lucide-pause'
+                                : 'i-lucide-play'
+                            "
+                            class="text-xs"
+                          />
+                          {{
+                            radarStatus.enabled
+                              ? 'Pausar radar'
+                              : 'Reativar radar'
+                          }}
+                        </button>
+                        <button
+                          class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
+                          title="Dar check: esconder este aviso (volta quando o Radar tiver novidade)"
+                          @click="checkAviso(radarSignature)"
+                        >
+                          <span class="i-lucide-check text-sm" />
+                        </button>
+                      </div>
+                      <!-- CARROSSEL pulsante (item 63): a pilha espia atrás (nome +
                  tempo) e o card da frente mostra tudo — CRM, etiquetas,
                  contexto e o botão convidativo -->
-            <div class="relative max-w-2xl mx-auto" :style="{ paddingTop: `${radarPeek.length * 14 + 2}px` }">
-              <!-- pilha de trás -->
-              <div
-                v-for="(p, i) in radarPeek"
-                :key="`peek-${p.conversation_id}`"
-                class="absolute left-1/2 -translate-x-1/2 rounded-xl border flex items-center gap-2 px-3 h-8 cursor-pointer"
-                :style="{
-                  top: `${(radarPeek.length - 1 - i) * 14}px`,
-                  width: `calc(100% - ${(i + 1) * 36}px)`,
-                  zIndex: 3 - i,
-                  background: '#fbfdfc',
-                  borderColor: '#dbe7e1',
-                  opacity: String(0.85 - i * 0.18),
-                }"
-                :title="`Trazer ${p.contact_name} para a frente`"
-                @click="rotateRadar"
-              >
-                <span class="text-[11px] font-semibold truncate" style="color: #334155">{{ p.contact_name }}</span>
-                <span class="text-[10px] ml-auto flex-shrink-0" style="color: #047857">{{ waitingLabel(p) }}</span>
-              </div>
+                      <div
+                        class="relative max-w-2xl mx-auto"
+                        :style="{
+                          paddingTop: `${radarPeek.length * 14 + 2}px`,
+                        }"
+                      >
+                        <!-- pilha de trás -->
+                        <div
+                          v-for="(p, i) in radarPeek"
+                          :key="`peek-${p.conversation_id}`"
+                          class="absolute left-1/2 -translate-x-1/2 rounded-xl border flex items-center gap-2 px-3 h-8 cursor-pointer"
+                          :style="{
+                            top: `${(radarPeek.length - 1 - i) * 14}px`,
+                            width: `calc(100% - ${(i + 1) * 36}px)`,
+                            zIndex: 3 - i,
+                            background: '#fbfdfc',
+                            borderColor: '#dbe7e1',
+                            opacity: String(0.85 - i * 0.18),
+                          }"
+                          :title="`Trazer ${p.contact_name} para a frente`"
+                          @click="rotateRadar"
+                        >
+                          <span
+                            class="text-[11px] font-semibold truncate"
+                            style="color: #334155"
+                            >{{ p.contact_name }}</span
+                          >
+                          <span
+                            class="text-[10px] ml-auto flex-shrink-0"
+                            style="color: #047857"
+                            >{{ waitingLabel(p) }}</span
+                          >
+                        </div>
 
-              <!-- card da FRENTE (pulsa como Tarefas 100%) -->
-              <div
-                v-if="radarFront"
-                :key="`front-${radarFront.conversation_id}`"
-                class="cevico-radar-front relative z-10 rounded-xl p-3 cursor-pointer flex flex-col gap-2 bg-white"
-                @click="openChatBalloon(radarFront)"
-              >
-                <div class="flex items-center gap-2">
+                        <!-- card da FRENTE (pulsa como Tarefas 100%) -->
+                        <div
+                          v-if="radarFront"
+                          :key="`front-${radarFront.conversation_id}`"
+                          class="cevico-radar-front relative z-10 rounded-xl p-3 cursor-pointer flex flex-col gap-2 bg-white"
+                          @click="openChatBalloon(radarFront)"
+                        >
+                          <div class="flex items-center gap-2">
+                            <div
+                              class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0"
+                              style="
+                                background: linear-gradient(
+                                  135deg,
+                                  #059669,
+                                  #4ade80
+                                );
+                              "
+                            >
+                              {{ alertInitials(radarFront) }}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                              <p
+                                class="text-sm font-semibold truncate leading-tight"
+                                style="color: #0f172a"
+                              >
+                                {{ radarFront.contact_name }}
+                              </p>
+                              <p
+                                v-if="radarFront.phone"
+                                class="text-xs truncate"
+                                style="color: #64748b"
+                              >
+                                {{ radarFront.phone }}
+                              </p>
+                            </div>
+                            <span
+                              class="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0"
+                              style="
+                                background: rgba(16, 185, 129, 0.12);
+                                color: #047857;
+                                border: 1px solid rgba(16, 185, 129, 0.3);
+                              "
+                            >
+                              <span class="i-lucide-clock text-[11px]" />
+                              {{ waitingLabel(radarFront) }}
+                            </span>
+                          </div>
+                          <div
+                            v-if="
+                              alertKindMeta(radarFront) ||
+                              radarFront.stage_name ||
+                              radarFront.user_name
+                            "
+                            class="flex flex-wrap gap-1"
+                          >
+                            <span
+                              v-if="alertKindMeta(radarFront)"
+                              class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-semibold text-white"
+                              :style="{
+                                background: alertKindMeta(radarFront).color,
+                              }"
+                            >
+                              <span
+                                :class="alertKindMeta(radarFront).icon"
+                                class="text-[11px]"
+                              />
+                              {{ alertKindMeta(radarFront).label }}
+                            </span>
+                            <span
+                              v-if="radarFront.stage_name"
+                              class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded"
+                              style="background: #eef2f7; color: #475569"
+                            >
+                              <span
+                                class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                                style="background: #059669"
+                              />
+                              {{ radarFront.stage_name }}
+                            </span>
+                            <span
+                              v-if="radarFront.user_name"
+                              class="text-xs px-1.5 py-0.5 rounded font-medium"
+                              style="
+                                background: rgba(212, 160, 23, 0.14);
+                                color: #92600a;
+                              "
+                              >📌 para {{ radarFront.user_name }}</span
+                            >
+                          </div>
+                          <div
+                            class="rounded-r-lg px-2 py-1.5"
+                            style="
+                              background: #f8fafc;
+                              border-left: 2px solid #10b981;
+                            "
+                          >
+                            <p
+                              class="text-xs leading-snug"
+                              style="color: #475569"
+                            >
+                              {{ radarFront.motivo }}
+                            </p>
+                          </div>
+                          <p class="text-xs" style="color: #475569">
+                            💡 <b style="color: #0f172a">O que fazer:</b>
+                            {{ radarFront.acao }}
+                          </p>
+                          <div
+                            class="flex items-center justify-between gap-1 mt-auto"
+                          >
+                            <div class="flex items-center gap-1">
+                              <button
+                                v-if="radarFront.contact_id"
+                                class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+                                title="Espaço do Paciente"
+                                @click.stop="openPatientSpace(radarFront)"
+                              >
+                                <PatientSpaceIcon :size="24" />
+                              </button>
+                              <button
+                                v-if="radarFront.kind !== 'robo_parado'"
+                                class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
+                                style="
+                                  color: #2563eb;
+                                  background: rgba(37, 99, 235, 0.1);
+                                "
+                                title="Abrir conversa"
+                                @click.stop="openChatBalloon(radarFront)"
+                              >
+                                <span
+                                  class="i-lucide-message-circle-more text-lg"
+                                />
+                              </button>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                              <button
+                                v-if="radarQueue.length > 1"
+                                class="text-[11px] font-medium px-2.5 py-1.5 rounded-full border transition-colors hover:bg-slate-50"
+                                style="border-color: #e2e8f0; color: #64748b"
+                                title="Deixar para depois — vai para o fim da fila"
+                                @click.stop="rotateRadar"
+                              >
+                                pular ↷
+                              </button>
+                              <button
+                                v-if="isAgentAlert(radarFront)"
+                                class="text-[11px] font-semibold px-2.5 py-1.5 rounded-full border transition-colors hover:bg-slate-50"
+                                style="border-color: #bfdbfe; color: #1d4ed8"
+                                title="Conferir a consulta na Agenda"
+                                @click.stop="openAgendaFromAlert(radarFront)"
+                              >
+                                📅 Agenda
+                              </button>
+                              <button
+                                class="cevico-energy-btn text-xs font-bold text-white px-3.5 py-1.5 rounded-lg"
+                                @click.stop="attendNow(radarFront, $event)"
+                              >
+                                {{
+                                  radarFront.kind === 'robo_parado'
+                                    ? 'Ok, vi'
+                                    : isAgentAlert(radarFront)
+                                      ? 'Ver conversa →'
+                                      : 'Atender agora →'
+                                }}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <p
+                          v-if="radarQueue.length > 4"
+                          class="text-center text-[11px] mt-1.5 text-n-slate-9"
+                        >
+                          +{{ radarQueue.length - 4 }} na fila
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else-if="blockId === 'tarefas' && estiloClassico">
+                  <!-- 📋 Tarefas e notas (redesenho 27/09, "clean e organizado"):
+                       UMA lista por vez (abas), linhas com fio em vez de caixinhas,
+                       sem coluna vazia ocupando espaço -->
                   <div
-                    class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-semibold flex-shrink-0"
-                    style="background: linear-gradient(135deg, #059669, #4ADE80)"
+                    v-if="
+                      tasksBoxAlways ||
+                      ((myTasks.length || patientNotes.length) &&
+                        !avisoChecado(tasksSignature))
+                    "
+                    class="cv-block mb-6"
                   >
-                    {{ alertInitials(radarFront) }}
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-3 mb-3 min-h-[30px]">
+                        <span class="cv-icon cv-icon-sm">
+                          <span class="i-lucide-list-checks text-sm" />
+                        </span>
+                        <div class="min-w-0">
+                          <h2
+                            class="text-sm font-bold text-n-slate-12 leading-none"
+                          >
+                            Tarefas e notas
+                          </h2>
+                          <p
+                            class="text-[11px] text-n-slate-9 mt-0.5 tabular-nums"
+                          >
+                            {{ myTasksCount }}
+                            {{
+                              myTasksCount === 1
+                                ? 'tarefa esperando você'
+                                : 'tarefas esperando você'
+                            }}
+                            · {{ patientNotes.length }}
+                            {{ patientNotes.length === 1 ? 'nota' : 'notas' }}
+                            da equipe
+                          </p>
+                        </div>
+                        <div class="ml-auto flex items-center gap-1.5">
+                          <button
+                            class="cv-btn cv-btn-ghost cv-btn-sm"
+                            title="Escrever um recado sobre um paciente"
+                            @click="showNoteForm = !showNoteForm"
+                          >
+                            <span class="i-lucide-plus text-xs" />
+                            Nota
+                          </button>
+                          <button class="cv-btn cv-btn-sm" @click="goToTasks">
+                            Tarefas
+                            <span class="i-lucide-arrow-right text-xs" />
+                          </button>
+                          <button
+                            v-if="!tasksBoxAlways"
+                            class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
+                            title="Dar check: esconder este aviso (volta quando houver tarefa nova)"
+                            @click="checkAviso(tasksSignature)"
+                          >
+                            <span class="i-lucide-check text-sm" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div v-if="showNoteForm" class="cv-sub p-3.5 mb-3">
+                        <PatientNoteForm
+                          compact
+                          @saved="onPanelNoteSaved"
+                          @cancel="showNoteForm = false"
+                        />
+                      </div>
+
+                      <div class="cv-seg cv-seg-sm mb-2">
+                        <button
+                          class="cv-seg-item"
+                          :class="tasksTab === 'tarefas' ? 'cv-seg-on' : ''"
+                          @click="pickTasksTab('tarefas')"
+                        >
+                          <span class="i-lucide-circle-dot text-[11px]" />
+                          Esperando você
+                          <span class="tabular-nums opacity-70">{{
+                            myTasksCount
+                          }}</span>
+                        </button>
+                        <button
+                          class="cv-seg-item"
+                          :class="tasksTab === 'notas' ? 'cv-seg-on' : ''"
+                          @click="pickTasksTab('notas')"
+                        >
+                          <span class="i-lucide-sticky-note text-[11px]" />
+                          Notas dos pacientes
+                          <span class="tabular-nums opacity-70">{{
+                            patientNotes.length
+                          }}</span>
+                        </button>
+                      </div>
+
+                      <!-- TAREFAS: uma linha por tarefa -->
+                      <template v-if="tasksTab === 'tarefas'">
+                        <p
+                          v-if="!myTasks.length"
+                          class="text-xs text-n-slate-9 py-5 text-center"
+                        >
+                          Nada esperando você agora. ✨
+                        </p>
+                        <div
+                          v-else
+                          class="cv-list max-h-[22rem] overflow-y-auto"
+                        >
+                          <button
+                            v-for="task in myTasks"
+                            :key="task.id"
+                            class="cv-list-row w-full text-left"
+                            @click="goToTasks"
+                          >
+                            <span
+                              class="w-2 h-2 rounded-full flex-shrink-0"
+                              :style="{
+                                background:
+                                  TASK_DOT[task.priority] || TASK_DOT.medium,
+                              }"
+                              :title="
+                                TASK_PRIORITY_LABEL[task.priority] ||
+                                task.priority
+                              "
+                            />
+                            <span
+                              class="text-[13px] font-medium text-n-slate-12 truncate min-w-0 flex-1"
+                            >
+                              {{ task.title }}
+                            </span>
+                            <span
+                              v-if="task.comments_count"
+                              class="text-[10px] text-n-slate-9 inline-flex items-center gap-0.5 flex-shrink-0"
+                              ><span
+                                class="i-lucide-message-circle text-[10px]"
+                              />{{ task.comments_count }}</span
+                            >
+                            <span
+                              v-if="task.creator_name"
+                              class="text-[10px] text-n-slate-9 flex-shrink-0 hidden sm:inline"
+                              >de {{ task.creator_name.split(' ')[0] }}</span
+                            >
+                            <span
+                              v-if="task.due_at"
+                              class="cv-chip !h-5 !px-1.5 text-[10px] flex-shrink-0 tabular-nums"
+                              :class="
+                                new Date(task.due_at) < new Date()
+                                  ? 'cv-red'
+                                  : ''
+                              "
+                              ><span
+                                class="i-lucide-alarm-clock text-[10px]"
+                              />{{ fmtTaskDue(task.due_at) }}</span
+                            >
+                          </button>
+                        </div>
+                        <p
+                          v-if="myTasksCount > myTasks.length"
+                          class="text-[10px] text-n-slate-9 mt-1.5 text-right"
+                        >
+                          mostrando {{ myTasks.length }} de {{ myTasksCount }} —
+                          as outras estão em Tarefas
+                        </p>
+                      </template>
+
+                      <!-- NOTAS: avatar com iniciais, nome, hora, texto em 2 linhas -->
+                      <template v-else>
+                        <p
+                          v-if="!patientNotes.length"
+                          class="text-xs text-n-slate-9 py-5 text-center"
+                        >
+                          Nenhuma nota ainda — escreva a primeira em "+ Nota".
+                        </p>
+                        <div
+                          v-else
+                          class="cv-list max-h-[22rem] overflow-y-auto"
+                        >
+                          <div
+                            v-for="note in patientNotes"
+                            :key="note.id"
+                            class="cv-list-row group"
+                          >
+                            <button
+                              class="cv-avatar flex-shrink-0"
+                              title="Abrir o Espaço do Paciente"
+                              @click="openPatientFromNote(note)"
+                            >
+                              {{ noteInitials(note.contact?.name) }}
+                            </button>
+                            <div class="min-w-0 flex-1">
+                              <div class="flex items-baseline gap-2 min-w-0">
+                                <button
+                                  class="text-[13px] font-semibold text-n-slate-12 truncate hover:underline text-left"
+                                  title="Abrir o Espaço do Paciente"
+                                  @click="openPatientFromNote(note)"
+                                >
+                                  {{ note.contact?.name || 'Paciente' }}
+                                </button>
+                                <span
+                                  class="text-[10px] text-n-slate-9 whitespace-nowrap tabular-nums"
+                                >
+                                  {{ fmtNoteAt(note.created_at) }} ·
+                                  {{
+                                    note.author_name?.split(' ')[0] || 'equipe'
+                                  }}
+                                </span>
+                                <button
+                                  v-if="note.mine || isAdmin"
+                                  class="ml-auto text-n-slate-9 hover:text-red-500 opacity-0 group-hover:opacity-100 flex-shrink-0"
+                                  title="Apagar a nota"
+                                  @click="deletePanelNote(note)"
+                                >
+                                  <span class="i-lucide-trash-2 text-[11px]" />
+                                </button>
+                              </div>
+                              <p
+                                class="text-xs text-n-slate-11 leading-snug break-words line-clamp-2"
+                              >
+                                {{ note.content }}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
                   </div>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm font-semibold truncate leading-tight" style="color: #0f172a">{{ radarFront.contact_name }}</p>
-                    <p v-if="radarFront.phone" class="text-xs truncate" style="color: #64748b">{{ radarFront.phone }}</p>
-                  </div>
-                  <span
-                    class="inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 flex-shrink-0"
-                    style="background: rgba(16, 185, 129, 0.12); color: #047857; border: 1px solid rgba(16, 185, 129, 0.3)"
+                </template>
+
+                <template v-else-if="blockId === 'mentor'">
+                  <!-- 🧭 Mentor do Time: feedback da semana (individual; admin vê o time) -->
+                  <div
+                    v-if="visibleFeedback && !avisoChecado(fbSignature)"
+                    class="cv-block mb-6"
                   >
-                    <span class="i-lucide-clock text-[11px]" />
-                    {{ waitingLabel(radarFront) }}
-                  </span>
-                </div>
-                <div v-if="radarFront.stage_name || radarFront.user_name" class="flex flex-wrap gap-1">
-                  <span v-if="radarFront.stage_name" class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded" style="background: #eef2f7; color: #475569">
-                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: #059669" />
-                    {{ radarFront.stage_name }}
-                  </span>
-                  <span v-if="radarFront.user_name" class="text-xs px-1.5 py-0.5 rounded font-medium" style="background: rgba(212, 160, 23, 0.14); color: #92600a">📌 para {{ radarFront.user_name }}</span>
-                </div>
-                <div class="rounded-r-lg px-2 py-1.5" style="background: #f8fafc; border-left: 2px solid #10b981">
-                  <p class="text-xs leading-snug" style="color: #475569">{{ radarFront.motivo }}</p>
-                </div>
-                <p class="text-xs" style="color: #475569">💡 <b style="color: #0f172a">O que fazer:</b> {{ radarFront.acao }}</p>
-                <div class="flex items-center justify-between gap-1 mt-auto">
-                  <div class="flex items-center gap-1">
-                    <button
-                      v-if="radarFront.contact_id"
-                      class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
-                      title="Espaço do Paciente"
-                      @click.stop="openPatientSpace(radarFront)"
-                    >
-                      <PatientSpaceIcon :size="24" />
-                    </button>
-                    <button
-                      class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
-                      style="color: #2563EB; background: rgba(37, 99, 235, 0.1)"
-                      title="Abrir conversa"
-                      @click.stop="openChatBalloon(radarFront)"
-                    >
-                      <span class="i-lucide-message-circle-more text-lg" />
-                    </button>
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-3 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-graduation-cap text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          {{
+                            visibleFeedback.user_id === currentUser.id
+                              ? 'Seu feedback da semana'
+                              : `Feedback de ${visibleFeedback.user_name}`
+                          }}
+                        </h2>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">{{
+                          fbWeekLabel(visibleFeedback)
+                        }}</span>
+                        <button
+                          class="cv-btn cv-btn-ghost cv-iconbtn flex-shrink-0"
+                          title="Dar check: li meu feedback, pode esconder (volta na próxima semana)"
+                          @click="checkAviso(fbSignature)"
+                        >
+                          <span class="i-lucide-check text-sm" />
+                        </button>
+                      </div>
+
+                      <!-- admin: navega pelo time -->
+                      <div
+                        v-if="isAdmin && teamFeedbacks.length > 1"
+                        class="cv-seg cv-seg-sm flex-wrap mb-3"
+                      >
+                        <button
+                          v-for="fb in teamFeedbacks"
+                          :key="fb.user_id"
+                          class="cv-seg-item"
+                          :class="
+                            visibleFeedback.user_id === fb.user_id
+                              ? 'cv-seg-on'
+                              : ''
+                          "
+                          @click="feedbackViewUserId = fb.user_id"
+                        >
+                          {{ fb.user_name.split(' ')[0] }}
+                        </button>
+                      </div>
+
+                      <p class="text-sm text-n-slate-11 leading-relaxed mb-3">
+                        {{ visibleFeedback.feedback.resumo }}
+                      </p>
+
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
+                        <div class="cv-sub cv-green p-3">
+                          <p class="cv-label mb-1 flex items-center gap-1">
+                            <span class="i-lucide-thumbs-up text-xs" />Ponto
+                            forte
+                          </p>
+                          <p class="text-xs text-n-slate-11 leading-snug">
+                            {{ visibleFeedback.feedback.ponto_forte }}
+                          </p>
+                        </div>
+                        <div class="cv-sub cv-amber p-3">
+                          <p class="cv-label mb-1 flex items-center gap-1">
+                            <span class="i-lucide-wrench text-xs" />O ponto a
+                            corrigir
+                          </p>
+                          <p class="text-xs text-n-slate-11 leading-snug">
+                            {{ visibleFeedback.feedback.ponto_fraco }}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="visibleFeedback.feedback.solucoes?.length"
+                        class="space-y-1.5 mb-3"
+                      >
+                        <p class="cv-label">Soluções simples desta semana</p>
+                        <div
+                          v-for="(sol, si) in visibleFeedback.feedback.solucoes"
+                          :key="si"
+                          class="cv-sub flex items-start gap-2 px-3 py-2"
+                        >
+                          <span
+                            class="cv-icon text-[10px] font-bold mt-0.5"
+                            style="
+                              width: 20px;
+                              height: 20px;
+                              border-radius: 9999px;
+                            "
+                          >
+                            {{ si + 1 }}
+                          </span>
+                          <div class="min-w-0">
+                            <p class="text-xs font-semibold text-n-slate-12">
+                              {{ sol.titulo }}
+                            </p>
+                            <p class="text-xs text-n-slate-10 leading-snug">
+                              {{ sol.como_fazer }}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p
+                        v-if="visibleFeedback.feedback.incentivo"
+                        class="text-xs italic"
+                        style="color: var(--cv-deep)"
+                      >
+                        {{ visibleFeedback.feedback.incentivo }}
+                      </p>
+                    </div>
                   </div>
-                  <div class="flex items-center gap-1.5">
-                    <button
-                      v-if="radarQueue.length > 1"
-                      class="text-[11px] font-medium px-2 py-1.5 rounded-lg border transition-colors"
-                      style="border-color: #e2e8f0; color: #64748b"
-                      title="Deixar para depois — vai para o fim da fila"
-                      @click.stop="rotateRadar"
-                    >
-                      pular ↷
-                    </button>
-                    <button
-                      class="cevico-energy-btn text-xs font-bold text-white px-3.5 py-1.5 rounded-lg"
-                      @click.stop="attendNow(radarFront, $event)"
-                    >
-                      Atender agora →
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <p v-if="radarQueue.length > 4" class="text-center text-[11px] mt-1.5" style="color: #94a3b8">
-                +{{ radarQueue.length - 4 }} na fila
-              </p>
-            </div>
-          </div>
-        </div>
-            </template>
-
-            <template v-else-if="blockId === 'tarefas'">
-        <!-- 📋 Tarefas esperando você (aviso DOURADO — coisa boa a fazer) -->
-        <div
-          v-if="myTasks.length && !avisoChecado(tasksSignature)"
-          class="rounded-2xl border-2 overflow-hidden mb-6"
-          style="border-color: rgba(212, 160, 23, 0.5); background: rgba(212, 160, 23, 0.05)"
-        >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #B8860B, #D4A017)" />
-          <div class="p-4 sm:p-5">
-            <div class="flex items-center gap-2 mb-3 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #B8860B, #D4A017)">
-                <span class="i-lucide-list-checks text-white text-base" />
-              </span>
-              <h2 class="text-sm font-bold text-n-slate-12">
-                {{ myTasksCount }} tarefa(s) esperando você
-              </h2>
-              <button
-                class="ml-auto text-xs font-semibold text-white px-3 py-1.5 rounded-lg hover:opacity-90"
-                style="background: linear-gradient(135deg, #B8860B, #D4A017)"
-                @click="goToTasks"
-              >
-                Abrir Tarefas →
-              </button>
-              <button
-                class="w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center transition-colors flex-shrink-0"
-                style="color: #B8860B"
-                title="Dar check: esconder este aviso (volta quando houver tarefa nova)"
-                @click="checkAviso(tasksSignature)"
-              >
-                <span class="i-lucide-check text-sm" />
-              </button>
-            </div>
-            <div class="space-y-1.5">
-              <button
-                v-for="task in myTasks"
-                :key="task.id"
-                class="w-full flex items-center gap-2 flex-wrap bg-n-solid-1 border rounded-xl px-3 py-2 text-left hover:shadow-sm transition-shadow"
-                style="border-color: rgba(212, 160, 23, 0.3)"
-                @click="goToTasks"
-              >
-                <span class="i-lucide-circle-dot text-sm" style="color: #B8860B" />
-                <span class="text-sm font-medium text-n-slate-12 truncate">{{ task.title }}</span>
-                <span
-                  class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
-                  :class="['high', 'urgent'].includes(task.priority) ? 'bg-red-500/15 text-red-600' : 'bg-n-alpha-2 text-n-slate-11'"
-                >
-                  {{ TASK_PRIORITY_LABEL[task.priority] || task.priority }}
-                </span>
-                <span v-if="task.creator_name" class="text-[10px] text-n-slate-9">de {{ task.creator_name.split(' ')[0] }}</span>
-                <span v-if="task.comments_count" class="text-[10px] text-n-slate-9">💬 {{ task.comments_count }}</span>
-                <span v-if="task.due_at" class="text-[10px] text-n-slate-10 ml-auto">⏰ {{ fmtTaskDue(task.due_at) }}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-            </template>
-
-            <template v-else-if="blockId === 'mentor'">
-        <!-- 🧭 Mentor do Time: feedback da semana (individual; admin vê o time) -->
-        <div
-          v-if="visibleFeedback && !avisoChecado(fbSignature)"
-          class="rounded-2xl overflow-hidden mb-6 bg-n-card outline outline-1 outline-n-container"
-        >
-          <div class="h-1.5 w-full" style="background: linear-gradient(90deg, #C2410C, #FB923C)" />
-          <div class="p-4 sm:p-5">
-            <div class="flex items-center gap-2 mb-3 flex-wrap">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, #C2410C, #FB923C)">
-                <span class="i-lucide-graduation-cap text-white text-base" />
-              </span>
-              <h2 class="text-sm font-bold text-n-slate-12">
-                {{ visibleFeedback.user_id === currentUser.id ? 'Seu feedback da semana' : `Feedback de ${visibleFeedback.user_name}` }}
-              </h2>
-              <span class="text-[11px] text-n-slate-9 ml-auto">{{ fbWeekLabel(visibleFeedback) }}</span>
-              <button
-                class="w-7 h-7 rounded-lg border border-n-weak flex items-center justify-center transition-colors flex-shrink-0"
-                style="color: #C2410C"
-                title="Dar check: li meu feedback, pode esconder (volta na próxima semana)"
-                @click="checkAviso(fbSignature)"
-              >
-                <span class="i-lucide-check text-sm" />
-              </button>
-            </div>
-
-            <!-- admin: navega pelo time -->
-            <div v-if="isAdmin && teamFeedbacks.length > 1" class="flex items-center gap-1 flex-wrap mb-3">
-              <button
-                v-for="fb in teamFeedbacks"
-                :key="fb.user_id"
-                class="text-[11px] font-medium px-2.5 py-1 rounded-full transition-colors"
-                :class="visibleFeedback.user_id === fb.user_id ? 'text-white' : 'text-n-slate-10 bg-n-alpha-1 hover:bg-n-alpha-2'"
-                :style="visibleFeedback.user_id === fb.user_id ? { background: 'linear-gradient(135deg, #C2410C, #FB923C)' } : {}"
-                @click="feedbackViewUserId = fb.user_id"
-              >
-                {{ fb.user_name.split(' ')[0] }}
-              </button>
-            </div>
-
-            <p class="text-sm text-n-slate-11 leading-relaxed mb-3">{{ visibleFeedback.feedback.resumo }}</p>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-3">
-              <div class="rounded-xl p-3" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25)">
-                <p class="text-[10px] font-bold uppercase tracking-wide mb-1" style="color: #047857">Ponto forte</p>
-                <p class="text-xs text-n-slate-11 leading-snug">{{ visibleFeedback.feedback.ponto_forte }}</p>
-              </div>
-              <div class="rounded-xl p-3" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3)">
-                <p class="text-[10px] font-bold uppercase tracking-wide mb-1" style="color: #B45309">O ponto a corrigir</p>
-                <p class="text-xs text-n-slate-11 leading-snug">{{ visibleFeedback.feedback.ponto_fraco }}</p>
-              </div>
-            </div>
-
-            <div v-if="visibleFeedback.feedback.solucoes?.length" class="space-y-1.5 mb-3">
-              <p class="text-[10px] font-bold uppercase tracking-wide text-n-slate-9">Soluções simples desta semana</p>
-              <div
-                v-for="(sol, si) in visibleFeedback.feedback.solucoes"
-                :key="si"
-                class="flex items-start gap-2 rounded-xl border border-n-weak bg-n-solid-2 px-3 py-2"
-              >
-                <span
-                  class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 mt-0.5"
-                  style="background: linear-gradient(135deg, #C2410C, #FB923C)"
-                >
-                  {{ si + 1 }}
-                </span>
-                <div class="min-w-0">
-                  <p class="text-xs font-semibold text-n-slate-12">{{ sol.titulo }}</p>
-                  <p class="text-xs text-n-slate-10 leading-snug">{{ sol.como_fazer }}</p>
-                </div>
-              </div>
-            </div>
-
-            <p v-if="visibleFeedback.feedback.incentivo" class="text-xs italic" style="color: #9A3412">
-              {{ visibleFeedback.feedback.incentivo }}
-            </p>
-          </div>
-        </div>
-            </template>
-            </template>
-          </section>
+                </template>
+              </template>
+            </section>
           </template>
-        </draggable>
+        </MagnetBoard>
 
+        <!-- 🧭 item 338: daqui até o fim dos blocos de conteúdo = só na versão CLÁSSICA -->
+        <template v-if="estiloClassico">
         <!-- Seletor de painel (cada pessoa no seu) -->
         <div class="flex items-center gap-2 flex-wrap mb-3">
-          <div class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto">
+          <div class="cv-seg overflow-x-auto">
             <button
               v-for="p in visiblePanels"
               :key="p.key"
-              class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5"
-              :class="selectedPanel === p.key ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="selectedPanel === p.key ? { background: p.grad } : {}"
+              class="cv-seg-item"
+              :class="selectedPanel === p.key ? 'cv-seg-on' : ''"
               @click="setPanel(p.key)"
             >
               <span :class="p.icon" class="text-sm" />
@@ -2278,7 +6915,7 @@ onUnmounted(() => {
             </button>
             <button
               v-if="isAdmin"
-              class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 flex items-center justify-center"
+              class="cv-seg-item cv-seg-icon"
               title="Definir qual painel cada pessoa vê"
               @click="openAssignModal"
             >
@@ -2286,29 +6923,31 @@ onUnmounted(() => {
             </button>
             <button
               v-if="isAdmin"
-              class="w-8 h-8 rounded-lg text-n-slate-10 hover:bg-n-alpha-1 flex items-center justify-center"
+              class="cv-seg-item cv-seg-icon"
               title="Metas do painel (os cards mudam de cor contra a meta)"
               @click="openGoalsModal"
             >
               <span class="i-lucide-target text-sm" />
             </button>
-            <!-- atalho pro Dashboard da Agenda em TODOS os painéis (item 86) -->
+            <!-- 🧑‍🤝‍🧑 painel por pessoa (rodada 160): versão de um painel-base
+                 com layout próprio, para uma ou mais pessoas do time -->
             <button
-              class="h-8 px-3 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 hover:opacity-90 whitespace-nowrap"
-              style="background: linear-gradient(135deg, #0369A1, #38BDF8)"
-              :title="isClinica ? 'Dashboard da Agenda — comparecimento, ocupação, cirurgias' : 'Dashboard da Agenda — comparecimento e ocupação'"
-              @click="goToAgendaDashboard"
+              v-if="isAdmin"
+              class="cv-seg-item"
+              title="Criar um painel para uma pessoa: escolhe o painel-base e quem vê; depois organiza blocos e cards no Modo edição"
+              @click="openVariantModal()"
             >
-              <span class="i-lucide-calendar-range text-sm" />
-              Dashboard da Agenda
+              <span class="i-lucide-user-plus text-sm" />
+              Painel por pessoa
             </button>
           </div>
+          <!-- (28/09) o atalho "Dashboard da Agenda" saiu daqui a pedido dele —
+               o bloco Dashboard da Agenda continua no painel e em Acesso rápido -->
           <!-- pílulas de médico (só no painel Médicos) -->
-          <div v-if="selectedPanel === 'medico'" class="flex items-center bg-n-solid-2 border border-n-weak rounded-xl p-0.5 gap-0.5 w-fit max-w-full overflow-x-auto">
+          <div v-if="panelBase === 'medico'" class="cv-seg overflow-x-auto">
             <button
-              class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-              :class="!selectedDoctor ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="!selectedDoctor ? { background: currentPanel.grad } : {}"
+              class="cv-seg-item"
+              :class="!selectedDoctor ? 'cv-seg-on' : ''"
               @click="setDoctor('')"
             >
               Todos
@@ -2316,9 +6955,11 @@ onUnmounted(() => {
             <button
               v-for="doc in DOCTORS"
               :key="doc.name"
-              class="px-3 h-8 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
-              :class="selectedDoctor === doc.name ? 'text-white' : 'text-n-slate-11 hover:bg-n-alpha-1'"
-              :style="selectedDoctor === doc.name ? { background: doc.color } : {}"
+              class="cv-seg-item"
+              :class="selectedDoctor === doc.name ? 'cv-seg-on' : ''"
+              :style="
+                selectedDoctor === doc.name ? { background: doc.color } : {}
+              "
               @click="setDoctor(doc.name)"
             >
               {{ doc.short || doc.name }}
@@ -2327,38 +6968,113 @@ onUnmounted(() => {
         </div>
 
         <!-- Régua de período PADRÃO (presets + Personalizado De/Até) -->
-        <div class="mb-4 max-w-full">
-          <PeriodRuler v-model="period" class="max-w-full" />
+        <div class="mb-4 max-w-full flex flex-wrap items-center gap-2">
+          <PeriodRuler v-model="period" glass class="max-w-full" />
+          <!-- 🔎 item 328: de qual FONTE de pacientes são os números -->
+          <div
+            v-if="lensOptions.length"
+            class="cv-seg inline-flex items-center gap-0.5 max-w-full flex-nowrap overflow-x-auto"
+            title="De qual fonte de pacientes são os números do painel"
+          >
+            <span
+              class="i-lucide-split text-sm ml-2 mr-0.5 flex-shrink-0"
+              :style="{ color: 'var(--cv)' }"
+            />
+            <button
+              v-for="opt in lensOptions"
+              :key="opt.key"
+              class="cv-seg-item text-xs font-medium whitespace-nowrap flex-shrink-0"
+              :class="activeLens === opt.key ? 'cv-seg-on' : ''"
+              @click="setSourceLens(opt.key)"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
         </div>
+        <p
+          v-if="lensOptions.length && activeLens !== 'cevico'"
+          class="cv-sub px-3 py-2 mb-4 text-xs text-n-slate-11 leading-relaxed"
+        >
+          <span class="i-lucide-split text-xs align-middle mr-1" />
+          <b class="text-n-slate-12">Vendo: {{ activeLensLabel }}.</b>
+          {{
+            activeLens === 'all'
+              ? 'Os indicadores somam todas as fontes de pacientes.'
+              : `Os indicadores mostram só o que é da fonte ${activeLensLabel}: pacientes, agendamentos e colunas do funil dela.`
+          }}
+          Metas e recordes são da CEVICO e não julgam os cards nesta visão.
+          Tarefas, próximas consultas, Radar e desempenho das pessoas não mudam
+          com a chavinha.
+        </p>
 
         <!-- ✈️ GESTOR: o indicador de decisão — posso viajar ou é ação imediata? -->
+        <!-- item 240: minimizado = barrinha na mesma cor; clique abre de novo -->
+        <button
+          v-if="panelBase === 'gestor' && data && verdictMinimized"
+          class="cv-modal-head w-full rounded-2xl shadow-md mb-4 !px-4 !py-2.5 flex items-center gap-3 text-left"
+          :style="{ background: gestorVerdict.grad }"
+          title="Abrir os avisos de novo"
+          @click="setVerdictMinimized(false)"
+        >
+          <p class="text-sm font-bold flex-1 min-w-0 truncate">
+            {{ gestorVerdict.title }}
+          </p>
+          <span class="cv-glass-chip">
+            {{
+              gestorSignals.length
+                ? `${gestorSignals.length} aviso(s)`
+                : 'nenhum aviso'
+            }}
+          </span>
+          <span class="i-lucide-chevron-down text-base shrink-0" />
+        </button>
         <div
-          v-if="selectedPanel === 'gestor' && data"
-          class="rounded-2xl text-white shadow-lg overflow-hidden mb-4"
+          v-else-if="panelBase === 'gestor' && data"
+          class="cv-modal-head rounded-3xl shadow-lg mb-4 !p-5"
           :style="{ background: gestorVerdict.grad }"
         >
-          <div class="p-4 sm:p-5">
+          <div>
             <div class="flex items-center gap-3 flex-wrap">
               <div class="flex-1 min-w-[220px]">
                 <p class="text-lg font-bold">{{ gestorVerdict.title }}</p>
-                <p class="text-xs text-white/80 mt-0.5">{{ gestorVerdict.sub }}</p>
+                <p class="text-xs text-white/80 mt-0.5">
+                  {{ gestorVerdict.sub }}
+                </p>
               </div>
-              <span class="text-[10px] px-2.5 py-1 rounded-full bg-white/20 font-semibold">
-                {{ gestorSignals.length ? `${gestorSignals.length} aviso(s)` : 'nenhum aviso' }}
+              <span class="cv-glass-chip">
+                {{
+                  gestorSignals.length
+                    ? `${gestorSignals.length} aviso(s)`
+                    : 'nenhum aviso'
+                }}
               </span>
+              <button
+                class="cv-glass-btn cv-iconbtn"
+                title="Minimizar — volta a abrir sozinho se aparecer um aviso novo ou amanhã"
+                @click="setVerdictMinimized(true)"
+              >
+                <span class="i-lucide-minus text-sm" />
+              </button>
             </div>
             <!-- central de avisos: os motivos, prontos para agir -->
             <div v-if="gestorSignals.length" class="mt-3 space-y-1.5">
               <div
                 v-for="(sig, si) in gestorSignals"
                 :key="si"
-                class="flex items-center gap-2 bg-black/15 rounded-lg px-3 py-1.5 text-xs"
+                class="cv-glass flex items-center gap-2 px-3 py-2 text-xs"
               >
                 <span :class="sig.icon" class="text-sm shrink-0" />
                 <span class="flex-1">{{ sig.text }}</span>
                 <span
                   class="w-2 h-2 rounded-full shrink-0"
-                  :style="{ background: sig.level === 'red' ? '#FCA5A5' : sig.level === 'amber' ? '#FDE68A' : '#BAE6FD' }"
+                  :style="{
+                    background:
+                      sig.level === 'red'
+                        ? '#FCA5A5'
+                        : sig.level === 'amber'
+                          ? '#FDE68A'
+                          : '#BAE6FD',
+                  }"
                 />
               </div>
             </div>
@@ -2378,492 +7094,1620 @@ onUnmounted(() => {
 
         <!-- ⠿ BLOCOS MÓVEIS (item 143) — área de CONTEÚDO: os blocos abaixo
              do seletor se movem com o mesmo arrasto magnético dos cards -->
-        <draggable
-          v-model="dragMainBlocks"
-          :item-key="id => id"
-          handle=".cevico-block-handle"
-          :animation="220"
-          :disabled="!organizeMode"
-          ghost-class="opacity-30"
-          @end="saveBlockLayout"
+        <MagnetBoard
+          v-model:layout="mainGrid"
+          :locked="blocksLocked"
+          auto-height
+          :stack-below="700"
+          handle="[data-drag-handle], .cevico-block-handle"
+          @moved="saveBlockLayout"
         >
-          <template #item="{ element: blockId }">
-          <section>
-            <div
-              v-if="organizeMode"
-              class="cevico-block-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 rounded-xl border-2 border-dashed border-n-brand/40 bg-n-solid-2 text-xs font-semibold text-n-slate-12"
+          <template #card="{ item: { id: blockId } }">
+            <section
+              :style="blockVars(blockId)"
+              class="min-w-0 relative cv-mb-block"
             >
-              <span class="i-lucide-grip-vertical text-sm text-n-slate-9" />
-              {{ BLOCK_LABELS[blockId] }}
-              <span v-if="blockId === 'indicadores'" class="text-n-slate-9 font-normal ml-auto hidden sm:inline">os cards ficam abertos pra editar cor e ordem</span>
-              <span v-else class="text-n-slate-9 font-normal ml-auto hidden sm:inline">⠿ arraste pra mudar a ordem</span>
-            </div>
-
-            <!-- no modo edição só a FILEIRA fica aberta (é nela que se mexe
-                 nos cards); os demais blocos recolhem em barrinhas -->
-            <template v-if="!organizeMode || blockId === 'indicadores'">
-            <template v-if="blockId === 'indicadores'">
-            <template v-if="!currentPanel.custom">
-        <!-- Indicadores do período — mudam com o painel escolhido -->
-        <draggable
-          v-model="dragTiles"
-          item-key="id"
-          :animation="220"
-          :disabled="!organizeMode"
-          ghost-class="opacity-30"
-          class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
-          @end="onKpiReorder"
-        >
-          <template #item="{ element: tile }">
-          <div
-            class="relative rounded-2xl p-4 sm:p-5 text-white shadow-lg transition-all duration-700"
-            :class="[
-              tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
-              tileVisual(tile).isRecord ? 'ring-2 ring-amber-300/80' : '',
-              organizeMode ? 'cursor-grab active:cursor-grabbing ring-2 ring-dashed ring-white/60' : '',
-            ]"
-            :style="{ background: tileVisual(tile).grad }"
-          >
-            <!-- 🏆 recorde: átomos orbitando o card em sentido horário -->
-            <TileAura
-              v-if="tileVisual(tile).aura"
-              :intensity="tileVisual(tile).auraIntensity"
-              gold
-            />
-            <div class="relative">
-              <div class="flex items-center gap-1.5 mb-1 text-white/80">
-                <span :class="tile.icon" class="text-sm" />
-                <p class="text-xs font-medium flex-1 truncate">{{ tile.label }}</p>
-                <button
-                  v-if="organizeMode"
-                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
-                  title="Trocar a cor deste card"
-                  @click.stop="openColorPicker(tile)"
-                >
-                  <span class="i-lucide-paintbrush text-[11px]" />
-                </button>
-                <button
-                  v-if="organizeMode"
-                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-500/80 transition-colors"
-                  title="Ocultar este card (dá pra restaurar depois)"
-                  @click.stop="hideTile(tile)"
-                >
-                  <span class="i-lucide-x text-[11px]" />
-                </button>
-                <button
-                  v-else-if="tile.details?.length || tile.about"
-                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/30 transition-colors"
-                  title="Ver detalhes deste indicador"
-                  @click.stop="openKpi(tile)"
-                >
-                  <span class="i-lucide-maximize-2 text-[11px]" />
-                </button>
-                <span v-if="tileVisual(tile).isRecord" class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900" title="Melhor resultado já registrado neste tipo de período">🏆 RECORDE</span>
-                <span v-else-if="tileVisual(tile).status === 'meta'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25" title="Meta batida">✓ META</span>
-                <span v-else-if="tileVisual(tile).status === 'bad'" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25" title="Muito abaixo do ritmo da meta">⚠️</span>
-              </div>
-              <p class="text-3xl font-bold">{{ tile.value }}</p>
-              <span v-if="tile.chip" class="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ tile.chip.label }}</span>
-              <template v-if="tile.sub">
-                <!-- linhas curtas propositais: nada de frase quebrando no meio -->
-                <p class="text-[10px] text-white/70 truncate">{{ tile.sub }}</p>
-                <p v-if="tile.sub2" class="text-[10px] text-white/80 truncate">{{ tile.sub2 }}</p>
-                <p v-if="tile.sub3" class="text-[10px] text-white/80 truncate">{{ tile.sub3 }}</p>
-              </template>
-              <!-- medidor da meta (aparece quando o admin definiu meta) -->
-              <div v-if="tileVisual(tile).ratio !== null" class="mt-2">
-                <div class="h-1.5 rounded-full bg-black/20 overflow-hidden">
-                  <div
-                    class="h-full rounded-full bg-white/85 transition-all duration-700"
-                    :style="{ width: Math.min(100, Math.round(tileVisual(tile).ratio * 100)) + '%' }"
-                  />
-                </div>
-                <p class="text-[9px] text-white/70 mt-0.5">
-                  {{ Math.round(tileVisual(tile).ratio * 100) }}% do ritmo da meta
-                  <template v-if="!tile.pct"> · esperado {{ Math.ceil(tileVisual(tile).expected) }}</template>
-                </p>
-              </div>
-            </div>
-          </div>
-          </template>
-
-          <!-- ➕ card novo (admin, item 141) — o modo edição agora liga no
-               botão "Modo edição" do topo (item 143) -->
-          <template #footer>
-            <div v-if="isAdmin && !currentPanel.custom" class="rounded-2xl border-2 border-dashed border-n-weak flex flex-col items-stretch justify-center p-3 min-h-[120px]">
-              <button
-                class="flex-1 rounded-xl text-n-slate-10 hover:bg-n-brand/10 hover:text-n-brand transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
-                title="Criar um card de indicador: indicador pronto, fórmula (ex.: agendamentos / leads) e cor"
-                @click="openKpiBuilder(null)"
+              <span
+                v-if="!blocksLocked"
+                class="cv-mb-grip"
+                data-drag-handle
+                :title="`Mover “${BLOCK_LABELS[blockId]}”: pegue aqui e arraste`"
+                ><span class="i-lucide-grip-vertical"
+              /></span>
+              <div
+                v-if="organizeMode"
+                class="cevico-block-handle cv-handle cursor-grab active:cursor-grabbing flex items-center gap-2.5 px-4 py-2.5 mb-2 text-xs font-semibold"
               >
-                <span class="i-lucide-plus text-2xl" />
-                <span class="text-xs font-medium">Novo indicador</span>
-              </button>
-            </div>
-          </template>
-        </draggable>
+                <span class="i-lucide-grip-vertical text-sm opacity-60" />
+                <span class="cv-icon cv-icon-sm"
+                  ><span :class="BLOCK_ICONS[blockId]" class="text-xs"
+                /></span>
+                {{ BLOCK_LABELS[blockId] }}
+                <button
+                  v-if="isAdmin"
+                  class="cv-chip"
+                  :title="`Paleta deste bloco (hoje: ${paletteLabel(blockPalette(blockId))}) — clique para trocar`"
+                  @pointerdown.stop
+                  @mousedown.stop
+                  @click.stop="openPalettePicker(blockId)"
+                >
+                  <span
+                    class="w-2 h-2 rounded-full flex-shrink-0"
+                    :style="{
+                      background:
+                        blockPalette(blockId).swatch ||
+                        blockPalette(blockId).dot,
+                      boxShadow: '0 0 0 1.5px rgba(255,255,255,0.8)',
+                    }"
+                  />
+                  <span class="i-lucide-palette text-[10px]" />
+                  {{ blockPalette(blockId).label }}
+                </button>
+                <span
+                  class="cv-seg cv-seg-sm"
+                  title="Largura do bloco (ou puxe a borda direita)"
+                  @pointerdown.stop
+                  @mousedown.stop
+                >
+                  <button
+                    v-for="o in BLOCK_WIDTHS"
+                    :key="o.w"
+                    class="cv-seg-item !h-6 !px-2"
+                    :class="blockWidth(blockId) === o.w ? 'cv-seg-on' : ''"
+                    @click.stop="setBlockWidth(blockId, o.w)"
+                  >
+                    {{ o.label }}
+                  </button>
+                </span>
+                <span
+                  v-if="blockId === 'indicadores'"
+                  class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
+                  >🧲 cards: pegue e arraste · puxe a borda ou o canto para
+                  esticar</span
+                >
+                <span
+                  v-else
+                  class="text-n-slate-9 font-normal ml-auto hidden sm:inline"
+                  >⠿ pegue e arraste · puxe a borda direita para esticar</span
+                >
+              </div>
 
-        <!-- Linha de destaque do painel -->
-        <div class="bg-n-solid-2 border border-n-weak rounded-2xl px-4 py-3 mb-6 flex items-center gap-3">
-          <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" :style="{ background: panelHighlight.color + '1F' }">
-            <span :class="panelHighlight.icon" class="text-lg" :style="{ color: panelHighlight.color }" />
-          </span>
-          <div class="flex-1">
-            <p class="text-xs font-medium text-n-slate-11">{{ panelHighlight.label }}</p>
-            <p class="text-[10px] text-n-slate-9">{{ panelHighlight.sub }}</p>
-          </div>
-          <p class="text-2xl font-bold text-n-slate-12">{{ panelHighlight.value }}</p>
-        </div>
-            </template>
-            </template>
+              <!-- no modo edição só a FILEIRA fica aberta (é nela que se mexe
+                 nos cards); os demais blocos recolhem em barrinhas -->
+              <template
+                v-if="
+                  !organizeMode || !collapseBlocks || blockId === 'indicadores'
+                "
+              >
+                <template v-if="blockId === 'indicadores'">
+                  <template v-if="!currentPanel.custom">
+                    <!-- Indicadores do período — mudam com o painel escolhido -->
+                    <!-- 28/09 (pedido: "os quadradinhos dos indicadores ajustem seu tamanho
+                         de acordo com as informações deles"): altura pelo CONTEÚDO (auto-height);
+                         só a largura se estica -->
+                    <!-- item 275: EDITAR direto no ambiente dos indicadores -->
+                    <div
+                      v-if="isAdmin && !currentPanel.custom && !organizeMode"
+                      class="flex justify-end -mb-2"
+                    >
+                      <button
+                        class="cv-btn cv-btn-ghost cv-btn-sm"
+                        title="Editar os indicadores: arrastar, esticar, ocultar, cores, divisórias, modelos"
+                        @click="toggleEditMode"
+                      >
+                        <span class="i-lucide-pencil-ruler text-xs" />
+                        editar indicadores
+                      </button>
+                    </div>
+                    <MagnetBoard
+                      v-model:layout="tileGrid"
+                      :locked="blocksLocked"
+                      :stack-below="600"
+                      handle=".cv-tile, .cv-tile-gap, .cv-tile-div"
+                      class="mb-4"
+                      @moved="onKpiReorder"
+                    >
+                      <!-- (v-for de 1 item = jeito de nomear `tile` a partir da célula da grade) -->
+                      <template #card="{ item: cell }">
+                        <template
+                          v-for="tile in [tileById[cell.id]]"
+                          :key="tile ? tile.id : cell.id"
+                        >
+                          <!-- item 275: DIVISÓRIA com título — separa seções ("Início da jornada"…) -->
+                          <div
+                            v-if="tile && tile.divider"
+                            class="cv-tile-div relative flex items-center gap-3 py-2"
+                            :class="
+                              organizeMode
+                                ? 'cursor-grab active:cursor-grabbing'
+                                : ''
+                            "
+                          >
+                            <span class="cv-tile-div-line" />
+                            <input
+                              v-if="organizeMode"
+                              :value="tile.label"
+                              class="cv-tile-div-input"
+                              maxlength="60"
+                              title="Nome da seção — Enter para salvar"
+                              data-no-drag
+                              @keydown.enter.prevent="
+                                renameDivider(tile, $event.target.value)
+                              "
+                              @blur="renameDivider(tile, $event.target.value)"
+                            />
+                            <h3 v-else class="cv-tile-div-title">
+                              {{ tile.label }}
+                            </h3>
+                            <span class="cv-tile-div-line" />
+                            <button
+                              v-if="organizeMode"
+                              class="w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-500/80 hover:text-white transition-colors flex-shrink-0"
+                              title="Tirar esta divisória"
+                              data-no-drag
+                              @click.stop="removeDivider(tile)"
+                            >
+                              <span class="i-lucide-x text-[11px]" />
+                            </button>
+                          </div>
+                          <div
+                            v-else-if="tile && tile.spacer"
+                            class="cv-tile-gap relative rounded-2xl h-full min-h-[150px] flex items-center justify-center"
+                            :class="
+                              organizeMode
+                                ? 'cv-tile-add cursor-grab active:cursor-grabbing'
+                                : ''
+                            "
+                            :aria-hidden="!organizeMode"
+                          >
+                            <!-- item 239: ESPAÇO vazio — só aparece tracejado no modo edição
+                               (comentário aqui dentro: o slot do draggable aceita 1 filho só) -->
+                            <template v-if="organizeMode">
+                              <span
+                                class="text-xs font-medium opacity-80 flex items-center gap-1.5"
+                              >
+                                <span class="i-lucide-square-dashed text-sm" />
+                                espaço vazio
+                              </span>
+                              <button
+                                class="absolute top-2 right-2 w-6 h-6 rounded-md flex items-center justify-center hover:bg-red-500/80 hover:text-white transition-colors"
+                                title="Tirar este espaço"
+                                @click.stop="removeSpacer(tile)"
+                              >
+                                <span class="i-lucide-x text-[11px]" />
+                              </button>
+                            </template>
+                          </div>
+                          <div
+                            v-else-if="tile"
+                            v-cv-menu="() => tileMenu(tile)"
+                            class="cv-tile relative rounded-2xl h-full overflow-hidden p-4 sm:p-5 text-white shadow-lg transition-colors duration-700 flex flex-col"
+                            :class="[
+                              tileHist(tile)?.dir === 'up'
+                                ? 'cv-tile-hist-up'
+                                : '',
+                              tileHist(tile)?.dir === 'down'
+                                ? 'cv-tile-hist-down'
+                                : '',
+                              tileVisual(tile).pulse ? 'cevico-meta-pulse' : '',
+                              tileVisual(tile).isRecord
+                                ? 'ring-2 ring-amber-300/80'
+                                : '',
+                              organizeMode
+                                ? 'cursor-grab active:cursor-grabbing ring-2 ring-dashed ring-white/60'
+                                : '',
+                              tileVisual(tile).darkText
+                                ? 'cv-tile-ink-dark'
+                                : '',
+                            ]"
+                            :style="{
+                              background: tileVisual(tile).grad,
+                              color: tileVisual(tile).darkText
+                                ? tileVisual(tile).ink
+                                : undefined,
+                            }"
+                            :title="
+                              tileVisual(tile).palette
+                                ? tileVisual(tile).palette.label
+                                : undefined
+                            "
+                          >
+                            <!-- 🏆 recorde: átomos orbitando o card em sentido horário -->
+                            <TileAura
+                              v-if="tileVisual(tile).aura"
+                              :intensity="tileVisual(tile).auraIntensity"
+                              gold
+                            />
+                            <div class="relative flex-1 flex flex-col">
+                              <!-- 26/09 (pedido dele): no modo edição os botões ganham uma faixa
+                                 própria — antes dividiam a linha e cortavam o nome ("Conv…", "Taxa …") -->
+                              <div
+                                v-if="organizeMode"
+                                class="flex items-center justify-end gap-1 mb-1.5"
+                              >
+                                <button
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
+                                  :title="
+                                    tile.big
+                                      ? 'Voltar ao tamanho normal (1 quadrado) — ou puxe a borda/canto do card'
+                                      : 'Card grande (metade da linha, 2 alturas) com o resumo do indicador — ou puxe a borda/canto do card'
+                                  "
+                                  @click.stop="toggleTileSize(tile)"
+                                >
+                                  <span
+                                    :class="
+                                      tile.big
+                                        ? 'i-lucide-minimize-2'
+                                        : 'i-lucide-maximize-2'
+                                    "
+                                    class="text-[11px]"
+                                  />
+                                </button>
+                                <button
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/35 transition-colors"
+                                  title="Trocar a cor deste card"
+                                  @click.stop="openColorPicker(tile)"
+                                >
+                                  <span
+                                    class="i-lucide-paintbrush text-[11px]"
+                                  />
+                                </button>
+                                <button
+                                  v-if="tile.def"
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-600 transition-colors"
+                                  title="Excluir este indicador de vez (volta restaurando o modelo ou criando no +)"
+                                  @click.stop="deleteTileKpi(tile)"
+                                >
+                                  <span class="i-lucide-trash-2 text-[11px]" />
+                                </button>
+                                <button
+                                  class="w-6 h-6 rounded-md flex items-center justify-center bg-white/15 hover:bg-red-500/80 transition-colors"
+                                  title="Ocultar este card (dá pra restaurar depois)"
+                                  @click.stop="hideTile(tile)"
+                                >
+                                  <span class="i-lucide-x text-[11px]" />
+                                </button>
+                              </div>
+                              <div
+                                class="flex items-start gap-1.5 mb-1.5 text-white/85"
+                              >
+                                <span
+                                  :class="tile.icon"
+                                  class="text-sm flex-shrink-0 mt-px"
+                                />
+                                <!-- nome COMPLETO: quebra em até 2 linhas; o texto inteiro no toque/mouse -->
+                                <p
+                                  class="text-xs font-medium flex-1 min-w-0 leading-snug line-clamp-2 break-words"
+                                  :title="tile.label"
+                                >
+                                  {{ tile.label }}
+                                </p>
+                                <button
+                                  v-if="
+                                    !organizeMode &&
+                                    (tile.details?.length || tile.about)
+                                  "
+                                  class="w-6 h-6 flex-shrink-0 rounded-md flex items-center justify-center bg-white/15 hover:bg-white/30 transition-colors"
+                                  title="Ver detalhes deste indicador"
+                                  @click.stop="openKpi(tile)"
+                                >
+                                  <span
+                                    class="i-lucide-maximize-2 text-[11px]"
+                                  />
+                                </button>
+                              </div>
+                              <!-- número grande + selos + TENDÊNCIA vs período anterior
+                   (varredura 12/09: os selos saíram da linha do nome, que
+                   vivia truncado — "Novos c… 🏆 RECORDE") -->
+                              <div
+                                class="flex items-end justify-between gap-2 flex-wrap"
+                              >
+                                <p
+                                  class="font-bold tabular-nums tracking-tight leading-none"
+                                  :class="tile.big ? 'text-5xl' : 'text-3xl'"
+                                >
+                                  {{ tile.value }}
+                                </p>
+                                <div
+                                  class="flex items-center gap-1 flex-wrap justify-end"
+                                >
+                                  <span
+                                    v-if="tileVisual(tile).isRecord"
+                                    class="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-300 text-amber-900"
+                                    title="Melhor resultado já registrado neste tipo de período"
+                                    >🏆 RECORDE</span
+                                  >
+                                  <span
+                                    v-else-if="
+                                      tileVisual(tile).status === 'meta'
+                                    "
+                                    class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-white/25"
+                                    title="Meta batida"
+                                    >✓ META</span
+                                  >
+                                  <span
+                                    v-else-if="
+                                      tileVisual(tile).status === 'bad'
+                                    "
+                                    class="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-black/25"
+                                    title="Muito abaixo do ritmo da meta"
+                                    >⚠️</span
+                                  >
+                                  <span
+                                    v-if="tileTrend(tile)"
+                                    class="text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums"
+                                    :class="
+                                      tileTrend(tile).up
+                                        ? 'bg-white/25'
+                                        : 'bg-black/20'
+                                    "
+                                    :title="tileTrend(tile).title"
+                                    >{{ tileTrend(tile).text }}</span
+                                  >
+                                </div>
+                              </div>
+                              <span
+                                v-if="tile.chip"
+                                class="inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-white/20"
+                                >{{ tile.chip.label }}</span
+                              >
+                              <template v-if="tile.sub">
+                                <!-- linhas curtas propositais: nada de frase quebrando no meio -->
+                                <p
+                                  class="text-[11px] text-white/75 truncate mt-1"
+                                >
+                                  {{ tile.sub }}
+                                </p>
+                                <p
+                                  v-if="tile.sub2"
+                                  class="text-[11px] text-white/80 truncate"
+                                >
+                                  {{ tile.sub2 }}
+                                </p>
+                                <p
+                                  v-if="tile.sub3"
+                                  class="text-[11px] text-white/80 truncate"
+                                >
+                                  {{ tile.sub3 }}
+                                </p>
+                              </template>
+                              <!-- ✨ sparkline: a forma do período num relance (mesma série do
+                   gráfico do popup; some quando não há série ou movimento) -->
+                              <!-- item 239: card GRANDE = resumo do indicador (o
+                   gráfico do popup, pico/média e as primeiras linhas) -->
+                              <template v-if="tile.big && tileBigSummary(tile)">
+                                <div
+                                  v-if="tileBigSummary(tile).hasData"
+                                  class="mt-3"
+                                >
+                                  <TileLine
+                                    :values="tileBigSummary(tile).values"
+                                    :labels="tileBigSummary(tile).labels"
+                                    :prev-values="
+                                      tileBigSummary(tile).prevValues
+                                    "
+                                    :format="tileBigSummary(tile).format"
+                                    :height="124"
+                                    :trend="trendOn"
+                                    :granularity="
+                                      tileBigSummary(tile).granularity
+                                    "
+                                  />
+                                  <p
+                                    class="text-[10px] text-white/80 mt-1 truncate"
+                                  >
+                                    ✨ {{ tileBigSummary(tile).peakText }}
+                                  </p>
+                                  <p
+                                    v-if="tileBigSummary(tile).trendWords"
+                                    class="text-[10px] text-white/90 mt-0.5 truncate font-semibold"
+                                  >
+                                    📈 tendência:
+                                    {{ tileBigSummary(tile).trendWords.text }}
+                                  </p>
+                                </div>
+                                <div
+                                  v-if="tileBigSummary(tile).details.length"
+                                  class="mt-2 space-y-1"
+                                >
+                                  <div
+                                    v-for="(row, ri) in tileBigSummary(tile)
+                                      .details"
+                                    :key="ri"
+                                    class="flex items-center justify-between gap-3 text-[11px] rounded-lg bg-white/15 px-2.5 py-1"
+                                  >
+                                    <span class="text-white/80 truncate">{{
+                                      row.label
+                                    }}</span>
+                                    <b class="tabular-nums truncate">{{
+                                      row.value
+                                    }}</b>
+                                  </div>
+                                </div>
+                                <button
+                                  v-if="
+                                    !organizeMode &&
+                                    (tile.details?.length || tile.about)
+                                  "
+                                  class="mt-auto pt-2 self-start text-[11px] font-semibold text-white/85 hover:text-white flex items-center gap-1"
+                                  @click.stop="openKpi(tile)"
+                                >
+                                  ver tudo
+                                  <span
+                                    class="i-lucide-arrow-right text-[11px]"
+                                  />
+                                </button>
+                              </template>
+                              <!-- item 248: selo da MÉDIA HISTÓRICA (90 dias) -->
+                              <span
+                                v-if="
+                                  tileHist(tile) &&
+                                  tileHist(tile).dir !== 'flat'
+                                "
+                                class="self-start mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full"
+                                :class="
+                                  tileHist(tile).dir === 'up'
+                                    ? 'bg-white/25'
+                                    : 'bg-black/25'
+                                "
+                                :title="tileHist(tile).title"
+                                >{{ tileHist(tile).text }}</span
+                              >
+                              <svg
+                                v-if="!tile.big && tileSpark(tile)"
+                                class="w-full mt-auto pt-2"
+                                viewBox="0 0 100 24"
+                                preserveAspectRatio="none"
+                                style="height: 24px"
+                                aria-hidden="true"
+                              >
+                                <polygon
+                                  :points="tileSpark(tile).area"
+                                  fill="rgba(255,255,255,0.18)"
+                                />
+                                <line
+                                  v-if="tileSpark(tile).avgY !== null"
+                                  x1="0"
+                                  x2="100"
+                                  :y1="tileSpark(tile).avgY"
+                                  :y2="tileSpark(tile).avgY"
+                                  stroke="rgba(255,255,255,0.7)"
+                                  stroke-width="1"
+                                  stroke-dasharray="3 3"
+                                  vector-effect="non-scaling-stroke"
+                                />
+                                <polyline
+                                  :points="tileSpark(tile).line"
+                                  fill="none"
+                                  stroke="rgba(255,255,255,0.85)"
+                                  stroke-width="1.6"
+                                  stroke-linejoin="round"
+                                  stroke-linecap="round"
+                                  vector-effect="non-scaling-stroke"
+                                />
+                                <!-- item 266: reta de tendência (amarela, sólida) -->
+                                <line
+                                  v-if="tileSpark(tile).trend"
+                                  :x1="tileSpark(tile).trend.x1"
+                                  :y1="tileSpark(tile).trend.y1"
+                                  :x2="tileSpark(tile).trend.x2"
+                                  :y2="tileSpark(tile).trend.y2"
+                                  stroke="#FFE08A"
+                                  stroke-width="1.8"
+                                  stroke-linecap="round"
+                                  vector-effect="non-scaling-stroke"
+                                />
+                              </svg>
+                              <!-- medidor da meta (aparece quando o admin definiu meta) -->
+                              <div
+                                v-if="tileVisual(tile).ratio !== null"
+                                class="mt-2"
+                              >
+                                <div
+                                  class="h-1.5 rounded-full bg-black/20 overflow-hidden"
+                                >
+                                  <div
+                                    class="h-full rounded-full bg-white/85 transition-all duration-700"
+                                    :style="{
+                                      width:
+                                        Math.min(
+                                          100,
+                                          Math.round(
+                                            tileVisual(tile).ratio * 100
+                                          )
+                                        ) + '%',
+                                    }"
+                                  />
+                                </div>
+                                <p class="text-[9px] text-white/70 mt-0.5">
+                                  {{
+                                    Math.round(tileVisual(tile).ratio * 100)
+                                  }}% do ritmo da meta
+                                  <template v-if="!tile.pct">
+                                    · esperado
+                                    {{ Math.ceil(tileVisual(tile).expected) }}
+                                  </template>
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                      </template>
+                    </MagnetBoard>
 
-            <template v-else-if="blockId === 'desempenho'">
-        <!-- 🎯 MEU DESEMPENHO (item 138): auto-avaliação — a pessoa e o
+                    <!-- ➕ card novo (admin, item 141) — o modo edição agora liga no
+               botão "Modo edição" do topo (item 143); fica abaixo do ímã -->
+                    <div
+                      v-if="isAdmin && !currentPanel.custom"
+                      class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4"
+                    >
+                      <div
+                        class="cv-tile-add flex flex-col items-stretch justify-center p-3 min-h-[120px]"
+                      >
+                        <button
+                          class="flex-1 rounded-xl transition-colors flex flex-col items-center justify-center gap-0.5 py-2"
+                          title="Criar um card de indicador: indicador pronto, fórmula (ex.: agendamentos / leads) e cor"
+                          @click="openKpiBuilder(null)"
+                        >
+                          <span class="i-lucide-plus text-2xl" />
+                          <span class="text-xs font-medium"
+                            >Novo indicador</span
+                          >
+                        </button>
+                        <!-- item 239: espaço vazio para organizar a fileira -->
+                        <button
+                          v-if="organizeMode"
+                          class="mt-1 rounded-lg py-1 text-[11px] font-medium flex items-center justify-center gap-1 opacity-80 hover:opacity-100"
+                          title="Um quadrado vazio, que você arrasta para onde quiser (só aparece no modo edição)"
+                          @click="addSpacer"
+                        >
+                          <span class="i-lucide-square-dashed text-xs" />
+                          espaço vazio
+                        </button>
+                        <!-- item 275: divisória com título (largura inteira) -->
+                        <button
+                          v-if="organizeMode"
+                          class="rounded-lg py-1 text-[11px] font-medium flex items-center justify-center gap-1 opacity-80 hover:opacity-100"
+                          title="Uma faixa de largura inteira com um título, para separar seções (Início · Meio · Fim da jornada)"
+                          @click="addDivider"
+                        >
+                          <span class="i-lucide-minus text-xs" />
+                          divisória
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Linha de destaque do painel -->
+                    <div
+                      class="cv-block cv-strip px-4 py-3 mb-6 flex items-center gap-3"
+                    >
+                      <span class="cv-icon cv-icon-lg">
+                        <span :class="panelHighlight.icon" class="text-lg" />
+                      </span>
+                      <div class="flex-1">
+                        <p class="text-xs font-medium text-n-slate-11">
+                          {{ panelHighlight.label }}
+                        </p>
+                        <p class="text-[10px] text-n-slate-9">
+                          {{ panelHighlight.sub }}
+                        </p>
+                      </div>
+                      <p class="text-2xl font-bold text-n-slate-12">
+                        {{ panelHighlight.value }}
+                      </p>
+                    </div>
+                  </template>
+                </template>
+
+                <template v-else-if="blockId === 'desempenho'">
+                  <!-- 🎯 MEU DESEMPENHO (item 138): auto-avaliação — a pessoa e o
              Atendimento IA como referência; sem ranking de colegas (o
              ranking do time vive no Dashboard dos Agentes, do gestor) -->
-        <div v-if="perfCols.length" class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
-          <div class="flex items-center gap-2 mb-4 flex-wrap">
-            <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F5FA6, #7C3AED)">
-              <span class="i-lucide-target text-white text-base" />
-            </span>
-            <h2 class="text-sm font-bold text-n-slate-12">{{ selectedPanel === 'gestor' ? 'Desempenho da equipe' : 'Meu desempenho' }}</h2>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-1 text-n-slate-11">velocidades no horário comercial · 08h–17h</span>
-            <span v-if="perf?.previous?.label" class="text-[10px] text-n-slate-9 ml-auto">setinhas comparam com {{ perf.previous.label }}</span>
-          </div>
+                  <div v-if="perfCols.length" class="cv-block p-5 sm:p-6 mb-6">
+                    <div class="flex items-center gap-2 mb-4 flex-wrap">
+                      <span class="cv-icon">
+                        <span class="i-lucide-target text-base" />
+                      </span>
+                      <h2 class="text-sm font-bold text-n-slate-12">
+                        {{
+                          panelBase === 'gestor'
+                            ? 'Desempenho da equipe'
+                            : 'Meu desempenho'
+                        }}
+                      </h2>
+                      <span class="cv-chip"
+                        >velocidades no horário comercial · 08h–17h</span
+                      >
+                      <span
+                        v-if="perf?.previous?.label"
+                        class="text-[10px] text-n-slate-9 ml-auto"
+                        >setinhas comparam com {{ perf.previous.label }}</span
+                      >
+                    </div>
 
-          <div class="grid grid-cols-1 gap-3" :class="perfCols.length > 2 ? 'lg:grid-cols-3' : 'lg:grid-cols-2'">
-            <div
-              v-for="col in perfCols"
-              :key="col.key"
-              class="rounded-2xl border p-4"
-              :class="col.key === 'me' ? 'border-violet-400/40 bg-n-solid-1' : 'border-n-weak bg-n-alpha-1'"
-            >
-              <div class="flex items-center gap-2 mb-3">
-                <p class="text-sm font-bold text-n-slate-12 flex-1">{{ col.title }}</p>
-                <span class="text-[10px] text-n-slate-10">{{ col.row.messages_sent }} mensagens</span>
-              </div>
+                    <div
+                      class="grid grid-cols-1 gap-3"
+                      :class="
+                        perfCols.length > 2
+                          ? 'lg:grid-cols-3'
+                          : 'lg:grid-cols-2'
+                      "
+                    >
+                      <div
+                        v-for="col in perfCols"
+                        :key="col.key"
+                        class="cv-sub p-4"
+                        :class="col.key === 'me' ? 'cv-sub-on' : ''"
+                      >
+                        <div class="flex items-center gap-2 mb-3">
+                          <p class="text-sm font-bold text-n-slate-12 flex-1">
+                            {{ col.title }}
+                          </p>
+                          <span class="text-[10px] text-n-slate-10"
+                            >{{ col.row.messages_sent }} mensagens</span
+                          >
+                        </div>
 
-              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
-                <div v-for="t in perfTilesFor(col)" :key="t.key" class="rounded-xl bg-n-alpha-1 px-2 py-2">
-                  <p class="text-base font-bold" :class="t.color ? '' : 'text-n-slate-12'" :style="t.color ? { color: t.color } : {}">
-                    {{ t.display }}
-                    <span v-if="t.delta" class="text-[10px] font-bold" :title="'antes: ' + t.delta.prev" :style="{ color: t.delta.color }">{{ t.delta.arrow }}</span>
-                  </p>
-                  <p class="text-[10px] text-n-slate-10">{{ t.label }}</p>
-                </div>
-              </div>
+                        <div
+                          class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center"
+                        >
+                          <div
+                            v-for="t in perfTilesFor(col)"
+                            :key="t.key"
+                            class="cv-stat"
+                          >
+                            <p
+                              class="text-base font-bold"
+                              :class="t.color ? '' : 'text-n-slate-12'"
+                              :style="t.color ? { color: t.color } : {}"
+                            >
+                              {{ t.display }}
+                              <span
+                                v-if="t.delta"
+                                class="text-[10px] font-bold"
+                                :title="'antes: ' + t.delta.prev"
+                                :style="{ color: t.delta.color }"
+                                >{{ t.delta.arrow }}</span
+                              >
+                            </p>
+                            <p class="text-[10px] text-n-slate-10">
+                              {{ t.label }}
+                            </p>
+                          </div>
+                        </div>
 
-              <!-- Radar + jornada -->
-              <div class="flex items-center gap-x-4 gap-y-1 flex-wrap mt-3 text-xs text-n-slate-11">
-                <span class="inline-flex items-center gap-1.5">
-                  <span class="i-lucide-radar text-sm" style="color: #EA580C" />
-                  {{ col.row.radar_responded }} aviso(s) do Radar
-                  <template v-if="col.row.radar_avg_response_min !== null"> · respondeu em <b class="text-n-slate-12">{{ perfFmtMin(col.row.radar_avg_response_min) }}</b></template>
-                </span>
-                <span v-if="col.row.workday" class="inline-flex items-center gap-1.5">
-                  <span class="i-lucide-sunrise text-sm" style="color: #D97706" />
-                  1ª msg <b class="text-n-slate-12">{{ col.row.workday.avg_first_msg }}</b> · última <b class="text-n-slate-12">{{ col.row.workday.avg_last_msg }}</b>
-                </span>
-              </div>
-              <div v-if="col.row.workday?.top_gaps?.length || col.row.off_hours?.count" class="flex items-center gap-1.5 flex-wrap mt-2">
-                <span
-                  v-for="(g, gi) in (col.row.workday?.top_gaps || []).slice(0, 2)"
-                  :key="gi"
-                  class="text-[10px] px-2 py-0.5 rounded-full bg-n-alpha-1 border border-n-weak text-n-slate-11"
-                  title="Maior pausa entre uma mensagem e outra no período"
-                >
-                  pausa {{ g.day }} · {{ g.from }}→{{ g.to }} · <b>{{ perfFmtMin(g.minutes) }}</b>
-                </span>
-                <span
-                  v-if="col.row.off_hours?.count"
-                  class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-500 font-medium"
-                  :title="'Dias com mensagens fora de seg–sex 08h–17h: ' + (col.row.off_hours.days || []).join(' · ')"
-                >
-                  🌙 {{ col.row.off_hours.count }} dia(s) fora do horário<template v-if="col.row.off_hours.days?.length">: {{ col.row.off_hours.days.slice(0, 3).join(' · ') }}</template>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
+                        <!-- Radar + jornada -->
+                        <div
+                          class="flex items-center gap-x-4 gap-y-1 flex-wrap mt-3 text-xs text-n-slate-11"
+                        >
+                          <span class="inline-flex items-center gap-1.5">
+                            <span
+                              class="i-lucide-radar text-sm"
+                              style="color: var(--cv)"
+                            />
+                            {{ col.row.radar_responded }} aviso(s) do Radar
+                            <template
+                              v-if="col.row.radar_avg_response_min !== null"
+                            >
+                              · respondeu em
+                              <b class="text-n-slate-12">{{
+                                perfFmtMin(col.row.radar_avg_response_min)
+                              }}</b></template
+                            >
+                          </span>
+                          <span
+                            v-if="col.row.workday"
+                            class="inline-flex items-center gap-1.5"
+                          >
+                            <span
+                              class="i-lucide-sunrise text-sm"
+                              style="color: var(--cv)"
+                            />
+                            1ª msg
+                            <b class="text-n-slate-12">{{
+                              col.row.workday.avg_first_msg
+                            }}</b>
+                            · última
+                            <b class="text-n-slate-12">{{
+                              col.row.workday.avg_last_msg
+                            }}</b>
+                          </span>
+                        </div>
+                        <div
+                          v-if="
+                            col.row.workday?.top_gaps?.length ||
+                            col.row.off_hours?.count
+                          "
+                          class="flex items-center gap-1.5 flex-wrap mt-2"
+                        >
+                          <span
+                            v-for="(g, gi) in (
+                              col.row.workday?.top_gaps || []
+                            ).slice(0, 2)"
+                            :key="gi"
+                            class="cv-chip"
+                            title="Maior pausa entre uma mensagem e outra no período"
+                          >
+                            pausa {{ g.day }} · {{ g.from }}→{{ g.to }} ·
+                            <b>{{ perfFmtMin(g.minutes) }}</b>
+                          </span>
+                          <span
+                            v-if="col.row.off_hours?.count"
+                            class="cv-chip cv-slate"
+                            :title="
+                              'Dias com mensagens fora de seg–sex 08h–17h: ' +
+                              (col.row.off_hours.days || []).join(' · ')
+                            "
+                          >
+                            <span class="i-lucide-moon text-[10px]" />{{
+                              col.row.off_hours.count
+                            }}
+                            dia(s) fora do horário<template
+                              v-if="col.row.off_hours.days?.length"
+                              >:
+                              {{
+                                col.row.off_hours.days.slice(0, 3).join(' · ')
+                              }}</template
+                            >
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
 
-            </template>
-
-            <template v-else-if="blockId === 'agenda_dashboard'">
-        <!-- 📅 Dashboard da Agenda EMBUTIDO (pedido 20/08): o dashboard
+                <template v-else-if="blockId === 'agenda_dashboard'">
+                  <!-- 📅 Dashboard da Agenda EMBUTIDO (pedido 20/08): o dashboard
              inteiro faz parte do Meu Painel em TODAS as predefinições,
              seguindo o período da régua; a Saúde da Agenda vem logo abaixo -->
-        <div class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
-          <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <div class="flex items-center gap-2">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-                <span class="i-lucide-calendar-days text-white text-base" />
-              </span>
-              <h2 class="text-sm font-bold text-n-slate-12">Dashboard da Agenda</h2>
-              <span class="text-[10px] text-n-slate-9">segue o período escolhido acima</span>
-            </div>
-            <button
-              class="px-3 h-8 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1.5"
-              title="Abrir o relatório completo em Relatórios"
-              @click="goToAgendaDashboard"
-            >
-              <span class="i-lucide-expand text-sm" />
-              Relatório completo
-            </button>
-          </div>
-          <AgendaDashboardCore :period="period" />
-        </div>
-            </template>
+                  <div class="cv-block p-5 sm:p-6 mb-6">
+                    <div
+                      class="flex items-center justify-between mb-4 flex-wrap gap-2"
+                    >
+                      <div class="flex items-center gap-2">
+                        <span class="cv-icon">
+                          <span class="i-lucide-calendar-days text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Dashboard da Agenda
+                        </h2>
+                        <span class="text-[10px] text-n-slate-9"
+                          >segue o período escolhido acima</span
+                        >
+                      </div>
+                      <button
+                        class="cv-btn cv-btn-ghost cv-btn-sm"
+                        title="Abrir o relatório completo em Relatórios"
+                        @click="goToAgendaDashboard"
+                      >
+                        <span class="i-lucide-expand text-sm" />
+                        Relatório completo
+                      </button>
+                    </div>
+                    <AgendaDashboardCore
+                      :period="period"
+                      glass
+                      :family="blockFamily('agenda_dashboard')"
+                    />
+                  </div>
+                </template>
 
-            <template v-else-if="blockId === 'saude_agenda'">
-        <!-- Saúde da Agenda -->
-        <div class="bg-n-card outline outline-1 outline-n-container rounded-2xl p-5 sm:p-6 mb-6">
-          <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-            <div class="flex items-center gap-2">
-              <span class="w-8 h-8 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-                <span class="i-lucide-calendar-days text-white text-base" />
-              </span>
-              <h2 class="text-sm font-bold text-n-slate-12">Saúde da Agenda</h2>
-            </div>
-            <!-- atalho pulsante para a Agenda (cor do ambiente) -->
-            <button
-              class="cevico-pulse-btn px-4 h-9 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md"
-              style="background: linear-gradient(135deg, #5B21B6, #7C3AED)"
-              @click="go('agenda_board')"
-            >
-              <span class="i-lucide-calendar-days text-sm" />
-              Ir para agenda →
-            </button>
-          </div>
+                <template v-else-if="blockId === 'saude_agenda'">
+                  <!-- Saúde da Agenda -->
+                  <div class="cv-block p-5 sm:p-6 mb-6">
+                    <div
+                      class="flex items-center justify-between mb-4 flex-wrap gap-2"
+                    >
+                      <div class="flex items-center gap-2">
+                        <span class="cv-icon">
+                          <span class="i-lucide-activity text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Saúde da Agenda
+                        </h2>
+                      </div>
+                      <!-- atalho pulsante para a Agenda (cor do ambiente) -->
+                      <button
+                        class="cv-btn cv-btn-pulse"
+                        @click="go('agenda_board')"
+                      >
+                        <span class="i-lucide-calendar-days text-sm" />
+                        Ir para agenda
+                        <span class="i-lucide-arrow-right text-xs" />
+                      </button>
+                    </div>
 
-          <!-- DOIS retângulos simétricos: Consultas × Cirurgias -->
-          <div class="grid grid-cols-1 gap-4" :class="showSurgeryHealth ? 'lg:grid-cols-2' : ''">
-            <!-- 🩺 Agenda de CONSULTAS -->
-            <div class="rounded-xl border border-n-weak bg-n-solid-2 p-4 flex flex-col gap-4">
-              <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-stethoscope text-sm" style="color: #7C3AED" />
-                Agenda de Consultas
-              </p>
-              <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">Agenda cheia <span class="text-n-slate-9">(próx. 7 dias)</span></span>
-                  <span class="font-bold text-base text-n-slate-12">{{ fillNext7.pct }}%</span>
-                </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(fillNext7.pct, 2) + '%', background: 'linear-gradient(90deg, #0F5FA6, #7C3AED)' }" />
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">{{ fillNext7.filled }} de {{ fillNext7.total }} blocos</p>
-              </div>
-              <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">Aproveitamento <span class="text-n-slate-9">(últimos 7 dias)</span></span>
-                  <span class="font-bold text-base text-n-slate-12">{{ usageLast7.pct }}%</span>
-                </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(usageLast7.pct, 2) + '%', background: 'linear-gradient(90deg, #B8860B, #D4A017)' }" />
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">blocos que viraram consulta</p>
-              </div>
-              <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">Comparecimento <span class="text-n-slate-9">(30 dias)</span></span>
-                  <span class="font-bold text-base text-n-slate-12">{{ attendance === null ? '—' : attendance + '%' }}</span>
-                </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(attendance || 0, 2) + '%', background: 'linear-gradient(90deg, #65A30D, #84CC16)' }" />
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">consultas concluídas ÷ realizadas</p>
-              </div>
-              <!-- vagas livres, junto da agenda de consultas -->
-              <div class="mt-auto pt-1 border-t border-n-weak">
-                <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1.5 mt-2">Vagas livres mais próximas</p>
-                <div v-if="nextFreeSlots.length" class="flex flex-wrap gap-1.5">
-                  <button
-                    v-for="(f, i) in nextFreeSlots"
-                    :key="i"
-                    class="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg border border-dashed hover:bg-n-alpha-1 transition-colors"
-                    :style="{ borderColor: slotColor(f) + '70', color: slotColor(f) }"
-                    @click="go('agenda_board')"
-                  >
-                    <span class="i-lucide-calendar-plus text-xs" />
-                    {{ slotLabel(f) }} · {{ slotDoctorShort(f) }}
-                  </button>
-                </div>
-                <p v-else class="text-xs text-n-slate-10">Sem vagas nos próximos 14 dias.</p>
-                <p v-if="nextAppointment" class="text-[11px] text-n-slate-10 flex items-center gap-1.5 mt-2">
-                  <span class="i-lucide-clock text-xs" />
-                  Próxima consulta: <b class="text-n-slate-12">{{ nextAppointment.title }}</b> — {{ apptTime(nextAppointment.due_at) }}
-                </p>
-              </div>
-            </div>
+                    <!-- DOIS retângulos simétricos: Consultas × Cirurgias -->
+                    <div
+                      class="grid grid-cols-1 gap-4"
+                      :class="showSurgeryHealth ? 'lg:grid-cols-2' : ''"
+                    >
+                      <!-- 🩺 Agenda de CONSULTAS -->
+                      <div class="cv-sub p-4 flex flex-col gap-4">
+                        <p
+                          class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5"
+                        >
+                          <span
+                            class="i-lucide-stethoscope text-sm"
+                            style="color: var(--cv)"
+                          />
+                          Agenda de Consultas
+                        </p>
+                        <div>
+                          <div
+                            class="flex items-center justify-between text-xs mb-1.5"
+                          >
+                            <span class="text-n-slate-11"
+                              >Agenda cheia
+                              <span class="text-n-slate-9"
+                                >(próx. 7 dias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12"
+                              >{{ fillNext7.pct }}%</span
+                            >
+                          </div>
+                          <div class="cv-track">
+                            <div
+                              class="cv-fill"
+                              :style="{
+                                width: Math.max(fillNext7.pct, 2) + '%',
+                              }"
+                            />
+                          </div>
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            {{ fillNext7.filled }} de
+                            {{ fillNext7.total }} blocos
+                          </p>
+                        </div>
+                        <div>
+                          <div
+                            class="flex items-center justify-between text-xs mb-1.5"
+                          >
+                            <span class="text-n-slate-11"
+                              >Aproveitamento
+                              <span class="text-n-slate-9"
+                                >(últimos 7 dias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12"
+                              >{{ usageLast7.pct }}%</span
+                            >
+                          </div>
+                          <div class="cv-track">
+                            <div
+                              class="cv-fill"
+                              :style="{
+                                width: Math.max(usageLast7.pct, 2) + '%',
+                              }"
+                            />
+                          </div>
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            blocos que viraram consulta
+                          </p>
+                        </div>
+                        <div>
+                          <div
+                            class="flex items-center justify-between text-xs mb-1.5"
+                          >
+                            <span class="text-n-slate-11"
+                              >Comparecimento
+                              <span class="text-n-slate-9"
+                                >(30 dias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12">{{
+                              attendance === null ? '—' : attendance + '%'
+                            }}</span>
+                          </div>
+                          <div class="cv-track">
+                            <div
+                              class="cv-fill"
+                              :style="{
+                                width: Math.max(attendance || 0, 2) + '%',
+                              }"
+                            />
+                          </div>
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            consultas concluídas ÷ realizadas
+                          </p>
+                        </div>
+                        <!-- vagas livres, junto da agenda de consultas -->
+                        <div
+                          class="mt-auto pt-1"
+                          style="
+                            border-top: 1px solid rgb(var(--cv-rgb) / 0.18);
+                          "
+                        >
+                          <p class="cv-label mb-1.5 mt-2">
+                            Vagas livres mais próximas
+                          </p>
+                          <div
+                            v-if="nextFreeSlots.length"
+                            class="flex flex-wrap gap-1.5"
+                          >
+                            <button
+                              v-for="(f, i) in nextFreeSlots"
+                              :key="i"
+                              class="cv-chip cv-chip-lg"
+                              @click="go('agenda_board')"
+                            >
+                              <span
+                                class="w-2 h-2 rounded-full flex-shrink-0"
+                                :style="{ background: slotColor(f) }"
+                              />
+                              {{ slotLabel(f) }} · {{ slotDoctorShort(f) }}
+                            </button>
+                          </div>
+                          <p v-else class="text-xs text-n-slate-10">
+                            Sem vagas nos próximos 14 dias.
+                          </p>
+                          <p
+                            v-if="nextAppointment"
+                            class="text-[11px] text-n-slate-10 flex items-center gap-1.5 mt-2"
+                          >
+                            <span class="i-lucide-clock text-xs" />
+                            Próxima consulta:
+                            <b class="text-n-slate-12">{{
+                              nextAppointment.title
+                            }}</b>
+                            — {{ apptTime(nextAppointment.due_at) }}
+                          </p>
+                        </div>
+                      </div>
 
-            <!-- 🔪 Agenda de CIRURGIAS (simétrica) -->
-            <div v-if="showSurgeryHealth" class="rounded-xl border border-sky-400/30 bg-sky-400/5 p-4 flex flex-col gap-4">
-              <p class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5">
-                <span class="i-lucide-slice text-sm" style="color: #0284C7" />
-                Agenda de Cirurgias
-                <span class="text-[10px] font-normal text-n-slate-9">sala cirúrgica (IOP, Ocular Surgery...)</span>
-              </p>
-              <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">Sala cheia <span class="text-n-slate-9">(próx. 7 dias)</span></span>
-                  <span class="font-bold text-base text-n-slate-12">{{ surgFillNext7.total ? surgFillNext7.pct + '%' : '—' }}</span>
-                </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(surgFillNext7.pct, 2) + '%', background: 'linear-gradient(90deg, #0284C7, #7DD3FC)' }" />
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">{{ surgFillNext7.total ? `${surgFillNext7.filled} de ${surgFillNext7.total} blocos` : 'sem janelas da sala nos próximos dias' }}</p>
-              </div>
-              <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">Aproveitamento <span class="text-n-slate-9">(últimos 7 dias)</span></span>
-                  <span class="font-bold text-base text-n-slate-12">{{ surgUsageLast7.total ? surgUsageLast7.pct + '%' : '—' }}</span>
-                </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(surgUsageLast7.pct, 2) + '%', background: 'linear-gradient(90deg, #0369A1, #38BDF8)' }" />
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">blocos da sala que viraram cirurgia</p>
-              </div>
-              <!-- 🎯 META: 100 cirurgias -->
-              <div>
-                <div class="flex items-center justify-between text-xs mb-1.5">
-                  <span class="text-n-slate-11">🎯 Meta do mês <span class="text-n-slate-9">({{ SURGERY_GOAL }} {{ termo('vendas') }})</span></span>
-                  <span class="font-bold text-base text-n-slate-12">{{ surgeriesDoneMonth }} de {{ SURGERY_GOAL }}</span>
-                </div>
-                <div class="h-3.5 bg-n-alpha-1 rounded-full overflow-hidden">
-                  <div class="h-full rounded-full transition-all" :style="{ width: Math.max(goalPct, 2) + '%', background: 'linear-gradient(90deg, #065F46, #10B981)' }" />
-                </div>
-                <p class="text-[10px] text-n-slate-9 mt-1">{{ goalPct }}% da meta · cirurgias realizadas no mês</p>
-              </div>
-              <div class="mt-auto pt-1 border-t border-sky-400/20">
-                <p v-if="nextSurgery" class="text-[11px] text-n-slate-10 flex items-center gap-1.5 mt-2">
-                  <span class="i-lucide-clock text-xs" />
-                  Próxima cirurgia: <b class="text-n-slate-12">{{ nextSurgery.title.replace(/^Consulta:\s*/i, '') }}</b> — {{ apptTime(nextSurgery.due_at) }}
-                </p>
-                <p v-else class="text-[11px] text-n-slate-10 mt-2">Nenhuma cirurgia futura na agenda.</p>
-              </div>
-            </div>
-          </div>
+                      <!-- 🔪 Agenda de CIRURGIAS (simétrica) -->
+                      <div
+                        v-if="showSurgeryHealth"
+                        class="cv-sub p-4 flex flex-col gap-4"
+                      >
+                        <p
+                          class="text-xs font-bold text-n-slate-12 flex items-center gap-1.5"
+                        >
+                          <span
+                            class="i-lucide-slice text-sm"
+                            style="color: var(--cv)"
+                          />
+                          Agenda de Cirurgias
+                          <span class="text-[10px] font-normal text-n-slate-9"
+                            >sala cirúrgica (IOP, Ocular Surgery...)</span
+                          >
+                        </p>
+                        <div>
+                          <div
+                            class="flex items-center justify-between text-xs mb-1.5"
+                          >
+                            <span class="text-n-slate-11"
+                              >Sala cheia
+                              <span class="text-n-slate-9"
+                                >(próx. 7 dias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12">{{
+                              surgFillNext7.total
+                                ? surgFillNext7.pct + '%'
+                                : '—'
+                            }}</span>
+                          </div>
+                          <div class="cv-track">
+                            <div
+                              class="cv-fill"
+                              :style="{
+                                width: Math.max(surgFillNext7.pct, 2) + '%',
+                              }"
+                            />
+                          </div>
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            {{
+                              surgFillNext7.total
+                                ? `${surgFillNext7.filled} de ${surgFillNext7.total} blocos`
+                                : 'sem janelas da sala nos próximos dias'
+                            }}
+                          </p>
+                        </div>
+                        <div>
+                          <div
+                            class="flex items-center justify-between text-xs mb-1.5"
+                          >
+                            <span class="text-n-slate-11"
+                              >Aproveitamento
+                              <span class="text-n-slate-9"
+                                >(últimos 7 dias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12">{{
+                              surgUsageLast7.total
+                                ? surgUsageLast7.pct + '%'
+                                : '—'
+                            }}</span>
+                          </div>
+                          <div class="cv-track">
+                            <div
+                              class="cv-fill"
+                              :style="{
+                                width: Math.max(surgUsageLast7.pct, 2) + '%',
+                              }"
+                            />
+                          </div>
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            blocos da sala que viraram cirurgia
+                          </p>
+                        </div>
+                        <!-- 🎯 META: 100 cirurgias -->
+                        <div>
+                          <div
+                            class="flex items-center justify-between text-xs mb-1.5"
+                          >
+                            <span
+                              class="text-n-slate-11 inline-flex items-center gap-1"
+                              ><span
+                                class="i-lucide-target text-xs"
+                                style="color: var(--cv)"
+                              />Meta do mês
+                              <span class="text-n-slate-9"
+                                >({{ surgeryGoalTarget }} cirurgias)</span
+                              ></span
+                            >
+                            <span class="font-bold text-base text-n-slate-12"
+                              >{{ surgeriesDoneMonth }} de
+                              {{ surgeryGoalTarget }}</span
+                            >
+                          </div>
+                          <div class="cv-track">
+                            <div
+                              class="cv-fill"
+                              :class="goalPct >= 100 ? 'cv-green' : ''"
+                              :style="{ width: Math.max(goalPct, 2) + '%' }"
+                            />
+                          </div>
+                          <p class="text-[10px] text-n-slate-9 mt-1">
+                            {{ goalPct }}% da meta · cirurgias realizadas no mês
+                          </p>
+                        </div>
+                        <div
+                          class="mt-auto pt-1"
+                          style="
+                            border-top: 1px solid rgb(var(--cv-rgb) / 0.18);
+                          "
+                        >
+                          <p
+                            v-if="nextSurgery"
+                            class="text-[11px] text-n-slate-10 flex items-center gap-1.5 mt-2"
+                          >
+                            <span class="i-lucide-clock text-xs" />
+                            Próxima cirurgia:
+                            <b class="text-n-slate-12">{{
+                              nextSurgery.title.replace(/^Consulta:\s*/i, '')
+                            }}</b>
+                            — {{ apptTime(nextSurgery.due_at) }}
+                          </p>
+                          <p v-else class="text-[11px] text-n-slate-10 mt-2">
+                            Nenhuma cirurgia futura na agenda.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
 
-          <!-- o "% de agendamento" que morava aqui foi PROMOVIDO pra fileira
+                    <!-- o "% de agendamento" que morava aqui foi PROMOVIDO pra fileira
                de indicadores do painel Agendamento (item 143) -->
-        </div>
-            </template>
+                  </div>
+                </template>
 
-            <template v-else-if="blockId === 'metas_strip'">
-        <!-- 🎯 Metas · Rotinas · Ferramentas (alimentado pelo Painel de Metas) -->
-        <div v-if="goalsData" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
-          <!-- METAS do mês -->
-          <button
-            class="rounded-2xl border border-n-weak bg-n-card outline-none p-4 text-left hover:border-violet-500/60 hover:shadow-md transition-all"
-            @click="goToGoals"
-          >
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #5B21B6, #7C3AED)">
-                <span class="i-lucide-target text-white text-sm" />
-              </span>
-              <p class="text-xs font-bold text-n-slate-12 flex-1">Metas do mês</p>
-              <span class="i-lucide-chevron-right text-sm text-n-slate-9" />
-            </div>
-            <template v-if="goalRows.length">
-              <div v-for="g in goalRows" :key="g.key" class="mb-1.5">
-                <div class="flex items-center justify-between text-[10px] mb-0.5">
-                  <span class="text-n-slate-10 truncate">{{ g.label }}</span>
-                  <b class="text-n-slate-12">{{ g.current }}/{{ g.target }}</b>
-                </div>
-                <div class="h-1.5 bg-n-alpha-1 rounded-full overflow-hidden">
+                <template v-else-if="blockId === 'metas_strip'">
+                  <!-- 🎯 Metas · Rotinas · Ferramentas (alimentado pelo Painel de Metas) -->
                   <div
-                    class="h-full rounded-full transition-all duration-700"
-                    :style="{ width: `${Math.max(g.pct, 2)}%`, background: g.pct >= 100 ? 'linear-gradient(90deg, #047857, #34D399)' : 'linear-gradient(90deg, #5B21B6, #7C3AED)' }"
-                  />
-                </div>
-              </div>
-            </template>
-            <p v-else class="text-[11px] text-n-slate-9">
-              {{ isAdmin ? 'Defina a meta do mês no Painel de Metas →' : 'A meta do mês aparece aqui quando o gestor definir.' }}
-            </p>
-          </button>
+                    v-if="goalsData"
+                    class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6"
+                  >
+                    <!-- METAS do mês -->
+                    <button
+                      class="cv-block cv-block-hover p-4 text-left"
+                      @click="goToGoals"
+                    >
+                      <div class="flex items-center gap-2 mb-2">
+                        <span class="cv-icon cv-icon-sm">
+                          <span class="i-lucide-target text-xs" />
+                        </span>
+                        <p class="text-xs font-bold text-n-slate-12 flex-1">
+                          Metas do mês
+                        </p>
+                        <span
+                          class="i-lucide-chevron-right text-sm text-n-slate-9"
+                        />
+                      </div>
+                      <template v-if="goalRows.length">
+                        <div v-for="g in goalRows" :key="g.key" class="mb-1.5">
+                          <div
+                            class="flex items-center justify-between text-[10px] mb-0.5"
+                          >
+                            <span class="text-n-slate-10 truncate">{{
+                              g.label
+                            }}</span>
+                            <b class="text-n-slate-12"
+                              >{{ g.current }}/{{ g.target }}</b
+                            >
+                          </div>
+                          <div class="cv-track cv-track-sm">
+                            <div
+                              class="cv-fill"
+                              :class="g.pct >= 100 ? 'cv-green' : ''"
+                              :style="{ width: `${Math.max(g.pct, 2)}%` }"
+                            />
+                          </div>
+                        </div>
+                      </template>
+                      <p v-else class="text-[11px] text-n-slate-9">
+                        {{
+                          isAdmin
+                            ? 'Defina a meta do mês no Painel de Metas →'
+                            : 'A meta do mês aparece aqui quando o gestor definir.'
+                        }}
+                      </p>
+                    </button>
 
-          <!-- ROTINAS -->
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #0F766E, #2DD4BF)">
-                <span class="i-lucide-repeat text-white text-sm" />
-              </span>
-              <p class="text-xs font-bold text-n-slate-12">Rotinas</p>
-            </div>
-            <template v-if="teamRoutines.length">
-              <p v-for="(r, ri) in teamRoutines.slice(0, 5)" :key="ri" class="text-[11px] text-n-slate-11 leading-relaxed flex items-start gap-1.5 mb-0.5">
-                <span class="i-lucide-check-circle-2 text-[11px] mt-0.5 flex-shrink-0" style="color: #0D9488" />
-                {{ r }}
-              </p>
-            </template>
-            <p v-else class="text-[11px] text-n-slate-9">
-              {{ isAdmin ? 'Cadastre as rotinas do time no Painel de Metas.' : 'As rotinas combinadas aparecem aqui.' }}
-            </p>
-          </div>
+                    <!-- ROTINAS -->
+                    <div class="cv-block p-4">
+                      <div class="flex items-center gap-2 mb-2">
+                        <span class="cv-icon cv-icon-sm">
+                          <span class="i-lucide-repeat text-xs" />
+                        </span>
+                        <p class="text-xs font-bold text-n-slate-12">Rotinas</p>
+                      </div>
+                      <template v-if="teamRoutines.length">
+                        <p
+                          v-for="(r, ri) in teamRoutines.slice(0, 5)"
+                          :key="ri"
+                          class="text-[11px] text-n-slate-11 leading-relaxed flex items-start gap-1.5 mb-0.5"
+                        >
+                          <span
+                            class="i-lucide-check-circle-2 text-[11px] mt-0.5 flex-shrink-0"
+                            style="color: var(--cv)"
+                          />
+                          {{ r }}
+                        </p>
+                      </template>
+                      <p v-else class="text-[11px] text-n-slate-9">
+                        {{
+                          isAdmin
+                            ? 'Cadastre as rotinas do time no Painel de Metas.'
+                            : 'As rotinas combinadas aparecem aqui.'
+                        }}
+                      </p>
+                    </div>
 
-          <!-- FERRAMENTAS importantes -->
-          <div class="rounded-2xl border border-n-weak bg-n-card p-4">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, #065F46, #34D399)">
-                <span class="i-lucide-wrench text-white text-sm" />
-              </span>
-              <p class="text-xs font-bold text-n-slate-12">Ferramentas</p>
-            </div>
-            <button
-              class="w-full flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
-              @click="goToTools"
-            >
-              <span class="i-lucide-swords text-[11px]" style="color: #047857" />
-              Fechamento: script + mapa de objeções
-              <span class="i-lucide-chevron-right text-[11px] ml-auto text-n-slate-9" />
-            </button>
-            <button
-              v-for="(t, ti) in importantTools.slice(0, 4)"
-              :key="ti"
-              class="w-full flex items-center gap-1.5 text-[11px] text-n-slate-11 rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 mb-1 hover:border-emerald-500/60 transition-colors"
-              @click="openTool(t)"
-            >
-              <span class="i-lucide-external-link text-[11px] text-n-slate-9" />
-              <span class="truncate">{{ t.label }}</span>
-            </button>
-          </div>
-        </div>
+                    <!-- FERRAMENTAS importantes -->
+                    <div class="cv-block p-4">
+                      <div class="flex items-center gap-2 mb-2">
+                        <span class="cv-icon cv-icon-sm">
+                          <span class="i-lucide-wrench text-xs" />
+                        </span>
+                        <p class="text-xs font-bold text-n-slate-12">
+                          Ferramentas
+                        </p>
+                      </div>
+                      <button
+                        class="cv-sub cv-sub-hover w-full flex items-center gap-1.5 text-[11px] font-semibold text-n-slate-12 px-2.5 py-1.5 mb-1"
+                        @click="goToTools"
+                      >
+                        <span
+                          class="i-lucide-swords text-[11px]"
+                          style="color: var(--cv)"
+                        />
+                        Fechamento: script + mapa de objeções
+                        <span
+                          class="i-lucide-chevron-right text-[11px] ml-auto text-n-slate-9"
+                        />
+                      </button>
+                      <button
+                        v-for="(t, ti) in importantTools.slice(0, 4)"
+                        :key="ti"
+                        class="cv-sub cv-sub-hover w-full flex items-center gap-1.5 text-[11px] text-n-slate-11 px-2.5 py-1.5 mb-1"
+                        @click="openTool(t)"
+                      >
+                        <span
+                          class="i-lucide-external-link text-[11px] text-n-slate-9"
+                        />
+                        <span class="truncate">{{ t.label }}</span>
+                      </button>
+                    </div>
+                  </div>
+                </template>
 
-            </template>
+                <template v-else-if="blockId === 'atalhos'">
+                  <!-- Acesso rápido (compacto, largura toda) -->
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <button
+                      v-for="(s, si) in shortcuts"
+                      :key="s.route"
+                      class="cv-block cv-block-hover flex items-center gap-2.5 px-4 py-3 text-left"
+                      @click="go(s.route)"
+                    >
+                      <span
+                        class="cv-icon cv-icon-lg"
+                        :style="{ background: blockFamily('atalhos')[si % 4] }"
+                      >
+                        <span :class="s.icon" class="text-lg" />
+                      </span>
+                      <span class="text-sm font-semibold text-n-slate-12">{{
+                        s.label
+                      }}</span>
+                    </button>
+                  </div>
+                </template>
 
-            <template v-else-if="blockId === 'atalhos'">
-        <!-- Acesso rápido (compacto, largura toda) -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-          <button
-            v-for="s in shortcuts"
-            :key="s.route"
-            class="flex items-center gap-2.5 px-4 py-3 rounded-2xl border border-n-weak bg-n-solid-2 hover:border-n-brand/60 transition-colors text-left"
-            @click="go(s.route)"
-          >
-            <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" :style="{ backgroundColor: s.color + '1A' }">
-              <span :class="s.icon" class="text-lg" :style="{ color: s.color }" />
-            </span>
-            <span class="text-sm font-semibold text-n-slate-12">{{ s.label }}</span>
-          </button>
-        </div>
-
-            </template>
-
-            <template v-else-if="blockId === 'termometro'">
-        <!-- Termômetro do momento -->
-        <div class="flex flex-wrap gap-4 text-xs text-n-slate-10 mb-4">
-          <span class="flex items-center gap-1.5"><span class="i-lucide-inbox text-sm" /> {{ data.open_conversations ?? 0 }} conversas abertas agora</span>
-          <span class="flex items-center gap-1.5" :class="(data.unanswered ?? 0) > 0 ? 'text-amber-500 font-medium' : ''">
-            <span class="i-lucide-clock-alert text-sm" /> {{ data.unanswered ?? 0 }} aguardando resposta
-          </span>
-          <span class="flex items-center gap-1.5"><span class="i-lucide-calendar-check text-sm" /> {{ data.appointments_today ?? 0 }} consultas hoje</span>
-        </div>
-            </template>
-            </template>
-          </section>
+                <template v-else-if="blockId === 'termometro'">
+                  <!-- Termômetro do momento -->
+                  <div
+                    class="cv-block cv-strip flex flex-wrap items-center gap-2 px-3 py-2 mb-4"
+                  >
+                    <span class="cv-icon cv-icon-sm"
+                      ><span class="i-lucide-thermometer text-xs"
+                    /></span>
+                    <span class="cv-chip"
+                      ><span class="i-lucide-inbox text-xs" />{{
+                        data.open_conversations ?? 0
+                      }}
+                      conversas abertas agora</span
+                    >
+                    <span
+                      class="cv-chip"
+                      :class="(data.unanswered ?? 0) > 0 ? 'cv-amber' : ''"
+                    >
+                      <span class="i-lucide-clock-alert text-xs" />{{
+                        data.unanswered ?? 0
+                      }}
+                      aguardando resposta
+                    </span>
+                    <span class="cv-chip"
+                      ><span class="i-lucide-calendar-check text-xs" />{{
+                        data.appointments_today ?? 0
+                      }}
+                      consultas hoje</span
+                    >
+                  </div>
+                </template>
+                <!-- 🌪️ item 271: FUNIL DE AQUISIÇÃO POR TURMA (Gestor) -->
+                <template v-else-if="blockId === 'funil_aquisicao'">
+                  <div
+                    v-if="panelBase === 'gestor'"
+                    class="cv-block p-5 sm:p-6 mb-6"
+                  >
+                    <div
+                      class="flex items-center justify-between mb-1 flex-wrap gap-2"
+                    >
+                      <div class="flex items-center gap-2">
+                        <span class="cv-icon"
+                          ><span class="i-lucide-filter text-base"
+                        /></span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Funil de aquisição · por turma
+                        </h2>
+                      </div>
+                      <div
+                        class="cv-seg cv-seg-sm"
+                        title="até quantos dias depois de chegar contam as etapas"
+                      >
+                        <button
+                          v-for="h in FUNNEL_HORIZONS"
+                          :key="'fh' + h"
+                          class="cv-seg-item"
+                          :class="funnelHorizon === h ? 'cv-seg-on' : ''"
+                          @click="funnelHorizon = h"
+                        >
+                          {{ h }} dias
+                        </button>
+                      </div>
+                    </div>
+                    <p class="text-[11px] text-n-slate-10 mb-4">
+                      quem <b>chegou</b> no período escolhido acima (leads pelas
+                      caixas de captação) e até onde cada um foi nos
+                      {{ funnelHorizon }} dias seguintes · clique numa etapa
+                      para ver os nomes · "≈ dias" = tempo típico desde a etapa
+                      anterior
+                    </p>
+                    <div
+                      v-if="funnelLoading && !acqFunnel"
+                      class="text-xs text-n-slate-10 py-6 text-center"
+                    >
+                      <span class="i-lucide-loader-circle animate-spin" />
+                      montando a turma…
+                    </div>
+                    <template v-else-if="acqFunnel && acqFunnel.total">
+                      <FunnelSteps
+                        :steps="acqSteps"
+                        :height="130"
+                        clickable
+                        @pick="pickAcq"
+                      />
+                      <div class="flex items-center gap-1.5 flex-wrap mt-4">
+                        <span class="text-[10px] text-n-slate-9 mr-1"
+                          >parou em:</span
+                        >
+                        <button
+                          v-for="c in stoppedChips(acqFunnel)"
+                          :key="'as' + c.key"
+                          class="cv-chip"
+                          :title="`chegaram em ${c.label} e não passaram para ${c.next} · clique para ver`"
+                          @click="
+                            openFunnelList(
+                              acqFunnel,
+                              'funil_aquisicao',
+                              c.key,
+                              'stopped',
+                              `Pararam em ${c.label}`,
+                              `chegaram aqui e não passaram para ${c.next}`
+                            )
+                          "
+                        >
+                          {{ c.label }} <b class="tabular-nums">{{ c.n }}</b>
+                        </button>
+                        <span
+                          v-if="acqFunnel.by_source"
+                          class="cv-chip ml-auto"
+                          title="das consultas marcadas da turma, quem marcou"
+                        >
+                          <span class="i-lucide-bot text-xs" /> robô
+                          <b class="tabular-nums">{{
+                            acqFunnel.by_source.ia
+                          }}</b>
+                          × equipe
+                          <b class="tabular-nums">{{
+                            acqFunnel.by_source.equipe
+                          }}</b>
+                        </span>
+                      </div>
+                      <div
+                        v-if="acqFunnel.by_origin?.length"
+                        class="cv-sub mt-4 p-3 overflow-x-auto"
+                      >
+                        <p class="text-[10px] font-bold text-n-slate-11 mb-2">
+                          por onde chegaram (caixa da primeira conversa)
+                        </p>
+                        <table class="w-full text-[11px] tabular-nums">
+                          <thead>
+                            <tr class="text-n-slate-9 text-left">
+                              <th class="font-semibold pb-1">origem</th>
+                              <th
+                                v-for="st in acqFunnel.steps"
+                                :key="'ah' + st.key"
+                                class="font-semibold pb-1 text-right"
+                              >
+                                {{ st.label }}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr
+                              v-for="o in acqFunnel.by_origin.slice(0, 8)"
+                              :key="'ao' + o.name"
+                              class="border-t border-n-slate-4"
+                            >
+                              <td
+                                class="py-1 pr-2 font-semibold text-n-slate-12 truncate max-w-[10rem]"
+                              >
+                                {{ o.name }}
+                              </td>
+                              <td
+                                v-for="st in acqFunnel.steps"
+                                :key="'ac' + o.name + st.key"
+                                class="py-1 text-right text-n-slate-11"
+                              >
+                                {{ o.steps[st.key] }}
+                                <span
+                                  v-if="st.key !== 'arrived'"
+                                  class="text-n-slate-8"
+                                  >·
+                                  {{
+                                    funnelPct(o.steps[st.key], o.total)
+                                  }}</span
+                                >
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </template>
+                    <p v-else class="text-xs text-n-slate-10 py-6 text-center">
+                      nenhum lead chegou no período escolhido
+                    </p>
+                  </div>
+                </template>
+                <!-- 🚪 item 271: DA PORTA PRA DENTRO (Gestor) -->
+                <template v-else-if="blockId === 'porta_dentro'">
+                  <div
+                    v-if="panelBase === 'gestor'"
+                    class="cv-block p-5 sm:p-6 mb-6"
+                  >
+                    <div class="flex items-center gap-2 mb-1">
+                      <span class="cv-icon"
+                        ><span class="i-lucide-door-open text-base"
+                      /></span>
+                      <h2 class="text-sm font-bold text-n-slate-12">
+                        Da porta pra dentro
+                      </h2>
+                    </div>
+                    <p class="text-[11px] text-n-slate-10 mb-4">
+                      quem tinha <b>consulta com data</b> no período (sem
+                      exame/tele) e o que aconteceu depois: presença, indicação,
+                      cirurgia marcada, realizada e pesquisa respondida · clique
+                      numa etapa para ver os nomes
+                    </p>
+                    <div
+                      v-if="funnelLoading && !clinicFunnel"
+                      class="text-xs text-n-slate-10 py-6 text-center"
+                    >
+                      <span class="i-lucide-loader-circle animate-spin" />
+                      conferindo as consultas…
+                    </div>
+                    <template v-else-if="clinicFunnel && clinicFunnel.total">
+                      <FunnelSteps
+                        :steps="clinicSteps"
+                        :height="130"
+                        clickable
+                        @pick="pickClinic"
+                      />
+                      <div class="flex items-center gap-1.5 flex-wrap mt-4">
+                        <button
+                          class="cv-chip cv-red"
+                          title="não vieram (falta registrada) · clique para ver"
+                          @click="openSideList('missed', 'Faltas em consultas')"
+                        >
+                          <span class="i-lucide-user-x text-xs" /> faltas
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.missed
+                          }}</b>
+                          <span class="opacity-60"
+                            >·
+                            {{
+                              funnelPct(
+                                clinicFunnel.side.missed,
+                                clinicFunnel.total
+                              )
+                            }}</span
+                          >
+                        </button>
+                        <button
+                          class="cv-chip"
+                          title="desmarcadas · clique para ver"
+                          @click="
+                            openSideList('canceled', 'Consultas canceladas')
+                          "
+                        >
+                          <span class="i-lucide-calendar-x text-xs" />
+                          canceladas
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.canceled
+                          }}</b>
+                        </button>
+                        <button
+                          class="cv-chip"
+                          title="mudaram de dia ou hora · clique para ver"
+                          @click="
+                            openSideList('rescheduled', 'Consultas remarcadas')
+                          "
+                        >
+                          <span class="i-lucide-refresh-cw text-xs" />
+                          remarcadas
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.rescheduled
+                          }}</b>
+                        </button>
+                        <span
+                          v-if="clinicFunnel.side.pending"
+                          class="cv-chip cv-amber"
+                          title="consulta já passou e ninguém marcou se o paciente veio — o funil fica cego aqui"
+                        >
+                          <span class="i-lucide-circle-help text-xs" /> sem
+                          registro de presença
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.pending
+                          }}</b>
+                        </span>
+                        <span
+                          v-if="clinicFunnel.side.future"
+                          class="cv-chip"
+                          title="consultas do período que ainda vão acontecer"
+                        >
+                          <span class="i-lucide-clock text-xs" /> ainda vão
+                          acontecer
+                          <b class="tabular-nums">{{
+                            clinicFunnel.side.future
+                          }}</b>
+                        </span>
+                      </div>
+                      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
+                        <div
+                          v-for="grp in [
+                            ['por médico', clinicFunnel.by_doctor],
+                            ['por unidade', clinicFunnel.by_unit],
+                          ]"
+                          :key="grp[0]"
+                          class="cv-sub p-3 overflow-x-auto"
+                        >
+                          <p class="text-[10px] font-bold text-n-slate-11 mb-2">
+                            {{ grp[0] }}
+                          </p>
+                          <table class="w-full text-[11px] tabular-nums">
+                            <thead>
+                              <tr class="text-n-slate-9 text-left">
+                                <th class="font-semibold pb-1">&nbsp;</th>
+                                <th class="font-semibold pb-1 text-right">
+                                  consultas
+                                </th>
+                                <th class="font-semibold pb-1 text-right">
+                                  vieram
+                                </th>
+                                <th class="font-semibold pb-1 text-right">
+                                  indicação
+                                </th>
+                                <th class="font-semibold pb-1 text-right">
+                                  cirurgia
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr
+                                v-for="o in (grp[1] || []).slice(0, 8)"
+                                :key="grp[0] + o.name"
+                                class="border-t border-n-slate-4"
+                              >
+                                <td
+                                  class="py-1 pr-2 font-semibold text-n-slate-12 truncate max-w-[9rem]"
+                                >
+                                  {{ o.name }}
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.total }}
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.steps.attended }}
+                                  <span class="text-n-slate-8"
+                                    >·
+                                    {{
+                                      funnelPct(o.steps.attended, o.total)
+                                    }}</span
+                                  >
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.steps.indicated }}
+                                  <span class="text-n-slate-8"
+                                    >·
+                                    {{
+                                      funnelPct(
+                                        o.steps.indicated,
+                                        o.steps.attended
+                                      )
+                                    }}</span
+                                  >
+                                </td>
+                                <td class="py-1 text-right text-n-slate-11">
+                                  {{ o.steps.surgery_booked }}
+                                  <span class="text-n-slate-8"
+                                    >·
+                                    {{
+                                      funnelPct(
+                                        o.steps.surgery_booked,
+                                        o.steps.indicated
+                                      )
+                                    }}</span
+                                  >
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </template>
+                    <p v-else class="text-xs text-n-slate-10 py-6 text-center">
+                      nenhuma consulta com data no período
+                    </p>
+                  </div>
+                </template>
+              </template>
+            </section>
           </template>
-        </draggable>
+        </MagnetBoard>
+        </template>
       </template>
 
       <!-- Admin: quem vê qual painel -->
@@ -2872,25 +8716,44 @@ onUnmounted(() => {
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
         @click.self="showAssignModal = false"
       >
-        <div class="bg-n-solid-1 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden">
-          <div class="h-1.5 w-full flex-shrink-0" style="background: linear-gradient(135deg, #111827, #94A3B8)" />
-          <div class="flex items-center justify-between px-5 py-4 border-b border-n-weak flex-shrink-0">
-            <h2 class="text-base font-semibold text-n-slate-12 flex items-center gap-2">
-              <span class="i-lucide-settings-2 text-n-brand" />
-              Painel de cada pessoa
-            </h2>
-            <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showAssignModal = false" />
+        <div class="cv-modal w-full max-w-md max-h-[85vh] flex flex-col">
+          <div class="cv-modal-head flex items-center gap-3">
+            <span
+              class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
+              ><span class="i-lucide-settings-2 text-base"
+            /></span>
+            <div class="flex-1 min-w-0">
+              <h2 class="text-base font-bold leading-tight">
+                Painel de cada pessoa
+              </h2>
+              <p class="text-[11px] opacity-85 mt-0.5">
+                quem abre o Meu Painel em qual versão
+              </p>
+            </div>
+            <button
+              class="cv-glass-btn cv-iconbtn"
+              aria-label="Fechar"
+              @click="showAssignModal = false"
+            >
+              <span class="i-lucide-x text-base" />
+            </button>
           </div>
           <div class="flex-1 overflow-y-auto p-5 space-y-2">
             <p class="text-xs text-n-slate-10 mb-2">
-              A pessoa abre o Meu Painel já na versão da função dela (e só vê essa).
-              "Livre" = pode alternar entre todos os painéis.
+              A pessoa abre o Meu Painel já na versão da função dela (e só vê
+              essa). "Livre" = pode alternar entre todos os painéis.
             </p>
-            <div v-for="agent in teamAgents" :key="agent.id" class="flex items-center gap-2">
-              <span class="text-sm text-n-slate-12 flex-1 truncate">{{ agent.name }}</span>
+            <div
+              v-for="agent in teamAgents"
+              :key="agent.id"
+              class="flex items-center gap-2"
+            >
+              <span class="text-sm text-n-slate-12 flex-1 truncate">{{
+                agent.name
+              }}</span>
               <select
                 v-model="assignDraft[String(agent.id)]"
-                class="h-8 text-xs border border-n-weak rounded-lg px-2 bg-n-solid-2 text-n-slate-12"
+                class="cv-input !h-8 text-xs text-n-slate-12"
               >
                 <option value="">Livre (todos)</option>
                 <!-- lista também os painéis do Construtor (custom:<id>) -->
@@ -2900,71 +8763,227 @@ onUnmounted(() => {
               </select>
             </div>
           </div>
-          <div class="px-5 py-4 border-t border-n-weak flex gap-2 flex-shrink-0">
+          <div class="cv-modal-foot flex gap-2">
             <button
-              class="flex-1 text-white rounded-lg py-2 text-sm font-medium disabled:opacity-50"
-              style="background: linear-gradient(135deg, #111827, #475569)"
+              class="cv-btn cv-btn-lg flex-1"
               :disabled="isSavingAssign"
               @click="saveAssignments"
             >
               {{ isSavingAssign ? 'Salvando…' : 'Salvar' }}
             </button>
-            <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showAssignModal = false">
+            <button
+              class="cv-btn cv-btn-ghost cv-btn-lg"
+              @click="showAssignModal = false"
+            >
               Cancelar
             </button>
           </div>
         </div>
       </div>
 
-    <!-- 🎯 Modal de METAS por painel (admin) -->
-    <div
-      v-if="showGoalsModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      @click.self="showGoalsModal = false"
-    >
-      <div class="bg-n-solid-1 rounded-2xl shadow-xl w-full max-w-md p-5">
-        <div class="flex items-center justify-between mb-1">
-          <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
-            <span class="i-lucide-target text-base" style="color: #d4af37" />
-            Metas — {{ currentPanel.label }}
-          </h3>
-          <button class="text-n-slate-10 hover:text-n-slate-12 i-lucide-x text-xl" @click="showGoalsModal = false" />
-        </div>
-        <p class="text-[11px] text-n-slate-10 mb-4">
-          Metas MENSAIS (as taxas % são diretas). Os cards mudam de cor pelo ritmo:
-          🔴 muito abaixo · 🟠 abaixo · cores normais no ritmo · 🟢 meta batida · 🏆 recorde com átomos.
-        </p>
-        <div class="space-y-3 mb-4">
-          <label
-            v-for="field in GOAL_FIELDS[selectedPanel] || []"
-            :key="field.gk"
-            class="flex items-center gap-3"
-          >
-            <span class="text-xs text-n-slate-11 flex-1">{{ field.label }}</span>
-            <input
-              v-model.number="goalsDraft[selectedPanel][field.gk]"
-              type="number"
-              min="0"
-              :step="field.pct ? 0.5 : 1"
-              class="w-24 h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-sm text-n-slate-12 text-right"
-              placeholder="—"
-            />
-          </label>
-        </div>
-        <p class="text-[10px] text-n-slate-9 mb-3">Deixar vazio (ou 0) = sem meta para aquele card.</p>
-        <div class="flex justify-end gap-2">
-          <button class="px-4 border border-n-weak rounded-lg py-2 text-sm text-n-slate-11" @click="showGoalsModal = false">Cancelar</button>
-          <button
-            class="px-4 rounded-lg py-2 text-sm font-semibold text-white disabled:opacity-60"
-            :style="{ background: currentPanel.grad }"
-            :disabled="isSavingGoals"
-            @click="saveGoals"
-          >
-            {{ isSavingGoals ? 'Salvando…' : 'Salvar metas' }}
-          </button>
+      <!-- 🧑‍🤝‍🧑 Painel por pessoa (admin, rodada 160) -->
+      <div
+        v-if="showVariantModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        @click.self="showVariantModal = false"
+      >
+        <div class="cv-modal w-full max-w-md max-h-[85vh] flex flex-col">
+          <div class="cv-modal-head flex items-center gap-3">
+            <span
+              class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
+              ><span class="i-lucide-user-plus text-base"
+            /></span>
+            <div class="flex-1 min-w-0">
+              <h2 class="text-base font-bold leading-tight">
+                {{
+                  variantDraft.id
+                    ? 'Editar painel por pessoa'
+                    : 'Painel por pessoa'
+                }}
+              </h2>
+              <p class="text-[11px] opacity-85 mt-0.5">
+                uma versão do painel-base com layout próprio
+              </p>
+            </div>
+            <button
+              class="cv-glass-btn cv-iconbtn"
+              aria-label="Fechar"
+              @click="showVariantModal = false"
+            >
+              <span class="i-lucide-x text-base" />
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-5 space-y-4">
+            <p class="text-xs text-n-slate-10 leading-relaxed">
+              Uma versão do painel-base só para quem você escolher: os mesmos
+              números e metas, com blocos, cards e cores organizados do jeito
+              dela — no <b>Modo edição</b>, com o arrasto magnético. A pessoa
+              abre o Meu Painel já neste painel.
+            </p>
+            <div>
+              <p class="cv-label mb-1.5">Painel-base</p>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="b in BASE_PANELS"
+                  :key="b.key"
+                  class="cv-btn cv-btn-sm"
+                  :class="variantDraft.base === b.key ? '' : 'cv-btn-ghost'"
+                  @click="variantDraft.base = b.key"
+                >
+                  <span :class="b.icon" class="text-sm" />
+                  {{ b.label }}
+                </button>
+              </div>
+            </div>
+            <div>
+              <p class="cv-label mb-1.5">Quem vê este painel</p>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  v-for="agent in teamAgents"
+                  :key="agent.id"
+                  class="cv-btn cv-btn-sm"
+                  :class="
+                    variantDraft.user_ids.includes(agent.id)
+                      ? ''
+                      : 'cv-btn-ghost'
+                  "
+                  @click="toggleVariantUser(agent.id)"
+                >
+                  {{ agent.name }}
+                </button>
+                <span
+                  v-if="!teamAgents.length"
+                  class="text-[11px] text-n-slate-9"
+                  >carregando o time…</span
+                >
+              </div>
+              <p class="text-[10px] text-n-slate-9 mt-1.5">
+                Quem está na lista fica travado neste painel (dá pra mudar
+                depois em "Painel de cada pessoa").
+              </p>
+            </div>
+            <div>
+              <p class="cv-label mb-1">Nome do painel</p>
+              <input
+                v-model="variantDraft.name"
+                type="text"
+                maxlength="40"
+                :placeholder="suggestedVariantName() || 'ex.: Natália'"
+                class="cv-input w-full text-n-slate-12"
+              />
+            </div>
+          </div>
+          <div class="cv-modal-foot flex gap-2">
+            <button
+              class="cv-btn cv-btn-lg flex-1"
+              :disabled="isSavingVariant"
+              @click="saveVariant"
+            >
+              {{
+                isSavingVariant
+                  ? 'Salvando…'
+                  : variantDraft.id
+                    ? 'Salvar'
+                    : 'Criar painel'
+              }}
+            </button>
+            <button
+              v-if="variantDraft.id"
+              class="cv-btn cv-btn-ghost cv-btn-lg cv-btn-danger"
+              :class="variantDeleteArmed ? 'cv-btn-danger-on' : ''"
+              :disabled="isSavingVariant"
+              @click="
+                variantDeleteArmed
+                  ? deleteVariant()
+                  : (variantDeleteArmed = true)
+              "
+            >
+              {{ variantDeleteArmed ? 'Confirmar exclusão' : 'Excluir' }}
+            </button>
+            <button
+              class="cv-btn cv-btn-ghost cv-btn-lg"
+              @click="showVariantModal = false"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      <!-- 🎯 Modal de METAS por painel (admin) -->
+      <div
+        v-if="showGoalsModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        @click.self="showGoalsModal = false"
+      >
+        <div class="cv-modal w-full max-w-md flex flex-col">
+          <div class="cv-modal-head flex items-center gap-3">
+            <span
+              class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
+              ><span class="i-lucide-target text-base"
+            /></span>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-base font-bold leading-tight">
+                Metas — {{ currentPanel.label }}
+              </h3>
+              <p class="text-[11px] opacity-85 mt-0.5">
+                metas mensais; os cards mudam de cor pelo ritmo
+              </p>
+            </div>
+            <button
+              class="cv-glass-btn cv-iconbtn"
+              aria-label="Fechar"
+              @click="showGoalsModal = false"
+            >
+              <span class="i-lucide-x text-base" />
+            </button>
+          </div>
+          <div class="p-5">
+            <p class="text-[11px] text-n-slate-10 mb-4">
+              Metas MENSAIS (as taxas % são diretas). Os cards mudam de cor pelo
+              ritmo: 🔴 muito abaixo · 🟠 abaixo · cores normais no ritmo · 🟢
+              meta batida · 🏆 recorde com átomos.
+            </p>
+            <div class="space-y-3 mb-4">
+              <label
+                v-for="field in GOAL_FIELDS[panelBase] || []"
+                :key="field.gk"
+                class="flex items-center gap-3"
+              >
+                <span class="text-xs text-n-slate-11 flex-1">{{
+                  field.label
+                }}</span>
+                <input
+                  v-model.number="goalsDraft[panelBase][field.gk]"
+                  type="number"
+                  min="0"
+                  :step="field.pct ? 0.5 : 1"
+                  class="cv-input w-24 text-n-slate-12 text-right"
+                  placeholder="—"
+                />
+              </label>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mb-3">
+              Deixar vazio (ou 0) = sem meta para aquele card.
+            </p>
+          </div>
+          <div class="cv-modal-foot flex justify-end gap-2">
+            <button
+              class="cv-btn cv-btn-ghost cv-btn-lg"
+              @click="showGoalsModal = false"
+            >
+              Cancelar
+            </button>
+            <button
+              class="cv-btn cv-btn-lg"
+              :disabled="isSavingGoals"
+              @click="saveGoals"
+            >
+              {{ isSavingGoals ? 'Salvando…' : 'Salvar metas' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Balão da conversa direto do card do Radar (o mesmo do CRM) -->
@@ -2978,252 +8997,970 @@ onUnmounted(() => {
 
     <EmojiFx ref="radarFx" />
   </div>
-  <!-- 🔍 Popup de detalhes do card de KPI (item 140) -->
+  <!-- 🔍 Popup de detalhes do card de KPI (itens 140/144; UX 152: transição
+       suave, Esc fecha, rolagem própria — nunca maior que a tela) -->
   <Teleport to="body">
-    <div
-      v-if="kpiModal"
-      class="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
-      @click.self="kpiModal = null"
-    >
-      <div class="w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
-        <div class="p-5 text-white" :style="{ background: tileVisual(kpiModal).grad }">
-          <div class="flex items-center gap-2 text-white/85">
-            <span :class="kpiModal.icon" class="text-base" />
-            <p class="text-sm font-medium flex-1">{{ kpiModal.label }}</p>
-            <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="kpiModal = null">
-              <span class="i-lucide-x text-sm" />
-            </button>
-          </div>
-          <p class="text-4xl font-bold mt-2">{{ kpiModal.value }}</p>
-          <span v-if="kpiModal.chip" class="inline-block mt-1 text-[11px] px-2 py-0.5 rounded-full font-semibold bg-white/20">{{ kpiModal.chip.label }}</span>
-          <p v-if="kpiModal.sub" class="text-xs text-white/80 mt-1">{{ kpiModal.sub }}</p>
-        </div>
-        <div class="p-5 space-y-3">
-          <!-- 📊 gráfico do período v2 (item 144): mini-régua própria, período
-               anterior sobreposto, linha de meta e 📌 ações da empresa -->
-          <div v-if="modalChart" class="rounded-xl bg-n-alpha-1 px-3 py-2">
-            <div class="flex items-center justify-between gap-2 text-[10px] text-n-slate-10 mb-1">
-              <span class="truncate">{{ modalChart.compare ? 'comparativo' : `${modalChart.label || kpiModal.label} · ${modalBag?.granularity === 'month' ? 'por mês' : modalBag?.granularity === 'week' ? 'por semana' : 'por dia'}` }}</span>
-              <span v-if="isLoadingModalBag" class="i-lucide-loader-circle animate-spin text-xs flex-shrink-0" />
-              <span v-else-if="modalChart.prevValues" class="flex-shrink-0">tracejado = período anterior</span>
-              <span v-else-if="modalChart.prev !== undefined && modalChart.prev !== null && !modalChart.compare" class="flex-shrink-0">tracejado = média do anterior</span>
+    <Transition name="cevico-kpi-pop">
+      <div
+        v-if="kpiModal"
+        class="cv-page cv-overlay fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-[2px] p-4"
+        :style="cvVars"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeKpiModal"
+      >
+        <div
+          class="cevico-kpi-panel cv-modal w-full max-w-lg max-h-[88vh] flex flex-col"
+        >
+          <div
+            class="cv-modal-head !p-5 !pb-4"
+            :style="{ background: tileVisual(kpiModal).grad }"
+          >
+            <div class="flex items-center gap-2 text-white/85">
+              <span :class="kpiModal.icon" class="text-base" />
+              <p class="text-sm font-medium flex-1">{{ kpiModal.label }}</p>
+              <button
+                class="cv-glass-btn cv-iconbtn"
+                aria-label="Fechar (Esc)"
+                title="Fechar (Esc)"
+                @click="closeKpiModal"
+              >
+                <span class="i-lucide-x text-base" />
+              </button>
             </div>
-            <MiniBars
-              :values="modalChart.values"
-              :labels="modalChart.labels"
-              color="#0F5FA6"
-              :height="110"
-              :prev-values="modalChart.prevValues || null"
-              :goal="modalChart.goal ?? null"
-              :markers="modalChart.compare ? [] : modalMarkers"
-              :reference="!modalChart.compare && !modalChart.prevValues && modalChart.prev ? modalChart.prev / Math.max(1, modalChart.values.length) : null"
-              :format="chartFormat(kpiModal)"
-            />
-            <div v-if="!modalChart.compare" class="flex items-center justify-between gap-2 flex-wrap mt-1">
+            <div class="flex items-end gap-3 flex-wrap mt-2">
               <p
-                v-if="modalChart.prev !== undefined && modalChart.prev !== null"
-                class="text-[11px]"
-                :class="(modalChart.total ?? 0) >= modalChart.prev ? 'text-emerald-600' : 'text-red-500'"
+                class="text-4xl font-bold tabular-nums tracking-tight leading-none"
               >
-                {{ deltaLine(modalChart.total ?? 0, modalChart.prev, kpiModal.format || (modalChart.unit === 'brl' ? 'currency' : 'number'), modalBag) }}
+                {{ kpiModal.value }}
               </p>
-              <p v-if="modalChart.goal" class="text-[10px]" style="color: #B8860B">
-                ⭑ meta ≈ {{ chartFormat(kpiModal)(modalChart.goal) }} por {{ modalBag?.granularity === 'month' ? 'mês' : modalBag?.granularity === 'week' ? 'semana' : 'dia' }}
-              </p>
-            </div>
-            <!-- mini-régua do popup: o recorte é DESTE gráfico, sem mexer na
-                 régua da página -->
-            <div v-if="!modalChart.compare" class="flex items-center gap-1 flex-wrap mt-2 pt-2 border-t border-n-weak/60">
-              <button
-                v-for="p in MODAL_PRESETS"
-                :key="String(p[0])"
-                class="h-6 px-2 rounded-md text-[10px] font-medium border transition-colors"
-                :class="kpiModalPreset === p[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                :style="kpiModalPreset === p[0] ? { background: panelFamily[1] } : {}"
-                @click="setModalPreset(p[0])"
-              >
-                {{ p[1] }}
-              </button>
-              <span class="text-n-weak text-[10px]">·</span>
-              <button
-                v-for="g in MODAL_GRAINS"
-                :key="String(g[0])"
-                class="h-6 px-2 rounded-md text-[10px] font-medium border transition-colors"
-                :class="kpiModalGranularity === g[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-10 hover:bg-n-alpha-1'"
-                :style="kpiModalGranularity === g[0] ? { background: panelFamily[2] } : {}"
-                @click="setModalGranularity(g[0])"
-              >
-                {{ g[1] }}
-              </button>
-            </div>
-          </div>
-          <!-- 🧩 DE ONDE VEM ESTA TAXA (item 144): as séries que formam a
-               conta — responde se o problema foi entrada ou conversão -->
-          <div v-if="modalComponents.length" class="rounded-xl bg-n-alpha-1 px-3 py-2 space-y-2">
-            <p class="text-[10px] text-n-slate-10">🧩 de onde vem: as séries da conta ({{ modalRangeLabel }})</p>
-            <div v-for="comp in modalComponents" :key="comp.key">
-              <div class="flex items-center justify-between text-[10px] mb-0.5">
-                <span class="text-n-slate-11">{{ comp.label }}</span>
-                <b class="text-n-slate-12">{{ componentFormat(comp)(comp.total) }}</b>
+              <!-- a tendência já no cabeçalho: a história antes do gráfico (varredura 12/09) -->
+              <div v-if="modalDelta" class="flex flex-col leading-tight pb-0.5">
+                <span
+                  class="text-sm font-bold"
+                  :class="modalDelta.up ? 'text-emerald-200' : 'text-red-200'"
+                  >{{ modalDelta.text }}</span
+                >
+                <span class="text-[10px] text-white/75">{{
+                  modalDelta.sub
+                }}</span>
               </div>
+            </div>
+            <span v-if="kpiModal.chip" class="cv-glass-chip mt-1.5">{{
+              kpiModal.chip.label
+            }}</span>
+            <p v-if="kpiModal.sub" class="text-xs text-white/80 mt-1">
+              {{ kpiModal.sub }}
+            </p>
+          </div>
+          <div class="p-5 space-y-3 overflow-y-auto overscroll-contain">
+            <!-- 📊 gráfico do período v2 (item 144; UX 152: legenda visual,
+               estado vazio gentil, carregamento suave, régua com rótulos) -->
+            <div v-if="modalChart" class="cv-sub px-3 py-2">
+              <div
+                class="flex items-center justify-between gap-2 text-[10px] text-n-slate-10 mb-1"
+              >
+                <span class="truncate">{{
+                  modalChart.compare
+                    ? 'comparativo'
+                    : `${modalChart.label || kpiModal.label} · ${modalBag?.granularity === 'month' ? 'por mês' : modalBag?.granularity === 'week' ? 'por semana' : 'por dia'}`
+                }}</span>
+                <span
+                  v-if="isLoadingModalBag"
+                  class="i-lucide-loader-circle animate-spin text-xs flex-shrink-0"
+                />
+              </div>
+              <div
+                class="transition-opacity duration-200"
+                :class="isLoadingModalBag ? 'opacity-40' : ''"
+              >
+                <MiniBars
+                  :values="modalChart.values"
+                  :labels="modalChart.labels"
+                  :color="modalChartColor"
+                  :height="128"
+                  :prev-values="modalChart.prevValues || null"
+                  :goal="modalChart.goal ?? null"
+                  :markers="modalChart.compare ? [] : modalMarkers"
+                  :reference="
+                    !modalChart.compare &&
+                    !modalChart.prevValues &&
+                    modalChart.prev
+                      ? modalChart.prev / Math.max(1, modalChart.values.length)
+                      : null
+                  "
+                  :format="chartFormat(kpiModal)"
+                  :trend="trendOn && !modalChart.compare"
+                  :granularity="modalBag?.granularity || 'day'"
+                />
+              </div>
+              <!-- recorte sem nenhum movimento: fala com a pessoa em vez do vazio -->
+              <p
+                v-if="modalChartIsEmpty"
+                class="cv-row text-[11px] text-n-slate-10 text-center mt-1 px-2 py-1.5"
+              >
+                Sem movimento neste recorte — experimente <b>Este mês</b> ou
+                <b>Este ano</b> aqui embaixo.
+              </p>
+              <!-- legenda VISUAL: cada elemento do gráfico explicado com a
+                 própria forma (tracinho, estrela, pino) -->
+              <div
+                v-if="!modalChart.compare"
+                class="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[10px] text-n-slate-10 mt-0.5"
+              >
+                <span
+                  v-if="
+                    modalChart.prevValues ||
+                    (modalChart.prev !== undefined && modalChart.prev !== null)
+                  "
+                  class="flex items-center gap-1"
+                >
+                  <span
+                    class="inline-block w-4 border-t-2 border-dashed"
+                    style="border-color: #94a3b8"
+                  />
+                  {{
+                    modalChart.prevValues
+                      ? 'período anterior'
+                      : 'média do anterior'
+                  }}
+                </span>
+                <span
+                  v-if="modalChart.goal"
+                  class="flex items-center gap-1"
+                  style="color: #b8860b"
+                >
+                  ⭑ meta ≈ {{ chartFormat(kpiModal)(modalChart.goal) }} por
+                  {{
+                    modalBag?.granularity === 'month'
+                      ? 'mês'
+                      : modalBag?.granularity === 'week'
+                        ? 'semana'
+                        : 'dia'
+                  }}
+                </span>
+                <span v-if="modalMarkers.length" class="flex items-center gap-1"
+                  >📌 ação da empresa</span
+                >
+                <!-- item 266: a linha de tendência liga e desliga aqui mesmo -->
+                <button
+                  class="cv-chip !h-6 !text-[10px] ml-auto"
+                  :class="trendOn ? 'cv-chip-on' : ''"
+                  title="Linha de tendência: reta que mostra para onde o indicador está indo (regressão sobre os dias com valor)"
+                  @click="toggleTrend"
+                >
+                  <span class="i-lucide-trending-up text-[10px]" />
+                  tendência {{ trendOn ? 'ligada' : 'desligada' }}
+                </button>
+              </div>
+              <p
+                v-if="trendOn && modalTrendWords"
+                class="text-[11px] mt-1.5 flex items-start gap-1.5 leading-snug font-semibold"
+                :style="{
+                  color:
+                    modalTrendWords.dir > 0
+                      ? '#059669'
+                      : modalTrendWords.dir < 0
+                        ? '#DC2626'
+                        : '#64748B',
+                }"
+              >
+                <span
+                  class="i-lucide-trending-up text-xs mt-0.5 flex-shrink-0"
+                />
+                <span
+                  >tendência: {{ modalTrendWords.text }} — reta traçada sobre os
+                  {{ modalChart.values.filter(v => v > 0).length }} baldes com
+                  valor</span
+                >
+              </p>
+              <!-- 💡 o gráfico lido em uma frase: pico, média e total — quem
+                 não lê gráfico entende o período mesmo assim -->
+              <p
+                v-if="modalInsight"
+                class="text-[11px] mt-1.5 text-n-slate-11 flex items-start gap-1.5 leading-snug"
+              >
+                <span
+                  class="i-lucide-sparkles text-xs mt-0.5 flex-shrink-0"
+                  style="color: #b8860b"
+                />
+                <span>{{ modalInsight }}</span>
+              </p>
+              <!-- mini-régua do popup: recorte SÓ deste gráfico (a régua da
+                 página fica intacta) — grupos com nome, sem adivinhação -->
+              <div
+                v-if="!modalChart.compare"
+                class="mt-2 pt-2 space-y-1.5"
+                style="border-top: 1px solid rgb(var(--cv-rgb) / 0.18)"
+              >
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0"
+                    >Período</span
+                  >
+                  <span class="cv-seg cv-seg-sm flex-wrap">
+                    <button
+                      v-for="p in MODAL_PRESETS"
+                      :key="String(p[0])"
+                      class="cv-seg-item"
+                      :class="kpiModalPreset === p[0] ? 'cv-seg-on' : ''"
+                      @click="setModalPreset(p[0])"
+                    >
+                      {{ p[1] }}
+                    </button>
+                  </span>
+                </div>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="text-[10px] text-n-slate-9 w-12 flex-shrink-0"
+                    >Ver por</span
+                  >
+                  <span class="cv-seg cv-seg-sm flex-wrap">
+                    <button
+                      v-for="g in MODAL_GRAINS"
+                      :key="String(g[0])"
+                      class="cv-seg-item"
+                      :class="kpiModalGranularity === g[0] ? 'cv-seg-on' : ''"
+                      @click="setModalGranularity(g[0])"
+                    >
+                      {{ g[1] }}
+                    </button>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <!-- 🧩 DE ONDE VEM ESTA TAXA (item 144): as séries que formam a
+               conta — responde se o problema foi entrada ou conversão -->
+            <div
+              v-if="modalComponents.length"
+              class="cv-sub px-3 py-2 space-y-2"
+            >
+              <p class="text-[11px] font-medium text-n-slate-11">
+                🧩 De onde vem este número
+                <span class="font-normal text-n-slate-9"
+                  >· {{ modalRangeLabel }}</span
+                >
+              </p>
+              <div v-for="comp in modalComponents" :key="comp.key">
+                <div
+                  class="flex items-center justify-between text-[10px] mb-0.5"
+                >
+                  <span class="text-n-slate-11">{{ comp.label }}</span>
+                  <b class="text-n-slate-12">{{
+                    componentFormat(comp)(comp.total)
+                  }}</b>
+                </div>
+                <MiniBars
+                  :values="comp.values"
+                  :labels="modalChart?.labels || []"
+                  color="#64748B"
+                  :height="46"
+                  :prev-values="comp.prevValues"
+                  :format="componentFormat(comp)"
+                />
+              </div>
+            </div>
+            <!-- 🏥 POR UNIDADE (item 146): Paulista × Tatuapé lado a lado —
+               consultas, comparecimento e a taxa de cada casa -->
+            <div
+              v-if="kpiModal.units?.length"
+              class="cv-sub px-3 py-2 space-y-2"
+            >
+              <p class="text-[11px] font-medium text-n-slate-11">
+                🏥 Por unidade
+                <span class="font-normal text-n-slate-9"
+                  >· consultas e comparecimento do período</span
+                >
+              </p>
+              <div
+                v-for="u in kpiModal.units"
+                :key="u.unit || 'sem'"
+                class="cv-row px-3 py-2"
+              >
+                <div
+                  class="flex items-center justify-between gap-2 text-xs mb-1"
+                >
+                  <b class="text-n-slate-12">{{ u.label }}</b>
+                  <span
+                    class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white"
+                    :style="{
+                      background:
+                        (u.show_rate ?? 0) >= 80
+                          ? 'linear-gradient(135deg, #065F46, #10B981)'
+                          : (u.show_rate ?? 0) >= 60
+                            ? 'linear-gradient(135deg, #B8860B, #D4A017)'
+                            : 'linear-gradient(135deg, #B91C1C, #EF4444)',
+                    }"
+                  >
+                    {{ u.show_rate ?? 0 }}% compareceram
+                  </span>
+                </div>
+                <div
+                  class="flex items-center gap-3 text-[10px] text-n-slate-10 flex-wrap"
+                >
+                  <span>{{ u.consultations }} consulta(s)</span>
+                  <span style="color: #059669">✓ {{ u.attended }} vieram</span>
+                  <span style="color: #dc2626">✗ {{ u.missed }} faltaram</span>
+                  <span
+                    v-if="u.consultations - u.attended - u.missed > 0"
+                    class="text-n-slate-9"
+                  >
+                    {{ u.consultations - u.attended - u.missed }} sem
+                    conferência
+                  </span>
+                </div>
+                <div
+                  class="h-1.5 rounded-full bg-n-alpha-2 overflow-hidden mt-1.5"
+                >
+                  <div
+                    class="h-full rounded-full transition-all"
+                    :style="{
+                      width: Math.max(u.show_rate ?? 0, 2) + '%',
+                      background:
+                        (u.show_rate ?? 0) >= 80
+                          ? 'linear-gradient(90deg, #065F46, #10B981)'
+                          : (u.show_rate ?? 0) >= 60
+                            ? 'linear-gradient(90deg, #B8860B, #D4A017)'
+                            : 'linear-gradient(90deg, #B91C1C, #EF4444)',
+                    }"
+                  />
+                </div>
+              </div>
+            </div>
+            <!-- leads por caixa (card 1): barras lado a lado -->
+            <div
+              v-if="kpiModal.compareInboxes?.length"
+              class="cv-sub px-3 py-2"
+            >
+              <p class="text-[11px] font-medium text-n-slate-11 mb-1">
+                {{
+                  kpiModal.compareInboxesTitle ||
+                  '📥 Leads por caixa de entrada'
+                }}
+              </p>
               <MiniBars
-                :values="comp.values"
-                :labels="modalChart?.labels || []"
-                color="#64748B"
-                :height="46"
-                :prev-values="comp.prevValues"
-                :format="componentFormat(comp)"
+                :values="kpiModal.compareInboxes.map(i => i.value)"
+                :labels="kpiModal.compareInboxes.map(i => i.label)"
+                color="#7C3AED"
+                :height="80"
               />
             </div>
-          </div>
-          <!-- leads por caixa (card 1): barras lado a lado -->
-          <div v-if="kpiModal.compareInboxes?.length" class="rounded-xl bg-n-alpha-1 px-3 py-2">
-            <p class="text-[10px] text-n-slate-10 mb-1">leads por caixa de entrada</p>
-            <MiniBars :values="kpiModal.compareInboxes.map(i => i.value)" :labels="kpiModal.compareInboxes.map(i => i.label)" color="#7C3AED" :height="80" />
-          </div>
-          <div v-if="kpiModal.details?.length" class="space-y-1.5">
-            <div
-              v-for="(row, ri) in kpiModal.details"
-              :key="ri"
-              class="flex items-start justify-between gap-3 text-xs rounded-xl bg-n-alpha-1 px-3 py-2"
-            >
-              <span class="text-n-slate-11">{{ row.label }}</span>
-              <b class="text-n-slate-12 text-right whitespace-nowrap">{{ row.value }}</b>
+            <!-- item 267: FUNIL em 3 colunas (taxa de agendamento de leads novos) -->
+            <div v-if="kpiModal.funnel" class="cv-sub px-3 py-3">
+              <p class="text-[11px] font-medium text-n-slate-11 mb-2">
+                🪜 Leads novos dos últimos 30 dias, passo a passo
+              </p>
+              <FunnelSteps :steps="kpiModal.funnel" :height="140" />
             </div>
-          </div>
-          <p v-if="kpiModal.about" class="text-[11px] text-n-slate-10 leading-relaxed">
-            <span class="i-lucide-info text-xs align-middle mr-1" />{{ kpiModal.about }}
-          </p>
-          <div v-if="isAdmin && kpiModal.kpi" class="flex items-center gap-2 pt-1">
-            <button class="h-8 px-3 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="openKpiBuilder(kpiModal.def)">✏️ Editar</button>
-            <button class="h-8 px-3 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10" :disabled="isSavingKpi" @click="deleteKpi(kpiModal.def)">🗑️ Remover</button>
+            <!-- 🧭 item 328: tudo o que foi marcado, em três cortes -->
+            <div
+              v-for="group in cutGroups(kpiModal.cuts)"
+              :key="group.n"
+              class="cv-sub px-3 py-3"
+            >
+              <p class="text-sm font-bold text-n-slate-12">
+                <span class="mr-1.5" :style="{ color: 'var(--cv)' }">{{
+                  group.n
+                }}</span
+                >{{ group.title }}
+              </p>
+              <p class="text-[11px] text-n-slate-10 leading-relaxed mb-2">
+                {{ group.hint }}
+              </p>
+              <div
+                v-for="bar in group.bars"
+                :key="bar.field"
+                class="mt-2 first:mt-0"
+              >
+                <p
+                  v-if="bar.title"
+                  class="text-[11px] font-medium text-n-slate-11 mb-1.5"
+                >
+                  {{ bar.title }}
+                </p>
+                <ShareBar
+                  :items="bar.items"
+                  :max="8"
+                  :height="12"
+                  clickable
+                  @pick="openCutList(kpiModal.cuts, bar, $event)"
+                />
+              </div>
+            </div>
+            <!-- item 267: o que importa neste indicador, em seções -->
+            <div
+              v-for="sec in modalBreakdowns"
+              :key="sec.title"
+              class="cv-sub px-3 py-2.5"
+            >
+              <p class="text-[11px] font-medium text-n-slate-11 mb-1.5">
+                {{ sec.title }}
+              </p>
+              <ShareBar :items="sec.items" :max="6" :height="10" />
+            </div>
+            <div v-if="kpiModal.details?.length" class="space-y-1.5">
+              <div
+                v-for="(row, ri) in kpiModal.details"
+                :key="ri"
+                class="cv-row flex items-start justify-between gap-3 text-xs px-3 py-2"
+              >
+                <span class="text-n-slate-11 flex-shrink-0">{{
+                  row.label
+                }}</span>
+                <b class="text-n-slate-12 text-right break-words min-w-0">{{
+                  row.value
+                }}</b>
+              </div>
+            </div>
+            <p
+              v-if="kpiModal.about"
+              class="text-[11px] text-n-slate-10 leading-relaxed"
+            >
+              <span class="i-lucide-info text-xs align-middle mr-1" />{{
+                kpiModal.about
+              }}
+            </p>
+            <div
+              v-if="isAdmin && kpiModal.kpi"
+              class="flex items-center gap-2 pt-1"
+            >
+              <button
+                class="cv-btn cv-btn-ghost"
+                @click="openKpiBuilder(kpiModal.def)"
+              >
+                <span class="i-lucide-pencil text-xs" />Editar
+              </button>
+              <button
+                class="cv-btn cv-btn-ghost cv-btn-danger"
+                :disabled="isSavingKpi"
+                @click="deleteKpi(kpiModal.def)"
+              >
+                <span class="i-lucide-trash-2 text-xs" />Remover
+              </button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
   <!-- ➕ Construtor de indicador (admin, item 141) -->
   <Teleport to="body">
     <div
       v-if="kpiBuilder"
-      class="fixed inset-0 z-[71] flex items-center justify-center bg-black/50 p-4"
+      class="cv-page cv-overlay fixed inset-0 z-[71] flex items-center justify-center bg-black/50 p-4"
+      :style="cvVars"
       @click.self="kpiBuilder = null"
     >
-      <div class="w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1 max-h-[92vh] flex flex-col">
-        <div class="p-5 text-white flex items-center gap-3" :style="{ background: kpiBuilder.color || panelFamily[0] }">
-          <span class="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center"><span :class="kpiBuilder.icon" class="text-lg" /></span>
+      <div class="cv-modal w-full max-w-2xl max-h-[92vh] flex flex-col">
+        <div
+          class="cv-modal-head !p-5 flex items-center gap-3"
+          :style="{ background: kpiBuilder.color || panelFamily[0] }"
+        >
+          <span
+            class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
+            ><span :class="kpiIcon(kpiBuilder)" class="text-lg"
+          /></span>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-bold">{{ kpiBuilder.id ? 'Editar indicador' : 'Novo indicador' }}</p>
-            <p class="text-[11px] text-white/80 hidden sm:block">aparece no Meu Painel com o período da régua, histórico e comparação com o anterior</p>
+            <p class="text-sm font-bold">
+              {{ kpiBuilder.id ? 'Editar indicador' : 'Novo indicador' }}
+            </p>
+            <p class="text-[11px] text-white/80 hidden sm:block">
+              aparece no Meu Painel com o período da régua, histórico e
+              comparação com o anterior
+            </p>
           </div>
           <!-- prévia viva -->
           <div class="text-right max-w-[40%] flex-shrink-0">
-            <p v-if="kpiPreview.ok" class="text-2xl font-bold leading-none">{{ kpiPreview.text }}</p>
-            <p v-else class="text-[11px] text-white/85 leading-snug">{{ kpiPreview.text }}</p>
-            <p v-if="kpiPreview.delta" class="text-[10px] text-white/80 mt-1">{{ kpiPreview.delta }}</p>
+            <p v-if="kpiPreview.ok" class="text-2xl font-bold leading-none">
+              {{ kpiPreview.text }}
+            </p>
+            <p v-else class="text-[11px] text-white/85 leading-snug">
+              {{ kpiPreview.text }}
+            </p>
+            <p v-if="kpiPreview.delta" class="text-[10px] text-white/80 mt-1">
+              {{ kpiPreview.delta }}
+            </p>
           </div>
-          <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="kpiBuilder = null"><span class="i-lucide-x text-sm" /></button>
+          <button class="cv-glass-btn cv-iconbtn" @click="kpiBuilder = null">
+            <span class="i-lucide-x text-sm" />
+          </button>
         </div>
 
         <div class="p-5 space-y-4 overflow-y-auto">
           <!-- nome -->
           <div>
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Nome do card</p>
-            <input v-model="kpiBuilder.label" type="text" maxlength="60" placeholder="ex.: Taxa de agendamento" class="w-full h-9 px-3 rounded-lg border border-n-weak bg-n-solid-2 text-sm text-n-slate-12" />
+            <p class="cv-label mb-1">Nome do card</p>
+            <input
+              v-model="kpiBuilder.label"
+              type="text"
+              maxlength="60"
+              placeholder="ex.: Taxa de agendamento"
+              class="cv-input w-full text-n-slate-12"
+            />
+          </div>
+
+          <!-- item 241: ícone — automático pelo nome, ou escolhido à mão -->
+          <div>
+            <p class="cv-label mb-1">Ícone</p>
+            <div class="flex items-center gap-1 flex-wrap">
+              <button
+                class="cv-btn cv-btn-sm"
+                :class="kpiBuilder.icon_manual ? 'cv-btn-ghost' : ''"
+                title="O ícone segue o nome do indicador"
+                @click="
+                  kpiBuilder.icon = AUTO_ICON;
+                  kpiBuilder.icon_manual = false;
+                "
+              >
+                <span
+                  :class="iconForKpi(kpiBuilder.label, kpiBuilder.format)"
+                  class="text-sm"
+                />
+                automático
+              </button>
+              <button
+                v-for="ic in KPI_ICON_CHOICES"
+                :key="ic"
+                class="w-8 h-8 rounded-lg flex items-center justify-center border transition-colors"
+                :class="
+                  kpiBuilder.icon_manual && kpiBuilder.icon === ic
+                    ? 'border-n-slate-12 bg-n-alpha-2'
+                    : 'border-transparent hover:bg-n-alpha-1'
+                "
+                :title="ic.replace('i-lucide-', '')"
+                @click="
+                  kpiBuilder.icon = ic;
+                  kpiBuilder.icon_manual = true;
+                "
+              >
+                <span :class="ic" class="text-base text-n-slate-12" />
+              </button>
+            </div>
           </div>
 
           <!-- modo -->
           <div class="flex items-center gap-1.5">
-            <button class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilderMode === 'ready' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilderMode === 'ready' ? { background: panelFamily[1] } : {}" @click="kpiBuilderMode = 'ready'">Indicador pronto</button>
-            <button class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilderMode === 'formula' ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilderMode === 'formula' ? { background: panelFamily[1] } : {}" @click="kpiBuilderMode = 'formula'">Fórmula</button>
-            <span class="text-[10px] text-n-slate-9 ml-1">os números abaixo são do período da régua</span>
+            <span class="cv-seg">
+              <button
+                class="cv-seg-item"
+                :class="kpiBuilderMode === 'ready' ? 'cv-seg-on' : ''"
+                @click="kpiBuilderMode = 'ready'"
+              >
+                Indicador pronto
+              </button>
+              <button
+                class="cv-seg-item"
+                :class="kpiBuilderMode === 'formula' ? 'cv-seg-on' : ''"
+                @click="kpiBuilderMode = 'formula'"
+              >
+                Montar fórmula
+              </button>
+            </span>
+            <span class="text-[10px] text-n-slate-9 ml-1"
+              >os números abaixo são do período da régua · marque vários para
+              criar todos de uma vez<template v-if="kpiMulti.length">
+                · <b>{{ kpiMulti.length }} marcado(s)</b></template
+              ></span
+            >
           </div>
 
           <!-- indicadores prontos: primeiro as TAXAS já formuladas por
                categoria (item 143), depois os números-base do período -->
-          <div v-if="kpiBuilderMode === 'ready'" class="max-h-72 overflow-y-auto pr-1 space-y-3">
+          <div
+            v-if="kpiBuilderMode === 'ready'"
+            class="max-h-72 overflow-y-auto pr-1 space-y-3"
+          >
+            <!-- item 241: os seus indicadores também servem de base -->
+            <div v-if="myKpiItems.length">
+              <p class="cv-label mb-1">⭐ Seus indicadores</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <button
+                  v-for="m in myKpiItems"
+                  :key="m.key"
+                  class="cv-btn !justify-between !h-9 !rounded-xl text-left"
+                  :class="
+                    kpiBuilder.expr.trim() === m.key ? '' : 'cv-btn-ghost'
+                  "
+                  @click="
+                    kpiBuilder.expr = m.key;
+                    if (!kpiBuilder.label) kpiBuilder.label = m.label;
+                  "
+                >
+                  <span class="truncate flex items-center gap-1.5"
+                    ><span :class="m.icon" class="text-xs shrink-0" />{{
+                      m.label
+                    }}</span
+                  ><b class="whitespace-nowrap">{{ m.value }}</b>
+                </button>
+              </div>
+            </div>
             <div v-for="sec in readyFormulaSections" :key="sec.cat">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">{{ sec.cat }} <span class="normal-case font-normal">· taxas prontas</span></p>
+              <p class="cv-label mb-1">
+                {{ sec.cat }}
+                <span class="normal-case font-normal">· taxas prontas</span>
+              </p>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 <button
                   v-for="f in sec.items"
                   :key="f.label"
-                  class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
-                  :class="kpiBuilder.expr.trim() === f.expr ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  :style="kpiBuilder.expr.trim() === f.expr ? { background: panelFamily[1] } : {}"
+                  class="cv-btn !justify-between !h-9 !rounded-xl text-left"
+                  :class="
+                    kpiBuilder.expr.trim() === f.expr ? '' : 'cv-btn-ghost'
+                  "
                   :title="f.note"
-                  @click="applyReadyFormula(f)"
+                  @click="
+                    applyReadyFormula(f);
+                    toggleKpiMulti({
+                      key: 'f:' + f.expr,
+                      label: f.label,
+                      expr: f.expr,
+                      format: f.format,
+                      icon: f.icon,
+                      note: f.note,
+                    });
+                  "
                 >
-                  <span class="truncate">{{ f.label }}</span><b class="whitespace-nowrap">{{ f.value }}</b>
+                  <span class="truncate flex items-center gap-1.5"
+                    ><span
+                      :class="
+                        kpiMultiHas('f:' + f.expr)
+                          ? 'i-lucide-square-check'
+                          : 'i-lucide-square'
+                      "
+                      class="text-xs shrink-0"
+                    />{{ f.label }}</span
+                  ><b class="whitespace-nowrap">{{ f.value }}</b>
                 </button>
               </div>
             </div>
             <div v-for="sec in kpiCatalogSections" :key="sec.cat">
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">{{ sec.cat }}</p>
+              <p class="cv-label mb-1">{{ sec.cat }}</p>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 <button
                   v-for="m in sec.items"
                   :key="m.key"
-                  class="flex items-center justify-between gap-2 px-3 h-9 rounded-lg border text-xs text-left"
-                  :class="kpiBuilder.expr.trim() === m.key ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'"
-                  :style="kpiBuilder.expr.trim() === m.key ? { background: panelFamily[1] } : {}"
-                  @click="kpiBuilder.expr = m.key; if (!kpiBuilder.label) kpiBuilder.label = m.label"
+                  class="cv-btn !justify-between !h-9 !rounded-xl text-left"
+                  :class="
+                    kpiBuilder.expr.trim() === m.key ? '' : 'cv-btn-ghost'
+                  "
+                  @click="
+                    kpiBuilder.expr = m.key;
+                    if (!kpiBuilder.label) kpiBuilder.label = m.label;
+                    toggleKpiMulti({
+                      key: 'm:' + m.key,
+                      label: m.label,
+                      expr: m.key,
+                      format: m.key === 'revenue' ? 'currency' : 'number',
+                    });
+                  "
                 >
-                  <span class="truncate">{{ m.label }}</span><b class="whitespace-nowrap">{{ m.value }}</b>
+                  <span class="truncate flex items-center gap-1.5"
+                    ><span
+                      :class="
+                        kpiMultiHas('m:' + m.key)
+                          ? 'i-lucide-square-check'
+                          : 'i-lucide-square'
+                      "
+                      class="text-xs shrink-0"
+                    />{{ m.label }}</span
+                  ><b class="whitespace-nowrap">{{ m.value }}</b>
                 </button>
               </div>
             </div>
           </div>
 
-          <!-- fórmula -->
+          <!-- fórmula livre (item 241): colunas, indicadores do sistema e os
+               SEUS indicadores + operações; lê-se em português embaixo -->
           <div v-else class="space-y-2">
-            <textarea v-model="kpiBuilder.expr" rows="2" placeholder="ex.: appointments_booked / new_leads * 100" class="w-full px-3 py-2 rounded-lg border border-n-weak bg-n-solid-2 text-sm font-mono text-n-slate-12" />
-            <p class="text-[10px] text-n-slate-9">clique num indicador pra inserir na fórmula · use + − × ÷ e parênteses · % = multiplique por 100</p>
-            <div class="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
-              <button v-for="m in kpiCatalog" :key="m.key" class="text-[10px] px-2 py-1 rounded-md border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :title="m.key" @click="insertKpiVar(m.key)">{{ m.label }}</button>
+            <p class="text-[11px] text-n-slate-10">
+              Clique nos blocos para montar a conta, ou escreva à vontade
+              (números também valem, ex.: <b>÷ 2</b> ou <b>× 100</b>).
+            </p>
+            <div
+              v-if="kpiBuilder.expr"
+              class="rounded-xl px-3 py-2 text-xs text-n-slate-12"
+              style="background: rgb(var(--cv-rgb) / 0.08)"
+            >
+              <span class="text-n-slate-10">Lê-se: </span>
+              <b>{{ prettyFormula(kpiBuilder.expr) }}</b>
+            </div>
+            <textarea
+              v-model="kpiBuilder.expr"
+              rows="2"
+              placeholder="monte clicando nos blocos abaixo"
+              class="cv-input w-full font-mono text-[11px] text-n-slate-11"
+            />
+            <div class="flex items-center gap-1 flex-wrap">
+              <button
+                v-for="o in KPI_OPS"
+                :key="o.op"
+                class="cv-btn cv-btn-sm cv-btn-ghost !min-w-[2rem] font-bold"
+                @click="insertKpiOp(o.op)"
+              >
+                {{ o.label }}
+              </button>
+              <button
+                class="cv-btn cv-btn-sm cv-btn-ghost ml-auto"
+                title="Apagar a fórmula e começar de novo"
+                @click="clearKpiExpr"
+              >
+                <span class="i-lucide-eraser text-xs" /> limpar
+              </button>
+            </div>
+            <input
+              v-model="kpiVarQuery"
+              type="text"
+              placeholder="buscar coluna ou indicador…"
+              class="cv-input w-full text-xs text-n-slate-12"
+            />
+            <div class="max-h-60 overflow-y-auto pr-1 space-y-2">
+              <div v-for="g in kpiFormulaGroups" :key="g.title">
+                <p class="cv-label mb-1">{{ g.title }}</p>
+                <div class="flex flex-wrap gap-1">
+                  <button
+                    v-for="m in g.items"
+                    :key="m.key"
+                    class="cv-chip"
+                    :title="`inserir na conta · agora: ${m.value}`"
+                    @click="insertKpiVar(m.key)"
+                  >
+                    <span v-if="m.icon" :class="m.icon" class="text-[10px]" />
+                    {{ m.label }}
+                    <span class="opacity-70 tabular-nums">{{ m.value }}</span>
+                  </button>
+                </div>
+              </div>
+              <p
+                v-if="!kpiFormulaGroups.length"
+                class="text-[11px] text-n-slate-9"
+              >
+                nada com "{{ kpiVarQuery }}"
+              </p>
             </div>
           </div>
 
           <!-- formato + painel -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Formato</p>
+              <p class="cv-label mb-1">Formato</p>
               <div class="flex items-center gap-1.5">
-                <button v-for="f in [['number', 'Número'], ['percent', '%'], ['currency', 'R$']]" :key="f[0]" class="h-8 px-3 rounded-lg text-xs font-medium border" :class="kpiBuilder.format === f[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.format === f[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.format = f[0]">{{ f[1] }}</button>
+                <button
+                  v-for="f in [
+                    ['number', 'Número'],
+                    ['percent', '%'],
+                    ['currency', 'R$'],
+                  ]"
+                  :key="f[0]"
+                  class="cv-btn cv-btn-sm"
+                  :class="kpiBuilder.format === f[0] ? '' : 'cv-btn-ghost'"
+                  @click="kpiBuilder.format = f[0]"
+                >
+                  {{ f[1] }}
+                </button>
               </div>
             </div>
             <div>
-              <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Aparece em</p>
+              <p class="cv-label mb-1">Aparece em</p>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <button v-for="pp in [['all', 'Todos os painéis'], ['agendamento', isClinica ? 'Agendamento' : 'Captação'], ['conducao', 'Condução'], ['cirurgia', isClinica ? 'Cirurgias' : 'Vendas'], ['medico', isClinica ? 'Médicos' : termoCap('profissionais')], ['gestor', 'Gestor']]" :key="pp[0]" class="h-8 px-2.5 rounded-lg text-xs font-medium border" :class="kpiBuilder.panel === pp[0] ? 'text-white border-transparent' : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'" :style="kpiBuilder.panel === pp[0] ? { background: panelFamily[2] } : {}" @click="kpiBuilder.panel = pp[0]">{{ pp[1] }}</button>
+                <button
+                  v-for="pp in [
+                    ['all', 'Todos os painéis'],
+                    ['agendamento', 'Agendamento'],
+                    ['conducao', 'Condução'],
+                    ['cirurgia', 'Cirurgias'],
+                    ['medico', 'Médicos'],
+                    ['gestor', 'Gestor'],
+                  ]"
+                  :key="pp[0]"
+                  class="cv-btn cv-btn-sm"
+                  :class="kpiBuilder.panel === pp[0] ? '' : 'cv-btn-ghost'"
+                  @click="kpiBuilder.panel = pp[0]"
+                >
+                  {{ pp[1] }}
+                </button>
               </div>
             </div>
           </div>
 
           <!-- cor -->
           <div>
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Cor do card</p>
+            <p class="cv-label mb-1">Cor do card</p>
             <div class="flex items-center gap-1.5 flex-wrap">
-              <button class="h-8 px-3 rounded-lg text-xs border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" :class="!kpiBuilder.color ? 'ring-2 ring-n-brand' : ''" @click="kpiBuilder.color = ''">automática</button>
-              <button v-for="c in kpiColorOptions" :key="c.key" class="w-8 h-8 rounded-lg border-2" :class="kpiBuilder.color === c.grad ? 'border-n-slate-12 scale-110' : 'border-transparent'" :style="{ background: c.grad }" :title="c.title" @click="kpiBuilder.color = c.grad" />
-              <input v-model="kpiHexColor" type="text" placeholder="#152C61" maxlength="7" class="h-8 w-24 px-2 rounded-lg border border-n-weak bg-n-solid-2 text-xs font-mono text-n-slate-12" @change="applyHexColor" @keydown.enter.prevent="applyHexColor" />
+              <button
+                class="cv-btn cv-btn-sm"
+                :class="!kpiBuilder.color ? '' : 'cv-btn-ghost'"
+                @click="kpiBuilder.color = ''"
+              >
+                automática
+              </button>
+              <input
+                v-model="kpiHexColor"
+                type="text"
+                placeholder="#152C61"
+                maxlength="7"
+                class="cv-input !h-8 w-24 text-xs font-mono text-n-slate-12"
+                @change="applyHexColor"
+                @keydown.enter.prevent="applyHexColor"
+              />
+            </div>
+            <!-- item 239: as nossas paletas em grupos -->
+            <div class="mt-2 space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              <div v-for="g in kpiColorGroups" :key="g.title">
+                <p class="text-[10px] font-semibold text-n-slate-10 mb-0.5">
+                  {{ g.title }}
+                </p>
+                <div class="flex items-center gap-1 flex-wrap">
+                  <button
+                    v-for="c in g.items"
+                    :key="c.key"
+                    class="w-7 h-7 rounded-lg border-2"
+                    :class="
+                      kpiBuilder.color === c.grad
+                        ? 'border-n-slate-12 scale-110'
+                        : 'border-transparent hover:scale-105'
+                    "
+                    :style="{ background: c.grad }"
+                    :title="c.title"
+                    @click="kpiBuilder.color = c.grad"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- nota -->
           <div>
-            <p class="text-[10px] font-semibold text-n-slate-9 uppercase tracking-wide mb-1">Nota (aparece no popup do card)</p>
-            <input v-model="kpiBuilder.note" type="text" maxlength="200" placeholder="ex.: meta da clínica é 15%" class="w-full h-9 px-3 rounded-lg border border-n-weak bg-n-solid-2 text-sm text-n-slate-12" />
+            <p class="cv-label mb-1">Nota (aparece no popup do card)</p>
+            <input
+              v-model="kpiBuilder.note"
+              type="text"
+              maxlength="200"
+              placeholder="ex.: meta da clínica é 15%"
+              class="cv-input w-full text-n-slate-12"
+            />
           </div>
         </div>
 
-        <div class="px-5 py-3 border-t border-n-weak flex items-center gap-2">
-          <button v-if="kpiBuilder.id" class="h-9 px-3 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10" :disabled="isSavingKpi" @click="deleteKpi(kpiBuilder)">🗑️ Remover</button>
+        <div class="cv-modal-foot flex items-center gap-2">
+          <button
+            v-if="kpiBuilder.id"
+            class="cv-btn cv-btn-ghost cv-btn-danger"
+            :disabled="isSavingKpi"
+            @click="deleteKpi(kpiBuilder)"
+          >
+            <span class="i-lucide-trash-2 text-xs" />Remover
+          </button>
           <span class="flex-1" />
-          <button class="h-9 px-4 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1" @click="kpiBuilder = null">Cancelar</button>
-          <button class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-50" :style="{ background: panelFamily[0] }" :disabled="isSavingKpi || !kpiPreview.ok || !kpiBuilder.label.trim()" @click="saveKpiBuilder">
+          <button class="cv-btn cv-btn-ghost" @click="kpiBuilder = null">
+            Cancelar
+          </button>
+          <button
+            v-if="kpiMulti.length > 1"
+            class="cv-btn"
+            :disabled="isSavingKpi"
+            title="Cria um card para cada indicador marcado, com o formato, painel e cor escolhidos aqui"
+            @click="saveKpiMulti"
+          >
+            <span class="i-lucide-layers text-xs" />
+            {{ isSavingKpi ? 'Salvando…' : `Salvar ${kpiMulti.length} cards` }}
+          </button>
+          <button
+            v-else
+            class="cv-btn"
+            :disabled="
+              isSavingKpi || !kpiPreview.ok || !kpiBuilder.label.trim()
+            "
+            @click="saveKpiBuilder"
+          >
             {{ isSavingKpi ? 'Salvando…' : 'Salvar card' }}
           </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+  <!-- 🍎🍊 Paleta do painel e dos blocos (admin, rodada 162): componente
+       compartilhado com os Relatórios (rodada 163) -->
+  <CevicoPalettePicker
+    :pal="pal"
+    :title="`Paleta de cores · ${currentPanel.label}`"
+  />
+  <!-- 🧩 item 248: MODELOS PRONTOS do painel -->
+  <Teleport to="body">
+    <div
+      v-if="showPresets"
+      class="cv-page cv-overlay fixed inset-0 z-[72] flex items-center justify-center bg-black/50 p-4"
+      :style="cvVars"
+      @click.self="showPresets = false"
+    >
+      <div class="cv-modal w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div class="cv-modal-head !p-5 flex items-center gap-3">
+          <span
+            class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"
+            ><span class="i-lucide-layout-template text-lg"
+          /></span>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-bold">
+              Modelos prontos · {{ currentPanel.label }}
+            </p>
+            <p class="text-[11px] text-white/80">
+              nossos indicadores já montados, com cores das paletas e a média
+              histórica ligada — os cards de agora ficam ocultos (voltam pelos
+              chips)
+            </p>
+          </div>
+          <button class="cv-glass-btn cv-iconbtn" @click="showPresets = false">
+            <span class="i-lucide-x text-sm" />
+          </button>
+        </div>
+        <div class="p-5 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div
+            v-for="pr in panelPresets"
+            :key="pr.key"
+            class="cv-ag-block p-4 flex flex-col gap-3"
+          >
+            <div class="flex items-center gap-2">
+              <span class="text-lg">{{ pr.emoji }}</span>
+              <p class="cv-ag-block-title flex-1">{{ pr.label }}</p>
+              <span
+                v-if="currentPreset && currentPreset.key === pr.key"
+                class="cv-chip cv-green"
+                >em uso</span
+              >
+              <span v-else-if="!pr.panels.includes(panelBase)" class="cv-chip"
+                >de outro painel</span
+              >
+            </div>
+            <p class="text-[11px] text-n-slate-10 leading-snug">
+              {{ pr.desc }}
+            </p>
+            <!-- miniatura da grade: 4 colunas, grande = 2×2 -->
+            <div class="grid grid-cols-4 gap-1 auto-rows-[18px]">
+              <span
+                v-for="(t, ti) in pr.tiles"
+                :key="pr.key + ti"
+                class="rounded-md"
+                :class="t.size === 'lg' ? 'col-span-2 row-span-2' : ''"
+                :style="
+                  t.spacer
+                    ? { border: '1.5px dashed rgb(148 163 184 / .6)' }
+                    : { background: presetSwatch(t) }
+                "
+              />
+            </div>
+            <button
+              class="cv-btn cv-btn-sm self-end"
+              :disabled="isApplyingPreset"
+              @click="applyPreset(pr)"
+            >
+              <span
+                :class="
+                  isApplyingPreset
+                    ? 'i-lucide-loader-2 animate-spin'
+                    : 'i-lucide-check'
+                "
+                class="text-xs"
+              />
+              Usar este modelo
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -3232,40 +9969,61 @@ onUnmounted(() => {
   <Teleport to="body">
     <div
       v-if="colorPicker"
-      class="fixed inset-0 z-[72] flex items-center justify-center bg-black/50 p-4"
+      class="cv-page cv-overlay fixed inset-0 z-[72] flex items-center justify-center bg-black/50 p-4"
+      :style="cvVars"
       @click.self="colorPicker = null"
     >
-      <div class="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl bg-n-solid-1">
-        <div class="p-4 text-white flex items-center gap-2" :style="{ background: tileVisual(colorPicker).grad }">
+      <div class="cv-modal w-full max-w-md">
+        <div
+          class="cv-modal-head !p-4 flex items-center gap-2"
+          :style="{ background: tileVisual(colorPicker).grad }"
+        >
           <span :class="colorPicker.icon" class="text-base" />
-          <p class="text-sm font-bold flex-1 truncate">Cor do card "{{ colorPicker.label }}"</p>
-          <button class="w-7 h-7 rounded-lg bg-white/15 hover:bg-white/30 flex items-center justify-center" @click="colorPicker = null">
+          <p class="text-sm font-bold flex-1 truncate">
+            Cor do card "{{ colorPicker.label }}"
+          </p>
+          <button class="cv-glass-btn cv-iconbtn" @click="colorPicker = null">
             <span class="i-lucide-x text-sm" />
           </button>
         </div>
         <div class="p-4 space-y-3">
           <p class="text-[11px] text-n-slate-10 leading-relaxed">
-            A cor vale pra todo mundo que vê este painel. Se o card estiver julgado
-            por meta (vermelho/âmbar/verde), o alerta continua por cima da cor escolhida.
+            A cor vale pra todo mundo que vê este painel. Se o card estiver
+            julgado por meta (vermelho/âmbar/verde), o alerta continua por cima
+            da cor escolhida.
           </p>
           <div class="flex items-center gap-1.5 flex-wrap">
             <button
-              class="h-9 px-3 rounded-lg text-xs border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-              :class="!colorPicker.customGrad ? 'ring-2 ring-n-brand' : ''"
+              class="cv-btn"
+              :class="!colorPicker.customGrad ? '' : 'cv-btn-ghost'"
               title="Volta pra cor automática (família do painel)"
               @click="setTileColor(null)"
             >
               automática
             </button>
-            <button
-              v-for="c in kpiColorOptions"
-              :key="c.key"
-              class="w-9 h-9 rounded-lg border-2 transition-transform"
-              :class="colorPicker.customGrad === c.grad ? 'border-n-slate-12 scale-110' : 'border-transparent hover:scale-105'"
-              :style="{ background: c.grad }"
-              :title="c.title"
-              @click="setTileColor(c.grad)"
-            />
+          </div>
+          <!-- item 239: as nossas paletas (iMac G3, frutas, marca) em grupos -->
+          <div class="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
+            <div v-for="g in kpiColorGroups" :key="g.title">
+              <p class="text-[11px] font-semibold text-n-slate-11 mb-1">
+                {{ g.title }}
+              </p>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <button
+                  v-for="c in g.items"
+                  :key="c.key"
+                  class="w-8 h-8 rounded-lg border-2 transition-transform"
+                  :class="
+                    colorPicker.customGrad === c.grad
+                      ? 'border-n-slate-12 scale-110'
+                      : 'border-transparent hover:scale-105'
+                  "
+                  :style="{ background: c.grad }"
+                  :title="c.title"
+                  @click="setTileColor(c.grad)"
+                />
+              </div>
+            </div>
           </div>
           <div class="flex items-center gap-2">
             <input
@@ -3273,21 +10031,32 @@ onUnmounted(() => {
               type="text"
               placeholder="#152C61"
               maxlength="7"
-              class="h-9 w-28 px-2 rounded-lg border border-n-weak bg-n-solid-2 text-xs font-mono text-n-slate-12"
+              class="cv-input w-28 text-xs font-mono text-n-slate-12"
               @keydown.enter.prevent="applyTileHexColor"
             />
-            <button
-              class="h-9 px-3 rounded-lg text-xs font-medium border border-n-weak text-n-slate-11 hover:bg-n-alpha-1"
-              @click="applyTileHexColor"
-            >
+            <button class="cv-btn cv-btn-ghost" @click="applyTileHexColor">
               usar este tom
             </button>
-            <span v-if="isSavingLayout" class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10 ml-auto" />
+            <span
+              v-if="isSavingLayout"
+              class="i-lucide-loader-circle animate-spin text-sm text-n-slate-10 ml-auto"
+            />
           </div>
         </div>
       </div>
     </div>
   </Teleport>
+  <!-- item 271: lista de pacientes por trás de uma etapa do funil -->
+  <PatientListPopup
+    v-if="funnelPopup"
+    :title="funnelPopup.title"
+    :subtitle="funnelPopup.subtitle"
+    :people="funnelPopup.people"
+    :grad="funnelPopup.grad"
+    :icon="funnelPopup.icon"
+    :account-id="accountId"
+    @close="funnelPopup = null"
+  />
 </template>
 
 <style scoped>
@@ -3297,16 +10066,28 @@ onUnmounted(() => {
   animation: cevico-radar-pulse 2.2s ease-in-out infinite;
 }
 @keyframes cevico-radar-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.3); }
-  50% { box-shadow: 0 0 22px rgba(52, 211, 153, 0.65); }
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 22px rgba(52, 211, 153, 0.65);
+  }
 }
 /* meta batida / recorde: o card respira com brilho suave */
 .cevico-meta-pulse {
   animation: cevicoMetaPulse 2.6s ease-in-out infinite;
 }
 @keyframes cevicoMetaPulse {
-  0%, 100% { box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2); }
-  50% { box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2), 0 0 26px 4px rgba(244, 222, 142, 0.45); }
+  0%,
+  100% {
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 10px 24px rgba(0, 0, 0, 0.2),
+      0 0 26px 4px rgba(244, 222, 142, 0.45);
+  }
 }
 
 /* botão de atalho pulsante (Ir para agenda) — respiração suave */
@@ -3402,5 +10183,100 @@ onUnmounted(() => {
   .cevico-energy-btn::after {
     animation: none;
   }
+}
+
+/* 🔍 popup dos indicadores (item 152): entrada suave estilo folha — o fundo
+   escurece em fade e o cartão sobe com leve escala; saída mais rápida.
+   Quem pede menos movimento no sistema recebe só o fade. */
+.cevico-kpi-pop-enter-active {
+  transition: opacity 0.22s ease;
+}
+.cevico-kpi-pop-leave-active {
+  transition: opacity 0.15s ease;
+}
+.cevico-kpi-pop-enter-active .cevico-kpi-panel {
+  transition:
+    transform 0.26s cubic-bezier(0.32, 1.25, 0.5, 1),
+    opacity 0.2s ease;
+}
+.cevico-kpi-pop-leave-active .cevico-kpi-panel {
+  transition:
+    transform 0.15s ease-in,
+    opacity 0.15s ease-in;
+}
+.cevico-kpi-pop-enter-from,
+.cevico-kpi-pop-leave-to {
+  opacity: 0;
+}
+.cevico-kpi-pop-enter-from .cevico-kpi-panel {
+  transform: translateY(14px) scale(0.97);
+  opacity: 0;
+}
+.cevico-kpi-pop-leave-to .cevico-kpi-panel {
+  transform: translateY(8px) scale(0.98);
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cevico-kpi-pop-enter-from .cevico-kpi-panel,
+  .cevico-kpi-pop-leave-to .cevico-kpi-panel {
+    transform: none;
+  }
+}
+
+/* item 248: MÉDIA HISTÓRICA — acima (≥ +10%) brilha suave; abaixo (≤ −10%) contorno âmbar */
+.cv-tile-hist-up {
+  animation: cv-hist-glow 2.8s ease-in-out infinite;
+}
+@keyframes cv-hist-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 14px 30px -14px rgba(0, 0, 0, 0.4),
+      0 0 0 0 rgba(255, 255, 255, 0);
+  }
+  50% {
+    box-shadow:
+      0 14px 30px -14px rgba(0, 0, 0, 0.4),
+      0 0 22px 2px rgba(255, 255, 255, 0.35);
+  }
+}
+.cv-tile-hist-down {
+  box-shadow:
+    inset 0 0 0 2px rgba(251, 191, 36, 0.75),
+    0 14px 30px -14px rgba(0, 0, 0, 0.4) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-tile-hist-up {
+    animation: none;
+  }
+}
+/* item 275: divisória com título entre seções dos indicadores */
+.cv-tile-div-line {
+  flex: 1;
+  height: 1px;
+  background: rgb(var(--cv-rgb) / 0.35);
+}
+.cv-tile-div-title,
+.cv-tile-div-input {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--cv-deep);
+  white-space: nowrap;
+}
+.cv-tile-div-input {
+  border: 1px dashed rgb(var(--cv-rgb) / 0.5);
+  border-radius: 8px;
+  padding: 2px 8px;
+  background: rgb(255 255 255 / 0.6);
+  min-width: 14rem;
+}
+.dark .cv-tile-div-title {
+  color: #fff;
+}
+.dark .cv-tile-div-input {
+  background: rgb(0 0 0 / 0.3);
+  color: #fff;
 }
 </style>

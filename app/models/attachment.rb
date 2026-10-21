@@ -129,7 +129,9 @@ class Attachment < ApplicationRecord
       thumb_url: thumb_url,
       file_size: file.byte_size,
       width: file.metadata[:width],
-      height: file.metadata[:height]
+      height: file.metadata[:height],
+      # CEVICO item 204: leitura da imagem pelo Gemini (o áudio já tinha a chave)
+      transcribed_text: meta&.[]('transcribed_text') || ''
     }
 
     metadata[:data_url] = metadata[:thumb_url] = external_url if instagram_incoming_message?

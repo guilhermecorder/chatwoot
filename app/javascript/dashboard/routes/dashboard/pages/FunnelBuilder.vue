@@ -6,10 +6,13 @@
 import { ref, computed, onMounted } from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import { useAlert } from 'dashboard/composables';
-import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import CrmAPI from 'dashboard/api/crm';
 
-const { isAdmin } = useAdmin();
+// 🔐 rodada 334: quem só VÊ o funil lê; editar = fontes e elos entre páginas
+const { canEdit } = useCevicoAccess();
+const canEditFunnels = computed(() => canEdit('marketing.funis'));
 const isLoading = ref(true);
 const pages = ref([]);
 const funnels = ref([]);
@@ -106,7 +109,7 @@ onMounted(load);
           <span class="i-lucide-tornado text-white text-lg" />
         </span>
         <div class="flex-1 min-w-0">
-          <h1 class="text-lg font-bold text-n-slate-12">Montador de Funis</h1>
+          <h1 class="text-lg font-bold text-n-slate-12">Montador de Funis <CevicoViewOnlyPill v-if="!canEditFunnels" /></h1>
           <p class="text-xs text-n-slate-10">da FONTE ao WhatsApp: tráfego, médicos parceiros e indicações alimentando cada funil de páginas</p>
         </div>
       </div>
@@ -125,7 +128,7 @@ onMounted(load);
             >
               {{ s.emoji }} {{ s.label }}
             </span>
-            <template v-if="isAdmin">
+            <template v-if="canEditFunnels">
               <input
                 v-model="newSourceLabel"
                 type="text"
@@ -164,12 +167,12 @@ onMounted(load);
                 >
                   <span>{{ s.emoji }}</span>
                   <span class="flex-1 truncate">{{ s.label }}</span>
-                  <button v-if="isAdmin" class="i-lucide-x text-[10px] text-n-slate-9 hover:text-red-500" @click="removeSource(f, s.key)" />
+                  <button v-if="canEditFunnels" class="i-lucide-x text-[10px] text-n-slate-9 hover:text-red-500" @click="removeSource(f, s.key)" />
                 </div>
                 <p v-if="!sourcesFor(f).length" class="text-[10px] text-n-slate-9">nenhuma fonte marcada ainda.</p>
               </div>
               <select
-                v-if="isAdmin && availableSourcesFor(f).length"
+                v-if="canEditFunnels && availableSourcesFor(f).length"
                 class="mt-2 w-full h-7 rounded-lg border border-n-weak bg-n-solid-1 px-1.5 text-[10px] text-n-slate-11"
                 style="margin-bottom: 0"
                 :disabled="saving"
@@ -199,7 +202,7 @@ onMounted(load);
                   💬 {{ step.cta_clicks }} WhatsApp <b :style="{ color: step.cta_rate >= 10 ? '#047857' : '#64748B' }">({{ fmtPct(step.cta_rate) }})</b>
                 </p>
                 <select
-                  v-if="isAdmin"
+                  v-if="canEditFunnels"
                   class="mt-2 w-full h-7 rounded-lg border border-n-weak bg-n-solid-2 px-1.5 text-[10px] text-n-slate-11"
                   style="margin-bottom: 0"
                   :disabled="savingLink === step.id"
@@ -231,7 +234,7 @@ onMounted(load);
               <span class="text-xs font-semibold text-n-slate-12 flex-1 min-w-[140px] truncate">{{ p.title }}</span>
               <span class="text-[11px] text-n-slate-10">{{ p.views_count }} visitas</span>
               <select
-                v-if="isAdmin"
+                v-if="canEditFunnels"
                 class="h-7 rounded-lg border border-n-weak bg-n-solid-2 px-1.5 text-[10px] text-n-slate-11"
                 style="width: 13rem; margin-bottom: 0"
                 :disabled="savingLink === p.id"

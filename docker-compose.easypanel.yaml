@@ -1,4 +1,5 @@
-version: '3'
+# CEVICO Rodada 6: 3.4 é o mínimo para o healthcheck.start_period (o docker stack recusa com '3')
+version: '3.4'
 
 services:
   base: &base
@@ -21,6 +22,15 @@ services:
     command: ['bundle', 'exec', 'rails', 's', '-p', '3000', '-b', '0.0.0.0']
     ports:
       - '3000:3000'
+    # 🩺 CEVICO Rodada 6: o mesmo teste de saúde da imagem (docker/Dockerfile),
+    # escrito aqui para ficar visível. Web = /health responde; enquanto uma
+    # migration roda, sempre "saudável" (nunca derrubar no meio dela).
+    healthcheck:
+      test: ['CMD', 'sh', 'docker/entrypoints/healthcheck.sh']
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
 
   sidekiq:
     <<: *base
@@ -32,6 +42,15 @@ services:
       - RAILS_ENV=production
       - INSTALLATION_ENV=docker
     command: ['bundle', 'exec', 'sidekiq', '-C', 'config/sidekiq.yml']
+    # 🩺 CEVICO Rodada 6: Sidekiq vivo = batimento deste processo no Redis com
+    # menos de 90 s (travado para de bater). As filas da IA ('ai' e 'ai_fundo')
+    # rodam DENTRO deste mesmo processo, em cápsulas próprias (config/sidekiq.yml).
+    healthcheck:
+      test: ['CMD', 'sh', 'docker/entrypoints/healthcheck.sh']
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 180s
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -43,12 +62,30 @@ services:
       - POSTGRES_USER=${POSTGRES_USERNAME}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 
+  # 🧯 CEVICO Rodada 6 (RESIL-NOVO1): antes o Redis só tirava "foto" de tempos
+  # em tempos; se caísse, perdia os envios dos últimos minutos (a mensagem
+  # ficava "enviada" na tela e nunca chegava ao paciente). Agora:
+  # - appendonly + everysec: cada fila gravada no disco a cada 1 segundo;
+  # - maxmemory + noeviction: com memória cheia ele RECUSA gravar (erro visível)
+  #   em vez de apagar fila em silêncio. REDIS_MAXMEMORY padrão 512mb.
+  # ⚠️ Ao aplicar pela 1ª vez, siga docs/BACKUP.md ("Redis com AOF") — liga o
+  # AOF com o Redis no ar ANTES de trocar este comando, para não perder nada.
   redis:
     image: redis:alpine
     restart: always
-    command: ["sh", "-c", "redis-server --requirepass \"$REDIS_PASSWORD\""]
+    command:
+      [
+        "sh",
+        "-c",
+        "redis-server --requirepass \"$REDIS_PASSWORD\" --appendonly yes --appendfsync everysec --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy noeviction",
+      ]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   storage_data:

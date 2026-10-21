@@ -41,7 +41,7 @@ class Crm::CopywriterService
     oficiais: Refrativa PRK/Lasik R$ 5.000 · Catarata (lente Nacional
     R$ 2.800 | Mono Rayner R$ 3.200 | Tórica monofocal R$ 5.600 | Foco
     estendido R$ 5.690 | Trifocal R$ 8.490 | Galaxy R$ 14.990) · Artisan
-    R$ 11.900. Só cite valor se o briefing pedir.
+    R$ 11.900 por olho. Só cite valor se o briefing pedir.
 
     VALORES DA MARCA (a bússola de TODA comunicação CEVICO — definidos
     pelo Guilherme): tecnologia de ponta, acolhimento humano e clareza
@@ -82,6 +82,12 @@ class Crm::CopywriterService
   PROMPT
 
   # opts: category / form / modality / structure
+
+  # 🏢 rodada 334: clínica = SYSTEM_PROMPT de sempre; outro ramo = genérico da empresa
+  def default_system_prompt
+    Crm::CompanyPrompts.pick(@account, SYSTEM_PROMPT, :copywriter)
+  end
+
   def initialize(account:, briefing:, **opts)
     @account = account
     @briefing = briefing
@@ -95,13 +101,13 @@ class Crm::CopywriterService
     error = config_error
     return error if error
 
-    schema = @modality == 'pagina' ? OUTPUT_SCHEMA : CONTENT_SCHEMA
+    schema = company_schema(@modality == 'pagina' ? OUTPUT_SCHEMA : CONTENT_SCHEMA)
     message = client.messages.create(
       model: model,
       # esforço de raciocínio + página longa dividem o mesmo teto — 8192
       # truncava o JSON de páginas grandes (mesma lição do Construtor)
       max_tokens: @modality == 'pagina' ? 30_000 : 8192,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: schema }),
       messages: [{ role: 'user', content: build_briefing }]
     )

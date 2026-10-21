@@ -1,7 +1,7 @@
 # Formulários CEVICO: montagem (admin), agregação das respostas para o
 # dashboard e geração de insights de marketing com IA.
 class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseController
-  before_action :check_admin
+  include Crm::AccessControl
   before_action :form, only: [:update, :destroy, :summary, :generate_insights, :preview_link]
 
   def index
@@ -35,6 +35,9 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
     responses = scoped_responses
     render json: {
       total: responses.size,
+      # 🔐 achado #118: respostas do link limpo em cadastro que já existia
+      # (ninguém provou que é o dono do telefone) — o hub avisa
+      unverified_count: responses.count { |r| !r.verified? },
       first_response_at: responses.map(&:created_at).min,
       last_response_at: responses.map(&:created_at).max,
       questions: aggregate_questions(responses),
@@ -56,10 +59,11 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
 
   private
 
+  # admin ou concessão Marketing ('pages') — gaveta Marketing (20/09)
   def check_admin
-    return if Current.account_user.administrator?
+    return if crm_can?(:pages)
 
-    render json: { error: 'Apenas administradores podem gerenciar formulários.' }, status: :forbidden
+    render json: { error: 'Você não tem acesso aos formulários. Peça a concessão Marketing a um administrador.' }, status: :forbidden
   end
 
   def form
@@ -67,7 +71,7 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
   end
 
   def form_params
-    params.permit(:name, :active, :intro_title, :intro_text, :thank_you_text,
+    params.permit(:name, :active, :slug, :intro_title, :intro_text, :thank_you_text,
                   questions: [:id, :label, :type, :required, :text, :color, { options: [] }])
   end
 
@@ -116,6 +120,7 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
       id: f.id,
       name: f.name,
       slug: f.slug,
+      short_link: f.public_short_link,
       active: f.active,
       intro_title: f.intro_title,
       intro_text: f.intro_text,

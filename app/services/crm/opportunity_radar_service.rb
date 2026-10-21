@@ -83,6 +83,9 @@ class Crm::OpportunityRadarService
     return { skipped: 'nenhuma coluna configurada' } if effective_watchers.empty?
 
     state = radar_state
+    # 🔒 (#102) foto do estado no COMEÇO da rodada: no fim, save_state compara
+    # com o estado fresco para não apagar o que entrou/saiu enquanto a IA rodava
+    @state_at_start = state.deep_dup
     kept_alerts = still_valid_alerts(state['alerts'])
     checked = prune_checked(state['checked'])
     history = Array(state['history'])
@@ -127,7 +130,9 @@ class Crm::OpportunityRadarService
       'analyzed' => analyzed,
       'new_alerts' => new_alerts.size
     }
-    save_state(kept_alerts + new_alerts, checked, history.last(HISTORY_LIMIT), last_run)
+    # o que ficou válido e o que foi achado NESTA rodada vão separados: assim o
+    # aviso vencido que foi redetectado entra na versão nova (não na velha)
+    save_state(kept_alerts, new_alerts, checked, history.last(HISTORY_LIMIT), last_run)
     { alerts: kept_alerts.size + new_alerts.size, new: new_alerts.size, analyzed: analyzed, candidates: total_candidates }
   end
 
@@ -216,7 +221,7 @@ class Crm::OpportunityRadarService
     message = client.messages.create(
       model: model,
       max_tokens: 512,
-      system_: system_prompt,
+      system_: cached_system,
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: transcript }]
     )
@@ -269,6 +274,8 @@ class Crm::OpportunityRadarService
     Array(alerts).select do |a|
       created = Time.zone.parse(a['created_at'].to_s) rescue nil
       next false if created.nil? || created < ALERT_TTL.ago
+      # ligação perdida (167) / "não vou" da jornada (168): valem até alguém retornar
+      next Crm::RadarExtraAlerts.still_open?(@account, a) if Crm::RadarExtraAlerts.extra?(a)
 
       conv = @account.conversations.find_by(display_id: a['conversation_id'])
       conv&.open? && conv.waiting_since.present?
@@ -290,18 +297,72 @@ class Crm::OpportunityRadarService
     end
   end
 
-  def save_state(alerts, checked, history, last_run)
-    settings = CrmSetting.find_or_create_by!(account: @account)
-    cfg = settings.ai_config || {}
-    cfg['opportunity_state'] = {
-      'alerts' => alerts.last(30),
-      'checked' => checked,
-      'history' => history,
-      'last_run' => last_run,
-      'last_run_at' => last_run['at']
-    }
-    settings.update!(ai_config: cfg)
+  # 🔒 Rodada 4 da auditoria (#102): grava sob a trava da linha (Cevico::
+  # SettingMerge) relendo o estado FRESCO. A rodada demora minutos (chamadas
+  # de IA) e, nesse meio-tempo, outros escritores mexem na MESMA lista de
+  # avisos: Crm::AgentAlert (cancelou/remarcou/não confirmou/pós-op), ligação
+  # perdida, "não vou" da jornada e o "Atender agora" do carrossel. Antes, o
+  # Radar gravava a foto do começo e apagava tudo isso. Regra do acerto:
+  # - aviso que ENTROU durante a rodada (qualquer tipo) fica;
+  # - aviso ATENDIDO durante a rodada (saiu da lista) não volta;
+  # - aviso que este Radar julgou vencido sai; o que ele achou de novo entra
+  #   (aviso vencido REDETECTADO = entra a versão nova, não a velha);
+  # - as outras chaves do estado (manual_log, attended_log) ficam como estão.
+  # kept_alerts = o que já estava e continua válido; new_alerts = o que o
+  # Radar achou NESTA rodada (nunca deduzido por identidade contra a foto do
+  # começo — senão o redetectado com o mesmo id ficava com a versão velha).
+  def save_state(kept_alerts, new_alerts, checked, history, last_run)
+    kept_ids = kept_alerts.map { |a| alert_id(a) }
+    new_ids = new_alerts.map { |a| alert_id(a) }
+    new_history = history - Array(@state_at_start.to_h['history'])
+
+    Cevico::SettingMerge.merge_key!(@account, :ai_config, 'opportunity_state') do |state|
+      survivors = fresh_survivors(state['alerts'], kept_ids, new_ids)
+      state.merge(
+        'alerts' => (survivors + new_alerts).last(30),
+        'checked' => prune_checked(Hash(state['checked']).merge(checked)),
+        'history' => (Array(state['history']) + new_history).last(HISTORY_LIMIT),
+        'last_run' => last_run,
+        'last_run_at' => last_run['at']
+      )
+    end
     @ai_config = nil # limpa memo
+  end
+
+  # avisos do estado FRESCO que ficam:
+  # - redetectado agora (id em new_ids): sai, a versão nova entra depois;
+  # - não estava na foto do começo: entrou durante a rodada → fica;
+  # - estava na foto, mas o fresco tem created_at mais novo: foi REGRAVADO
+  #   durante a rodada (ex.: AgentAlert da mesma tarefa depois do TTL) → fica;
+  # - estava na foto e este Radar ainda considera válido (kept) → fica;
+  # - o resto (vencido/atendido segundo este Radar) sai.
+  def fresh_survivors(fresh, kept_ids, new_ids)
+    start_at = Array(@state_at_start.to_h['alerts']).to_h { |a| [alert_id(a), alert_time(a)] }
+    Array(fresh).select do |a|
+      id = alert_id(a)
+      next false if new_ids.include?(id)
+      next true unless start_at.key?(id)
+      next true if newer?(alert_time(a), start_at[id])
+
+      kept_ids.include?(id)
+    end
+  end
+
+  def alert_time(alert)
+    Time.zone.parse(alert['created_at'].to_s)
+  rescue ArgumentError
+    nil
+  end
+
+  def newer?(time, reference)
+    time.present? && (reference.nil? || time > reference)
+  end
+
+  # identidade de um aviso: os extras (ligação, jornada, agente) se repetem
+  # pelo id da ligação/envio/tarefa; os do próprio Radar, pela conversa
+  def alert_id(alert)
+    extra = alert['call_id'] || alert['send_id'] || alert['task_id']
+    [alert['kind'].to_s, (extra || alert['conversation_id']).to_s]
   end
 
   def build_transcript(conversation, stage_name = nil)

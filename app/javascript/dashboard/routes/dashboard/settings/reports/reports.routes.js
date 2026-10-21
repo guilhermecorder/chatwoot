@@ -26,12 +26,17 @@ import SLAReports from './SLAReports.vue';
 import LabelDashboard from './LabelDashboard.vue';
 import CrmDashboardReport from './CrmDashboardReport.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
+import WhatsappSpend from './WhatsappSpend.vue';
+import AcquisitionCost from './AcquisitionCost.vue';
+import CampaignAgent from './CampaignAgent.vue';
 import TrafficFunnel from './TrafficFunnel.vue';
 import DoctorsDashboard from './DoctorsDashboard.vue';
 import AgentsDashboard from './AgentsDashboard.vue';
 import GoogleDashboard from './GoogleDashboard.vue';
 import AgendaDashboard from './AgendaDashboard.vue';
 import AdsReport from './AdsReport.vue';
+import CreativesCenter from './CreativesCenter.vue';
+import CallsDashboard from './CallsDashboard.vue';
 
 const meta = {
   featureFlag: FEATURE_FLAGS.REPORTS,
@@ -69,66 +74,50 @@ const revisedReportRoutes = [
   {
     path: 'agents_overview',
     name: 'agent_reports_index',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: AgentReportsIndex,
   },
   {
     path: 'agents/:id',
     name: 'agent_reports_show',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: AgentReportsShow,
   },
 
   {
     path: 'inboxes_overview',
     name: 'inbox_reports_index',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: InboxReportsIndex,
   },
   {
     path: 'inboxes/:id',
     name: 'inbox_reports_show',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: InboxReportsShow,
   },
   {
     path: 'teams_overview',
     name: 'team_reports_index',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: TeamReportsIndex,
   },
   {
     path: 'teams/:id',
     name: 'team_reports_show',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: TeamReportsShow,
   },
   {
     path: 'labels_overview',
     name: 'label_reports_index',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: LabelReportsIndex,
   },
   {
     path: 'labels/:id',
     name: 'label_reports_show',
-    meta: {
-      permissions: ['administrator', 'report_manage'],
-    },
+    meta,
     component: LabelReportsShow,
   },
   {
@@ -202,6 +191,33 @@ export default {
           component: WhatsappHealth,
         },
         {
+          // 💸 item 303: Gasto do WhatsApp — dinheiro, só admin
+          path: 'whatsapp_spend',
+          name: 'whatsapp_spend_reports',
+          meta: {
+            permissions: ['administrator'],
+          },
+          component: WhatsappSpend,
+        },
+        {
+          // 💰 item 318: Financeiro & CAC — admin ou concessão "Financeiro"
+          path: 'acquisition_cost',
+          name: 'acquisition_cost_reports',
+          meta: {
+            permissions: ['administrator', 'agent'],
+          },
+          component: AcquisitionCost,
+        },
+        {
+          // 🎯 item 352: Agente de Campanhas — nó marketing.campanhas
+          path: 'campaign_agent',
+          name: 'campaign_agent_reports',
+          meta: {
+            permissions: ['administrator', 'agent'],
+          },
+          component: CampaignAgent,
+        },
+        {
           path: 'traffic_funnel',
           name: 'traffic_funnel_reports',
           meta: {
@@ -248,6 +264,23 @@ export default {
             permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: AdsReport,
+        },
+        {
+          // 🎯 Central de Criativos (item 172)
+          path: 'creatives',
+          name: 'creatives_reports',
+          meta: {
+            permissions: ['administrator', 'agent', 'report_manage'],
+          },
+          component: CreativesCenter,
+        },
+        {
+          path: 'calls_dashboard',
+          name: 'calls_dashboard_reports',
+          meta: {
+            permissions: ['administrator', 'agent', 'report_manage'],
+          },
+          component: CallsDashboard,
         },
       ],
     },

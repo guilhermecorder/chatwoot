@@ -9,6 +9,13 @@ import MoreActions from './MoreActions.vue';
 import Avatar from 'next/avatar/Avatar.vue';
 import SLACardLabel from './components/SLACardLabel.vue';
 import ConversationCallButton from './ConversationCallButton.vue';
+// 📞 CEVICO item 167: botão de ligar pelo NOSSO módulo (substitui o Enterprise)
+import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
+import BubbleThemePicker from 'dashboard/components-next/cevico/BubbleThemePicker.vue';
+// 🤖 item 212: chavinha do Atendente IA no topo da conversa
+import ResponderSwitch from 'dashboard/components-next/cevico/conversas/ResponderSwitch.vue';
+// 🎨 item 212b: "foto" do paciente na cor de quem cuida
+import { useCevicoPersonColors } from 'dashboard/composables/useCevicoPersonColors';
 import wootConstants from 'dashboard/constants/globals';
 import { conversationListPageURL } from 'dashboard/helper/URLHelper';
 import { snoozedReopenTime } from 'dashboard/helper/snoozeHelpers';
@@ -36,6 +43,8 @@ const { width } = useElementSize(conversationHeader);
 const { isAWebWidgetInbox } = useInbox();
 
 const currentChat = computed(() => store.getters.getSelectedChat);
+const { patientGradientFor } = useCevicoPersonColors();
+const patientGradient = computed(() => patientGradientFor(currentChat.value));
 const accountId = computed(() => store.getters.getCurrentAccountId);
 
 const chatMetadata = computed(() => props.chat.meta);
@@ -89,11 +98,18 @@ const inbox = computed(() => {
   return store.getters['inboxes/getInbox'](inboxId);
 });
 
+// CEVICO: com o módulo de ligações ligado, o telefone do cabeçalho é o nosso
+const cevicoCallsOn = computed(
+  () => store.getters['crm/getSettings']?.calls?.enabled === true
+);
+
 const hasMultipleInboxes = computed(
   () => store.getters['inboxes/getInboxes'].length > 1
 );
 
-const hasSlaPolicyId = computed(() => props.chat?.sla_policy_id);
+const hasSlaPolicyId = computed(
+  () => props.chat?.applied_sla?.id && !currentContact.value?.blocked
+);
 
 const copyConversationId = async () => {
   try {
@@ -108,7 +124,7 @@ const copyConversationId = async () => {
 <template>
   <div
     ref="conversationHeader"
-    class="flex flex-col gap-3 items-center justify-between flex-1 w-full min-w-0 xl:flex-row px-3 pt-3 pb-2 h-24 xl:h-12"
+    class="cv-chat-head flex flex-col gap-3 items-center justify-between flex-1 w-full min-w-0 xl:flex-row px-3 pt-3 pb-2 h-24 xl:h-12"
   >
     <div
       class="flex items-center justify-start w-full xl:w-auto max-w-full min-w-0 xl:flex-1"
@@ -116,7 +132,7 @@ const copyConversationId = async () => {
       <BackButton
         v-if="showBackButton"
         :back-url="backButtonUrl"
-        class="ltr:mr-2 rtl:ml-2"
+        class="me-2"
       />
       <Avatar
         :name="currentContact.name"
@@ -124,10 +140,11 @@ const copyConversationId = async () => {
         :size="32"
         :status="currentContact.availability_status"
         hide-offline-status
+        rounded-full
+        gradient
+        :gradient-override="patientGradient"
       />
-      <div
-        class="flex flex-col items-start min-w-0 ml-2 overflow-hidden rtl:ml-0 rtl:mr-2"
-      >
+      <div class="flex flex-col items-start min-w-0 ms-2 overflow-hidden">
         <div class="flex flex-row items-center max-w-full gap-1 p-0 m-0">
           <span
             class="text-sm font-medium truncate leading-tight text-n-slate-12"
@@ -172,7 +189,20 @@ const copyConversationId = async () => {
         :parent-width="width"
         class="hidden md:flex"
       />
-      <ConversationCallButton :inbox="inbox" :chat="currentChat" />
+      <!-- 🤖 item 212: liga/desliga o Atendente IA nesta conversa -->
+      <ResponderSwitch :conversation-id="currentChat.id" :chat="currentChat" />
+      <!-- 🎨 item 209: tema dos balões (por pessoa) -->
+      <BubbleThemePicker />
+      <CevicoCallButton
+        :contact-id="currentContact?.id"
+        :inbox-id="currentChat.inbox_id"
+        :phone="currentContact?.phone_number"
+      />
+      <ConversationCallButton
+        v-if="!cevicoCallsOn"
+        :inbox="inbox"
+        :chat="currentChat"
+      />
       <MoreActions :conversation-id="currentChat.id" />
     </div>
   </div>

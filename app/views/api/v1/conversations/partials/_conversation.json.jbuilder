@@ -46,8 +46,13 @@ json.contact_last_seen_at conversation.contact_last_seen_at.to_i
 json.custom_attributes conversation.custom_attributes
 json.inbox_id conversation.inbox_id
 json.labels conversation.cached_label_list_array
-# estágio da jornada (coluna do CRM CEVICO) do contato — filtro do ChatList
-json.crm_stage_id conversation.contact&.crm_contacts&.first&.stage_id
+# estágio da jornada (coluna do CRM CEVICO) do contato — filtro do ChatList.
+# O contato pode estar em mais de um funil: mandamos todas as colunas/funis
+# (crm_stage_id fica por compatibilidade = a primeira)
+crm_journeys = conversation.contact&.crm_contacts&.to_a || []
+json.crm_stage_id crm_journeys.first&.stage_id
+json.crm_stage_ids crm_journeys.map(&:stage_id)
+json.crm_pipeline_ids crm_journeys.map(&:pipeline_id)
 json.muted conversation.muted?
 json.snoozed_until conversation.snoozed_until
 json.status conversation.status
@@ -60,5 +65,6 @@ json.last_non_activity_message conversation.messages.where(account_id: conversat
 json.last_activity_at conversation.last_activity_at.to_i
 json.priority conversation.priority
 json.waiting_since conversation.waiting_since.to_i.to_i
-json.sla_policy_id conversation.sla_policy_id
+sla_applicable = conversation.account.feature_enabled?('sla') && (!conversation.respond_to?(:sla_applicable?) || conversation.sla_applicable?)
+json.sla_policy_id sla_applicable ? conversation.sla_policy_id : nil
 json.partial! 'enterprise/api/v1/conversations/partials/conversation', conversation: conversation if ChatwootApp.enterprise?

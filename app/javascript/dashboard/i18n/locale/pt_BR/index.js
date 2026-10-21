@@ -5,6 +5,7 @@ import attributesMgmt from './attributesMgmt.json';
 import auditLogs from './auditLogs.json';
 import automation from './automation.json';
 import bulkActions from './bulkActions.json';
+import calls from './calls.json';
 import campaign from './campaign.json';
 import crm from './crm.json';
 import tasksCevico from './tasksCevico.json';
@@ -36,6 +37,7 @@ import report from './report.json';
 import resetPassword from './resetPassword.json';
 import search from './search.json';
 import setNewPassword from './setNewPassword.json';
+import sessionLimit from './sessionLimit.json';
 import settings from './settings.json';
 import signup from './signup.json';
 import sla from './sla.json';
@@ -43,6 +45,7 @@ import snooze from './snooze.json';
 import teamsSettings from './teamsSettings.json';
 import webhooks from './webhooks.json';
 import whatsappTemplates from './whatsappTemplates.json';
+import whatsappTemplateMgmt from './whatsappTemplateMgmt.json';
 import yearInReview from './yearInReview.json';
 
 export default {
@@ -53,6 +56,7 @@ export default {
   ...auditLogs,
   ...automation,
   ...bulkActions,
+  ...calls,
   ...campaign,
   ...crm,
   ...tasksCevico,
@@ -84,6 +88,7 @@ export default {
   ...resetPassword,
   ...search,
   ...setNewPassword,
+  ...sessionLimit,
   ...settings,
   ...signup,
   ...sla,
@@ -91,5 +96,6 @@ export default {
   ...teamsSettings,
   ...webhooks,
   ...whatsappTemplates,
+  ...whatsappTemplateMgmt,
   ...yearInReview,
 };

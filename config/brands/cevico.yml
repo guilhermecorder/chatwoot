@@ -1,6 +1,6 @@
 # Pacote de marca: CEVICO (padrão do sistema — sem MARCA no ambiente, é ela que vale)
 id: cevico
-nome: 'Sistema CEVICO'
+nome: 'CEVICO S.Un'
 brand_name: 'Sistema CEVICO'
 segmento: clinica   # pré-seleção de fábrica: clínica oftalmológica (config/segmentos/clinica.yml)
 logos:

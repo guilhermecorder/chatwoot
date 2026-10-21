@@ -28,6 +28,7 @@ class Api::V1::Accounts::ContactsController < Api::V1::Accounts::BaseController
       'name ILIKE :search OR email ILIKE :search OR phone_number ILIKE :search OR contacts.identifier LIKE :search',
       search: "%#{params[:q].strip}%"
     )
+    contacts = contacts.or(phone_digits_contacts(params[:q])) if phone_digits(params[:q]).length >= 4
     @contacts = fetch_contacts_with_has_more(contacts)
   end
 
@@ -190,6 +191,20 @@ class Api::V1::Accounts::ContactsController < Api::V1::Accounts::BaseController
     permitted_params.except(:custom_attributes, :avatar_url)
                     .merge({ custom_attributes: contact_custom_attributes })
                     .merge({ additional_attributes: contact_additional_attributes })
+  end
+
+  # CEVICO (item 199): telefone "do jeito que a pessoa digita" — só os dígitos,
+  # com ou sem DDD/+55, com espaço, traço ou parêntese. O cadastro guarda
+  # +5511999999999; digitar "11 99999-9999" ou "99999 9999" precisa achar.
+  def phone_digits(query)
+    query.to_s.gsub(/\D/, '')
+  end
+
+  def phone_digits_contacts(query)
+    Current.account.contacts.where(
+      "regexp_replace(COALESCE(phone_number, ''), '\\D', '', 'g') LIKE :digits",
+      digits: "%#{phone_digits(query)}%"
+    )
   end
 
   def set_include_contact_inboxes
