@@ -124,6 +124,9 @@ class Crm::BookingSideEffects
     def move_card(account, contact, outcome, preferred_stage_id) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
       return nil if contact.blank?
 
+      # 🩹 21/10: a próxima consulta é de pós-op → o card fica em "Consulta Pós Op" (Crm::PosOpReflector)
+      return nil if outcome != :canceled && Crm::PosOpReflector.next_is_pos_op?(account, contact)
+
       target_id = outcome == :canceled ? config(account)['cancel_stage_id'] : booking_stage_id(account, preferred_stage_id)
       return nil if target_id.blank?
 

@@ -219,6 +219,8 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # 🔁 item 343: retorno novo nasce sem dono individual (equipe dos retornos)
   before_create -> { Crm::TaskOwner.apply_retorno_team!(self) }
   after_update :stamp_reschedule!, if: :rescheduled_in_this_save?
+  # 🩹 21/10: consulta de pós-op marcada/remarcada → card na coluna "Consulta Pós Op"
+  after_commit -> { Crm::PosOpReflector.call(self) }, on: %i[create update], if: -> { Crm::PosOpReflector.relevant_change?(self) }
 
   # 🔁 Auditoria 10/2026 (#2/#133): REMARCAÇÃO com carimbo próprio. Antes o
   # painel usava o updated_at — qualquer toque na consulta (✓ compareceu,

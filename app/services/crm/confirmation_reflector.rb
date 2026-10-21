@@ -29,7 +29,7 @@ class Crm::ConfirmationReflector
       if Crm::PartnerGuard.partner_task?(task) || Crm::PartnerGuard.partner_contact?(contact)
         Crm::PartnerFunnel.place!(account, contact, :confirmed)
       else
-        move_own_card(account, contact)
+        move_own_card(account, contact, task)
       end
     rescue StandardError => e
       Rails.logger.error "[Crm::ConfirmationReflector] consulta #{task&.id}: #{e.message}"
@@ -80,7 +80,10 @@ class Crm::ConfirmationReflector
         stages.where('crm_stages.name ILIKE ?', "%#{STAGE_LIKE}%").order('crm_pipelines.position, crm_stages.position').first
     end
 
-    def move_own_card(account, contact)
+    def move_own_card(account, contact, task = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+      # 🩹 21/10: consulta de pós-op confirmada continua em "Consulta Pós Op" (o selo na Agenda segue)
+      return nil if task && Crm::PosOpReflector.keeps_card?(account, task, contact)
+
       stage = own_stage(account)
       return nil if stage.nil?
 
