@@ -5,6 +5,10 @@
 # continuam os mesmos; só o texto saiu do arquivo do upstream, que agora
 # fica quase intocado no merge. Tudo aqui vira /api/v1/accounts/:id/crm/…
 namespace :crm do
+  # 🏢 Meus negócios (21/10): lançador do dono — lista + link de entrada por SSO
+  resources :negocios, only: [:index], param: :chave do
+    member { post :login }
+  end
   resources :campaigns, only: [:index, :show, :create, :destroy] do
     member do
       post :send_now

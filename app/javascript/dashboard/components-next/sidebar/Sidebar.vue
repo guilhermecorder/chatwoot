@@ -23,6 +23,7 @@ import ChannelIcon from 'next/icon/ChannelIcon.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
 import Logo from 'next/icon/Logo.vue';
 import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
+import CrmAPI from 'dashboard/api/crm';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import { menuNodeFor, routeNodesFor } from 'dashboard/helper/cevicoAccess';
 import {
@@ -372,6 +373,20 @@ const reportRoutes = computed(() => newReportRoutes());
 // nó que não está em `me` (ex.: cirurgias numa ótica) some para todo mundo.
 const { canAny, fill, company, loaded } = useCevicoAccess();
 
+// 🏢 Meus negócios (21/10): o item só aparece para o dono (e-mail em
+// MEUS_NEGOCIOS_DONOS, decidido no servidor) — uma consulta leve ao abrir
+const negociosDono = ref(false);
+const carregarNegocios = async () => {
+  if (!isAdmin.value) return;
+  try {
+    const { data } = await CrmAPI.getNegocios();
+    negociosDono.value = Boolean(data?.dono && data?.negocios?.length);
+  } catch (e) {
+    negociosDono.value = false;
+  }
+};
+onMounted(carregarNegocios);
+
 // itens cujo nó-pai pode estar em 'none' mas um filho liberado — abrem
 // se QUALQUER nó da rota liberar (mesma regra do guard de rota)
 const ITEM_ROUTE_ANY = {
@@ -439,6 +454,7 @@ const toggleHiddenFeature = key => {
 // Padrão admin: Relatórios logo abaixo do CRM (pedido 2026-07-15).
 const DEFAULT_MENU_ORDER = [
   'Business',
+  'Negocios',
   'Inicio',
   'CRM',
   'Reports',
@@ -594,6 +610,7 @@ const menuItemsForRole = computed(() => {
 // Item que não couber em gaveta nenhuma cai em "Mais" — nunca desaparece.
 const MENU_LAYOUT = [
   { solo: 'Business' }, // 👑 27/09: a mesa do dono, acima de tudo (só admin)
+  { solo: 'Negocios' }, // 🏢 21/10: os negócios do dono (só MEUS_NEGOCIOS_DONOS)
   { solo: 'Inicio' }, // como está meu dia?
   {
     name: 'group:atendimento', // quem eu atendo agora?
@@ -757,6 +774,7 @@ const TILE_COLORS = {
   Settings: '#8e8e93',
   'Integrations Hub': '#64d2ff',
   Inicio: '#34c759',
+  Negocios: '#5e5ce6',
   // Marketing e Análises (gavetas 20/09)
   'Creatives Center': '#ff9f0a',
   'Pages List': '#0a84ff',
@@ -1058,6 +1076,17 @@ const menuItems = computed(() => {
             label: 'Painel do empresário',
             icon: 'i-lucide-crown',
             to: accountScopedRoute('cevico_business'),
+          },
+        ]
+      : []),
+    // 🏢 Meus negócios (21/10): a porta do dono para cada empresa
+    ...(negociosDono.value
+      ? [
+          {
+            name: 'Negocios',
+            label: 'Meus negócios',
+            icon: 'i-lucide-building-2',
+            to: accountScopedRoute('negocios_home'),
           },
         ]
       : []),

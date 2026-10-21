@@ -1811,6 +1811,15 @@ class CrmAPI extends ApiClient {
       `${this.url}/pipelines/${pipelineId}/stages/${stageId}/automations/${id}`
     );
   }
+
+  // ── 🏢 Meus negócios (21/10): lançador do dono ────────────────────
+  getNegocios() {
+    return axios.get(`${this.url}/negocios`);
+  }
+
+  loginNegocio(chave) {
+    return axios.post(`${this.url}/negocios/${chave}/login`);
+  }
 }
 
 export default new CrmAPI();

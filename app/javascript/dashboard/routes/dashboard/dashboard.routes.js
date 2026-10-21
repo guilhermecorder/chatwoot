@@ -22,6 +22,7 @@ import cevicoGoalsRoutes from './goals/routes';
 import cevicoBuilderRoutes from './builder/routes';
 import cevicoFinanceRoutes from './finance/routes';
 import inicioRoutes from './inicio/routes';
+import negociosRoutes from './negocios/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
 import AppContainer from './Dashboard.vue';
 import Suspended from './suspended/Index.vue';
@@ -58,6 +59,7 @@ export default {
         ...cevicoBuilderRoutes.routes,
         ...cevicoFinanceRoutes.routes,
         ...inicioRoutes.routes,
+        ...negociosRoutes.routes,
         ...cevicoAutomationsRoutes.routes,
       ],
     },
