@@ -47,11 +47,11 @@ module Cevico
       # (sem endereço/token ainda) até o ambiente ser preenchido
       PADRAO_HUB = [
         { 'chave' => 'cevico', 'nome' => 'CEVICO', 'descricao' => 'clínica · São Paulo',
-          'logo' => '/brand-assets/logo_thumbnail.png', 'cor' => '#152C61', 'pendente' => true },
+          'logo' => '/brand-assets/negocios/cevico.png', 'cor' => '#0B1F5C', 'pendente' => true },
         { 'chave' => 'life', 'nome' => 'LIFE Energia Solar', 'descricao' => 'energia solar · Piracicaba',
-          'logo' => '/brand-assets/life/logo_thumbnail.png', 'cor' => '#D2990B', 'local' => true },
+          'logo' => '/brand-assets/negocios/life.png', 'cor' => '#111111', 'local' => true },
         { 'chave' => 'sua-otica', 'nome' => 'Sua Ótica', 'descricao' => 'óticas · São Paulo',
-          'cor' => '#0A84FF', 'pendente' => true }
+          'logo' => '/brand-assets/negocios/sua-otica.png', 'cor' => '#FFFFFF', 'pendente' => true }
       ].freeze
 
       def donos

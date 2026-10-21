@@ -42,8 +42,11 @@ MEUS_NEGOCIOS=[{"chave":"life","nome":"LIFE Energia Solar","descricao":"energia 
 ```
 
 - JSON em **uma linha só**. `local: true` = este mesmo sistema (abre sem SSO).
-- `logo` pode ser caminho local (`/brand-assets/…`) ou URL completa; sem logo
-  o cartão mostra a inicial do nome.
+- `logo` pode ser caminho local ou URL completa; os logos oficiais já vêm na
+  imagem: `/brand-assets/negocios/cevico.png`, `/brand-assets/negocios/life.png`,
+  `/brand-assets/negocios/sua-otica.png`. Sem logo o quadradinho mostra a inicial.
+- No HUB (marca `hub`) a tela já nasce com os 3 negócios sem nenhuma variável;
+  `MEUS_NEGOCIOS` só é preciso para LIGAR a CEVICO e a Sua Ótica (endereço + token).
 - Depois de salvar, **Implantar** o serviço web (o sidekiq não precisa).
 - Conferir sem expor tokens: `bundle exec rake cevico:negocios:conferir`.
 

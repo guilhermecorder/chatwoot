@@ -111,7 +111,8 @@ export default {
     // HUB: a porta de entrada é tela cheia — a barra lateral só existe
     // DENTRO de um mundo (Negócios ou Saúde)
     isHubHome() {
-      return this.$route.name === 'hub_home';
+      // porta do HUB e Meus negócios: ambientes limpos, só com as opções
+      return ['hub_home', 'negocios_home'].includes(this.$route.name);
     },
   },
   watch: {

@@ -1884,3 +1884,4 @@ AgendaDashboardCore.vue).
 - **Meus negócios** (ITEM 357 do BACKLOG_CEVICO.md): tela + API + rake `cevico:negocios:autorizar`; configuração por ambiente (`MEUS_NEGOCIOS_DONOS`, `MEUS_NEGOCIOS`), manual em docs/MEUS_NEGOCIOS.md.
 - **Migrations:** 50 da linha de produção (BACKUP antes; comando migrate.sh).
 - **Ajuste pós-implantação (21/10 noite):** Negócios no /hub abre a tela **Meus negócios** (3 ícones: CEVICO · LIFE = este sistema · Sua Ótica; os não ligados mostram "Ligar" até o `MEUS_NEGOCIOS` ser preenchido — no HUB todo admin é dono sem precisar de `MEUS_NEGOCIOS_DONOS`); menu da Saúde voltou ao desenho próprio (as gavetas do mundo Negócios tinham jogado tudo em "Mais").
+- **Quadradinhos (21/10, mais tarde):** Meus negócios virou ambiente limpo (sem painel lateral, botão HUB no canto), com 3 quadradinhos de app usando os logos oficiais que ele mandou (`public/brand-assets/negocios/`), nome e estado embaixo (este sistema · entrar · ligar).
