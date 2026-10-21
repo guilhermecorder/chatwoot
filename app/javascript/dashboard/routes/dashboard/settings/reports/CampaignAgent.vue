@@ -21,6 +21,9 @@ import { useAlert } from 'dashboard/composables';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import HBars from 'dashboard/components-next/cevico/HBars.vue';
+import TimelineChart from 'dashboard/components-next/cevico/TimelineChart.vue';
+import DonutChart from 'dashboard/components-next/cevico/DonutChart.vue';
+import CvRegua from 'dashboard/components-next/cevico/guia/CvRegua.vue';
 import CvCabecalho from 'dashboard/components-next/cevico/guia/CvCabecalho.vue';
 import CvBloco from 'dashboard/components-next/cevico/guia/CvBloco.vue';
 import CvIndicador from 'dashboard/components-next/cevico/guia/CvIndicador.vue';
@@ -45,20 +48,27 @@ const openLaunch = ref(false); // sanfona de Subir campanha
 
 const pal = useCevicoPalette({
   scope: 'report:campaign_agent',
+  // os ids são os dos CvBloco (id="bloco-<id>"): é por eles que a salada de
+  // frutas e a fruta por bloco chegam a cada bloco
   blocks: [
-    { id: 'resumo', label: 'A estrela-guia', icon: 'i-lucide-target' },
-    {
-      id: 'indicadores',
-      label: 'Secundários e terciários',
-      icon: 'i-lucide-layers',
-    },
+    { id: 'primarios', label: 'Números', icon: 'i-lucide-target' },
+    { id: 'graficos', label: 'Gráficos', icon: 'i-lucide-chart-line' },
+    { id: 'secundarios', label: 'O caminho', icon: 'i-lucide-layers' },
     { id: 'campanhas', label: 'Campanhas', icon: 'i-lucide-megaphone' },
-    { id: 'fila', label: 'Recomendações', icon: 'i-lucide-lightbulb' },
-    { id: 'placar', label: 'Aprendizado', icon: 'i-lucide-graduation-cap' },
+    {
+      id: 'recomendacoes',
+      label: 'Recomendações',
+      icon: 'i-lucide-lightbulb',
+    },
+    {
+      id: 'aprendizado',
+      label: 'Aprendizado',
+      icon: 'i-lucide-graduation-cap',
+    },
     { id: 'media', label: 'Nossa média', icon: 'i-lucide-ruler' },
     {
       id: 'parametros',
-      label: 'Parâmetros',
+      label: 'Ajustes',
       icon: 'i-lucide-sliders-horizontal',
     },
     { id: 'subir', label: 'Subir campanha', icon: 'i-lucide-rocket' },
@@ -465,7 +475,9 @@ const campaignBars = computed(() =>
       label: c.name,
       sub: CHANNEL_LABEL[c.channel],
       values: [c.goal_cost],
-      color: CHANNEL_COLORS[c.channel],
+      color:
+        { bom: '#059669', problema: '#dc2626' }[goalBand(c)?.estado] ||
+        CHANNEL_COLORS[c.channel],
     }))
 );
 const openActionsOf = row =>
@@ -474,6 +486,188 @@ const openActionsOf = row =>
   );
 const adsCount = c =>
   (c.children || []).reduce((n, s) => n + (s.children?.length || 0), 0);
+
+// ── gráficos (358c): dia a dia, fatias e a régua contra a nossa média ──
+const series = computed(() => data.value?.series || null);
+const seriesCh = computed(() => series.value?.[channel.value] || null);
+// a nossa média POR DIA (gasto já vem por dia; leads/agendamentos = total ÷ dias)
+const dailyAvg = key => {
+  const b = baseline.value;
+  if (!b) return 0;
+  if (key === 'spend') return Number(b.daily_spend || 0);
+  return Number(b[key] || 0) / Number(b.days || 1);
+};
+const CHART = {
+  spend: 'var(--cv, #2563eb)',
+  leads: '#0a84ff',
+  booked: '#059669',
+};
+const timelineBars = computed(() =>
+  seriesCh.value
+    ? {
+        key: 'spend',
+        label: 'Investido',
+        color: CHART.spend,
+        values: seriesCh.value.spend,
+      }
+    : null
+);
+const timelineLines = computed(() =>
+  seriesCh.value
+    ? [
+        {
+          key: 'leads',
+          label: 'Leads',
+          color: CHART.leads,
+          values: seriesCh.value.leads,
+        },
+        {
+          key: 'booked',
+          label: 'Agendamentos',
+          color: CHART.booked,
+          values: seriesCh.value.booked,
+        },
+      ]
+    : []
+);
+const timelineRefs = computed(() =>
+  [
+    {
+      axis: 'left',
+      value: dailyAvg('spend'),
+      label: 'média/dia',
+      color: 'var(--g-texto, #111827)',
+    },
+    {
+      axis: 'right',
+      value: dailyAvg('leads'),
+      label: 'média de leads/dia',
+      color: CHART.leads,
+    },
+  ].filter(r => r.value > 0)
+);
+const timelineTip = i => {
+  const s = seriesCh.value;
+  if (!s) return null;
+  return {
+    title: series.value.labels[i],
+    rows: [
+      {
+        color: CHART.spend,
+        label: 'Investido',
+        value: moneyShort(s.spend[i]),
+        square: true,
+      },
+      { color: CHART.leads, label: 'Leads', value: fmtNum(s.leads[i]) },
+      {
+        color: CHART.booked,
+        label: 'Agendaram (dos que chegaram neste dia)',
+        value: fmtNum(s.booked[i]),
+      },
+    ],
+  };
+};
+// fatias: por canal (os dois) ou por campanha (um canal só)
+const SLICE_COLORS = [
+  '#2563eb',
+  '#7c3aed',
+  '#059669',
+  '#d97706',
+  '#dc2626',
+  '#0891b2',
+];
+const donut = key => {
+  if (channel.value === 'all')
+    return ['meta', 'google'].map(ch => ({
+      key: ch,
+      label: CHANNEL_LABEL[ch],
+      value: data.value?.totals?.[ch]?.[key] || 0,
+      color: CHANNEL_COLORS[ch],
+    }));
+  return campaigns.value
+    .filter(c => !String(c.id).includes('untracked'))
+    .map((c, i) => ({
+      key: `${c.channel}-${c.id}`,
+      label: c.name,
+      value: c[key] || 0,
+      color: SLICE_COLORS[i % SLICE_COLORS.length],
+    }));
+};
+const donutSpend = computed(() => donut('spend'));
+const donutLeads = computed(() => donut('leads'));
+const donutBooked = computed(() => donut('booked'));
+// a régua: seis indicadores contra a nossa média, nos limiares do agente
+const reguaItems = computed(() => {
+  const t = totals.value;
+  const b = baseline.value;
+  const r = (row, k) => row?.rates?.[k];
+  return [
+    {
+      key: 'goal',
+      label: `⭐ ${goalLabel.value}`,
+      value: t.goal_cost,
+      avg: b?.goal_cost,
+      lower: true,
+      fmt: moneyShort,
+      hint: 'investido ÷ resultados · menor é melhor',
+    },
+    {
+      key: 'cpl',
+      label: 'Custo por lead (CPL)',
+      value: r(t, 'cpl'),
+      avg: r(b, 'cpl'),
+      lower: true,
+      fmt: moneyShort,
+      hint: 'investido ÷ leads · menor é melhor',
+    },
+    {
+      key: 'ctr',
+      label: 'CTR (clique por exibição)',
+      value: r(t, 'ctr'),
+      avg: r(b, 'ctr'),
+      lower: false,
+      fmt: v => pct(v, 2),
+      hint: 'de cada 100 exibições, quantas clicaram · maior é melhor',
+    },
+    {
+      key: 'cpm',
+      label: 'CPM (custo por mil exibições)',
+      value: r(t, 'cpm'),
+      avg: r(b, 'cpm'),
+      lower: true,
+      fmt: money,
+      hint: 'quanto custa aparecer mil vezes · menor é melhor',
+    },
+    {
+      key: 'lead_rate',
+      label: 'Lead por clique',
+      value: r(t, 'lead_rate'),
+      avg: r(b, 'lead_rate'),
+      lower: false,
+      fmt: pct,
+      hint: 'cliques que viraram lead · maior é melhor',
+    },
+    {
+      key: 'booking_rate',
+      label: 'Taxa de agendamento',
+      value: r(t, 'booking_rate'),
+      avg: r(b, 'booking_rate'),
+      lower: false,
+      fmt: pct,
+      hint: 'leads que marcaram consulta · maior é melhor',
+    },
+  ];
+});
+// barras das campanhas: a média do canal como traço (a cor pelo veredito está em campaignBars)
+const campaignRef = computed(() =>
+  baseline.value?.goal_cost
+    ? {
+        value: baseline.value.goal_cost,
+        label: `a nossa média (${CHANNEL_LABEL[channel.value]}, ${baseline.value.days} dias)`,
+        color: 'var(--g-texto, #111827)',
+      }
+    : null
+);
 
 // ── recomendações ──
 const QUEUE_TABS = [
@@ -746,6 +940,8 @@ const creatives = computed(() => data.value?.creatives || []);
 const channelTiles = computed(() => {
   const m = channels.value.meta || {};
   const g = channels.value.google || {};
+  // antes da primeira leitura não dá para dizer se o canal está ligado
+  const lendo = { text: 'lendo…', estado: 'neutro' };
   let metaStatus = {
     text: 'não ligada · Integrações → Meta Ads',
     estado: 'problema',
@@ -767,13 +963,13 @@ const channelTiles = computed(() => {
     {
       key: 'meta',
       label: 'Meta',
-      status: metaStatus,
+      status: data.value ? metaStatus : lendo,
       icon: 'i-lucide-facebook',
     },
     {
       key: 'google',
       label: 'Google',
-      status: googleStatus,
+      status: data.value ? googleStatus : lendo,
       icon: 'i-lucide-search',
     },
   ];
@@ -1010,6 +1206,7 @@ const storyIndex = computed(() => {
     { key: 'campea', label: 'Campeã' },
     { key: 'vazamento', label: 'Vazamento' },
     { key: 'primarios', label: 'Números' },
+    { key: 'graficos', label: 'Gráficos' },
     { key: 'secundarios', label: 'Caminho' },
     { key: 'campanhas', label: 'Campanhas' },
     { key: 'recomendacoes', label: 'Recomendações' },
@@ -1205,6 +1402,106 @@ const goTo = async key => {
               em Integrações → Google.
             </template>
           </p>
+        </div>
+      </CvBloco>
+
+      <!-- ══ 1b · GRÁFICOS — a leitura em desenho (358c) ══ -->
+      <CvBloco
+        id="bloco-graficos"
+        titulo="Gráficos · a leitura em desenho"
+        :subtitulo="`Linha do dia a dia, fatias por ${channel === 'all' ? 'canal' : 'campanha'} e a régua contra a nossa média de ${p.baseline_days} dias. O traço escuro é sempre a média.`"
+        icon="i-lucide-chart-line"
+      >
+        <div class="cvg-bloco-pilha">
+          <div class="cvg-grafico">
+            <span class="cvg-grafico-titulo">
+              <span>Dia a dia · investido, leads e agendamentos</span>
+              <span>{{ periodoTxt }}</span>
+            </span>
+            <div class="cvg-grafico-corpo">
+              <TimelineChart
+                v-if="seriesCh"
+                :labels="series.labels"
+                :bars="timelineBars"
+                :lines="timelineLines"
+                :refs="timelineRefs"
+                :left-format="moneyShort"
+                :right-format="fmtNum"
+                :tip="timelineTip"
+                :height="240"
+                empty-text="sem dia com número no período"
+              />
+            </div>
+            <p class="cvg-grafico-nota">
+              Barras = investido no dia. Linhas = leads que chegaram e, desses,
+              quantos marcaram consulta. Tracejado = a nossa média por dia nos
+              últimos {{ p.baseline_days }} dias: barra acima do tracejado é dia
+              gastando mais que o normal; linha de leads acima é dia melhor.
+            </p>
+          </div>
+
+          <div class="cvg-graficos">
+            <div class="cvg-grafico">
+              <span class="cvg-grafico-titulo">
+                <span>Quem levou o investimento</span>
+              </span>
+              <div class="cvg-grafico-corpo">
+                <DonutChart
+                  :slices="donutSpend"
+                  :size="150"
+                  :format="moneyShort"
+                  unit="investidos"
+                  empty-text="sem gasto no período"
+                />
+              </div>
+            </div>
+            <div class="cvg-grafico">
+              <span class="cvg-grafico-titulo"
+                ><span>Quem trouxe os leads</span></span
+              >
+              <div class="cvg-grafico-corpo">
+                <DonutChart
+                  :slices="donutLeads"
+                  :size="150"
+                  unit="leads"
+                  empty-text="nenhum lead no período"
+                />
+              </div>
+            </div>
+            <div class="cvg-grafico">
+              <span class="cvg-grafico-titulo"
+                ><span>Quem trouxe os agendamentos</span></span
+              >
+              <div class="cvg-grafico-corpo">
+                <DonutChart
+                  :slices="donutBooked"
+                  :size="150"
+                  unit="agendamentos"
+                  empty-text="nenhum agendamento no período"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="cvg-grafico">
+            <span class="cvg-grafico-titulo">
+              <span>Contra a nossa média · o que é bom e o que é ruim</span>
+              <span>média de {{ p.baseline_days }} dias</span>
+            </span>
+            <div class="cvg-grafico-corpo">
+              <CvRegua
+                :items="reguaItems"
+                :worse="Number(p.worse_pct) || 30"
+                :better="Number(p.better_pct) || 30"
+              />
+            </div>
+            <p class="cvg-grafico-nota">
+              O traço escuro é a nossa média. Verde = {{ p.better_pct }}% melhor
+              que ela (campeã). Vermelho = {{ p.worse_pct }}% pior (atenção;
+              duas vezes a média = pausar). Âmbar = perto da média. São os
+              mesmos limiares que o agente usa para recomendar.
+            </p>
+          </div>
         </div>
       </CvBloco>
 
@@ -1484,7 +1781,9 @@ const goTo = async key => {
         <div v-if="campaignBars.length" class="cvg-grafico">
           <span class="cvg-grafico-titulo">
             <span>{{ goalLabel }} por campanha</span>
-            <span>menor é melhor</span>
+            <span
+              >menor é melhor · verde/vermelho = veredito contra a média</span
+            >
           </span>
           <div class="cvg-grafico-corpo">
             <HBars
@@ -1493,6 +1792,7 @@ const goTo = async key => {
               :format="v => moneyShort(v)"
               :label-width="15"
               :highlight-max="false"
+              :reference="campaignRef"
               empty-text="sem campanha com resultado no período"
             />
           </div>

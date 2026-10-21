@@ -16,8 +16,9 @@ class Api::V1::Accounts::Crm::CampaignAgentController < Api::V1::Accounts::BaseC
     since_d = since.to_date
     until_d = until_at.to_date
     channels = params[:channel].presence_in(%w[meta google]) ? [params[:channel]] : %w[meta google]
-    reader = Cevico::CampaignAgent::Reader.new(account: account, since_date: since_d, until_date: until_d, goal: agent_params['goal'],
-                                               channels: channels).call
+    reader_obj = Cevico::CampaignAgent::Reader.new(account: account, since_date: since_d, until_date: until_d, goal: agent_params['goal'],
+                                                   channels: channels)
+    reader = reader_obj.call
     days = (until_d - since_d).to_i + 1
     previous = Cevico::CampaignAgent::Reader.new(account: account, since_date: since_d - days, until_date: since_d - 1,
                                                  goal: agent_params['goal'], channels: channels).totals
@@ -30,6 +31,7 @@ class Api::V1::Accounts::Crm::CampaignAgentController < Api::V1::Accounts::BaseC
       totals: reader[:totals],
       previous: previous,
       time_to_book: reader[:time_to_book],
+      series: reader_obj.daily, # dia a dia para os gráficos (358c)
       baselines: Cevico::CampaignAgent::Baselines.new(account: account, goal: agent_params['goal']).call,
       actions: actions_json,
       scoreboard: Cevico::CampaignAgent::Learning.scoreboard(account),

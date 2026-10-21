@@ -9,7 +9,7 @@
 //
 // Devolve as variáveis --cv* (paletteVars) para a página inteira (cvVars) e
 // para cada bloco (blockVars(id)), mais o estado do popup CevicoPalettePicker.
-import { ref, computed, unref } from 'vue';
+import { ref, computed, unref, provide, getCurrentInstance } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import CrmAPI from 'dashboard/api/crm';
 import {
@@ -244,7 +244,7 @@ export function useCevicoPalette({
       }))
   );
 
-  return {
+  const api = {
     crmSettings,
     scopeKey,
     blockDefs,
@@ -279,4 +279,8 @@ export function useCevicoPalette({
     paletteTargets,
     ownBlockPalettes,
   };
+  // 21/10: os blocos do guia arejado (CvBloco) pegam a paleta do PRÓPRIO bloco
+  // daqui (salada de frutas / fruta por bloco) pelo id="bloco-<id>"
+  if (getCurrentInstance()) provide('cevicoPalette', api);
+  return api;
 }

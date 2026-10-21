@@ -51,6 +51,40 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
     out
   end
 
+  # ── dia a dia (gráficos da tela, item 358c — 21/10) ────────────────────
+  # gasto, leads e agendamentos por DIA e por canal no período. O agendamento
+  # é contado no dia em que o lead CHEGOU (coorte), o mesmo critério dos totais:
+  # "dos que chegaram neste dia, quantos marcaram".
+  def daily # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    dates = (@since_date..@until_date).to_a
+    spend = { 'meta' => Hash.new(0.0), 'google' => Hash.new(0.0) }
+    if @channels.include?('meta')
+      Crm::AdInsight.where(account_id: @account.id).between(@since_date, @until_date).group(:date)
+                    .sum(Arel.sql("COALESCE((metrics->>'spend')::numeric, 0)")).each { |d, v| spend['meta'][d] = v.to_f }
+    end
+    if @channels.include?('google')
+      Crm::CampaignDay.google.where(account_id: @account.id).between(@since_date, @until_date).group(:date).sum(:spend)
+                      .each { |d, v| spend['google'][d] = v.to_f }
+    end
+    leads = { 'meta' => meta_lead_dates, 'google' => google_lead_dates }
+    booked_at = first_booked_at(leads.values.flat_map(&:keys), Crm::AdFunnelSteps.stage_ids_for(@account)[:booked])
+    per = %w[meta google].to_h do |ch|
+      by_day = Hash.new(0)
+      booked_by_day = Hash.new(0)
+      leads[ch].each do |cid, at|
+        d = at.to_date
+        by_day[d] += 1
+        booked_by_day[d] += 1 if booked_at[cid]
+      end
+      [ch, { 'spend' => dates.map { |d| spend[ch][d].round(2) }, 'leads' => dates.map { |d| by_day[d] },
+             'booked' => dates.map { |d| booked_by_day[d] } }]
+    end
+    per['all'] = %w[spend leads booked].index_with do |k|
+      dates.each_index.map { |i| (per['meta'][k][i] + per['google'][k][i]).round(2) }
+    end
+    { 'labels' => dates.map { |d| d.strftime('%d/%m') }, 'dates' => dates.map(&:iso8601) }.merge(per)
+  end
+
   private
 
   # ── META ───────────────────────────────────────────────────────────────
@@ -178,6 +212,8 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
     names = {}
     leads.each do |cid, campaign, _content, utm_id|
       id = utm_id.presence if utm_id.present? && cost.key?(utm_id)
+      # anúncio que manda o ID da campanha no próprio utm_campaign (visto em produção 19/10)
+      id ||= campaign.to_s if campaign.to_s.match?(/\A\d{6,}\z/) && cost.key?(campaign.to_s)
       id ||= ids_by_name[campaign]
       id ||= by_simple_name[simple(campaign)]
       if id

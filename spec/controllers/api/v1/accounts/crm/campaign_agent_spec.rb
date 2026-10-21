@@ -21,6 +21,8 @@ RSpec.describe 'CEVICO Campaign Agent API', type: :request do
     expect(body['params']).to include('goal' => 'booked')
     expect(body['goal_label']).to eq('custo por agendamento de consulta')
     expect(body['baselines'].keys).to include('all', 'meta', 'google')
+    expect(body['series']['labels'].size).to eq(7) # 358c: dia a dia dos gráficos
+    expect(body['series']['all'].keys).to contain_exactly('spend', 'leads', 'booked')
     expect(body['actions']['open'].pluck('id')).to eq([action.id])
     expect(body['can_edit']).to be(true)
 
