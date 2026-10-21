@@ -34,6 +34,10 @@ const estilo = n => ({
 
 const entrar = async n => {
   if (abrindo.value) return;
+  if (n.pendente) {
+    useAlert(`${n.nome} ainda não está ligado: preencha MEUS_NEGOCIOS no ambiente (manual em docs/MEUS_NEGOCIOS.md).`);
+    return;
+  }
   abrindo.value = n.chave;
   // a aba nova precisa nascer no clique (senão o navegador bloqueia);
   // o endereço entra depois que o servidor devolver o link
@@ -64,12 +68,13 @@ const vazio = computed(
 // rótulos do cartão (fora do template para o prettier não quebrar linha)
 const descricao = n =>
   n.descricao || (n.local ? 'este sistema' : 'sistema próprio');
-const icone = n =>
-  abrindo.value === n.chave
-    ? 'i-lucide-loader-2 animate-spin'
-    : 'i-lucide-arrow-right';
+const icone = n => {
+  if (abrindo.value === n.chave) return 'i-lucide-loader-2 animate-spin';
+  return n.pendente ? 'i-lucide-plug' : 'i-lucide-arrow-right';
+};
 const rotulo = n => {
   if (abrindo.value === n.chave) return 'Abrindo';
+  if (n.pendente) return 'Ligar';
   return n.local ? 'Estou aqui' : 'Entrar';
 };
 
@@ -104,7 +109,8 @@ onMounted(carregar);
         class="neg-card"
         :style="estilo(n)"
         :disabled="Boolean(abrindo)"
-        :title="n.local ? 'Este sistema' : n.url"
+        :class="{ 'neg-card-pendente': n.pendente }"
+        :title="n.pendente ? 'Ainda não ligado' : n.local ? 'Este sistema' : n.url"
         @click="entrar(n)"
       >
         <span class="neg-num">{{ i + 1 }}</span>
@@ -149,6 +155,9 @@ onMounted(carregar);
 .neg-card:hover:not(:disabled) {
   transform: translateY(-3px);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.25);
+}
+.neg-card-pendente {
+  @apply opacity-80 saturate-50;
 }
 .neg-card:disabled {
   @apply cursor-wait opacity-80;

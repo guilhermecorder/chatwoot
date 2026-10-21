@@ -66,6 +66,22 @@ RSpec.describe 'CEVICO Meus negócios API', type: :request do
     expect(response.parsed_body['error']).to include('401')
   end
 
+  it 'no HUB, sem ambiente, todo admin é dono e vê os 3 negócios (2 a ligar)', :aggregate_failures do
+    stub_const('ENV', ENV.to_h.merge('MEUS_NEGOCIOS_DONOS' => '', 'MEUS_NEGOCIOS' => ''))
+    stub_const('MARCA', { 'id' => 'hub' })
+
+    get base, headers: outro_admin.create_new_auth_token, as: :json
+
+    body = response.parsed_body
+    expect(body['dono']).to be(true)
+    expect(body['negocios'].pluck('chave')).to eq(%w[cevico life sua-otica])
+    expect(body['negocios'].map { |n| n['pendente'] }).to eq([true, false, true])
+
+    post "#{base}/cevico/login", headers: outro_admin.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:bad_gateway)
+    expect(response.parsed_body['error']).to include('MEUS_NEGOCIOS')
+  end
+
   it 'barra o login de quem não é dono' do
     post "#{base}/cevico/login", headers: outro_admin.create_new_auth_token, as: :json
     expect(response).to have_http_status(:forbidden)

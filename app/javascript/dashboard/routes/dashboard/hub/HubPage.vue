@@ -19,7 +19,9 @@ const setMode = mode => {
 
 const abrirNegocios = () => {
   setMode('negocios');
-  router.push(accountScopedRoute('inicio_home'));
+  // 21/10: Negócios abre os ÍCONES das empresas (CEVICO · LIFE · Sua Ótica);
+  // cada um leva ao sistema daquele negócio — o Meu Painel fica dentro da LIFE
+  router.push(accountScopedRoute('negocios_home'));
 };
 
 const abrirSaude = () => {

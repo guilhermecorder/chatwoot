@@ -28,11 +28,31 @@ module Cevico
         donos.any? && lista.any?
       end
 
+      # dono = e-mail listado; sem lista, no sistema pessoal (marca hub) todo
+      # administrador é dono (é o sistema do Guilherme) — nas outras marcas
+      # a tela só existe com MEUS_NEGOCIOS_DONOS preenchido
       def dono?(user)
         return false if user.nil?
+        return hub? if donos.empty?
 
         donos.include?(user.email.to_s.strip.downcase)
       end
+
+      def hub?
+        defined?(MARCA) && MARCA['id'] == 'hub'
+      end
+
+      # sem MEUS_NEGOCIOS no ambiente, o HUB já mostra os 3 negócios dele:
+      # a LIFE é este sistema; CEVICO e Sua Ótica ficam "a configurar"
+      # (sem endereço/token ainda) até o ambiente ser preenchido
+      PADRAO_HUB = [
+        { 'chave' => 'cevico', 'nome' => 'CEVICO', 'descricao' => 'clínica · São Paulo',
+          'logo' => '/brand-assets/logo_thumbnail.png', 'cor' => '#152C61', 'pendente' => true },
+        { 'chave' => 'life', 'nome' => 'LIFE Energia Solar', 'descricao' => 'energia solar · Piracicaba',
+          'logo' => '/brand-assets/life/logo_thumbnail.png', 'cor' => '#D2990B', 'local' => true },
+        { 'chave' => 'sua-otica', 'nome' => 'Sua Ótica', 'descricao' => 'óticas · São Paulo',
+          'cor' => '#0A84FF', 'pendente' => true }
+      ].freeze
 
       def donos
         ENV.fetch('MEUS_NEGOCIOS_DONOS', '').split(/[,\s;]+/).map { |e| e.strip.downcase }.compact_blank
@@ -41,7 +61,7 @@ module Cevico
       # lista completa (com token) — só para uso interno
       def lista
         raw = ENV.fetch('MEUS_NEGOCIOS', '').strip
-        return [] if raw.blank?
+        return (hub? ? PADRAO_HUB.map { |n| normaliza(n) } : []) if raw.blank?
 
         itens = JSON.parse(raw)
         return [] unless itens.is_a?(Array)
@@ -65,6 +85,7 @@ module Cevico
       def link_de_entrada(chave, account: nil)
         negocio = encontrar(chave)
         raise Erro, 'negócio não configurado' if negocio.nil?
+        raise Erro, "#{negocio['nome']} ainda não está ligado: preencha MEUS_NEGOCIOS (docs/MEUS_NEGOCIOS.md)" if negocio['pendente']
 
         return link_local(negocio, account) if negocio['local']
 
@@ -94,7 +115,8 @@ module Cevico
         return nil if chave.blank?
 
         local = item['local'] == true
-        return nil if !local && (item['url'].blank? || item['token'].blank? || item['user_id'].blank?)
+        pendente = item['pendente'] == true
+        return nil if !local && !pendente && (item['url'].blank? || item['token'].blank? || item['user_id'].blank?)
 
         {
           'chave' => chave,
@@ -103,6 +125,7 @@ module Cevico
           'logo' => item['logo'].to_s,
           'cor' => item['cor'].presence || '#152C61',
           'local' => local,
+          'pendente' => pendente,
           'url' => item['url'].to_s.delete_suffix('/'),
           'user_id' => item['user_id'],
           'account_id' => item['account_id'],

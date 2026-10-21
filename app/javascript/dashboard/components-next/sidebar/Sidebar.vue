@@ -882,6 +882,10 @@ const toChild = item =>
         badgeCount: leafBadge(item),
       };
 const groupedMenuItems = computed(() => {
+  // HUB: no mundo Saúde (e para o convidado só-Saúde) o menu é o desenho
+  // próprio do HUB — grupos Treinar / Corpo & Dieta e itens diretos — sem as
+  // gavetas do mundo Negócios (senão tudo cai em "Mais")
+  if (hubSideOn.value) return visibleMenuItems.value;
   const items = visibleMenuItems.value.filter(
     i => !OMITTED_FROM_MENU.includes(i.name)
   );
