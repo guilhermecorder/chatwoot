@@ -937,7 +937,7 @@ const MEDIA_COLS = [
   { label: 'CPL', get: r => dash(r.rates?.cpl, moneyShort) },
   { label: 'Agend.', get: r => fmtNum(r.booked) },
   { label: 'Custo/agend.', get: r => dash(r.rates?.cost_booked, moneyShort) },
-  { label: 'Cirurgias', get: r => fmtNum(r.surgeries) },
+  { label: 'Operados', get: r => fmtNum(r.surgeries) }, // ponta 5: pacientes, não olhos
   { label: 'CAC', get: r => dash(r.rates?.cost_surgery, moneyShort) },
   { label: 'ROAS', get: r => roasFmt(r.rates?.roas) },
   { label: 'CTR', get: r => pct(r.rates?.ctr, 2) },
@@ -954,7 +954,7 @@ const SEO_MEDIA_COLS = [
   { label: 'Cliques WA', get: r => fmtNum(r.link_clicks) },
   { label: 'Leads', get: r => fmtNum(r.leads) },
   { label: 'Agend.', get: r => fmtNum(r.booked) },
-  { label: 'Cirurgias', get: r => fmtNum(r.surgeries) },
+  { label: 'Operados', get: r => fmtNum(r.surgeries) }, // ponta 5: pacientes, não olhos
   { label: 'Tx. clique', get: r => pct(r.rates?.ctr, 2) },
   { label: 'Tx. lead', get: r => pct(r.rates?.lead_rate) },
   { label: 'Tx. agend.', get: r => pct(r.rates?.booking_rate) },
@@ -1623,7 +1623,7 @@ const goTo = async key => {
               :contexto="`${pct(rate(totals, 'booking_rate'))} dos leads marcaram consulta.`"
             />
             <CvIndicador
-              rotulo="Cirurgias"
+              rotulo="Pacientes operados"
               :valor="fmtNum(totals.surgeries)"
               :comparacao="cmpPrev(totals.surgeries, previous.surgeries)"
               :contexto="`${fmtNum(totals.closed)} fechadas · receita ${moneyShort(totals.revenue)}.`"
@@ -1725,7 +1725,7 @@ const goTo = async key => {
               :contexto="`${pct(rate(totals, 'booking_rate'))} dos leads marcaram consulta.`"
             />
             <CvIndicador
-              rotulo="Cirurgias"
+              rotulo="Pacientes operados"
               :valor="fmtNum(totals.surgeries)"
               :comparacao="cmpPrev(totals.surgeries, previous.surgeries)"
               :contexto="`${fmtNum(totals.closed)} fechadas · custo por cirurgia (CAC) ${dash(rate(totals, 'cost_surgery'), moneyShort)}.`"

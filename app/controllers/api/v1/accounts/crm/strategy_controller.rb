@@ -266,13 +266,19 @@ class Api::V1::Accounts::Crm::StrategyController < Api::V1::Accounts::BaseContro
     scope = scope.where('LOWER(provider_name) LIKE ?', "%#{ActiveRecord::Base.sanitize_sql_like(own)}%") if own.present?
     done = scope.concluidas(today)
     faturamento = done.sum(:amount).to_f.round(2)
-    cirurgias = done.count
+    # 🧮 ponta 5 (22/10): "cirurgias" = só cirurgia (cada uma é um olho); exame
+    # do hub entra no faturamento, mas não é cirurgia; pacientes = pessoas
+    surgeries = done.cirurgias
+    cirurgias = surgeries.count
+    faturamento_cirurgias = surgeries.sum(:amount).to_f.round(2)
     {
       oftalmofacil: {
         month_label: "#{MONTHS_PT[month.month - 1]} de #{month.year}",
         # ainda agendadas = de hoje em diante (a que já passou virou realizada)
-        faturamento: faturamento, cirurgias: cirurgias, agendadas: scope.agendadas_por_vir(today).count,
-        ticket: cirurgias.positive? ? (faturamento / cirurgias).round(2) : 0,
+        faturamento: faturamento, cirurgias: cirurgias, agendadas: scope.agendadas_por_vir(today).cirurgias.count,
+        pacientes: surgeries.where.not(contact_id: nil).distinct.count(:contact_id) + surgeries.where(contact_id: nil).count,
+        exames: done.count - cirurgias,
+        ticket: cirurgias.positive? ? (faturamento_cirurgias / cirurgias).round(2) : 0,
         available: Crm::OftalmofacilSurgery.exists?(account_id: account.id)
       }
     }

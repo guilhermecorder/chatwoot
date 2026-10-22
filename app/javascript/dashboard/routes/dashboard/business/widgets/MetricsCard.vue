@@ -134,7 +134,7 @@ const tiles = computed(() => {
       value: money(m.value.faturamento),
       sub:
         source.value === 'oftalmofacil'
-          ? 'cirurgias realizadas no mês'
+          ? `cirurgias realizadas no mês${m.value.extra?.exames ? ` + ${m.value.extra.exames} exame(s)` : ''}`
           : 'receitas do mês',
       color: '#C8962E',
     },
@@ -143,7 +143,7 @@ const tiles = computed(() => {
       value: m.value.cirurgias,
       sub:
         source.value === 'oftalmofacil'
-          ? `${m.value.extra?.agendadas || 0} ainda agendadas no mês`
+          ? `olhos operados · ${m.value.extra?.pacientes ?? '—'} pacientes · ${m.value.extra?.agendadas || 0} ainda agendadas`
           : 'no mês',
       color: '#0A84FF',
     },

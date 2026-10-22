@@ -29,6 +29,14 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     end
     months = scope.group("to_char(surgery_date, 'YYYY-MM')").count
     months_done = scope.concluidas.group("to_char(surgery_date, 'YYYY-MM')").count
+    # 🧾 ponta 1 (22/10): realizada SEM PROVA (nem pagamento, nem card de pós, nem Agenda) — só rótulo, o valor não muda
+    unproven = unproven_surgeries(scope)
+    unproven.group_by(&:provider_name).each do |prov, list|
+      p = (partners[prov.to_s] ||= blank_partner(prov))
+      p[:sem_prova] = list.size
+      p[:amount_sem_prova] = list.sum { |s| s.amount.to_f } if admin?
+    end
+    unproven_months = unproven.group_by { |s| s.surgery_date.strftime('%Y-%m') }.transform_values(&:size)
     # 24/09 (pedido dele): REPRESENTATIVIDADE — procedimentos e clínicas por volume,
     # e o recorte de procedimentos dentro de cada clínica e de cada parceiro
     partner_procs = top_by(scope.group(:provider_name, :procedure_name).count)
@@ -43,9 +51,14 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     end
     render json: {
       period: { from: period_from.iso8601, to: period_to.iso8601 },
-      totals: with_done(scope.group(:status_kind).count, scope.concluidas.group(:status_kind).count).merge('total' => scope.count),
+      totals: with_done(scope.group(:status_kind).count, scope.concluidas.group(:status_kind).count)
+        .merge('total' => scope.count, 'realizada_sem_prova' => unproven.size),
+      # prova das realizadas da CEVICO (parceiro fica fora desta conta)
+      proof: Crm::SurgeryProof.tally(@proofs.slice(*@done.select { |s| own_provider?(s.provider_name) }.map(&:id))),
+      # 🧮 ponta 5 (22/10): realizadas da CEVICO medidas do jeito certo — olho, paciente, exame
+      measures: own_measures(@done.select { |s| own_provider?(s.provider_name) }),
       partners: partners.values.sort_by { |p| [p[:own] ? 0 : 1, -p[:total]] },
-      months: months.keys.sort.map { |m| { month: m, total: months[m], realizada: months_done[m] || 0 } },
+      months: months.keys.sort.map { |m| { month: m, total: months[m], realizada: months_done[m] || 0, sem_prova: unproven_months[m] || 0 } },
       clinics: clinics.sort_by { |c| -c[:total] },
       procedures: procedures_json(scope),
       types: scope.group(:procedure_type).count.map { |name, n| { name: name.presence || '(sem tipo)', total: n } }.sort_by { |t| -t[:total] },
@@ -54,7 +67,7 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     }
   end
 
-  def items # rubocop:disable Metrics/AbcSize
+  def items # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     scope = filtered_scope
     total = scope.count
     per = params[:per].to_i.clamp(1, PER_MAX)
@@ -66,6 +79,7 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     cards = Crm::Contact.includes(:stage, :pipeline).joins(:pipeline)
                         .where(crm_pipelines: { account_id: Current.account.id }, contact_id: contacts.keys)
                         .order('crm_pipelines.position').group_by(&:contact_id)
+    @proofs = Crm::SurgeryProof.new(Current.account).call(rows.select(&:concluida?))
     render json: {
       total: total, page: page, per: per,
       rows: rows.map { |s| item_json(s, tasks[s.item_token], contacts[s.contact_id], cards[s.contact_id]&.first) }
@@ -108,12 +122,48 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     card = contact && Crm::Contact.includes(:stage, :pipeline).joins(:pipeline)
                                   .where(crm_pipelines: { account_id: Current.account.id }, contact_id: contact.id)
                                   .order('crm_pipelines.position').first
+    @proofs = s.concluida? ? Crm::SurgeryProof.new(Current.account).call([s]) : {}
     payload = item_json(s, task, contact, card)
     payload[:raw] = s.raw if admin?
     payload[:match_via] = s.match_via
     payload[:applied_action] = s.applied_action
     payload[:applied_at] = s.applied_at
     render json: payload
+  end
+
+  # 👯 ponta 2 (22/10): como cada paciente da CEVICO foi casado (telefone, CPF,
+  # nome+e-mail, nome antigo, criado) e os criados com provável gêmeo aqui
+  def matching # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    own = mirror.where('LOWER(provider_name) LIKE ?', "%#{ActiveRecord::Base.sanitize_sql_like(of_config['provider_name'].to_s.strip.downcase)}%")
+    finder = Crm::OfTwinFinder.new(Current.account, own_provider: of_config['provider_name'])
+    twins = of_config['provider_name'].present? ? finder.call : []
+    people = ::Contact.where(id: twins.flat_map { |t| [t.created_id, t.other_id] }).index_by(&:id)
+    cards = Crm::Contact.includes(:stage).where(contact_id: people.keys).group_by(&:contact_id)
+    person = lambda do |id|
+      c = people[id]
+      c && { id: c.id, name: c.name, phone: c.phone_number, stage: cards[id]&.max_by { |k| k.stage_moved_at || k.updated_at }&.stage&.name }
+    end
+    render json: {
+      items: own.group(:match_via).count,
+      patients: own.where.not(contact_id: nil).group(:match_via).distinct.count(:contact_id),
+      twins: twins.map { |t| { created: person.call(t.created_id), other: person.call(t.other_id), reasons: t.reasons, strength: t.strength } }
+                  .select { |t| t[:created] && t[:other] }
+    }
+  end
+
+  # 🗂️ ponta 3 (22/10): os cards em "Cirurgia Agendada" da CEVICO, por situação
+  # da cirurgia no hub (Crm::OfSurgeryCards) — quantos não vão acontecer ali
+  def surgery_cards # rubocop:disable Metrics/CyclomaticComplexity
+    service = Crm::OftalmofacilSyncService.new(account: Current.account, silent: true).surgery_cards
+    rows = service.rows
+    render json: {
+      tally: Crm::OfSurgeryCards.tally(rows),
+      labels: Crm::OfSurgeryCards::LABELS,
+      rows: rows.reject { |r| r.klass == 'futura' }.first(300).map do |r|
+        { contact_id: r.card.contact_id, name: r.surgery&.patient_name || r.card.contact&.name, klass: r.klass,
+          surgery_date: r.surgery&.surgery_date, target: r.target&.name }
+      end
+    }
   end
 
   # 🔎 item 249 (26/09): CONFERÊNCIA DO DIA — cada item marcado no hub para a
@@ -226,8 +276,24 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
     case status.to_s
     when 'realizada' then scope.concluidas
     when 'agendada' then scope.agendadas_por_vir
+    when 'sem_prova' then scope.where(id: unproven_surgeries(scope).map(&:id))
+    # ponta 4: o que a Saúde da Agenda conta (agendada OU aguardando pagamento, de hoje em diante)
+    when 'por_vir' then scope.where(status_kind: %w[agendada aguardando_pagamento]).where('surgery_date >= ?', Date.current)
     else scope.where(status_kind: status)
     end
+  end
+
+  def own_measures(done)
+    surgeries = done.select(&:cirurgia?)
+    { olhos: surgeries.size, exames: done.size - surgeries.size,
+      pacientes: surgeries.map { |s| s.contact_id || "of:#{s.patient_cpf.presence || s.patient_name}" }.uniq.size }
+  end
+
+  # 🧾 ponta 1: concluídas do recorte sem nenhuma prova (guarda as provas em @proofs)
+  def unproven_surgeries(scope)
+    @done = scope.concluidas.to_a
+    @proofs = Crm::SurgeryProof.new(Current.account).call(@done)
+    @done.reject { |s| @proofs[s.id] }
   end
 
   # a nossa Agenda está "assentada"? o que falta para o hub virar agenda de verdade
@@ -240,10 +306,20 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
       without_task: upcoming.count - with_task.count,
       task_without_unit: with_task.where(unit: [nil, '']).count,
       task_without_doctor: with_task.where(doctor: [nil, '']).count,
+      # 🩺 ponta 4 (22/10): de quem são os CRMs sem nome no de-para (é o que deixa o agendamento sem médico)
+      doctors_unmapped: doctors_unmapped(with_task),
       unmatched_contacts: upcoming.where(contact_id: nil).count,
       past_still_scheduled: mirror.where(status_kind: %w[agendada aguardando_pagamento]).where('surgery_date < ?', Date.current - 7).count,
       clinics_unmapped: upcoming.where.not(clinic_name: [nil, '']).distinct.pluck(:clinic_name).reject { |c| unit_for(c).present? }
     }
+  end
+
+  def doctors_unmapped(with_task)
+    tokens = with_task.where(doctor: [nil, '']).select(:external_ref)
+    mirror.where(item_token: tokens).group(:doctor_crm, :provider_name).count
+          .group_by { |(crm, _prov), _n| crm.to_s.gsub(/\D/, '').presence || '(sem CRM)' }
+          .map { |crm, list| { crm: crm, total: list.sum(&:last), providers: list.filter_map { |(_c, prov), _n| prov }.uniq } }
+          .sort_by { |d| -d[:total] }
   end
 
   # Rodada 5 (#173): o hub nunca marca "realizada" — a cirurgia que está
@@ -303,7 +379,8 @@ class Api::V1::Accounts::Crm::OftalmofacilController < Api::V1::Accounts::BaseCo
   def status_view(surgery)
     return { status_view: surgery.status_kind, status_view_label: surgery.status_kind_label } unless surgery.concluida?
 
-    { status_view: 'realizada', status_view_label: 'Realizada' }
+    proof = (@proofs || {})[surgery.id]
+    { status_view: 'realizada', status_view_label: 'Realizada', proof: proof || 'sem_prova', proof_label: Crm::SurgeryProof.label(proof) }
   end
 
   def item_json(s, task, contact, card) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Naming/MethodParameterName

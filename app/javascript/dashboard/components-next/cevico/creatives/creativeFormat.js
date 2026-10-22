@@ -253,7 +253,7 @@ export const MONEY_DEFS = [
     key: 'cost_surgery',
     label: 'Custo por cirurgia realizada',
     short: 'Cirurgia realizada (CAC)',
-    hint: 'investido ÷ cirurgias realizadas — o CAC de verdade',
+    hint: 'investido ÷ pacientes operados — o CAC de verdade',
     fmt: v => fmtMoney(v),
     lower: true,
     icon: 'i-lucide-badge-dollar-sign',
@@ -323,7 +323,7 @@ export const PART_META = {
   },
   cac: {
     label: 'Custo por cirurgia',
-    metric: 'investido ÷ cirurgias realizadas',
+    metric: 'investido ÷ pacientes operados',
     icon: 'i-lucide-badge-dollar-sign',
     fmt: v => fmtMoney(v),
     key: 'cost_surgery',

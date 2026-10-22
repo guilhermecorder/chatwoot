@@ -434,6 +434,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/oftalmofacil/items/${id}`);
   }
 
+  // 👯 ponta 2 e 🗂️ ponta 3 (22/10)
+  oftalmofacilMatching() {
+    return axios.get(`${this.url}/oftalmofacil/matching`);
+  }
+
+  oftalmofacilSurgeryCards() {
+    return axios.get(`${this.url}/oftalmofacil/surgery_cards`);
+  }
+
   // 🔎 item 249: conferência de um dia (hub × Agenda) e trazer o que faltou
   oftalmofacilDayCheck(params) {
     return axios.get(`${this.url}/oftalmofacil/day_check`, { params });

@@ -16,7 +16,7 @@
 #             cobrado) + valor do card de quem é novo e não tem valor lá
 class Crm::AcquisitionPatients
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
-  NOT_SURGERY = /exam|consult|p[o]s.?op|pos.?operat|retorno/
+  NOT_SURGERY = Crm::OftalmofacilSurgery::NOT_SURGERY # ponta 5: uma régua só
 
   Patient = Struct.new(:key, :contact_id, :name, :first_on, :source, :partner, keyword_init: true)
 
@@ -116,7 +116,7 @@ class Crm::AcquisitionPatients
 
   def load_oftalmofacil # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     Crm::OftalmofacilSurgery.where(account_id: @account.id, status_kind: Crm::AdFunnelSteps::OF_DONE)
-                            .where(surgery_date: ...Time.zone.today)
+                            .where(surgery_date: ...Crm::OftalmofacilSurgery.today_sp) # ponta 5: o "hoje" de São Paulo
                             .pluck(:contact_id, :patient_cpf, :patient_name, :surgery_date, :provider_name,
                                    :procedure_type, :paid_amount, :amount, :clinic_price, :profit)
                             .each do |cid, cpf, name, on, provider, type, paid, amount, clinic, profit| # rubocop:disable Metrics/ParameterLists
@@ -148,8 +148,7 @@ class Crm::AcquisitionPatients
   end
 
   def surgery_type?(type)
-    t = type.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase
-    t.blank? || !t.match?(NOT_SURGERY)
+    Crm::OftalmofacilSurgery.surgery_type?(type)
   end
 
   def of_key(cpf, name)

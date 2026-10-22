@@ -176,7 +176,7 @@ class Crm::AcquisitionTimelineService
     end
     tasks.where.not(contact_id: nil).group(:contact_id).minimum(:created_at).each(&keep)
     if oftalmofacil
-      Crm::OftalmofacilSurgery.where(account_id: @account.id, status_kind: Crm::AdFunnelSteps::OF_CLOSED)
+      Crm::OftalmofacilSurgery.where(account_id: @account.id, status_kind: Crm::AdFunnelSteps::OF_CLOSED).cirurgias # ponta 5
                               .where.not(contact_id: nil).group(:contact_id).minimum(:surgery_date).each(&keep)
     end
     out.select { |cid, on| on.between?(@from, @to) && partner_ids.exclude?(cid) }

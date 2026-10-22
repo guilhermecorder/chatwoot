@@ -419,6 +419,9 @@ namespace :crm do
   get 'oftalmofacil/items', to: 'oftalmofacil#items'
   get 'oftalmofacil/patients', to: 'oftalmofacil#patients'
   get 'oftalmofacil/items/:id', to: 'oftalmofacil#show'
+  # ponta 2 e 3 (22/10): casamento dos pacientes + cards em Cirurgia Agendada
+  get 'oftalmofacil/matching', to: 'oftalmofacil#matching'
+  get 'oftalmofacil/surgery_cards', to: 'oftalmofacil#surgery_cards'
   # 🔎 item 249: conferência de um dia (hub × Agenda) + trazer o que faltou
   get 'oftalmofacil/day_check', to: 'oftalmofacil#day_check'
   post 'oftalmofacil/reconcile_day', to: 'oftalmofacil#reconcile_day'

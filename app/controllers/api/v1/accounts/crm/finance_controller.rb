@@ -39,6 +39,9 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     own = Crm::PartnerGuard.own_provider_name(Current.account)
     rows = rows.select { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'partners'
     rows = rows.reject { |s| Crm::PartnerGuard.partner_surgery?(s, own: own) } if side == 'own'
+    # 🧮 ponta 5 (22/10): exame, consulta e retorno do hub são ITENS, não cirurgia — ficam à parte
+    exam_rows = rows.reject(&:cirurgia?)
+    rows = rows.select(&:cirurgia?)
     doctors = (CrmSetting.find_by(account: Current.account)&.agenda_config || {}).dig('oftalmofacil', 'doctors') || {}
     marketing, marketing_source = period_marketing(from, to)
     sums = lambda do |list|
@@ -57,6 +60,16 @@ class Api::V1::Accounts::Crm::FinanceController < Api::V1::Accounts::BaseControl
     realizadas = rows.select(&done)
     summary = sums.call(realizadas)
     summary[:pago] = realizadas.sum { |s| s.paid_amount.to_f }.round(2)
+    # cada cirurgia é UM olho; paciente operado = pessoa distinta
+    summary[:pacientes] = realizadas.map { |s| s.contact_id || "of:#{s.patient_cpf.presence || s.patient_name}" }.uniq.size
+    summary[:exames] = sums.call(exam_rows.select(&done)).slice(:count, :receita, :resultado)
+    # 🧾 ponta 1 (22/10): quantas realizadas têm prova (pagamento, card de pós,
+    # Agenda) e quanto da receita acima está SEM prova — a receita NÃO muda
+    proofs = Crm::SurgeryProof.new(Current.account).call(realizadas)
+    sem_prova = realizadas.reject { |s| proofs[s.id] }
+    summary[:prova] = Crm::SurgeryProof.tally(proofs)
+    summary[:sem_prova] = { count: sem_prova.size, receita: sem_prova.sum { |s| s.amount.to_f }.round(2),
+                            resultado: sem_prova.sum(&:resultado).round(2) }
     summary[:agendadas] = rows.count { |s| !done.call(s) }
     summary[:agendadas_receita] = rows.reject(&done).sum { |s| s.amount.to_f }.round(2)
     summary[:marketing] = marketing.round(2)

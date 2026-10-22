@@ -51,6 +51,10 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
   # item 254: a Agenda se conserta sozinha nos próximos dias (ver heal_agenda!)
   HEAL_DAYS = 14
   UPCOMING_DAYS = 7
+  # 🩹 ponta 4 (22/10): item futuro SEM agendamento é refeito até aqui (antes
+  # só os próximos 14 dias — um exame de parceiro para daqui a 3 semanas, cuja
+  # rodada caiu no meio, nunca mais entrava na Agenda)
+  MISSING_DAYS = 180
 
   attr_reader :result
 
@@ -339,7 +343,45 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
     rescue StandardError => e
       @result.errors << "agenda #{surgery.item_token}: #{e.message}"
     end
+    fill_doctors!
     @result
+  end
+
+  # 🗂️ ponta 3 (22/10): card em "Cirurgia Agendada" de cirurgia que já passou
+  # (com prova) ou foi cancelada sai de lá — ver Crm::OfSurgeryCards. A cada
+  # rodada, só os pacientes com cirurgia nos últimos dias ou mexidos lá agora
+  # (a data que passa não muda nada no hub, então o incremental não veria).
+  def settle_cards!(days: 3)
+    return [] if own_pipeline.nil? || @config['provider_name'].blank?
+
+    since = Crm::OftalmofacilSurgery.today_sp - days
+    ids = Crm::OftalmofacilSurgery.where(account_id: @account.id).where.not(contact_id: nil)
+                                  .where('surgery_date BETWEEN :since AND :today OR of_modified_at >= :mod OR applied_at >= :mod',
+                                         since: since, today: since + days, mod: days.days.ago)
+                                  .distinct.pluck(:contact_id)
+    return [] if ids.empty?
+
+    surgery_cards.settle!(contact_ids: ids, silent: @silent)
+  end
+
+  def surgery_cards
+    Crm::OfSurgeryCards.new(@account, pipeline: own_pipeline, own_provider: @config['provider_name'])
+  end
+
+  # 🩺 ponta 4 (22/10): agendamento do hub sem médico porque o CRM ainda não
+  # tinha nome no de-para (Integrações → OftalmoFácil). Assim que o nome é
+  # cadastrado, os agendamentos de hoje em diante ganham o médico sozinhos.
+  def fill_doctors!
+    return 0 if (@config['doctors'] || {}).blank?
+
+    tasks = @account.tasks.where(source: 'oftalmofacil', doctor: [nil, ''], canceled_at: nil, archived_at: nil)
+                    .where('due_at >= ?', Time.current.beginning_of_day)
+    crms = Crm::OftalmofacilSurgery.where(account_id: @account.id, item_token: tasks.select(:external_ref))
+                                   .pluck(:item_token, :doctor_crm).to_h
+    tasks.to_a.count do |task|
+      name = doctor_name_for(crms[task.external_ref])
+      name && task.update_columns(doctor: name) # rubocop:disable Rails/SkipsModelValidations
+    end
   end
 
   # uma vez por hora: pergunta ao hub tudo o que está marcado nos próximos
@@ -439,7 +481,15 @@ class Crm::OftalmofacilSyncService # rubocop:disable Metrics/ClassLength
       next false if task.canceled_at.present? # a equipe cancelou aqui: não reabre sozinho
 
       task.due_at.nil? || task.due_at.in_time_zone('America/Sao_Paulo').to_date != s.surgery_date
-    end
+    end + missing_far(days)
+  end
+
+  # ponta 4: além da janela curta, o item ativo mais à frente que nunca virou agendamento
+  def missing_far(days)
+    from = [Date.current + days + 1, agenda_from].max
+    Crm::OftalmofacilSurgery.where(account_id: @account.id, surgery_date: from..(Date.current + MISSING_DAYS))
+                            .where.not(status_kind: 'cancelada')
+                            .where.not(item_token: @account.tasks.where.not(external_ref: nil).select(:external_ref)).to_a
   end
 
   def heal_one!(surgery)

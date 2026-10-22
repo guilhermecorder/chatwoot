@@ -53,9 +53,10 @@ class Crm::AdFunnelSteps
     @indicated_agenda = tasks('consulta').where(attendance: 'attended', surgery_indication: 'indicated').distinct.pluck(:contact_id).to_set
     @closed_agenda = tasks('cirurgia').where(canceled_at: nil).distinct.pluck(:contact_id).to_set
     @done_agenda = tasks('cirurgia').where(attendance: 'attended').distinct.pluck(:contact_id).to_set
-    surgeries = Crm::OftalmofacilSurgery.where(account_id: @account.id, contact_id: @ids)
+    # 🧮 ponta 5 (22/10): só CIRURGIA (exame/consulta do hub não é "operou") e o "hoje" de São Paulo, como no resto
+    surgeries = Crm::OftalmofacilSurgery.where(account_id: @account.id, contact_id: @ids).cirurgias
     @of_closed = surgeries.where(status_kind: OF_CLOSED).distinct.pluck(:contact_id).to_set
-    @of_done = surgeries.where(status_kind: OF_DONE).where(surgery_date: ...Time.zone.today)
+    @of_done = surgeries.where(status_kind: OF_DONE).where(surgery_date: ...Crm::OftalmofacilSurgery.today_sp)
                         .group(:contact_id).sum('COALESCE(NULLIF(paid_amount, 0), amount, 0)')
   end
 

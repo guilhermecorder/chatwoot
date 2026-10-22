@@ -185,10 +185,10 @@ class Crm::AdTimeline # rubocop:disable Metrics/ClassLength
 
   def hub_dates
     @hub_dates ||= begin
-      scope = Crm::OftalmofacilSurgery.where(account_id: @account.id, contact_id: lead_dates.keys)
+      scope = Crm::OftalmofacilSurgery.where(account_id: @account.id, contact_id: lead_dates.keys).cirurgias # ponta 5
       { 'closed' => scope.where(status_kind: Crm::AdFunnelSteps::OF_CLOSED).group(:contact_id)
                          .minimum(Arel.sql('COALESCE(of_created_at, created_at)')),
-        'surgeries' => scope.where(status_kind: Crm::AdFunnelSteps::OF_DONE).where(surgery_date: ...Time.zone.today)
+        'surgeries' => scope.where(status_kind: Crm::AdFunnelSteps::OF_DONE).where(surgery_date: ...Crm::OftalmofacilSurgery.today_sp)
                             .group(:contact_id).minimum(:surgery_date) }
     end
   end
