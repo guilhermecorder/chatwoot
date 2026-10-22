@@ -6,7 +6,8 @@ class Crm::Calls::Settings
   DEFAULT_HOURS = { 'start' => '08:00', 'end' => '19:00' }.freeze
   # quem toca primeiro: os demais só ouvem depois desta espera (rodada 2)
   DEFAULT_CASCADE_SECONDS = 12
-  CASCADE_RANGE = (5..60)
+  # 21/10: teto de 30 s — com 60 s o paciente já tinha desligado antes de os outros tocarem
+  CASCADE_RANGE = (5..30)
   DEFAULT_PERMISSION_MESSAGE = 'Olá! Podemos te ligar pelo WhatsApp para falar sobre o seu atendimento? ' \
                                'É só tocar em Permitir que a gente liga em seguida.'.freeze
 
@@ -90,7 +91,7 @@ class Crm::Calls::Settings
   end
 
   def ring_cascade_seconds(target_inbox = inbox)
-    inbox_config(target_inbox)['ring_cascade_seconds'] || DEFAULT_CASCADE_SECONDS
+    self.class.clamp_cascade(inbox_config(target_inbox)['ring_cascade_seconds'])
   end
 
   # só vale quem também está na lista de quem atende
@@ -160,9 +161,17 @@ class Crm::Calls::Settings
       'inbox_id' => c['inbox_id'].to_i,
       'ring_user_ids' => id_list(c['ring_user_ids']),
       'ring_first_user_ids' => id_list(c['ring_first_user_ids']),
-      'ring_cascade_seconds' => CASCADE_RANGE.cover?(cascade) ? cascade : DEFAULT_CASCADE_SECONDS,
+      'ring_cascade_seconds' => clamp_cascade(cascade),
       'meta' => (c['meta'] || {}).to_h
     }
+  end
+
+  # vazio/zero = padrão; acima do teto (configurações antigas com 60) = teto
+  def self.clamp_cascade(value)
+    v = value.to_i
+    return DEFAULT_CASCADE_SECONDS if v <= 0
+
+    v.clamp(CASCADE_RANGE.min, CASCADE_RANGE.max)
   end
 
   def self.id_list(value)

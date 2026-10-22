@@ -82,37 +82,49 @@ module Crm::Calls::CallbackLock # rubocop:disable Metrics/ModuleLength
     card&.stage_id || pipelines.order(:position, :id).first&.stages&.first&.id
   end
 
-  # o que vai junto do "está chamando": quem trava e depois de quantos segundos
-  def ringing(account, call, ring_user_ids, ring_first_user_ids)
+  # 📞 21/10 (reclamação da equipe: "já cai como perdida, nem chamou"): a
+  # ligação tocava SÓ para o responsável, e os outros só depois da espera da
+  # caixa (60 s) — o paciente desligava antes. Agora:
+  #   · quem está deslogado ou "ocupado" nunca é linha de frente — os outros
+  #     tocam na hora; linha de frente vazia = todo mundo toca junto;
+  #   · com o responsável tocando primeiro, os demais entram em no máximo
+  #     LOCK_CASCADE_SECONDS, mesmo que a caixa tenha espera maior.
+  LOCK_CASCADE_SECONDS = 10
+
+  # o que vai junto do "está chamando": quem toca primeiro, quem trava e as esperas
+  def ringing(account, call, ring_user_ids, ring_first_user_ids, cascade_seconds: nil) # rubocop:disable Metrics/CyclomaticComplexity
     calls = calls_config(account)
     cfg = config(account, calls)
     owner = cfg['enabled'] ? owner_id(account, call.contact_id, calls) : nil
-    return { ring_user_ids: ring_user_ids, ring_first_user_ids: ring_first_user_ids } if owner.nil?
+    available = available_users(account)
+    firsts = ring_first_user_ids.select { |id| available.include?(id) }
+    base = { ring_user_ids: ring_user_ids, ring_first_user_ids: firsts }
+    base[:ring_cascade_seconds] = cascade_seconds if cascade_seconds
+    return base if owner.nil?
 
-    # Auditoria #85: responsável deslogado (férias, folga, aba fechada) não
-    # ouve tocar — e com "só o responsável" NINGUÉM ouviria. Então a ligação
-    # cai para a lista de sempre da caixa, sem trava ao tocar. O responsável
-    # FICA na lista: a presença pisca (ping a cada 20 s; aba em segundo plano
-    # atrasa) e quem realmente saiu já não toca no navegador. A trava da
-    # ligação PERDIDA (arm!) continua com ele, para retornar quando voltar.
-    unless owner_online?(account, owner)
-      Rails.logger.info("[CEVICO calls] responsável #{owner} offline: ligação #{call.id} toca para a caixa inteira")
-      return { ring_user_ids: ring_user_ids | [owner], ring_first_user_ids: ring_first_user_ids }
+    # Auditoria #85: responsável deslogado (férias, folga, aba fechada) ou
+    # ocupado não ouve tocar — e com "só o responsável" NINGUÉM ouviria. Então a
+    # ligação cai para a lista de sempre da caixa, sem trava ao tocar. O
+    # responsável FICA na lista (a presença pisca; aba em segundo plano atrasa).
+    # A trava da ligação PERDIDA (arm!) continua com ele, para retornar quando voltar.
+    unless available.include?(owner)
+      Rails.logger.info("[CEVICO calls] responsável #{owner} indisponível: ligação #{call.id} toca para a caixa inteira")
+      return base.merge(ring_user_ids: ring_user_ids | [owner])
     end
 
-    { ring_user_ids: cfg['exclusive'] ? [owner] : (ring_user_ids | [owner]),
-      ring_first_user_ids: [owner], lock_user_ids: [owner], lock_after_seconds: cfg['after_seconds'] }
+    base.merge(ring_user_ids: cfg['exclusive'] ? [owner] : (ring_user_ids | [owner]),
+               ring_first_user_ids: [owner], lock_user_ids: [owner], lock_after_seconds: cfg['after_seconds'],
+               ring_cascade_seconds: [cascade_seconds || LOCK_CASCADE_SECONDS, LOCK_CASCADE_SECONDS].min)
   end
 
-  # a pessoa está com o sistema aberto e não se marcou "offline"? (mesma fonte
-  # da bolinha verde: OnlineStatusTracker). Se o Redis falhar, vale como presente
-  # para não mudar o comportamento de antes.
-  def owner_online?(account, user_id)
-    status = OnlineStatusTracker.get_available_users(account.id)[user_id.to_s]
-    status.present? && status != 'offline'
+  # quem está com o sistema aberto e disponível agora (bolinha verde:
+  # OnlineStatusTracker; "ocupado" e "offline" ficam fora da linha de frente).
+  # Se o Redis falhar, todo mundo vale como disponível (comportamento antigo).
+  def available_users(account)
+    OnlineStatusTracker.get_available_users(account.id).select { |_id, status| status == 'online' }.keys.to_set(&:to_i)
   rescue StandardError => e
-    Rails.logger.warn("[CEVICO calls] presença do responsável não lida: #{e.message}")
-    true
+    Rails.logger.warn("[CEVICO calls] presença não lida: #{e.message}")
+    account.users.pluck(:id).to_set
   end
 
   # ligação perdida: guarda o responsável na ligação (nil = trava desligada ou coluna sem dono)

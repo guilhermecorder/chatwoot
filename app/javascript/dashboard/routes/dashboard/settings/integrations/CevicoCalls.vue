@@ -226,7 +226,7 @@ const payload = () => ({
       ring_user_ids: e.ring_user_ids,
       ring_first_user_ids: e.ring_first_user_ids,
       ring_cascade_seconds: Math.min(
-        60,
+        30,
         Math.max(5, Number(e.ring_cascade_seconds) || 12)
       ),
     })),
@@ -548,7 +548,7 @@ const inputClass =
                     v-model.number="entry.ring_cascade_seconds"
                     type="number"
                     min="5"
-                    max="60"
+                    max="30"
                     step="1"
                     class="w-16 text-center h-7 text-xs border border-n-weak rounded-lg bg-n-solid-1 text-n-slate-12 focus:outline-none focus:border-n-brand"
                     style="width: 4.5rem; margin-bottom: 0"
