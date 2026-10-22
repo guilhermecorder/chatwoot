@@ -27,7 +27,8 @@ module Crm::StageLogRedate
   BUDGET_SQL = "messages.content ~* 'R\\$\\s*([0-9]{1,3}(\\.[0-9]{3})+|[0-9]{3,})'".freeze
   SLICE = 2000
 
-  Plan = Struct.new(:log_id, :stage_name, :burst_day, :kind, :real_at, :skip, keyword_init: true)
+  Plan = Struct.new(:log_id, :card_id, :stage_id, :stage_name, :burst_day, :kind, :real_at, :skip, keyword_init: true)
+  REPEATED = 'repetida (mesmo card, mesma coluna, mesmo dia)'.freeze
 
   module_function
 
@@ -49,16 +50,39 @@ module Crm::StageLogRedate
 
   # uma linha por entrada da carga: o dia real (ou o motivo de ficar fora)
   def plan(account, min: Crm::StageLogBulk::THRESHOLD)
-    rows = Crm::StageLog.where(id: candidate_ids(account, min: min)).joins(:crm_contact)
-                        .pluck('crm_contact_stage_logs.id', 'crm_contact_stage_logs.stage_name', 'crm_contact_stage_logs.entered_at',
+    ids = candidate_ids(account, min: min)
+    rows = Crm::StageLog.where(id: ids).joins(:crm_contact)
+                        .pluck('crm_contact_stage_logs.id', 'crm_contact_stage_logs.crm_contact_id', 'crm_contact_stage_logs.stage_id',
+                               'crm_contact_stage_logs.stage_name', 'crm_contact_stage_logs.entered_at',
                                'crm_contact_stage_logs.created_at', 'crm_contacts.contact_id')
     proofs = proofs_for(account, rows.map(&:last).uniq)
-    rows.map { |id, stage, at, created, contact_id| plan_one(id, stage, at, created, contact_id, proofs) }
+    plans = rows.map { |row| plan_one(*row, proofs) }
+    drop_repeated!(plans, ids)
   end
 
-  def plan_one(id, stage, entered_at, created_at, contact_id, proofs) # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
+  # 22/10 (ensaio em produção): a carga de 14/07 moveu de novo cards que já
+  # tinham entrado na mesma coluna em 10/07 — re-datar as duas daria DUAS
+  # entradas da mesma pessoa no mesmo dia. Fica uma por card + coluna + dia,
+  # contando também as entradas normais que o card já tem.
+  def drop_repeated!(plans, candidate_ids) # rubocop:disable Metrics/AbcSize
+    ready = plans.select(&:real_at)
+    seen = Crm::StageLog.where(crm_contact_id: ready.map(&:card_id).uniq, stage_id: ready.map(&:stage_id).uniq,
+                               event_type: Crm::StageLogBulk::ENTERED).where.not(id: candidate_ids)
+                        .pluck(:crm_contact_id, :stage_id, :entered_at)
+                        .to_set { |card, stage, at| [card, stage, at.in_time_zone(TZ).to_date] }
+    ready.sort_by { |p| [p.burst_day, p.log_id] }.each do |p|
+      key = [p.card_id, p.stage_id, p.real_at.in_time_zone(TZ).to_date]
+      next seen << key unless seen.include?(key)
+
+      p.real_at = nil
+      p.skip = REPEATED
+    end
+    plans
+  end
+
+  def plan_one(id, card_id, stage_id, stage, entered_at, created_at, contact_id, proofs) # rubocop:disable Metrics/ParameterLists, Metrics/AbcSize
     kind = kind_for(stage)
-    row = Plan.new(log_id: id, stage_name: stage, burst_day: entered_at.in_time_zone(TZ).to_date, kind: kind)
+    row = Plan.new(log_id: id, card_id: card_id, stage_id: stage_id, stage_name: stage, burst_day: entered_at.in_time_zone(TZ).to_date, kind: kind)
     return row.tap { |r| r.skip = 'coluna sem data confiável' } if kind.nil?
     return row.tap { |r| r.skip = 'sem a hora original guardada' } if (created_at - entered_at).abs > 2.minutes
 

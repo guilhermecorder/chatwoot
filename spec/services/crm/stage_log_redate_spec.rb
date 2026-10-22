@@ -66,6 +66,26 @@ RSpec.describe Crm::StageLogRedate do
     expect(log.event_type).to eq('bulk')
   end
 
+  it 'card que entrou de novo na mesma coluna numa segunda carga não ganha duas entradas no mesmo dia', :aggregate_failures do
+    budgets = load!(orcamento)
+    talk!(budgets[0], tz.parse('2026-03-02 10:00'), content: 'O investimento é R$ 4.900', type: :outgoing)
+    cards = Crm::Contact.where(contact_id: budgets.map(&:id))
+    travel_to(load_at + 4.days) do # a re-arrumação de 14/07: sai e volta para a mesma coluna
+      cards.each do |c|
+        c.update!(stage_id: novos.id)
+        c.update!(stage_id: orcamento.id)
+      end
+    end
+
+    plans = described_class.plan(account)
+    described_class.apply!(plans)
+    card = Crm::Contact.find_by(contact_id: budgets[0].id)
+    on_budget_day = Crm::StageLog.where(crm_contact_id: card.id, stage_id: orcamento.id, event_type: 'entered')
+                                 .where(entered_at: tz.parse('2026-03-02 00:00')..tz.parse('2026-03-02 23:59'))
+    expect(on_budget_day.count).to eq(1)
+    expect(plans.count { |p| p.skip == described_class::REPEATED }).to eq(1)
+  end
+
   it 'já marcada como carga pelo item 309 também é re-datada' do
     leads = load!(novos)
     talk!(leads[0], tz.parse('2026-05-20 09:00'))
