@@ -282,12 +282,14 @@ const loadPreview = async () => {
 // ── 4. VALORES (item 324): pré-configuração por tipo de atendimento ──
 // "avaliação geralmente é 150; retorno e 1º pós-operatório não têm custo;
 // exames, cada um tem o seu valor; particulares, cada médico tem o seu"
-const blankPrices = () => ({ avaliacao: '', retorno: '', pos_op: '', teleconsulta: '', particular: {}, exames: [] });
+const blankPrices = () => ({ avaliacao: '', retorno: '', pos_op: '', teleconsulta: '', particular: {}, exames: [], especiais: [] });
+const namedPrices = list => (list || []).map(e => ({ name: e.name || '', price: e.price || '' }));
 const pricesFrom = raw => ({
   ...blankPrices(),
   ...(raw || {}),
   particular: { ...(raw?.particular || {}) },
-  exames: (raw?.exames || []).map(e => ({ name: e.name || '', price: e.price || '' })),
+  exames: namedPrices(raw?.exames),
+  especiais: namedPrices(raw?.especiais),
 });
 const prices = ref(pricesFrom(settings.value?.appointment_prices));
 const pricesSaved = ref(JSON.stringify(prices.value));
@@ -302,6 +304,9 @@ watch(
 );
 const addExamPrice = () => prices.value.exames.push({ name: '', price: '' });
 const removeExamPrice = idx => prices.value.exames.splice(idx, 1);
+// 🩺 19/10: avaliação com especialista, pelo problema escrito no agendamento
+const addSpecialPrice = () => prices.value.especiais.push({ name: '', price: '' });
+const removeSpecialPrice = idx => prices.value.especiais.splice(idx, 1);
 const savePrices = async () => {
   busy.value = 'prices';
   try {
@@ -605,6 +610,20 @@ onMounted(loadPreview);
                 <span class="cv-label block mb-1">{{ d.name }}</span>
                 <input v-model="prices.particular[d.name]" class="cv-input w-full" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
               </div>
+            </div>
+          </section>
+          <section class="space-y-2">
+            <div class="flex items-center gap-2">
+              <p class="cv-ag-block-title flex-1">Avaliação com especialista, pelo problema</p>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addSpecialPrice"><span class="i-lucide-plus text-xs" /> Problema</button>
+            </div>
+            <p class="text-[11px] text-n-slate-10">Quando o problema escrito no agendamento cita uma destas palavras (ex.: "avaliação retina", "glaucoma"), a avaliação vale este valor em vez do valor da avaliação. Retorno e pós-operatório não mudam.</p>
+            <p v-if="!prices.especiais.length" class="text-xs text-n-slate-9">Nenhum problema com valor próprio.</p>
+            <div v-for="(e, idx) in prices.especiais" :key="'sp' + idx" class="cv-row flex items-center gap-2 px-3 py-2">
+              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" placeholder="Problema (glaucoma, retina, ceratocone…)" />
+              <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
+              <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removeSpecialPrice(idx)"><span class="i-lucide-x" /></button>
             </div>
           </section>
           <section class="space-y-2">

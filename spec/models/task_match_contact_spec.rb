@@ -92,5 +92,53 @@ RSpec.describe Task do
                                      due_at: 1.day.from_now, phone: '+55 11 99999-0000')
       expect(nova.modality).to eq('retorno')
     end
+
+    # 🚨 19/10 (Vaneide): paciente NOVA marcada pelo robô nasceu "retorno" e a
+    # confirmação saiu "sem custo" — só consulta que ACONTECEU conta
+    describe 'com o paciente cadastrado (histórico do contato)' do
+      def consulta(at, **extra)
+        described_class.create!({ account: account, creator: user, title: 'Consulta: Maria SP', task_type: 'consulta',
+                                  due_at: at, contact: sao_paulo, phone: sao_paulo.phone_number }.merge(extra))
+      end
+
+      it 'consulta anterior realizada faz a nova nascer como retorno' do
+        consulta(10.days.ago)
+        expect(consulta(2.days.from_now).modality).to eq('retorno')
+      end
+
+      it 'consulta anterior CANCELADA (o robô remarcou) não faz a nova nascer como retorno' do
+        consulta(10.days.ago, canceled_at: 9.days.ago)
+        expect(consulta(2.days.from_now).modality).to eq('avaliacao')
+      end
+
+      it 'consulta anterior em que o paciente FALTOU não conta' do
+        consulta(10.days.ago, attendance: 'missed')
+        expect(consulta(2.days.from_now).modality).to eq('avaliacao')
+      end
+
+      it 'consulta anterior arquivada não conta' do
+        consulta(10.days.ago, archived_at: 9.days.ago)
+        expect(consulta(2.days.from_now).modality).to eq('avaliacao')
+      end
+
+      it 'consulta ainda por vir não conta (a nova é a primeira que acontece)' do
+        consulta(1.day.from_now)
+        expect(consulta(5.days.from_now).modality).to eq('avaliacao')
+      end
+
+      it 'escolha manual do tipo sempre vence' do
+        consulta(10.days.ago)
+        expect(consulta(2.days.from_now, modality: 'avaliacao').modality).to eq('avaliacao')
+      end
+    end
+
+    it 'consulta anterior cancelada da mesma linha (sem cadastro) também não conta' do
+      account.contacts.destroy_all
+      described_class.create!(account: account, creator: user, title: 'Consulta antiga SP', task_type: 'consulta',
+                              due_at: 10.days.ago, phone: '(11) 99999-0000', canceled_at: 9.days.ago)
+      nova = described_class.create!(account: account, creator: user, title: 'Consulta: Maria SP', task_type: 'consulta',
+                                     due_at: 1.day.from_now, phone: '+55 11 99999-0000')
+      expect(nova.modality).to eq('avaliacao')
+    end
   end
 end

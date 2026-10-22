@@ -43,6 +43,29 @@ describe('effectiveAppointmentPrice (item 340)', () => {
     expect(result).toMatchObject({ text: '280,00', source: 'observacao' });
   });
 
+  it('avaliação com especialista: o problema escrito puxa o valor (só na avaliação)', () => {
+    const withSpecials = {
+      ...prices,
+      especiais: [{ name: 'retina', price: '300,00' }],
+    };
+    expect(
+      effectiveAppointmentPrice(
+        withSpecials,
+        appt({ procedure: 'avaliação retina' })
+      )
+    ).toMatchObject({
+      text: '300,00',
+      source: 'preset',
+      label: 'pré-configurado · avaliação de retina',
+    });
+    expect(
+      effectiveAppointmentPrice(
+        withSpecials,
+        appt({ modality: 'retorno', procedure: 'retorno retina' })
+      )
+    ).toMatchObject({ text: 'sem custo' });
+  });
+
   it('"R$ X" solto na observação fica depois do pré-configurado', () => {
     const result = effectiveAppointmentPrice(
       prices,

@@ -37,6 +37,25 @@ RSpec.describe Crm::AppointmentPrice do
     expect(described_class.resolve(cfg, consulta(doctor: 'Dra. Roberta Negri'))).to include(text: '150,00') # não é particular
   end
 
+  # 🩺 19/10 (Vaneide): "agendou com especialista em retina, só que o valor não subiu"
+  it 'avaliação com especialista: o problema escrito puxa o valor do especialista (padrão do Roteiro)', :aggregate_failures do
+    expect(described_class.resolve(cfg, consulta(procedure: 'avaliação retina', doctor: 'Dr. Henrique Gemelli')))
+      .to include(text: '300,00', source: 'preset', label: 'pré-configurado · avaliação de retina')
+    expect(described_class.resolve(cfg, consulta(procedure: 'Avaliação Glaucoma'))).to include(text: '300,00')
+    expect(described_class.resolve(cfg, consulta(procedure: 'ceratocone'))).to include(text: '350,00')
+    expect(described_class.resolve(cfg, consulta(procedure: 'miopia'))).to include(text: '150,00')
+    expect(described_class.resolve(cfg, consulta(modality: 'retorno', procedure: 'retorno glaucoma'))).to include(text: 'sem custo')
+    # valor lançado à mão continua vencendo
+    expect(described_class.resolve(cfg, consulta(procedure: 'retina', description: 'Valor: 280'))).to include(text: '280,00', source: 'observacao')
+  end
+
+  it 'a tela pode trocar os especiais; lista vazia = nenhum' do
+    custom = described_class::DEFAULTS.merge(described_class.sanitize(prices.merge('especiais' => [{ 'name' => 'Retina', 'price' => '400' }])))
+    expect(custom['especiais']).to eq([{ 'name' => 'Retina', 'price' => '400,00' }])
+    expect(described_class.resolve(custom, consulta(procedure: 'avaliação retina'))).to include(text: '400,00')
+    expect(described_class.resolve(custom, consulta(procedure: 'glaucoma'))).to include(text: '150,00')
+  end
+
   it 'exames: soma os exames citados no agendamento' do
     exame = consulta(modality: 'exames', procedure: 'Pentacam + topografia')
     expect(described_class.resolve(cfg, exame)).to include(text: '550,00', label: 'pré-configurado · Pentacam + Topografia')

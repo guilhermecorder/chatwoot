@@ -213,6 +213,10 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     inbox, template = inbox_and_template_for(account, rcfg, contact, task, inbox => template) unless partner
     return skip(run, task, partner ? 'Oftalmofácil: sem modelo' : "sem modelo para #{unit_label(task)}") if template.nil? && !shadow
 
+    # 💳 19/10: "R$sem custo à vista" nunca mais — valor em texto só sai por um modelo feito para o tipo
+    free = free_value_reason(template, task, rcfg)
+    return skip(run, task, free) if free
+
     if shadow
       run['sent'] << entry_for(task, contact, template: template&.dig('template_params', 'name'), partner: partner, inbox: inbox,
                                               general: template&.dig('general'), model: template&.dig('model'),
@@ -403,6 +407,27 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     body = params.dig('processed_params', 'body')
     body&.transform_values! { |v| subs.reduce(v.to_s) { |text, (key, val)| text.gsub(key, val) } }
     params
+  end
+
+  # 💳 19/10 (Vaneide, paciente nova marcada como retorno): a confirmação saiu
+  # "💳 Valor da avaliação: R$sem custo à vista (Não realizamos parcelamento)".
+  # Esse texto é FIXO no modelo da Meta — o sistema só preenche o {{valor}}. Um
+  # valor em texto ("sem custo", retorno/pós-op) só cabe num modelo escrito para
+  # aquele tipo de atendimento (item 327: Confirmação de consulta → modelos
+  # personalizados → Retorno). No modelo padrão (o da avaliação) ou num modelo
+  # só por médico, a consulta fica nas "puladas" com o motivo, e a equipe
+  # confirma à mão — melhor do que a paciente ler "R$sem custo".
+  def free_value_reason(template, task, rcfg) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return nil if template.nil? || template['modality'].present?
+
+    value = appointment_value(task, rcfg)
+    return nil if Crm::AppointmentPrice.to_number(value)
+
+    body = personalized_params(template['template_params'], task, rcfg, template['message_preview']).dig('processed_params', 'body') || {}
+    return nil unless body.values.any? { |text| text.to_s.include?(value) }
+
+    type = Crm::ReminderModels::MODALITY_LABELS[task.modality] || task.modality.presence || 'este tipo'
+    "valor \"#{value}\" não cabe no modelo padrão (que fala em R$) — cadastre um modelo de #{type} em modelos personalizados"
   end
 
   # 💰 item 324: o valor sai de Crm::AppointmentPrice — lançado à mão no card

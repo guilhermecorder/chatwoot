@@ -15,6 +15,10 @@
 #   4. o PRÉ-CONFIGURADO do tipo (agenda_config.appointment_prices):
 #        particular  consulta particular → o valor do MÉDICO
 #        exames      cada exame citado no agendamento → soma
+#        especiais   avaliação com ESPECIALISTA, pelo problema escrito no
+#                    agendamento (glaucoma/retina R$ 300, ceratocone R$ 350 —
+#                    os valores do Roteiro; 19/10, Vaneide: "agendou com
+#                    especialista em retina, só que o valor não subiu")
 #        avaliacao / retorno / pos_op / teleconsulta → o valor do tipo
 #   5. observacao    outro "R$ 250" solto na observação (sem "Valor:")
 #   6. padrao        o "valor padrão" do lembrete (como já era) ou 150,00
@@ -36,7 +40,13 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
   KEY = 'appointment_prices'.freeze
   TYPES = %w[avaliacao retorno pos_op teleconsulta].freeze
   FREE = 'sem custo'.freeze
-  DEFAULTS = { 'avaliacao' => '', 'retorno' => FREE, 'pos_op' => FREE, 'teleconsulta' => '', 'particular' => {}, 'exames' => [] }.freeze
+  # 🩺 19/10: avaliação com especialista — o problema escrito no agendamento
+  # ("avaliação retina", "glaucoma") puxa o valor do especialista. Padrão = os
+  # valores do Roteiro (Crm::CevicoScript); o admin ajusta em Agenda → Valores.
+  SPECIALS = [{ 'name' => 'glaucoma', 'price' => '300,00' }, { 'name' => 'retina', 'price' => '300,00' },
+              { 'name' => 'ceratocone', 'price' => '350,00' }].freeze
+  DEFAULTS = { 'avaliacao' => '', 'retorno' => FREE, 'pos_op' => FREE, 'teleconsulta' => '', 'particular' => {}, 'exames' => [],
+               'especiais' => SPECIALS }.freeze
   FALLBACK = '150,00'.freeze
   MAX_EXAMS = 60
   MAX_CHARGES = 8
@@ -61,17 +71,24 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
   end
 
   # o que a tela manda → o que fica gravado
-  def sanitize(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def sanitize(raw) # rubocop:disable Metrics/AbcSize
     raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
     out = TYPES.index_with { |type| tidy(raw[type]) }
     out['particular'] = (raw['particular'] || {}).to_h.to_h { |doctor, value| [doctor.to_s.strip[0, 80], tidy(value)] }
                                                  .reject { |doctor, value| doctor.blank? || value.blank? }
-    out['exames'] = Array(raw['exames']).first(MAX_EXAMS).filter_map do |exam|
-      exam = exam.respond_to?(:to_unsafe_h) ? exam.to_unsafe_h : exam.to_h
-      name = exam['name'].to_s.strip[0, 60]
-      name.present? ? { 'name' => name, 'price' => tidy(exam['price']) } : nil
-    end
+    out['exames'] = named_prices(raw['exames'])
+    # tela antiga (sem o bloco) não apaga os especiais padrão; lista vazia enviada = nenhum
+    out['especiais'] = raw.key?('especiais') ? named_prices(raw['especiais']) : SPECIALS
     out
+  end
+
+  # [{ name, price }] da tela → gravado (sem nome sai)
+  def named_prices(list)
+    Array(list).first(MAX_EXAMS).filter_map do |row|
+      row = row.respond_to?(:to_unsafe_h) ? row.to_unsafe_h : row.to_h
+      name = row['name'].to_s.strip[0, 60]
+      name.present? ? { 'name' => name, 'price' => tidy(row['price']) } : nil
+    end
   end
 
   # { text:, source:, label:, by: } — o valor que vale para este agendamento
@@ -98,7 +115,7 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
   end
 
   # o pré-configurado do tipo (nil = não tem)
-  def preset(cfg, task) # rubocop:disable Metrics/CyclomaticComplexity
+  def preset(cfg, task) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return nil unless task.task_type == 'consulta'
 
     if task.particular
@@ -107,9 +124,25 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
     end
     return exam_total(cfg, task.procedure) if task.modality == 'exames'
 
+    special = special_price(cfg, task)
+    return special if special
+
     type = TYPES.include?(task.modality) ? task.modality : 'avaliacao'
     value = cfg[type].to_s
     value.present? ? { text: value, source: 'preset', label: "pré-configurado · #{type.tr('_', ' ')}" } : nil
+  end
+
+  # 🩺 avaliação com especialista: o problema do agendamento cita um dos
+  # "especiais" (glaucoma, retina, ceratocone…) → o valor dele. Só na
+  # avaliação (retorno e pós-op seguem sem custo).
+  def special_price(cfg, task)
+    return nil unless ['', 'avaliacao'].include?(task.modality.to_s)
+
+    wanted = fold(task.procedure)
+    return nil if wanted.blank?
+
+    hit = Array(cfg['especiais']).find { |row| row['price'].present? && wanted.include?(fold(row['name'])) }
+    hit && { text: hit['price'], source: 'preset', label: "pré-configurado · avaliação de #{hit['name']}" }
   end
 
   # soma dos exames da pré-configuração citados no agendamento

@@ -380,26 +380,31 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # nasce como RETORNO quando o paciente já tem consulta anterior (match por
   # telefone) e como AVALIAÇÃO quando é a primeira. Escolha manual no modal
   # sempre vence (o campo vem preenchido e o hook não mexe).
-  def infer_consulta_modality # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  #
+  # 🚨 19/10 (Vaneide: "paciente que é consulta entrou como retorno e sem
+  # custo"): só conta consulta que ACONTECEU — já passou, não foi cancelada
+  # nem arquivada, e o paciente não faltou. Uma consulta cancelada (o robô
+  # remarcou), uma falta ou uma consulta ainda por vir não fazem a nova nascer
+  # como retorno (e sair "sem custo" na confirmação).
+  def infer_consulta_modality # rubocop:disable Metrics/AbcSize
     return unless task_type == 'consulta' && modality.blank?
 
+    before = [due_at, Time.current].compact.min
+    attended = account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
+                      .where("tasks.attendance IS DISTINCT FROM 'missed'")
+                      .where('due_at < ?', before)
     had_before =
       if contact_id.present?
         # unificado: histórico do CONTATO (link_contact_by_phone roda antes)
-        Task.for_patient(account, contact)
-            .where(task_type: 'consulta')
-            .exists?(['due_at < ?', due_at || Time.current])
+        attended.merge(Task.for_patient(account, contact)).exists?
       else
         digits = phone.to_s.gsub(/\D/, '')
         return self.modality = 'avaliacao' if digits.length < 8
 
         # auditoria 10/2026 (#239): consulta anterior só conta se for a MESMA linha (DDD confere)
-        account.tasks
-               .where(task_type: 'consulta')
-               .where('due_at < ?', due_at || Time.current)
-               .where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
-               .pluck(:phone)
-               .any? { |task_phone| Crm::AppointmentRecorder.same_phone_line?(digits, task_phone) }
+        attended.where("regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ?", "%#{digits.last(8)}")
+                .pluck(:phone)
+                .any? { |task_phone| Crm::AppointmentRecorder.same_phone_line?(digits, task_phone) }
       end
     self.modality = had_before ? 'retorno' : 'avaliacao'
   end

@@ -85,7 +85,9 @@ export const kindFor = key => KIND_BY_KEY[key] || KINDS[0];
 // menu. A regra é uma só, usada pela Agenda, por Tarefas e pela store.
 export const isAppointmentTask = task =>
   !!task &&
-  (task.task_type === 'consulta' || task.task_type === 'cirurgia' || !!task.unit);
+  (task.task_type === 'consulta' ||
+    task.task_type === 'cirurgia' ||
+    !!task.unit);
 
 // a que tipo uma task pertence
 export const kindOf = task => {
@@ -124,21 +126,88 @@ export const kindVars = kind => {
 // dow: 0=Dom … 6=Sáb; end é exclusivo (último bloco = end - block).
 // Mapa padrão — editável em Agenda → "Janelas dos médicos".
 export const DEFAULT_WINDOWS = [
-  { dow: 1, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '10:00', block: 15 },
-  { dow: 2, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Manhã', start: '08:00', end: '11:30', block: 15 },
-  { dow: 2, unit: 'paulista', doctor: 'Dra. Roberta Negri',   turno: 'Tarde', start: '14:30', end: '16:30', block: 15 },
+  {
+    dow: 1,
+    unit: 'paulista',
+    doctor: 'Dr. Gustavo Bittar',
+    turno: 'Manhã',
+    start: '08:30',
+    end: '10:00',
+    block: 15,
+  },
+  {
+    dow: 2,
+    unit: 'paulista',
+    doctor: 'Dr. Henrique Gemelli',
+    turno: 'Manhã',
+    start: '08:00',
+    end: '11:30',
+    block: 15,
+  },
+  {
+    dow: 2,
+    unit: 'paulista',
+    doctor: 'Dra. Roberta Negri',
+    turno: 'Tarde',
+    start: '14:30',
+    end: '16:30',
+    block: 15,
+  },
   // item 307 (01/10): quarta 13h–14h do Dr. Henrique = só pós-operatório; consulta a partir das 14h
-  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '13:00', end: '14:00', block: 15, only: ['pos_op'] },
-  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '14:00', end: '17:00', block: 15 },
-  { dow: 3, unit: 'tatuape',  doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 10 },
-  { dow: 4, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 15 },
-  { dow: 5, unit: 'tatuape',  doctor: 'Dra. Roberta Negri',   turno: 'Manhã', start: '10:30', end: '13:00', block: 10 },
+  {
+    dow: 3,
+    unit: 'paulista',
+    doctor: 'Dr. Henrique Gemelli',
+    turno: 'Tarde',
+    start: '13:00',
+    end: '14:00',
+    block: 15,
+    only: ['pos_op'],
+  },
+  {
+    dow: 3,
+    unit: 'paulista',
+    doctor: 'Dr. Henrique Gemelli',
+    turno: 'Tarde',
+    start: '14:00',
+    end: '17:00',
+    block: 15,
+  },
+  {
+    dow: 3,
+    unit: 'tatuape',
+    doctor: 'Dr. Gustavo Bittar',
+    turno: 'Manhã',
+    start: '08:30',
+    end: '11:00',
+    block: 10,
+  },
+  {
+    dow: 4,
+    unit: 'paulista',
+    doctor: 'Dr. Gustavo Bittar',
+    turno: 'Manhã',
+    start: '08:30',
+    end: '11:00',
+    block: 15,
+  },
+  {
+    dow: 5,
+    unit: 'tatuape',
+    doctor: 'Dra. Roberta Negri',
+    turno: 'Manhã',
+    start: '10:30',
+    end: '13:00',
+    block: 10,
+  },
 ];
 
 // médicos com a agenda FECHADA (item 76) — as janelas deles somem em
 // TODO consumidor (agenda, ocupação, saúde do Meu Painel)
 export const resolveClosedDoctors = settings =>
-  Array.isArray(settings?.agenda_closed_doctors) ? settings.agenda_closed_doctors : [];
+  Array.isArray(settings?.agenda_closed_doctors)
+    ? settings.agenda_closed_doctors
+    : [];
 
 // TODAS as janelas salvas (ou o padrão), inclusive as de médico com a agenda
 // fechada — é o que a tela de Configurações da Agenda edita (item 307)
@@ -170,7 +239,9 @@ export const windowAccepts = (win, modality) => {
   return !only.length || only.includes(modality);
 };
 const hmToMin = hm => {
-  const [h, m] = String(hm || '0:0').split(':').map(Number);
+  const [h, m] = String(hm || '0:0')
+    .split(':')
+    .map(Number);
   return h * 60 + (m || 0);
 };
 // a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade)
@@ -223,7 +294,9 @@ export const resolveSurgeryWindows = settings =>
     : [];
 
 export const resolveBlockedDays = settings =>
-  Array.isArray(settings?.agenda_blocked_days) ? settings.agenda_blocked_days : [];
+  Array.isArray(settings?.agenda_blocked_days)
+    ? settings.agenda_blocked_days
+    : [];
 // item 267: a lista mistura dias INTEIROS ('2026-10-12') e PARTES do dia
 // ({ date, unit } ou { date, doctor })
 export const wholeBlockedDays = list =>
@@ -232,11 +305,16 @@ export const partialBlocksOn = (list, key) =>
   list.filter(b => b && typeof b === 'object' && b.date === key);
 export const isWindowBlocked = (list, key, win) =>
   partialBlocksOn(list, key).some(
-    b => (!b.unit || b.unit === win.unit) && (!b.doctor || b.doctor === win.doctor)
+    b =>
+      (!b.unit || b.unit === win.unit) && (!b.doctor || b.doctor === win.doctor)
   );
 export const sameBlock = (a, b) => {
   if (typeof a === 'string' || typeof b === 'string') return a === b;
-  return a.date === b.date && (a.unit || '') === (b.unit || '') && (a.doctor || '') === (b.doctor || '');
+  return (
+    a.date === b.date &&
+    (a.unit || '') === (b.unit || '') &&
+    (a.doctor || '') === (b.doctor || '')
+  );
 };
 
 // blocos ('08:30', '08:45'…) de uma janela
@@ -245,7 +323,9 @@ export const slotsFor = win => {
   const [eh, em] = win.end.split(':').map(Number);
   const slots = [];
   for (let t = sh * 60 + sm; t < eh * 60 + em; t += win.block) {
-    slots.push(`${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
+    slots.push(
+      `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+    );
   }
   return slots;
 };
@@ -265,7 +345,13 @@ export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 // mesma consulta aparecia em 2 ou 3 horários e roubava vaga livre.
 // Sala cirúrgica e agenda de exames continuam por sobreposição (lá o
 // procedimento pode mesmo durar mais que um bloco).
-export const occupiesSlot = ({ taskStart, duration, slotStart, block, win }) => {
+export const occupiesSlot = ({
+  taskStart,
+  duration,
+  slotStart,
+  block,
+  win,
+}) => {
   const slotEnd = slotStart + (Number(block) || 15);
   if (win && win.doctor) return taskStart >= slotStart && taskStart < slotEnd;
   return taskStart < slotEnd && taskStart + duration > slotStart;
@@ -295,24 +381,108 @@ const mkType = t => ({
   hero: `linear-gradient(135deg, ${t.dark} 0%, ${t.deep} 55%, ${t.light} 100%)`,
 });
 export const TYPES = [
-  mkType({ key: 'avaliacao', label: 'Avaliação', noun: 'avaliação', plural: 'avaliações', article: 'a', icon: 'i-lucide-stethoscope',
-    color: '#2563EB', deep: '#1E40AF', light: '#60A5FA', pale: '#BFDBFE', dark: '#172554', kind: 'consultas', modality: 'avaliacao',
-    resource: 'doctor', hint: 'primeira consulta com o médico, nas unidades' }),
-  mkType({ key: 'retorno', label: 'Retorno', noun: 'retorno', plural: 'retornos', article: 'o', icon: 'i-lucide-rotate-ccw',
-    color: '#D4A017', deep: '#A16207', light: '#FACC15', pale: '#FEF08A', dark: '#713F12', kind: 'consultas', modality: 'retorno',
-    resource: 'doctor', hint: 'volta ao médico depois de exames ou tratamento' }),
-  mkType({ key: 'pos_op', label: 'Pós-operatório', noun: 'pós-operatório', plural: 'pós-operatórios', article: 'o', icon: 'i-lucide-heart-pulse',
-    color: '#DB2777', deep: '#9D174D', light: '#F472B6', pale: '#FBCFE8', dark: '#500724', kind: 'consultas', modality: 'pos_op',
-    resource: 'doctor', hint: 'revisão depois da cirurgia' }),
-  mkType({ key: 'exames', label: 'Exame', noun: 'exame', plural: 'exames', article: 'o', icon: 'i-lucide-scan-eye',
-    color: '#0D9488', deep: '#0F766E', light: '#2DD4BF', pale: '#99F6E4', dark: '#134E4A', kind: 'exames', modality: 'exames',
-    resource: 'exam', hint: 'pentacam, OCT, topografia… na janela de exames' }),
-  mkType({ key: 'teleconsulta', label: 'Teleconsulta', noun: 'teleconsulta', plural: 'teleconsultas', article: 'a', icon: 'i-lucide-video',
-    color: '#7C3AED', deep: '#5B21B6', light: '#A78BFA', pale: '#DDD6FE', dark: '#3B0764', kind: 'teleconsultas', modality: 'teleconsulta',
-    resource: 'online', hint: 'consulta por vídeo, sem unidade' }),
-  mkType({ key: 'cirurgia', label: 'Cirurgia', noun: 'cirurgia', plural: 'cirurgias', article: 'a', icon: 'i-lucide-slice',
-    color: '#EA580C', deep: '#9A3412', light: '#FB923C', pale: '#FED7AA', dark: '#431407', kind: 'cirurgias', modality: null,
-    resource: 'surgery', hint: 'sala cirúrgica das clínicas parceiras' }),
+  mkType({
+    key: 'avaliacao',
+    label: 'Avaliação',
+    noun: 'avaliação',
+    plural: 'avaliações',
+    article: 'a',
+    icon: 'i-lucide-stethoscope',
+    color: '#2563EB',
+    deep: '#1E40AF',
+    light: '#60A5FA',
+    pale: '#BFDBFE',
+    dark: '#172554',
+    kind: 'consultas',
+    modality: 'avaliacao',
+    resource: 'doctor',
+    hint: 'primeira consulta com o médico, nas unidades',
+  }),
+  mkType({
+    key: 'retorno',
+    label: 'Retorno',
+    noun: 'retorno',
+    plural: 'retornos',
+    article: 'o',
+    icon: 'i-lucide-rotate-ccw',
+    color: '#D4A017',
+    deep: '#A16207',
+    light: '#FACC15',
+    pale: '#FEF08A',
+    dark: '#713F12',
+    kind: 'consultas',
+    modality: 'retorno',
+    resource: 'doctor',
+    hint: 'volta ao médico depois de exames ou tratamento',
+  }),
+  mkType({
+    key: 'pos_op',
+    label: 'Pós-operatório',
+    noun: 'pós-operatório',
+    plural: 'pós-operatórios',
+    article: 'o',
+    icon: 'i-lucide-heart-pulse',
+    color: '#DB2777',
+    deep: '#9D174D',
+    light: '#F472B6',
+    pale: '#FBCFE8',
+    dark: '#500724',
+    kind: 'consultas',
+    modality: 'pos_op',
+    resource: 'doctor',
+    hint: 'revisão depois da cirurgia',
+  }),
+  mkType({
+    key: 'exames',
+    label: 'Exame',
+    noun: 'exame',
+    plural: 'exames',
+    article: 'o',
+    icon: 'i-lucide-scan-eye',
+    color: '#0D9488',
+    deep: '#0F766E',
+    light: '#2DD4BF',
+    pale: '#99F6E4',
+    dark: '#134E4A',
+    kind: 'exames',
+    modality: 'exames',
+    resource: 'exam',
+    hint: 'pentacam, OCT, topografia… na janela de exames',
+  }),
+  mkType({
+    key: 'teleconsulta',
+    label: 'Teleconsulta',
+    noun: 'teleconsulta',
+    plural: 'teleconsultas',
+    article: 'a',
+    icon: 'i-lucide-video',
+    color: '#7C3AED',
+    deep: '#5B21B6',
+    light: '#A78BFA',
+    pale: '#DDD6FE',
+    dark: '#3B0764',
+    kind: 'teleconsultas',
+    modality: 'teleconsulta',
+    resource: 'online',
+    hint: 'consulta por vídeo, sem unidade',
+  }),
+  mkType({
+    key: 'cirurgia',
+    label: 'Cirurgia',
+    noun: 'cirurgia',
+    plural: 'cirurgias',
+    article: 'a',
+    icon: 'i-lucide-slice',
+    color: '#EA580C',
+    deep: '#9A3412',
+    light: '#FB923C',
+    pale: '#FED7AA',
+    dark: '#431407',
+    kind: 'cirurgias',
+    modality: null,
+    resource: 'surgery',
+    hint: 'sala cirúrgica das clínicas parceiras',
+  }),
 ];
 export const TYPE_BY_KEY = Object.fromEntries(TYPES.map(t => [t.key, t]));
 
@@ -363,7 +533,8 @@ export const attendanceMarkOf = task => {
 // (SIM ao lembrete, card na coluna "Consulta Confirmada" ou a equipe marcou na
 // Agenda). O ✅ que a equipe digitava no nome também vale — e sai do nome, para
 // o selo ser um só. `declined_at` = respondeu NÃO ao lembrete.
-const TYPE_PREFIX = /^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i;
+const TYPE_PREFIX =
+  /^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i;
 const HAND_CHECK = /^\s*✅\s*/;
 const bareTitle = task => String(task?.title || '').replace(TYPE_PREFIX, '');
 export const patientNameOf = task => bareTitle(task).replace(HAND_CHECK, '');
@@ -381,8 +552,20 @@ export const confirmationTitle = task => {
 };
 // 🏥 item 300: de quem é o paciente (escolha obrigatória no formulário)
 export const ORIGINS = [
-  { key: 'cevico', label: 'CEVICO', icon: 'i-lucide-eye', color: '#152C61', hint: 'Paciente nosso: etiqueta cevico, card no CRM da CEVICO e lembrete pela caixa da CEVICO.' },
-  { key: 'oftalmofacil', label: 'Oftalmofácil', icon: 'i-lucide-hospital', color: '#0D9488', hint: 'Paciente do Oftalmofácil: etiqueta of_agenda, card no CRM do Oftalmofácil e lembrete só pela caixa do Oftalmofácil — sem IA.' },
+  {
+    key: 'cevico',
+    label: 'CEVICO',
+    icon: 'i-lucide-eye',
+    color: '#152C61',
+    hint: 'Paciente nosso: etiqueta cevico, card no CRM da CEVICO e lembrete pela caixa da CEVICO.',
+  },
+  {
+    key: 'oftalmofacil',
+    label: 'Oftalmofácil',
+    icon: 'i-lucide-hospital',
+    color: '#0D9488',
+    hint: 'Paciente do Oftalmofácil: etiqueta of_agenda, card no CRM do Oftalmofácil e lembrete só pela caixa do Oftalmofácil — sem IA.',
+  },
 ];
 export const ORIGIN_BY_KEY = Object.fromEntries(ORIGINS.map(o => [o.key, o]));
 // 🧭 item 362: COMO O PACIENTE CHEGOU (informado pela equipe; espelho de Crm::LeadChannel)
@@ -463,8 +646,10 @@ export const LEAD_CHANNEL_BY_KEY = Object.fromEntries(
 );
 // origem para MOSTRAR: a escolhida no formulário ou, no que veio do hub, o parceiro
 export const originOf = task => {
-  if (task?.origin && ORIGIN_BY_KEY[task.origin]) return ORIGIN_BY_KEY[task.origin];
-  if (task?.source === 'oftalmofacil' && task.source_detail) return ORIGIN_BY_KEY.oftalmofacil;
+  if (task?.origin && ORIGIN_BY_KEY[task.origin])
+    return ORIGIN_BY_KEY[task.origin];
+  if (task?.source === 'oftalmofacil' && task.source_detail)
+    return ORIGIN_BY_KEY.oftalmofacil;
   return null;
 };
 export const taskColorOf = task => {
@@ -472,9 +657,23 @@ export const taskColorOf = task => {
   return TASK_COLOR_SET.has(hex) ? hex : null;
 };
 // a "Agenda geral" (todas as camadas ligadas) veste um tom neutro
-export const GENERAL_TYPE = mkType({ key: 'geral', label: 'Agenda geral', noun: 'agendamento', plural: 'agendamentos', article: 'o',
-  icon: 'i-lucide-layers', color: '#475569', deep: '#1E293B', light: '#94A3B8', pale: '#CBD5E1', dark: '#0F172A', kind: null,
-  modality: null, resource: null, hint: 'todos os tipos juntos — ligue e desligue as camadas' });
+export const GENERAL_TYPE = mkType({
+  key: 'geral',
+  label: 'Agenda geral',
+  noun: 'agendamento',
+  plural: 'agendamentos',
+  article: 'o',
+  icon: 'i-lucide-layers',
+  color: '#475569',
+  deep: '#1E293B',
+  light: '#94A3B8',
+  pale: '#CBD5E1',
+  dark: '#0F172A',
+  kind: null,
+  modality: null,
+  resource: null,
+  hint: 'todos os tipos juntos — ligue e desligue as camadas',
+});
 export const typeOf = task => {
   if (!task) return 'avaliacao';
   if (task.task_type === 'cirurgia') return 'cirurgia';
@@ -496,7 +695,17 @@ export const modalityFor = key =>
 // 23/09: igual ao servidor (Crm::AgendaSlots) — uma consulta COM unidade só
 // ocupa o bloco daquela unidade; sem unidade ocupa em todas. Teleconsultas
 // (unidade 'online') não ocupam bloco físico nenhum.
-export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set(), from, days, freeLimit = 3, futureOnly = false, pastOnly = false }) => {
+export const scanAgenda = ({
+  windows,
+  tasks,
+  blockedSet,
+  blockedDays = new Set(),
+  from,
+  days,
+  freeLimit = 3,
+  futureOnly = false,
+  pastOnly = false,
+}) => {
   const occupied = new Set();
   const modalityByKey = new Map();
   tasks.forEach(t => {
@@ -539,7 +748,10 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
           const isTaken = occupied.has(key) || occupied.has(noUnitKey);
           if (isTaken) {
             filled += 1;
-            const mod = modalityByKey.get(key) || modalityByKey.get(noUnitKey) || 'avaliacao';
+            const mod =
+              modalityByKey.get(key) ||
+              modalityByKey.get(noUnitKey) ||
+              'avaliacao';
             byModality[mod] = (byModality[mod] || 0) + 1;
           } else if (freeSlots.length < freeLimit && slotDate > now) {
             freeSlots.push({ day: new Date(day), slot, win });
@@ -548,7 +760,13 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
       });
   }
 
-  return { total, filled, freeSlots, byModality, pct: total ? Math.round((filled / total) * 100) : 0 };
+  return {
+    total,
+    filled,
+    freeSlots,
+    byModality,
+    pct: total ? Math.round((filled / total) * 100) : 0,
+  };
 };
 
 // ── 💰 item 324 (05/10): VALOR do agendamento ─────────────────────────
@@ -615,6 +833,16 @@ export const presetAppointmentPrice = (prices, appt) => {
       text: sumPrices(hits.map(e => e.price)),
       label: hits.map(e => e.name).join(' + '),
     };
+  }
+  // 🩺 19/10: avaliação com especialista — o problema escrito ("avaliação
+  // retina", "glaucoma") puxa o valor do especialista (só na avaliação)
+  if (!appt.modality || appt.modality === 'avaliacao') {
+    const wanted = foldText(appt.procedure);
+    const special = (prices.especiais || []).find(
+      e => e.price && e.name && wanted.includes(foldText(e.name))
+    );
+    if (special)
+      return { text: special.price, label: `avaliação de ${special.name}` };
   }
   const type = PRICE_TYPES.includes(appt.modality)
     ? appt.modality

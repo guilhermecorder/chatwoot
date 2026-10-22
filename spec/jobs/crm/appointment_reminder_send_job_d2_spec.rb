@@ -282,7 +282,7 @@ RSpec.describe Crm::AppointmentReminderSendJob do
     consulta(ok, '2026-09-28 09:00')
     account.tasks.create!(title: 'Retorno: Sem Telefone', task_type: 'consulta', modality: 'retorno', unit: 'paulista',
                           due_at: tz.parse('2026-09-28 09:15'), creator: admin)
-    account.tasks.create!(title: 'Retorno: Telefone Solto', task_type: 'consulta', modality: 'retorno', unit: 'tatuape',
+    account.tasks.create!(title: 'Consulta: Telefone Solto', task_type: 'consulta', modality: 'avaliacao', unit: 'tatuape',
                           due_at: tz.parse('2026-09-28 09:30'), phone: '11 3333-0000', creator: admin)
 
     described_class.perform_now(now)
@@ -427,6 +427,71 @@ RSpec.describe Crm::AppointmentReminderSendJob do
 
     expect(sources).to eq([%w[INSTAGRAM confirma_ig_geral]])
     expect(settings.reload.agenda_config.dig('appointment_reminders_state', 'd2', 'sent').last['general']).to be(true)
+  end
+
+  # 💳 19/10 (Vaneide): a paciente recebeu "Valor da avaliação: R$sem custo à vista" — o texto é fixo
+  # no modelo da Meta; valor em texto só sai por um modelo feito para o tipo (Retorno)
+  describe 'valor em texto ("sem custo") no modelo padrão' do
+    let(:bodies) { [] }
+    let(:retorno_slot) { { 'template_params' => tpl.call('retorno_paulista'), 'message_preview' => 'Retorno {{1}}, sem custo' } }
+
+    before do
+      allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+        bodies << [args[3]['name'], args[3].dig('processed_params', 'body', '4')]
+        m.call(*args)
+      end
+    end
+
+    def state
+      settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+    end
+
+    it 'retorno sem modelo próprio fica nas puladas com o motivo (nunca "R$sem custo")', :aggregate_failures do
+      consulta(contact_named('Maria Retorno', '+5511999990201'), '2026-09-28 08:30', modality: 'retorno')
+      consulta(contact_named('Ana Avaliacao', '+5511999990202'), '2026-09-28 09:00')
+
+      described_class.perform_now(now)
+
+      expect(bodies).to eq([['confirmacao_consulta_paulista', '150,00']])
+      expect(state['sent'].pluck('name')).to eq(['Ana Avaliacao'])
+      expect(state['skipped'].to_h { |e| [e['name'], e['why']] }).to eq(
+        'Maria Retorno' => 'valor "sem custo" não cabe no modelo padrão (que fala em R$) — cadastre um modelo de Retorno em modelos personalizados'
+      )
+      marks = Contact.find_by(phone_number: '+5511999990201').additional_attributes['cevico_appt_reminders']
+      expect(marks).to be_blank # não gastou a marca: cadastrado o modelo, sai na próxima rodada
+    end
+
+    it 'com o modelo de Retorno cadastrado, o retorno sai por ele com "sem custo"', :aggregate_failures do
+      variants = [{ 'id' => 'ret', 'modality' => 'retorno', 'units' => { 'paulista' => retorno_slot } }]
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('variants' => variants) } })
+      consulta(contact_named('Maria Retorno', '+5511999990201'), '2026-09-28 08:30', modality: 'retorno')
+
+      described_class.perform_now(now)
+
+      expect(bodies).to eq([['retorno_paulista', 'sem custo']])
+      expect(state['skipped']).to be_empty
+    end
+
+    it 'modelo padrão sem a variável do valor (lembrete da véspera) segue saindo para o retorno' do
+      sem_valor = { '1' => '{{nome_completo}}', '2' => '{{data}}', '3' => '{{hora}}' }
+      d2 = d2_cfg.merge('units' => { 'paulista' => { 'template_params' => tpl.call('vespera').merge('processed_params' => { 'body' => sem_valor }),
+                                                     'message_preview' => 'Véspera {{1}}' } })
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2 } })
+      consulta(contact_named('Maria Retorno', '+5511999990201'), '2026-09-28 08:30', modality: 'retorno')
+
+      described_class.perform_now(now)
+
+      expect(state['sent'].pluck('name')).to eq(['Maria Retorno'])
+    end
+
+    it 'em sombra também aparece nas puladas (a equipe vê antes de ligar)' do
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('mode' => 'shadow') } })
+      consulta(contact_named('Maria Retorno', '+5511999990201'), '2026-09-28 08:30', modality: 'retorno')
+
+      described_class.perform_now(now)
+
+      expect(state['skipped'].pluck('name')).to eq(['Maria Retorno'])
+    end
   end
 
   # item 327 (05/10): "vamos precisar de modelos de mensagens específicos para quando for RETORNO…
