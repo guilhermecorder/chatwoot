@@ -185,7 +185,9 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
     value = {
       'meta_pixel_id' => attrs['meta_pixel_id'].to_s.gsub(/\D/, '')[0, 20],
       'ga4_id' => attrs['ga4_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20],
-      'gtm_id' => attrs['gtm_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20]
+      'gtm_id' => attrs['gtm_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20],
+      # 🔥 21/10: Microsoft Clarity (mapa de calor + gravações, grátis) — ID do projeto
+      'clarity_id' => attrs['clarity_id'].to_s.strip.downcase.gsub(/[^a-z0-9]/, '')[0, 20]
     }.compact_blank
     config = InstallationConfig.where(name: 'CEVICO_TRACKING').first_or_initialize
     config.value = value

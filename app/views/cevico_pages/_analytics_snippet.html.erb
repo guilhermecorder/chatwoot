@@ -10,12 +10,22 @@
 <% cfg = @cevico_tracking || Cevico::PublicSite.tracking_config %>
 <% pixel_id = cfg['meta_pixel_id'].presence %>
 <% ga4_id = cfg['ga4_id'].presence %>
+<% clarity_id = cfg['clarity_id'].presence %>
 <%# GTM: quem faz a colocação certa (head + pós-body) passa include_gtm:
     false; onde o snippet é o único ponto de injeção (ex.: hub), o
     container entra aqui mesmo — funciona igual, só carrega mais tarde %>
 <% unless defined?(include_gtm) && include_gtm == false %>
   <%= render 'cevico_pages/gtm_head' %>
   <%= render 'cevico_pages/gtm_noscript' %>
+<% end %>
+<% if clarity_id %>
+<%# 🔥 Microsoft Clarity (21/10): mapa de calor, gravações e funis de rolagem de TODA página pública.
+    Carrega depois da página (async); a letra da variação A/B já é marcada pelo tracking_snippet. %>
+<script nonce="<%= content_security_policy_nonce %>">
+(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+})(window, document, "clarity", "script", "<%= j clarity_id %>");
+</script>
 <% end %>
 <% if pixel_id || ga4_id %>
   <% page_name = page ? page.slug : 'hub' %>

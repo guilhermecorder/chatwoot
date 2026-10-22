@@ -2046,7 +2046,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     Cevico::PublicSite.save_tracking!('meta_pixel_id' => params[:meta_pixel_id].to_s,
                                       'ga4_id' => params[:ga4_id].to_s,
-                                      'gtm_id' => params[:gtm_id].to_s)
+                                      'gtm_id' => params[:gtm_id].to_s,
+                                      'clarity_id' => params[:clarity_id].to_s)
     render json: public_domain_json
   end
 
@@ -2103,6 +2104,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     gtm = params[:gtm_id].to_s.strip.upcase
     return 'ID do Tag Manager inválido — é o código que começa com GTM-, ex.: GTM-MWDV8T35' if gtm.present? && !gtm.match?(/\AGTM-[A-Z0-9]{4,12}\z/)
+
+    clarity = params[:clarity_id].to_s.strip
+    return 'ID do Clarity inválido — são as letras e números do projeto, ex.: abc1de2fgh' if clarity.present? && !clarity.match?(/\A[a-z0-9]{6,20}\z/i)
 
     nil
   end
