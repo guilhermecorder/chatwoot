@@ -72,11 +72,57 @@ const closed = computed(() =>
 const booked = computed(() => Number(funnel.value.booked || 0));
 const leads = computed(() => Number(funnel.value.leads || 0));
 const hasJourney = computed(() => leads.value > 0);
+// 🩺 item 360 (21/10): o caminho do lead em 3 números no card — consultas
+// marcadas (e a taxa lead → consulta), quem compareceu e quem saiu com
+// indicação de cirurgia; cada taxa contra a média da conta
+const attended = computed(() => Number(funnel.value.attended || 0));
+const indicated = computed(() => Number(funnel.value.indicated || 0));
+const rateOf = key => (props.row.rates ? props.row.rates[key] : null);
+const pctTxt = v =>
+  v === null || v === undefined ? '—' : `${Math.round(Number(v) * 100)}%`;
+const PATH = computed(() => [
+  {
+    key: 'booked',
+    label: 'Consultas',
+    value: booked.value,
+    rate: rateOf('booking_rate'),
+    of: 'dos leads',
+    vs: vsAverage(rateOf('booking_rate'), props.averages.booking_rate, false),
+  },
+  {
+    key: 'attended',
+    label: 'Vieram',
+    value: attended.value,
+    rate: rateOf('attend_rate'),
+    of: 'das consultas',
+    vs: vsAverage(rateOf('attend_rate'), props.averages.attend_rate, false),
+  },
+  {
+    key: 'indicated',
+    label: 'Indicadas',
+    value: indicated.value,
+    rate: rateOf('indication_rate'),
+    of: 'de quem veio',
+    vs: vsAverage(
+      rateOf('indication_rate'),
+      props.averages.indication_rate,
+      false
+    ),
+  },
+]);
+const vsClass = vs => {
+  if (!vs || vs.good === null) return 'text-n-slate-9';
+  return vs.good
+    ? 'text-emerald-700 dark:text-emerald-400'
+    : 'text-red-700 dark:text-red-400';
+};
 
 const open = () => emit('open', props.row);
 </script>
 
 <template>
+  <!-- tela só em português (CEVICO): textos direto no template, sem i18n -->
+  <!-- eslint-disable vue/no-bare-strings-in-template -->
   <div class="cv-frame cv-cq h-full" :class="{ 'cv-champion': isChampion }">
     <article
       class="cv-block p-5 flex flex-col gap-4 h-full cursor-pointer"
@@ -181,8 +227,37 @@ const open = () => emit('open', props.row);
         </figcaption>
       </figure>
 
+      <!-- item 360: o caminho do lead — consulta, comparecimento, indicação -->
+      <div class="grid grid-cols-3 gap-1.5 mt-auto">
+        <div
+          v-for="st in PATH"
+          :key="st.key"
+          class="cc-tile cv-sub rounded-2xl px-2.5 py-2.5 min-w-0"
+          :title="`${st.label}: ${fmtNum(st.value)} · ${pctTxt(st.rate)} ${st.of}${st.vs ? ` · ${st.vs.text}` : ''}`"
+        >
+          <p class="text-[10px] font-semibold text-n-slate-10 leading-tight">
+            {{ st.label }}
+          </p>
+          <p
+            class="cc-value-sm font-extrabold tabular-nums tracking-tight leading-none whitespace-nowrap mt-1"
+            :class="hasJourney ? 'text-n-slate-12' : 'text-n-slate-8'"
+          >
+            {{ fmtNum(st.value) }}
+          </p>
+          <p
+            class="text-[10px] font-semibold leading-tight mt-1"
+            :class="vsClass(st.vs)"
+          >
+            {{ pctTxt(st.rate) }} {{ st.of
+            }}<template v-if="st.vs && st.vs.good !== null">
+              {{ st.vs.good ? '▲' : '▼' }}
+            </template>
+          </p>
+        </div>
+      </div>
+
       <!-- o que vale dinheiro, em 2 números (o resto está na Análise) -->
-      <div class="grid grid-cols-2 gap-3 mt-auto">
+      <div class="grid grid-cols-2 gap-3 mt-3">
         <div class="cc-tile cv-sub rounded-2xl px-4 py-3 min-w-0">
           <p class="text-[11px] font-semibold text-n-slate-10 leading-tight">
             ROAS
@@ -296,5 +371,8 @@ const open = () => emit('open', props.row);
 }
 .cc-value {
   font-size: clamp(1.2rem, 15cqi, 1.75rem);
+}
+.cc-value-sm {
+  font-size: clamp(1rem, 18cqi, 1.4rem);
 }
 </style>

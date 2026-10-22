@@ -7,7 +7,7 @@
 module Crm::AdFunnel
   module_function
 
-  EMPTY = { leads: 0, booked: 0, attended: 0, closed: 0, surgeries: 0, revenue: 0.0 }.freeze
+  EMPTY = { leads: 0, booked: 0, attended: 0, indicated: 0, closed: 0, surgeries: 0, revenue: 0.0 }.freeze
 
   # 🩺 itens 289 e 294: os degraus e a origem de cada um moram em Crm::AdFunnelSteps
   # { ad_id => { leads:, booked:, attended:, closed:, surgeries:, revenue:, sources: } }
@@ -31,8 +31,9 @@ module Crm::AdFunnel
   def funnel_row(cids, steps) # rubocop:disable Metrics/AbcSize
     count = ->(set) { cids.count { |id| set.include?(id) } }
     done = cids.select { |id| steps.surgeries.include?(id) }
+    revenue = done.sum { |id| steps.revenue_of(id) }.round(2)
     { leads: cids.size, booked: count.call(steps.booked), attended: count.call(steps.attended),
-      closed: count.call(steps.closed), surgeries: done.size, revenue: done.sum { |id| steps.revenue_of(id) }.round(2),
+      indicated: count.call(steps.indicated), closed: count.call(steps.closed), surgeries: done.size, revenue: revenue,
       sources: { booked_crm: count.call(steps.crm[:booked]), booked_agenda: count.call(steps.booked_agenda),
                  attended_crm: count.call(steps.crm[:attended]), attended_agenda: count.call(steps.attended_agenda),
                  closed_crm: count.call(steps.crm[:closed]), closed_agenda: count.call(steps.closed_agenda),
@@ -49,7 +50,9 @@ module Crm::AdFunnel
       cost_closed: per_unit(spend, f[:closed]), cost_surgery: per_unit(spend, f[:surgeries]),
       roas: spend.positive? && f[:revenue].to_f.positive? ? (f[:revenue].to_f / spend).round(2) : nil,
       booking_rate: share(f[:booked], f[:leads]), closed_rate: share(f[:closed], f[:leads]),
-      surgery_rate: share(f[:surgeries], f[:leads])
+      surgery_rate: share(f[:surgeries], f[:leads]),
+      # item 360: comparecimento (dos que marcaram) e indicação de cirurgia (dos que compareceram)
+      attend_rate: share(f[:attended], f[:booked]), indication_rate: share(f[:indicated], f[:attended])
     }
   end
 
@@ -68,6 +71,7 @@ module Crm::AdFunnel
       acc[:leads] += f[:leads].to_i
       acc[:booked] += f[:booked].to_i
       acc[:attended] += f[:attended].to_i
+      acc[:indicated] += f[:indicated].to_i
       acc[:closed] += f[:closed].to_i
       acc[:surgeries] += f[:surgeries].to_i
       acc[:revenue] = (acc[:revenue] + f[:revenue].to_f).round(2)

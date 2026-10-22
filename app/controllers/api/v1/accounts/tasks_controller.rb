@@ -117,6 +117,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     new_task.save!
     # item 300: origem escolhida → contato criado, etiqueta e card no funil certo
     Crm::AppointmentOrigin.apply(account: Current.account, task: new_task)
+    stamp_channel(new_task) # 🧭 item 362: como chegou
     new_task.reload
     render json: task_json(new_task), status: :created
   end
@@ -149,8 +150,21 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     if task.saved_change_to_phone? && task.contact_id.blank? && %w[consulta cirurgia].include?(task.task_type)
       Crm::AppointmentOrigin.ensure_contact(account: Current.account, task: task)
     end
+    stamp_channel(task) # 🧭 item 362
 
     render json: task_json(task)
+  end
+
+  # 🧭 item 362: "como chegou" informado pela equipe → carimbo canal_origem no
+  # contato (primeiro toque; não sobrescreve). Sem contato, acha/cria pelo telefone.
+  def stamp_channel(record)
+    key = params[:channel].to_s
+    return if key.blank? || !Crm::LeadChannel.valid?(key)
+
+    contact = record.contact || Crm::AppointmentOrigin.ensure_contact(account: Current.account, task: record)
+    Crm::LeadChannel.stamp!(contact, key, user: Current.user) if contact
+  rescue StandardError => e
+    Rails.logger.error "[tasks#stamp_channel] #{record&.id}: #{e.class}: #{e.message}"
   end
 
   # 🗑️ item 304 (30/09): "Excluir" um AGENDAMENTO manda para a Lixeira (fica no
@@ -501,6 +515,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
       charges: Array(record.charges),
       price: Crm::AppointmentPrice.resolve(price_config, record),
       source_detail: record.source_detail,
+      # 🧭 item 362: como o paciente chegou (automático vale mais; senão o informado pela equipe)
+      channel: Crm::LeadChannel.key_of(record.contact),
       comments: Array(record.comments),
       attachments: task_files_json(record)
     ).merge(surgery_value_json(record))

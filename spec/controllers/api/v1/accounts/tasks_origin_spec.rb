@@ -19,6 +19,25 @@ RSpec.describe 'Tasks API — origem e confirmação (item 300)', type: :request
     expect(account.contacts.find(body['contact_id']).label_list).to include('of_agenda')
   end
 
+  it 'item 362: "como chegou" vira carimbo canal_origem no contato (primeiro toque) e o CAC lê', :aggregate_failures do
+    post "/api/v1/accounts/#{account.id}/tasks",
+         params: { title: 'Maria', phone: '11977776666', task_type: 'consulta', due_at: due, origin: 'cevico', channel: 'ligacao' },
+         headers: headers, as: :json
+    expect(response).to have_http_status(:created)
+    body = response.parsed_body
+    expect(body['channel']).to eq('key' => 'ligacao', 'auto' => false)
+    contact = account.contacts.find(body['contact_id'])
+    expect(contact.additional_attributes['canal_origem']).to include('key' => 'ligacao', 'por' => admin.name)
+
+    patch "/api/v1/accounts/#{account.id}/tasks/#{body['id']}", params: { channel: 'indicacao' }, headers: headers, as: :json
+    expect(contact.reload.additional_attributes.dig('canal_origem', 'key')).to eq('ligacao') # primeiro toque vence
+
+    result = Crm::AcquisitionChannel.new(account).for_contacts([contact.id])[contact.id]
+    expect(result.channel).to eq('organico')
+    expect(result.detail).to eq('informado pela equipe: Ligação')
+    expect(result.campaign).to eq('(informado pela equipe)')
+  end
+
   it 'origem inválida é recusada' do
     post "/api/v1/accounts/#{account.id}/tasks",
          params: { title: 'X', task_type: 'consulta', due_at: due, origin: 'outra' }, headers: headers, as: :json

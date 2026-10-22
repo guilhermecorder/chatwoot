@@ -38,6 +38,37 @@ RSpec.describe 'CEVICO Campaign Agent API', type: :request do
     expect(response.parsed_body['params']).to include('goal' => 'surgery')
   end
 
+  it 'item 359: o canal SEO / orgânico lê as páginas sem anúncio pago', :aggregate_failures do
+    page = CevicoPage.create!(account: account, title: 'Cirurgia de miopia', slug: 'cirurgia-de-miopia', status: 'published')
+    CevicoPageTraffic.create!(account: account, cevico_page: page, date: Date.current - 1, source: 'google_organico', views: 120, cta_clicks: 9)
+    CevicoPageTraffic.create!(account: account, cevico_page: page, date: Date.current - 1, source: 'google_ads', views: 50, cta_clicks: 5)
+    organico = create(:contact, account: account, additional_attributes: { 'page_ads' => { 'page_id' => page.id, 'source' => 'google_organico',
+                                                                                           'captured_at' => (1.day.ago).iso8601 } })
+    create(:contact, account: account, additional_attributes: { 'page_ads' => { 'page_id' => page.id, 'source' => 'google_ads',
+                                                                                'captured_at' => (1.day.ago).iso8601 } })
+
+    get base, params: { preset: 'last7', channel: 'seo' }, headers: admin.create_new_auth_token, as: :json
+
+    expect(response).to have_http_status(:success)
+    body = response.parsed_body
+    row = body['campaigns'].find { |c| c['id'] == "page-#{page.id}" }
+    expect(row).to include('channel' => 'seo', 'name' => 'Cirurgia de miopia', 'impressions' => 120, 'link_clicks' => 9, 'leads' => 1, 'spend' => 0.0)
+    expect(body['totals']['seo']).to include('leads' => 1, 'impressions' => 120)
+    expect(body['totals']['seo']['goal_cost']).to be_nil
+    expect(body['series']['seo']['views'].sum).to eq(120)
+    expect(body['baselines']['seo'].keys).to include('30')
+    expect(body['channels']['seo']).to include('pages' => 1)
+    expect(organico.reload.id).to be_present
+  end
+
+  it 'item 362: paciente cujo "como chegou" a equipe informou vira a linha "(informado pela equipe)" do canal' do
+    create(:contact, account: account, additional_attributes: { 'canal_origem' => { 'key' => 'meta_anuncio', 'por' => 'Vaneide',
+                                                                                    'em' => (1.day.ago).iso8601 } })
+    get base, params: { preset: 'last7', channel: 'meta' }, headers: admin.create_new_auth_token, as: :json
+    row = response.parsed_body['campaigns'].find { |c| c['id'] == 'meta-team' }
+    expect(row).to include('team' => true, 'leads' => 1, 'channel' => 'meta')
+  end
+
   it 'monta o plano da ficha e guarda' do
     post "#{base}/brief", params: { brief: { name: 'Miopia cenas', daily_budget: 50, whatsapp: '5511998085773' } },
                           headers: admin.create_new_auth_token, as: :json

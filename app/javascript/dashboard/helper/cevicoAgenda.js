@@ -568,6 +568,82 @@ export const humanNotes = text =>
       let aiUntil = -1;
       if (stamp >= 0) aiUntil = stamp;
       else if (AI_RESCHEDULE_LINE.test(lines[0] || ''))
+// 🧭 item 362: COMO O PACIENTE CHEGOU (informado pela equipe; espelho de Crm::LeadChannel)
+export const LEAD_CHANNELS = [
+  {
+    key: 'google_anuncio',
+    label: 'Google anúncio',
+    title: 'Google · anúncio',
+    icon: 'i-lucide-search',
+    color: '#0a84ff',
+  },
+  {
+    key: 'google_busca',
+    label: 'Google busca/site',
+    title: 'Google · busca ou site',
+    icon: 'i-lucide-globe',
+    color: '#0891b2',
+  },
+  {
+    key: 'meta_anuncio',
+    label: 'Insta/Face anúncio',
+    title: 'Instagram / Facebook · anúncio',
+    icon: 'i-lucide-megaphone',
+    color: '#bf5af2',
+  },
+  {
+    key: 'instagram_perfil',
+    label: 'Insta perfil/bio',
+    title: 'Instagram · perfil ou bio',
+    icon: 'i-lucide-instagram',
+    color: '#db2777',
+  },
+  {
+    key: 'whatsapp_direto',
+    label: 'WhatsApp direto',
+    title: 'WhatsApp direto (salvou o número, veio sozinho)',
+    icon: 'i-lucide-message-circle',
+    color: '#16a34a',
+  },
+  {
+    key: 'ligacao',
+    label: 'Ligação',
+    title: 'Ligação telefônica',
+    icon: 'i-lucide-phone',
+    color: '#d97706',
+  },
+  {
+    key: 'indicacao',
+    label: 'Indicação',
+    title: 'Indicação de paciente',
+    icon: 'i-lucide-heart-handshake',
+    color: '#dc2626',
+  },
+  {
+    key: 'parceiro',
+    label: 'Médico/parceiro',
+    title: 'Médico ou parceiro',
+    icon: 'i-lucide-stethoscope',
+    color: '#0d9488',
+  },
+  {
+    key: 'balcao',
+    label: 'Passou aqui',
+    title: 'Passou na clínica (balcão)',
+    icon: 'i-lucide-building-2',
+    color: '#152C61',
+  },
+  {
+    key: 'outro',
+    label: 'Outro',
+    title: 'Outro',
+    icon: 'i-lucide-circle-help',
+    color: '#6b7280',
+  },
+];
+export const LEAD_CHANNEL_BY_KEY = Object.fromEntries(
+  LEAD_CHANNELS.map(o => [o.key, o])
+);
         aiUntil = lines.length - 1;
       else if (index === 0 && AI_FIXED_VALUE_LINE.test(lines[0] || ''))
         aiUntil = 0;

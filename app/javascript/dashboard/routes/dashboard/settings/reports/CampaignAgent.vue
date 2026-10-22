@@ -147,18 +147,25 @@ const timeBR = iso =>
     : '';
 const plural = (n, one, many) => `${fmtNum(n)} ${Number(n) === 1 ? one : many}`;
 
-const CHANNEL_LABEL = { all: 'Meta + Google', meta: 'Meta', google: 'Google' };
+const CHANNEL_LABEL = {
+  all: 'Meta + Google',
+  meta: 'Meta',
+  google: 'Google',
+  seo: 'SEO / orgânico',
+};
 const CHANNEL_SHORT = {
   all: 'nos dois canais',
   meta: 'na Meta',
   google: 'no Google',
+  seo: 'no orgânico',
 };
-const CHANNEL_COLORS = { meta: '#bf5af2', google: '#0a84ff' };
+const CHANNEL_COLORS = { meta: '#bf5af2', google: '#0a84ff', seo: '#10b981' };
 const SEVERITY = {
   alerta: { label: 'alerta', tone: 'cvg-chip--problema' },
   atencao: { label: 'atenção', tone: 'cvg-chip--atencao' },
   oportunidade: { label: 'oportunidade', tone: 'cvg-chip--bom' },
   info: { label: 'aviso', tone: '' },
+  seo: { label: 'SEO', tone: '' },
 };
 const KIND_LABEL = {
   pause: 'pausar',
@@ -170,6 +177,10 @@ const KIND_LABEL = {
   quality: 'qualidade do lead',
   pacing: 'ritmo da verba',
   watch: 'observar',
+  // item 359: a fila do Agente de Páginas (azulejo SEO / orgânico)
+  seo: 'SEO',
+  content: 'conteúdo',
+  traffic: 'tráfego',
 };
 const KIND_ICON = {
   pause: 'i-lucide-pause-circle',
@@ -181,12 +192,16 @@ const KIND_ICON = {
   quality: 'i-lucide-message-square-heart',
   pacing: 'i-lucide-gauge',
   watch: 'i-lucide-eye',
+  seo: 'i-lucide-search',
+  content: 'i-lucide-pen-line',
+  traffic: 'i-lucide-route',
 };
 const LEVEL_LABEL = {
   channel: 'canal',
   campaign: 'campanha',
   adset: 'conjunto',
   ad: 'anúncio',
+  page: 'página',
 };
 // só verba e pausa mexem na plataforma; o resto é tarefa para a equipe
 const PLATFORM_KINDS = new Set(['pause', 'budget_up', 'budget_down']);
@@ -204,7 +219,8 @@ const baselineFor = ch => {
   const b = data.value?.baselines?.[ch] || {};
   const days = p.value.baseline_days || 30;
   const row = b[days] || b[String(days)];
-  if (row && Number(row.spend) > 0) return row;
+  // o orgânico não tem gasto: a régua dele vale mesmo com spend 0
+  if (row && (Number(row.spend) > 0 || ch === 'seo')) return row;
   const all = data.value?.baselines?.all || {};
   return all[days] || all[String(days)] || null;
 };
@@ -219,6 +235,8 @@ const channels = computed(() => data.value?.channels || {});
 const canEdit = computed(() => Boolean(data.value?.can_edit));
 const state = computed(() => data.value?.state || {});
 const executeApi = computed(() => Boolean(channels.value.meta?.execute));
+// item 359: azulejo SEO / orgânico = páginas sem anúncio pago + Search Console
+const isSeo = computed(() => channel.value === 'seo');
 
 // bom / atenção / ruim contra a nossa média (custos: menor é melhor)
 const LOWER = new Set([
@@ -275,6 +293,10 @@ const cmpBase = (value, key, fmt = moneyShort) => {
   if (!b) return { texto: 'sem média ainda', estado: 'neutro' };
   let base = key.startsWith('rates.') ? b.rates?.[key.slice(6)] : b[key];
   if (key === 'goal_cost') base = b.goal_cost;
+  if (key === 'leads_per_visit')
+    base = Number(b.impressions)
+      ? Number(b.leads) / Number(b.impressions)
+      : null;
   if (
     base === null ||
     base === undefined ||
@@ -318,6 +340,7 @@ const SECONDARY = [
   {
     key: 'ctr',
     label: 'CTR (clique por exibição)',
+    seoLabel: 'Clique no WhatsApp por visita',
     fmt: v => pct(v, 2),
     hint: 'de cada 100 exibições, quantas viraram clique no link',
   },
@@ -325,12 +348,14 @@ const SECONDARY = [
     key: 'cpm',
     label: 'CPM (custo por mil exibições)',
     fmt: money,
+    paid: true,
     hint: 'quanto custa aparecer mil vezes',
   },
   {
     key: 'cpc',
     label: 'CPC (custo por clique)',
     fmt: money,
+    paid: true,
     hint: 'quanto custa cada clique',
   },
   {
@@ -338,12 +363,14 @@ const SECONDARY = [
     label: 'Frequência',
     fmt: v => num(v, 2),
     raw: true,
+    paid: true,
     hint: 'quantas vezes a mesma pessoa viu (Meta)',
   },
   {
     key: 'conv_rate',
     label: 'Conversa por clique',
     fmt: pct,
+    paid: true,
     hint: 'cliques que abriram conversa no WhatsApp (Meta)',
   },
   {
@@ -356,15 +383,22 @@ const SECONDARY = [
     key: 'hook_rate',
     label: 'Gancho (parada em 3 s)',
     fmt: pct,
+    paid: true,
     hint: 'exibições que pararam para ver 3 segundos (vídeo)',
   },
   {
     key: 'hold_rate',
     label: 'Retenção (ThruPlay)',
     fmt: pct,
+    paid: true,
     hint: 'de quem parou, quantos viram quase todo (vídeo)',
   },
 ];
+// no orgânico só valem os degraus que existem sem anúncio
+const secondaryShown = computed(() =>
+  SECONDARY.filter(i => !isSeo.value || !i.paid)
+);
+const indLabel = ind => (isSeo.value && ind.seoLabel) || ind.label;
 const TERTIARY = [
   {
     key: 'booking_rate',
@@ -470,11 +504,11 @@ const goalBandShort = row => {
 };
 const campaignBars = computed(() =>
   campaigns.value
-    .filter(c => c.goal_cost)
+    .filter(c => (isSeo.value ? Number(c.leads) > 0 : c.goal_cost))
     .map(c => ({
       label: c.name,
       sub: CHANNEL_LABEL[c.channel],
-      values: [c.goal_cost],
+      values: [isSeo.value ? c.leads : c.goal_cost],
       color:
         { bom: '#059669', problema: '#dc2626' }[goalBand(c)?.estado] ||
         CHANNEL_COLORS[c.channel],
@@ -502,15 +536,34 @@ const CHART = {
   leads: '#0a84ff',
   booked: '#059669',
 };
-const timelineBars = computed(() =>
-  seriesCh.value
-    ? {
-        key: 'spend',
-        label: 'Investido',
-        color: CHART.spend,
-        values: seriesCh.value.spend,
-      }
-    : null
+const timelineBars = computed(() => {
+  if (!seriesCh.value) return null;
+  if (isSeo.value)
+    return {
+      key: 'views',
+      label: 'Visitas',
+      color: CHART.spend,
+      values: seriesCh.value.views,
+    };
+  return {
+    key: 'spend',
+    label: 'Investido',
+    color: CHART.spend,
+    values: seriesCh.value.spend,
+  };
+});
+// média de visitas por dia (orgânico) = visitas da janela ÷ dias
+const dailyViewsAvg = computed(() => {
+  const b = baseline.value;
+  return b ? Number(b.impressions || 0) / Number(b.days || 1) : 0;
+});
+const timelineTitle = computed(
+  () =>
+    `Dia a dia · ${isSeo.value ? 'visitas' : 'investido'}, leads e agendamentos`
+);
+const pageName = c => `${c.emoji ? `${c.emoji} ` : ''}${c.name}`;
+const leftFmt = computed(() =>
+  isSeo.value ? v => fmtNum(Math.round(v)) : moneyShort
 );
 const timelineLines = computed(() =>
   seriesCh.value
@@ -534,13 +587,13 @@ const timelineRefs = computed(() =>
   [
     {
       axis: 'left',
-      value: dailyAvg('spend'),
-      label: 'média/dia',
+      value: isSeo.value ? Math.round(dailyViewsAvg.value) : dailyAvg('spend'),
+      label: isSeo.value ? 'média de visitas/dia' : 'média/dia',
       color: 'var(--g-texto, #111827)',
     },
     {
       axis: 'right',
-      value: dailyAvg('leads'),
+      value: Math.round(dailyAvg('leads')),
       label: 'média de leads/dia',
       color: CHART.leads,
     },
@@ -593,7 +646,7 @@ const donut = key => {
       color: SLICE_COLORS[i % SLICE_COLORS.length],
     }));
 };
-const donutSpend = computed(() => donut('spend'));
+const donutSpend = computed(() => donut(isSeo.value ? 'impressions' : 'spend'));
 const donutLeads = computed(() => donut('leads'));
 const donutBooked = computed(() => donut('booked'));
 // a régua: seis indicadores contra a nossa média, nos limiares do agente
@@ -601,6 +654,71 @@ const reguaItems = computed(() => {
   const t = totals.value;
   const b = baseline.value;
   const r = (row, k) => row?.rates?.[k];
+  if (isSeo.value)
+    return [
+      {
+        key: 'ctr',
+        label: 'Clique no WhatsApp por visita',
+        value: r(t, 'ctr'),
+        avg: r(b, 'ctr'),
+        lower: false,
+        fmt: v => pct(v, 2),
+        hint: 'de cada 100 visitas, quantas clicaram no convite · maior é melhor',
+      },
+      {
+        key: 'lead_rate',
+        label: 'Lead por clique',
+        value: r(t, 'lead_rate'),
+        avg: r(b, 'lead_rate'),
+        lower: false,
+        fmt: pct,
+        hint: 'cliques que chegaram na caixa · maior é melhor',
+      },
+      {
+        key: 'leads_per_visit',
+        label: 'Leads por 100 visitas',
+        value: Number(t.impressions)
+          ? Number(t.leads) / Number(t.impressions)
+          : null,
+        avg: Number(b?.impressions)
+          ? Number(b.leads) / Number(b.impressions)
+          : null,
+        lower: false,
+        fmt: v => pct(v, 2),
+        hint: 'o resultado da página inteira · maior é melhor',
+      },
+      {
+        key: 'booking_rate',
+        label: 'Taxa de agendamento',
+        value: r(t, 'booking_rate'),
+        avg: r(b, 'booking_rate'),
+        lower: false,
+        fmt: pct,
+        hint: 'leads que marcaram consulta · maior é melhor',
+      },
+      {
+        key: 'surgery_rate',
+        label: 'Cirurgia por lead',
+        value: r(t, 'surgery_rate'),
+        avg: r(b, 'surgery_rate'),
+        lower: false,
+        fmt: pct,
+        hint: 'leads que já operaram · maior é melhor',
+      },
+      {
+        key: 'gsc_ctr',
+        label: 'Google: clique por aparição',
+        value: Number(t.gsc_impressions)
+          ? Number(t.gsc_clicks) / Number(t.gsc_impressions)
+          : null,
+        avg: Number(b?.gsc_impressions)
+          ? Number(b.gsc_clicks) / Number(b.gsc_impressions)
+          : null,
+        lower: false,
+        fmt: v => pct(v, 2),
+        hint: 'Search Console: de cada 100 vezes que apareceu na busca, quantas clicaram · maior é melhor',
+      },
+    ];
   return [
     {
       key: 'goal',
@@ -827,6 +945,24 @@ const MEDIA_COLS = [
   { label: 'CPC', get: r => dash(r.rates?.cpc, money) },
   { label: 'Tx. agend.', get: r => pct(r.rates?.booking_rate) },
 ];
+const SEO_MEDIA_COLS = [
+  {
+    label: 'Visitas/dia',
+    get: r =>
+      fmtNum(Math.round(Number(r.impressions || 0) / Number(r.days || 1))),
+  },
+  { label: 'Cliques WA', get: r => fmtNum(r.link_clicks) },
+  { label: 'Leads', get: r => fmtNum(r.leads) },
+  { label: 'Agend.', get: r => fmtNum(r.booked) },
+  { label: 'Cirurgias', get: r => fmtNum(r.surgeries) },
+  { label: 'Tx. clique', get: r => pct(r.rates?.ctr, 2) },
+  { label: 'Tx. lead', get: r => pct(r.rates?.lead_rate) },
+  { label: 'Tx. agend.', get: r => pct(r.rates?.booking_rate) },
+  { label: 'Google cliques', get: r => fmtNum(r.gsc_clicks) },
+];
+const mediaCols = computed(() =>
+  mediaChannel.value === 'seo' ? SEO_MEDIA_COLS : MEDIA_COLS
+);
 const isRegua = r => Number(r.days) === Number(p.value.baseline_days);
 
 const isSavingParams = ref(false);
@@ -953,6 +1089,16 @@ const channelTiles = computed(() => {
   const googleStatus = g.configured
     ? { text: 'ligado · só leitura (custo pelo GA4)', estado: 'neutro' }
     : { text: 'não ligado · Integrações → Google', estado: 'problema' };
+  const so = channels.value.seo || {};
+  const seoStatus = so.search_console
+    ? {
+        text: `${fmtNum(so.pages)} páginas · Search Console ligado`,
+        estado: 'bom',
+      }
+    : {
+        text: `${fmtNum(so.pages)} páginas · Search Console não ligado`,
+        estado: 'neutro',
+      };
   return [
     {
       key: 'all',
@@ -971,6 +1117,12 @@ const channelTiles = computed(() => {
       label: 'Google',
       status: data.value ? googleStatus : lendo,
       icon: 'i-lucide-search',
+    },
+    {
+      key: 'seo',
+      label: 'SEO / orgânico',
+      status: data.value ? seoStatus : lendo,
+      icon: 'i-lucide-leaf',
     },
   ];
 });
@@ -1022,6 +1174,131 @@ const leak = computed(() => {
   return worst && worst.gap > 0.1 ? worst : null;
 });
 const capitalize = s => (s ? `${s.charAt(0).toUpperCase()}${s.slice(1)}` : '');
+// item 359: a história do orgânico — sem gasto, o que conta são as visitas,
+// os cliques no convite, os leads e os agendamentos; e o que o Google mostra
+const seoStory = (t, b) => {
+  const out = [];
+  const chips = [];
+  const br = rate(t, 'booking_rate');
+  const bb = rate(b, 'booking_rate');
+  const k = band(br, bb, 'booking_rate');
+  if (k)
+    chips.push({
+      text: `agendamento por lead ${BAND[k].label}`,
+      tone: BAND[k].tone,
+    });
+  out.push({
+    key: 'resultado',
+    kicker: `SEO / orgânico · ${periodoTxt.value}`,
+    title: Number(t.booked)
+      ? `${plural(t.booked, 'pessoa marcou consulta vinda', 'pessoas marcaram consulta vindas')} das páginas, sem anúncio pago.`
+      : 'Nenhum agendamento veio do orgânico neste período.',
+    number: fmtNum(t.leads),
+    sub: 'leads do orgânico · sem investimento em anúncio',
+    text: `${plural(t.impressions, 'visita', 'visitas')} nas páginas · ${plural(t.link_clicks, 'clique no WhatsApp', 'cliques no WhatsApp')} · ${plural(t.booked, 'agendamento', 'agendamentos')} · ${plural(t.surgeries, 'cirurgia', 'cirurgias')}.${t.gsc_ready ? ` No Google: ${fmtNum(t.gsc_clicks)} cliques em ${fmtNum(t.gsc_impressions)} aparições (Search Console).` : ' O Search Console ainda não está ligado.'}${bb ? ` A nossa média de ${b.days} dias é ${pct(bb)} de agendamento por lead.` : ''}`,
+    tone: 'dia',
+    chips,
+    cta: { label: 'Ver os números', key: 'primarios' },
+  });
+  out.push({
+    key: 'seguranca',
+    kicker: 'Como o agente trabalha no orgânico',
+    title: 'Nada muda na página sem o seu ok.',
+    text: 'Toda madrugada o Agente de Páginas lê os últimos 7 dias de cada página contra a média das próprias páginas e o que o Google mostra no Search Console. Tudo que ele propõe é tarefa para a equipe: título, descrição, texto, convite.',
+    tone: 'neutro',
+    chips: [
+      {
+        text: channels.value.seo?.search_console
+          ? 'Search Console: ligado'
+          : 'Search Console: não ligado',
+        tone: channels.value.seo?.search_console ? 'bom' : 'problema',
+      },
+      { text: 'Investimento: R$ 0', tone: '' },
+    ],
+    items: [
+      {
+        title: 'Lê',
+        sub: 'Visitas e cliques no WhatsApp de cada página (sem anúncio pago), leads carimbados pela página e, do Google, cliques, aparições e posição.',
+      },
+      {
+        title: 'Compara',
+        sub: 'Com a média das próprias páginas em 90 dias e com o recorde da casa.',
+      },
+      {
+        title: 'Sugere',
+        sub: 'SEO (título, descrição, palavras), conteúdo (leitura, convite) e tráfego (quase na 1ª página, aparece e não clicam).',
+      },
+      {
+        title: 'Você decide',
+        sub: 'Aprovar abre o passo a passo; a página só muda quando alguém republica.',
+      },
+    ],
+    cta: { label: 'Ver as recomendações', key: 'recomendacoes' },
+  });
+  out.push({
+    key: 'otimizacao',
+    kicker: 'O que ele otimiza no orgânico',
+    title: 'Quatro alavancas, nenhuma custa mídia.',
+    text: 'No orgânico não existe verba para subir ou pausar: o jogo é aparecer mais no Google, ser clicado, prender a leitura e convidar bem.',
+    tone: 'neutro',
+    items: [
+      {
+        title: 'Aparecer',
+        sub: 'Página quase na 1ª página do Google → ajustar título, descrição e palavras para subir de posição.',
+      },
+      {
+        title: 'Ser clicado',
+        sub: 'Aparece muito e clicam pouco → o título e a descrição não estão convidando.',
+      },
+      {
+        title: 'Prender e convidar',
+        sub: 'Visita que não chega na metade ou não clica no WhatsApp → texto e convite da página.',
+      },
+      {
+        title: 'Virar paciente',
+        sub: 'Clica e não vira lead, ou lead que não agenda → mensagem pronta e atendimento.',
+      },
+    ],
+    cta: { label: 'Ver as páginas', key: 'campanhas' },
+  });
+  const open = queueOf('suggested');
+  out.push({
+    key: 'agente',
+    kicker: 'O Agente de Páginas recomenda',
+    title: open.length
+      ? `${open.length === 1 ? '1 ponto a melhorar espera' : `${open.length} pontos a melhorar esperam`} o seu ok.`
+      : 'Nada esperando o seu ok agora.',
+    text: open.length
+      ? ''
+      : 'As leituras saem toda madrugada, depois do Search Console.',
+    items: open.slice(0, 3).map(a => ({
+      title: `${KIND_LABEL[a.kind] || a.kind} · ${a.title}`,
+      sub: `${a.ref_name ? `${a.ref_name} · ` : ''}${a.suggestion}`,
+    })),
+    tone: 'neutro',
+    cta: {
+      label: open.length ? 'Decidir agora' : 'Ver o histórico',
+      key: 'recomendacoes',
+    },
+  });
+  const champ = campaigns.value
+    .filter(c => Number(c.impressions) >= 30 && Number(c.leads) >= 1)
+    .sort((x, y) => y.leads / y.impressions - x.leads / x.impressions)[0];
+  if (champ)
+    out.push({
+      key: 'campea',
+      kicker: 'A página campeã do período',
+      title: `${champ.emoji || '📄'} ${champ.name}`,
+      number: pct(champ.leads / champ.impressions, 2),
+      sub: `das visitas viraram lead · ${plural(champ.impressions, 'visita', 'visitas')}, ${plural(champ.leads, 'lead', 'leads')}, ${plural(champ.booked, 'agendamento', 'agendamentos')}`,
+      text: champ.gsc
+        ? `No Google (28 dias): ${fmtNum(champ.gsc.clicks)} cliques em ${fmtNum(champ.gsc.impressions)} aparições, posição média ${num(champ.gsc.position, 1)}.`
+        : '',
+      tone: 'bom',
+      cta: { label: 'Ver todas as páginas', key: 'campanhas' },
+    });
+  return out;
+};
 const story = computed(() => {
   if (!data.value) return [];
   const t = totals.value;
@@ -1038,6 +1315,7 @@ const story = computed(() => {
     goal.value === 'surgery'
       ? plural(events, 'cirurgia veio', 'cirurgias vieram')
       : plural(events, 'pessoa marcou consulta', 'pessoas marcaram consulta');
+  if (isSeo.value) return seoStory(t, b);
   out.push({
     key: 'resultado',
     kicker: `${CHANNEL_LABEL[channel.value]} · ${periodoTxt.value}`,
@@ -1316,7 +1594,102 @@ const goTo = async key => {
         tom="dia"
         icon="i-lucide-target"
       >
-        <div class="cvg-bloco-pilha">
+        <div v-if="isSeo" class="cvg-bloco-pilha">
+          <div class="cvg-fila cvg-fila--5">
+            <CvIndicador
+              rotulo="Leads do orgânico"
+              :valor="fmtNum(totals.leads)"
+              :comparacao="cmpPrev(totals.leads, previous.leads)"
+              contexto="Pessoas que chegaram pelas páginas sem anúncio pago. Nenhum real investido em mídia."
+              heroi
+              pe="carimbo da página"
+            />
+            <CvIndicador
+              rotulo="Visitas"
+              :valor="fmtNum(totals.impressions)"
+              :comparacao="cmpPrev(totals.impressions, previous.impressions)"
+              contexto="Visitas nas páginas, sem anúncio pago."
+            />
+            <CvIndicador
+              rotulo="Cliques no WhatsApp"
+              :valor="fmtNum(totals.link_clicks)"
+              :comparacao="cmpPrev(totals.link_clicks, previous.link_clicks)"
+              :contexto="`${pct(rate(totals, 'ctr'), 2)} das visitas clicaram no convite.`"
+            />
+            <CvIndicador
+              rotulo="Agendamentos"
+              :valor="fmtNum(totals.booked)"
+              :comparacao="cmpPrev(totals.booked, previous.booked)"
+              :contexto="`${pct(rate(totals, 'booking_rate'))} dos leads marcaram consulta.`"
+            />
+            <CvIndicador
+              rotulo="Cirurgias"
+              :valor="fmtNum(totals.surgeries)"
+              :comparacao="cmpPrev(totals.surgeries, previous.surgeries)"
+              :contexto="`${fmtNum(totals.closed)} fechadas · receita ${moneyShort(totals.revenue)}.`"
+            />
+          </div>
+          <div class="cvg-fila ca-fila-apoio">
+            <CvIndicador
+              rotulo="Google: cliques"
+              :valor="totals.gsc_ready ? fmtNum(totals.gsc_clicks) : '—'"
+              :comparacao="{
+                texto: totals.gsc_ready
+                  ? `${fmtNum(totals.gsc_days)} dias com foto`
+                  : 'Search Console não ligado',
+                estado: 'neutro',
+              }"
+              contexto="Cliques na busca do Google que chegaram ao site (Search Console)."
+              apoio
+            />
+            <CvIndicador
+              rotulo="Google: aparições"
+              :valor="totals.gsc_ready ? fmtNum(totals.gsc_impressions) : '—'"
+              :comparacao="{
+                texto: totals.gsc_impressions
+                  ? `${pct(totals.gsc_clicks / totals.gsc_impressions, 2)} viraram clique`
+                  : 'sem aparições no período',
+                estado: 'neutro',
+              }"
+              contexto="Quantas vezes as páginas apareceram na busca."
+              apoio
+            />
+            <CvIndicador
+              rotulo="Leads por 100 visitas"
+              :valor="
+                pct(
+                  totals.impressions ? totals.leads / totals.impressions : null,
+                  2
+                )
+              "
+              :comparacao="
+                cmpBase(
+                  totals.impressions ? totals.leads / totals.impressions : null,
+                  'leads_per_visit',
+                  v => pct(v, 2)
+                )
+              "
+              contexto="O resultado da página inteira."
+              apoio
+            />
+            <CvIndicador
+              rotulo="Taxa de agendamento"
+              :valor="pct(rate(totals, 'booking_rate'))"
+              :comparacao="
+                cmpBase(rate(totals, 'booking_rate'), 'rates.booking_rate', pct)
+              "
+              contexto="Leads do orgânico que marcaram consulta."
+              apoio
+            />
+          </div>
+          <p class="cvg-legenda">
+            Visitas e cliques vêm do tráfego das páginas (sem utm de anúncio).
+            Leads, agendamentos e cirurgias vêm do carimbo da página no contato
+            × Agenda × Oftalmofácil. Cliques e aparições do Google vêm do Search
+            Console (foto diária; por página, janela fixa de 28 dias).
+          </p>
+        </div>
+        <div v-else class="cvg-bloco-pilha">
           <div class="cvg-fila cvg-fila--5">
             <CvIndicador
               :rotulo="`⭐ ${goalLabel}`"
@@ -1415,7 +1788,7 @@ const goTo = async key => {
         <div class="cvg-bloco-pilha">
           <div class="cvg-grafico">
             <span class="cvg-grafico-titulo">
-              <span>Dia a dia · investido, leads e agendamentos</span>
+              <span>{{ timelineTitle }}</span>
               <span>{{ periodoTxt }}</span>
             </span>
             <div class="cvg-grafico-corpo">
@@ -1425,8 +1798,8 @@ const goTo = async key => {
                 :bars="timelineBars"
                 :lines="timelineLines"
                 :refs="timelineRefs"
-                :left-format="moneyShort"
-                :right-format="fmtNum"
+                :left-format="leftFmt"
+                :right-format="v => fmtNum(Math.round(v))"
                 :tip="timelineTip"
                 :height="240"
                 empty-text="sem dia com número no período"
@@ -1443,13 +1816,17 @@ const goTo = async key => {
           <div class="cvg-graficos">
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
-                <span>Quem levou o investimento</span>
+                <span>{{
+                  isSeo
+                    ? 'Quem recebeu as visitas'
+                    : 'Quem levou o investimento'
+                }}</span>
               </span>
               <div class="cvg-grafico-corpo">
                 <DonutChart
                   :slices="donutSpend"
                   :size="150"
-                  :format="moneyShort"
+                  :format="isSeo ? fmtNum : moneyShort"
                   unit="investidos"
                   empty-text="sem gasto no período"
                 />
@@ -1530,12 +1907,14 @@ const goTo = async key => {
             <tbody>
               <tr class="ca-tab-grupo">
                 <td :colspan="channelsShown.length + 1">
-                  Secundários · antes do lead
+                  Secundários · antes do lead{{
+                    isSeo ? ' (visita = exibição, clique = WhatsApp)' : ''
+                  }}
                 </td>
               </tr>
-              <tr v-for="ind in SECONDARY" :key="ind.key">
+              <tr v-for="ind in secondaryShown" :key="ind.key">
                 <td>
-                  <span class="ca-ind-nome">{{ ind.label }}</span>
+                  <span class="ca-ind-nome">{{ indLabel(ind) }}</span>
                   <span class="ca-ind-dica">{{ ind.hint }}</span>
                 </td>
                 <td v-for="ch in channelsShown" :key="ch" class="text-right">
@@ -1580,11 +1959,19 @@ const goTo = async key => {
       <!-- ══ 3 · CAMPANHAS em três níveis ══ -->
       <CvBloco
         id="bloco-campanhas"
-        titulo="Campanhas → conjuntos → anúncios"
-        :subtitulo="`Clique na campanha para abrir os conjuntos e os anúncios (Meta). O selo compara ${goalLabel} de cada linha com a nossa média do canal.`"
-        icon="i-lucide-megaphone"
+        :titulo="
+          isSeo
+            ? 'Páginas · sem anúncio pago'
+            : 'Campanhas → conjuntos → anúncios'
+        "
+        :subtitulo="
+          isSeo
+            ? 'Cada página como um canal: visitas, cliques no WhatsApp, leads e o que o Google mostra dela (Search Console, 28 dias).'
+            : `Clique na campanha para abrir os conjuntos e os anúncios (Meta). O selo compara ${goalLabel} de cada linha com a nossa média do canal.`
+        "
+        :icon="isSeo ? 'i-lucide-files' : 'i-lucide-megaphone'"
       >
-        <template #acoes>
+        <template v-if="!isSeo" #acoes>
           <div class="cvg-chave" role="tablist" aria-label="Visualização">
             <button
               type="button"
@@ -1603,7 +1990,66 @@ const goTo = async key => {
           </div>
         </template>
 
-        <div v-if="campaignView === 'list'" class="overflow-x-auto">
+        <div v-if="isSeo" class="overflow-x-auto">
+          <table v-if="campaigns.length" class="ca-tab ca-tab--campanhas">
+            <thead>
+              <tr>
+                <th class="text-left">Página</th>
+                <th class="text-right">Visitas</th>
+                <th class="text-right">Cliques WA</th>
+                <th class="text-right">Leads</th>
+                <th class="text-right">Agend.</th>
+                <th class="text-right">Cirurg.</th>
+                <th class="text-right">Tx. clique</th>
+                <th class="text-right">Tx. lead</th>
+                <th class="text-right">Tx. agend.</th>
+                <th class="text-right">
+                  Google cliques<span class="ca-th-sub">28 dias</span>
+                </th>
+                <th class="text-right">
+                  Aparições<span class="ca-th-sub">28 dias</span>
+                </th>
+                <th class="text-right">Posição</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in campaigns" :key="c.id">
+                <td>
+                  <span class="ca-nome-txt" :title="c.name">{{
+                    pageName(c)
+                  }}</span>
+                  <span v-if="c.slug" class="ca-ind-dica">/{{ c.slug }}</span>
+                </td>
+                <td class="text-right">{{ fmtNum(c.impressions) }}</td>
+                <td class="text-right">{{ fmtNum(c.link_clicks) }}</td>
+                <td class="text-right">
+                  <b>{{ fmtNum(c.leads) }}</b>
+                </td>
+                <td class="text-right">
+                  <b>{{ fmtNum(c.booked) }}</b>
+                </td>
+                <td class="text-right">{{ fmtNum(c.surgeries) }}</td>
+                <td class="text-right">{{ pct(c.rates?.ctr, 2) }}</td>
+                <td class="text-right">{{ pct(c.rates?.lead_rate) }}</td>
+                <td class="text-right">{{ pct(c.rates?.booking_rate) }}</td>
+                <td class="text-right">
+                  {{ c.gsc ? fmtNum(c.gsc.clicks) : '—' }}
+                </td>
+                <td class="text-right">
+                  {{ c.gsc ? fmtNum(c.gsc.impressions) : '—' }}
+                </td>
+                <td class="text-right">
+                  {{ c.gsc?.position ? num(c.gsc.position, 1) : '—' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-else class="cvg-vazio">
+            nenhuma página com visita ou lead no período
+          </p>
+        </div>
+
+        <div v-else-if="campaignView === 'list'" class="overflow-x-auto">
           <table v-if="visibleRows.length" class="ca-tab ca-tab--campanhas">
             <thead>
               <tr>
@@ -1665,6 +2111,13 @@ const goTo = async key => {
                       class="cvg-legenda flex-shrink-0"
                     >
                       · pausado
+                    </span>
+                    <span
+                      v-if="row.team"
+                      class="cvg-chip cvg-chip--apoio flex-shrink-0"
+                      title="pacientes cujo 'como chegou' a equipe informou no cadastro (item 362)"
+                    >
+                      equipe
                     </span>
                   </button>
                   <p v-if="row.note" class="cvg-legenda pl-1">
@@ -1780,19 +2233,27 @@ const goTo = async key => {
 
         <div v-if="campaignBars.length" class="cvg-grafico">
           <span class="cvg-grafico-titulo">
-            <span>{{ goalLabel }} por campanha</span>
-            <span
-              >menor é melhor · verde/vermelho = veredito contra a média</span
-            >
+            <span>{{
+              isSeo ? 'Leads por página' : `${goalLabel} por campanha`
+            }}</span>
+            <span>{{
+              isSeo
+                ? 'maior é melhor'
+                : 'menor é melhor · verde/vermelho = veredito contra a média'
+            }}</span>
           </span>
           <div class="cvg-grafico-corpo">
             <HBars
               :rows="campaignBars"
-              :series="[{ label: goalLabel, format: v => moneyShort(v) }]"
-              :format="v => moneyShort(v)"
+              :series="[
+                isSeo
+                  ? { label: 'Leads', format: fmtNum }
+                  : { label: goalLabel, format: v => moneyShort(v) },
+              ]"
+              :format="isSeo ? fmtNum : v => moneyShort(v)"
               :label-width="15"
-              :highlight-max="false"
-              :reference="campaignRef"
+              :highlight-max="isSeo"
+              :reference="isSeo ? null : campaignRef"
               empty-text="sem campanha com resultado no período"
             />
           </div>
@@ -1822,7 +2283,10 @@ const goTo = async key => {
             />
           </span>
           <div class="min-w-0">
-            <p class="ca-trava-titulo">
+            <p v-if="isSeo" class="ca-trava-titulo">
+              Páginas: tudo é tarefa para a equipe. Nada muda na página sozinho.
+            </p>
+            <p v-else class="ca-trava-titulo">
               {{
                 executeApi
                   ? 'API da Meta ligada: verba e pausa saem pela API, com confirmação antes.'
@@ -2062,7 +2526,7 @@ const goTo = async key => {
         <template #acoes>
           <div class="cvg-chave" role="tablist" aria-label="Canal da média">
             <button
-              v-for="ch in ['all', 'meta', 'google']"
+              v-for="ch in ['all', 'meta', 'google', 'seo']"
               :key="ch"
               type="button"
               :class="mediaChannel === ch ? 'cvg-on' : ''"
@@ -2077,7 +2541,7 @@ const goTo = async key => {
             <thead>
               <tr>
                 <th class="text-left">Janela</th>
-                <th v-for="c in MEDIA_COLS" :key="c.label" class="text-right">
+                <th v-for="c in mediaCols" :key="c.label" class="text-right">
                   {{ c.label }}
                 </th>
               </tr>
@@ -2098,7 +2562,7 @@ const goTo = async key => {
                   </span>
                 </td>
                 <td
-                  v-for="c in MEDIA_COLS"
+                  v-for="c in mediaCols"
                   :key="c.label"
                   class="text-right whitespace-nowrap"
                 >
@@ -2391,6 +2855,7 @@ const goTo = async key => {
 
       <!-- ══ 8 · SUBIR CAMPANHA (sanfona) ══ -->
       <CvBloco
+        v-if="!isSeo"
         id="bloco-subir"
         titulo="Subir campanha"
         :subtitulo="

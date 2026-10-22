@@ -14,6 +14,7 @@ class Crm::AcquisitionChannel
   PAID = %w[google meta].freeze
   NO_TRACE = 'sem rastro de anúncio (indicação, WhatsApp direto, balcão)'.freeze
   NO_CAMPAIGN = '(campanha não identificada)'.freeze
+  TEAM_CAMPAIGN = '(informado pela equipe)'.freeze
 
   Result = Struct.new(:channel, :detail, :campaign, :ad_id, keyword_init: true)
 
@@ -24,15 +25,19 @@ class Crm::AcquisitionChannel
   # { contact_id => Result } — numa consulta só
   def for_contacts(ids)
     rows = @account.contacts.where(id: ids.compact.uniq)
-                   .pluck(:id, Arel.sql("additional_attributes->'meta_ads'"), Arel.sql("additional_attributes->'page_ads'"))
-    preload_ads(rows.map { |_, meta, _| as_hash(meta)['source_id'] })
-    rows.to_h { |id, meta, page| [id, classify(as_hash(meta), as_hash(page))] }
+                   .pluck(:id, Arel.sql("additional_attributes->'meta_ads'"), Arel.sql("additional_attributes->'page_ads'"),
+                          Arel.sql("additional_attributes->'canal_origem'"))
+    preload_ads(rows.map { |_, meta, _, _| as_hash(meta)['source_id'] })
+    rows.to_h { |id, meta, page, team| [id, classify(as_hash(meta), as_hash(page), as_hash(team))] }
   end
 
-  def classify(meta, page)
+  # item 362: sem carimbo automático, vale o que a EQUIPE informou no cadastro
+  # ("como chegou"); sem nada, orgânico sem rastro
+  def classify(meta, page, team = {}) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     touches = []
     touches << [meta['captured_at'].to_s, meta_touch(meta)] if meta['source_id'].present? || meta['ctwa_clid'].present?
     touches << [page['captured_at'].to_s, page_touch(page)] if page['source'].present?
+    return team_touch(team) if touches.empty? && Crm::LeadChannel.valid?(team['key'])
     return Result.new(channel: 'organico', detail: NO_TRACE) if touches.empty?
 
     # sem data vai para o fim (o carimbo com data é o mais confiável)
@@ -40,6 +45,11 @@ class Crm::AcquisitionChannel
   end
 
   private
+
+  def team_touch(team)
+    Result.new(channel: Crm::LeadChannel.channel_for(team['key']),
+               detail: "informado pela equipe: #{Crm::LeadChannel.label_for(team['key'])}", campaign: TEAM_CAMPAIGN)
+  end
 
   def meta_touch(meta)
     ad_id = meta['source_id'].to_s.presence

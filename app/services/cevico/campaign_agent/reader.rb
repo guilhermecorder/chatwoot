@@ -36,6 +36,7 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
     campaigns = []
     campaigns.concat(meta_campaigns) if @channels.include?('meta')
     campaigns.concat(google_campaigns) if @channels.include?('google')
+    campaigns.concat(seo_pages) if @channels.include?('seo')
     campaigns = campaigns.sort_by { |c| [-c['spend'].to_f, -c['leads'].to_f] }
     { campaigns: campaigns, flat: flatten(campaigns), totals: totals(campaigns), time_to_book: time_to_book }
   end
@@ -47,6 +48,7 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
     (%w[all] + @channels).each do |ch|
       list = ch == 'all' ? campaigns : campaigns.select { |c| c['channel'] == ch }
       out[ch] = finish(sum_rows(list), 'channel', ch == 'all' ? 'Tudo' : ch, ch)
+      out[ch].merge!(seo_search_console_totals) if ch == 'seo'
     end
     out
   end
@@ -82,13 +84,31 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
     per['all'] = %w[spend leads booked].index_with do |k|
       dates.each_index.map { |i| (per['meta'][k][i] + per['google'][k][i]).round(2) }
     end
+    per['seo'] = seo_daily(dates) if @channels.include?('seo')
     { 'labels' => dates.map { |d| d.strftime('%d/%m') }, 'dates' => dates.map(&:iso8601) }.merge(per)
+  end
+
+  # dia a dia do orgânico: visitas e cliques no WhatsApp (tráfego das páginas) + leads/agendamentos
+  def seo_daily(dates) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    traffic = @account.cevico_page_traffic.where(date: @since_date..@until_date).where.not(source: PAID_SOURCES)
+                      .group(:date).pluck(:date, Arel.sql('SUM(views)'), Arel.sql('SUM(cta_clicks)')).to_h { |d, v, c| [d, [v.to_i, c.to_i]] }
+    leads = organic_lead_dates
+    booked_at = first_booked_at(leads.keys, Crm::AdFunnelSteps.stage_ids_for(@account)[:booked])
+    by_day = Hash.new(0)
+    booked_by_day = Hash.new(0)
+    leads.each do |cid, at|
+      d = at.to_date
+      by_day[d] += 1
+      booked_by_day[d] += 1 if booked_at[cid]
+    end
+    { 'spend' => dates.map { 0.0 }, 'views' => dates.map { |d| traffic.dig(d, 0).to_i }, 'cta' => dates.map { |d| traffic.dig(d, 1).to_i },
+      'leads' => dates.map { |d| by_day[d] }, 'booked' => dates.map { |d| booked_by_day[d] } }
   end
 
   private
 
   # ── META ───────────────────────────────────────────────────────────────
-  def meta_campaigns # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def meta_campaigns # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     ad_rows = meta_ad_rows
     by_adset = ad_rows.group_by { |r| r['parent_id'] }
     adsets = by_adset.map do |adset_id, ads|
@@ -107,7 +127,39 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
         .merge('status' => sets.any? { |s| s['status'] == 'ACTIVE' } ? 'ACTIVE' : 'PAUSED', 'children' => sets.sort_by { |s| -s['spend'].to_f })
     end
     campaigns << meta_untracked_row if meta_page_funnels[:untracked].present?
+    campaigns << team_row('meta') if team_row('meta')
     campaigns
+  end
+
+  # ── INFORMADO PELA EQUIPE (item 362) ────────────────────────────────────
+  # pacientes sem carimbo automático cujo "como chegou" a equipe informou no
+  # cadastro (Crm::LeadChannel): uma linha por canal, sem gasto próprio — o
+  # gasto do canal já está nas campanhas; aqui entram leads, consultas e
+  # cirurgias que antes ficavam invisíveis
+  def team_row(channel) # rubocop:disable Metrics/MethodLength
+    @team_rows ||= {}
+    return @team_rows[channel] if @team_rows.key?(channel)
+
+    keys = Crm::LeadChannel.keys_for(channel)
+    cids = @account.contacts
+                   .where("additional_attributes -> 'canal_origem' ->> 'key' IN (?)", keys)
+                   .where("additional_attributes -> 'meta_ads' ->> 'source_id' IS NULL")
+                   .where("COALESCE(additional_attributes -> 'page_ads' ->> 'source', '') NOT IN (?)", PAID_SOURCES)
+                   .where("(additional_attributes -> 'canal_origem' ->> 'em')::timestamptz BETWEEN ? AND ?",
+                          @since_date.beginning_of_day, @until_date.end_of_day)
+                   .pluck(:id)
+    @team_rows[channel] = if cids.empty?
+                            nil
+                          else
+                            funnel = Crm::AdFunnel.funnel_row(cids, steps_for(cids))
+                            row = ROW.add_funnel!(ROW.blank, funnel)
+                            finish(row, 'campaign', Crm::AcquisitionChannel::TEAM_CAMPAIGN, channel, id: "#{channel}-team", parent_id: nil,
+                                                                                                     video: false)
+                              .merge('team' => true, 'children' => [], 'status' => nil,
+                                     'note' => "pacientes cujo \"como chegou\" a equipe informou no cadastro: #{keys.map do |k|
+                                       Crm::LeadChannel.label_for(k)
+                                     end.join(', ')}")
+                          end
   end
 
   def meta_ad_rows # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
@@ -180,8 +232,85 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
              'note' => names.any? ? "utm_campaign visto: #{names.join(', ')}" : 'leads de página da Meta sem utm que case com um anúncio ou campanha')
   end
 
+  # ── SEO / ORGÂNICO (item 359, 21/10) ───────────────────────────────────
+  # As páginas SEM anúncio pago, lidas como um canal: visita = "exibição",
+  # clique no WhatsApp = "clique", e os leads carimbados pela página com origem
+  # orgânica (Google orgânico, redes, busca, direto). Gasto = 0: a estrela-guia
+  # não se aplica; o que vale são as taxas e os agendamentos. Por cima, o que o
+  # Google conta no Search Console (cliques, impressões, posição) — a foto é de
+  # uma janela fixa de 28 dias por página; os totais do período somam o diário.
+  PAID_SOURCES = %w[google_ads meta_ads].freeze
+
+  def seo_pages # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+    traffic = @account.cevico_page_traffic.where(date: @since_date..@until_date).where.not(source: PAID_SOURCES)
+                      .group(:cevico_page_id).pluck(:cevico_page_id, Arel.sql('SUM(views)'), Arel.sql('SUM(cta_clicks)'))
+                      .to_h { |pid, v, c| [pid, { views: v.to_i, cta: c.to_i }] }
+    leads = organic_page_leads
+    steps = steps_for(leads.map(&:first))
+    by_page = leads.group_by { |_, pid, _| pid }
+    ids = (traffic.keys | by_page.keys).compact
+    pages = @account.cevico_pages.where(id: ids).pluck(:id, :title, :slug, :emoji).to_h { |id, t, sl, e| [id, { title: t, slug: sl, emoji: e }] }
+    gsc = seo_search_console_pages
+    rows = (traffic.keys | by_page.keys).map do |pid|
+      t = traffic[pid] || { views: 0, cta: 0 }
+      funnel = by_page[pid] ? Crm::AdFunnel.funnel_row(by_page[pid].map(&:first), steps) : nil
+      row = ROW.from_google(spend: 0, clicks: t[:cta], impressions: t[:views], funnel: funnel)
+      name = pid.nil? ? 'Porta de entrada (hub)' : (pages.dig(pid, :title) || "Página #{pid}")
+      finish(row, 'campaign', name, 'seo', id: pid.nil? ? 'hub' : "page-#{pid}", parent_id: nil, video: false)
+        .merge('status' => 'ACTIVE', 'children' => [], 'page_id' => pid, 'slug' => pages.dig(pid, :slug), 'emoji' => pages.dig(pid, :emoji),
+               'gsc' => gsc[pid])
+    end
+    rows = rows.sort_by { |r| [-r['leads'].to_f, -r['impressions'].to_f] }
+    rows << team_row('organico').merge('channel' => 'seo', 'id' => 'seo-team') if team_row('organico')
+    rows
+  end
+
+  # [[contato, página, origem]] dos leads que chegaram por página SEM anúncio pago
+  def organic_page_leads
+    organic_contacts.pluck(:id, Arel.sql("(additional_attributes -> 'page_ads' ->> 'page_id')::bigint"),
+                           Arel.sql("additional_attributes -> 'page_ads' ->> 'source'"))
+  end
+
+  def organic_lead_dates
+    organic_contacts.pluck(:id, Arel.sql("additional_attributes -> 'page_ads' ->> 'captured_at'"))
+                    .to_h.transform_values { |at| Time.zone.parse(at.to_s) || @since_date }
+  end
+
+  def organic_contacts
+    @account.contacts
+            .where("additional_attributes -> 'page_ads' IS NOT NULL")
+            .where("COALESCE(additional_attributes -> 'page_ads' ->> 'source', '') NOT IN (?)", PAID_SOURCES)
+            .where("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz BETWEEN ? AND ?",
+                   @since_date.beginning_of_day, @until_date.end_of_day)
+  end
+
+  def search_console
+    @search_console ||= Cevico::SearchConsoleReport.new(@account).call
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO campanhas] Search Console indisponível: #{e.message}"
+    @search_console = {}
+  end
+
+  # por página, a foto da janela fixa (28 dias) do Search Console
+  def seo_search_console_pages
+    (search_console[:pages] || []).each_with_object({}) do |p, h|
+      h[p[:page_id]] = p.slice(:clicks, :impressions, :ctr, :position) if p[:page_id]
+    end
+  end
+
+  # cliques e impressões do Google dentro do PERÍODO (a foto diária cobre ~56 dias)
+  def seo_search_console_totals
+    rows = (search_console[:daily] || []).select do |d, _, _|
+      Date.parse(d.to_s).between?(@since_date, @until_date)
+    rescue ArgumentError
+      false
+    end
+    { 'gsc_clicks' => rows.sum { |_, c, _| c.to_i }, 'gsc_impressions' => rows.sum { |_, _, i| i.to_i }, 'gsc_days' => rows.size,
+      'gsc_ready' => search_console[:ready] == true, 'gsc_window' => search_console[:window] }
+  end
+
   # ── GOOGLE ─────────────────────────────────────────────────────────────
-  def google_campaigns # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  def google_campaigns # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     days = Crm::CampaignDay.google.where(account_id: @account.id).between(@since_date, @until_date)
                            .group(:campaign_id)
                            .pluck(:campaign_id, Arel.sql('SUM(spend)'), Arel.sql('SUM(clicks)'), Arel.sql('SUM(impressions)'),
@@ -195,6 +324,7 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
         .merge('status' => c[:spend].positive? ? 'ACTIVE' : 'PAUSED', 'children' => [], 'first_day' => google_first_day[id]&.iso8601)
     end
     rows << google_untracked_row(funnels) if funnels[:untracked].present?
+    rows << team_row('google') if team_row('google')
     rows
   end
 
@@ -267,8 +397,9 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
 
   # ⏱️ terciário: mediana de dias entre o lead chegar e entrar na coluna de
   # agendamento (ou ser marcado na Agenda), por canal
-  def time_to_book
+  def time_to_book # rubocop:disable Metrics/AbcSize
     leads = { 'meta' => meta_lead_dates, 'google' => google_lead_dates }
+    leads['seo'] = organic_lead_dates if @channels.include?('seo')
     stage_ids = Crm::AdFunnelSteps.stage_ids_for(@account)[:booked]
     all_ids = leads.values.flat_map(&:keys)
     return {} if all_ids.empty?

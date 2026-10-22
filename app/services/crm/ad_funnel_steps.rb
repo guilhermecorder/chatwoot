@@ -19,7 +19,7 @@ class Crm::AdFunnelSteps
   OF_DONE = %w[agendada realizada].freeze
 
   attr_reader :crm, :booked_agenda, :attended_agenda, :closed_agenda, :of_closed, :of_done,
-              :booked, :attended, :closed, :surgeries
+              :booked, :attended, :closed, :surgeries, :indicated_agenda, :indicated
 
   def initialize(account, contact_ids) # rubocop:disable Metrics/AbcSize
     @account = account
@@ -29,6 +29,8 @@ class Crm::AdFunnelSteps
     @closed = crm[:closed] | closed_agenda | of_closed | surgeries
     @attended = crm[:attended] | attended_agenda | closed
     @booked = crm[:booked] | booked_agenda | attended
+    # item 360: indicação de cirurgia (consulta realizada com a chavinha "indicou" da Agenda); quem fechou foi indicado
+    @indicated = indicated_agenda | closed
   end
 
   # colunas do CRM de cada degrau (a linha do tempo usa para DATAR cada passo)
@@ -48,6 +50,7 @@ class Crm::AdFunnelSteps
     @crm = stage_ids.transform_values { |ids| passed(ids) }
     @booked_agenda = tasks('consulta').distinct.pluck(:contact_id).to_set
     @attended_agenda = tasks('consulta').where(attendance: 'attended').distinct.pluck(:contact_id).to_set
+    @indicated_agenda = tasks('consulta').where(attendance: 'attended', surgery_indication: 'indicated').distinct.pluck(:contact_id).to_set
     @closed_agenda = tasks('cirurgia').where(canceled_at: nil).distinct.pluck(:contact_id).to_set
     @done_agenda = tasks('cirurgia').where(attendance: 'attended').distinct.pluck(:contact_id).to_set
     surgeries = Crm::OftalmofacilSurgery.where(account_id: @account.id, contact_id: @ids)

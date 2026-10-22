@@ -15,7 +15,7 @@ class Api::V1::Accounts::Crm::CampaignAgentController < Api::V1::Accounts::BaseC
     since, until_at = standard_period_range || default_range
     since_d = since.to_date
     until_d = until_at.to_date
-    channels = params[:channel].presence_in(%w[meta google]) ? [params[:channel]] : %w[meta google]
+    channels = params[:channel].presence_in(%w[meta google seo]) ? [params[:channel]] : %w[meta google]
     reader_obj = Cevico::CampaignAgent::Reader.new(account: account, since_date: since_d, until_date: until_d, goal: agent_params['goal'],
                                                    channels: channels)
     reader = reader_obj.call
@@ -33,7 +33,7 @@ class Api::V1::Accounts::Crm::CampaignAgentController < Api::V1::Accounts::BaseC
       time_to_book: reader[:time_to_book],
       series: reader_obj.daily, # dia a dia para os gráficos (358c)
       baselines: Cevico::CampaignAgent::Baselines.new(account: account, goal: agent_params['goal']).call,
-      actions: actions_json,
+      actions: actions_json(channels),
       scoreboard: Cevico::CampaignAgent::Learning.scoreboard(account),
       state: Cevico::CampaignAgent::Daily.state(account),
       briefs: Cevico::CampaignAgent::Launcher.new(account: account).list,
@@ -119,7 +119,7 @@ class Api::V1::Accounts::Crm::CampaignAgentController < Api::V1::Accounts::BaseC
   end
 
   def set_action
-    @action = Crm::CampaignAction.ads.find_by(account_id: account.id, id: params[:id])
+    @action = Crm::CampaignAction.where(channel: %w[meta google pages]).find_by(account_id: account.id, id: params[:id])
     render json: { error: 'Recomendação não encontrada.' }, status: :not_found if @action.nil?
   end
 
@@ -133,8 +133,9 @@ class Api::V1::Accounts::Crm::CampaignAgentController < Api::V1::Accounts::BaseC
   end
 
   # abertas + as últimas 60 decididas (histórico e aprendizado)
-  def actions_json
-    scope = Crm::CampaignAction.ads.where(account_id: account.id) # as páginas têm a fila delas (item 353)
+  # item 359: no azulejo SEO / orgânico a fila é a do Agente de Páginas (canal pages)
+  def actions_json(channels = %w[meta google])
+    scope = (channels == %w[seo] ? Crm::CampaignAction.pages : Crm::CampaignAction.ads).where(account_id: account.id)
     { open: scope.open.recent.map(&:as_json),
       history: scope.where.not(status: Crm::CampaignAction::OPEN).order(updated_at: :desc).limit(60).map(&:as_json) }
   end
@@ -146,7 +147,9 @@ class Api::V1::Accounts::Crm::CampaignAgentController < Api::V1::Accounts::BaseC
     { meta: { configured: meta['access_token'].present? && meta['ad_account_id'].present?, sync: meta['creatives_sync'] || {},
               execute: agent_params['execute_api'] },
       google: { configured: Cevico::CampaignAgent::GoogleSync.new(account: account).configured?,
-                sync: Cevico::CampaignAgent::GoogleSync.state(account) } }
+                sync: Cevico::CampaignAgent::GoogleSync.state(account) },
+      seo: { configured: true, search_console: Cevico::SearchConsole.new(account).configured?,
+             pages: CevicoPage.where(account_id: account.id).published.count } }
   end
 
   # criativos ativos da Central para reaproveitar na ficha de subida

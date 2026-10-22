@@ -90,6 +90,8 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       money_restricted: !money_visible?,
       origin: contact.additional_attributes&.dig('meta_ads')
                      &.slice('headline', 'ad_name', 'source_url', 'thumbnail_url', 'captured_at'),
+      # 🧭 item 362: como chegou — { key, auto } (auto = carimbo automático, não se mexe)
+      channel: Crm::LeadChannel.key_of(contact),
       # 👪 item 346: quem agendou para quem (os dois lados ficam amarrados)
       scheduled_by: contact.additional_attributes&.dig('agendado_por'),
       scheduled_for: Array(contact.additional_attributes&.dig('agendou_para')),
@@ -178,7 +180,7 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       stage_automations: stage_autos.map { |a| { id: a.id, name: a.name, action_type: a.action_type } },
       # por quais automações o paciente JÁ PASSOU e quando (trilha gravada
       # pelo CrmAutomationFireJob) — mostra qual automação realmente ajudou
-      trail: Array(contact.additional_attributes&.dig('cevico_automation_trail')).reverse.first(30)
+      trail: Array(contact.additional_attributes&.dig('cevico_automation_trail')).last(30).reverse
     }
   end
 

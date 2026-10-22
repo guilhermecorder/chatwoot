@@ -34,7 +34,7 @@ import {
   TASK_COLORS, taskColorOf, attendanceMarkOf,
   occupiesSlot,
   patientNameOf, handConfirmed, isConfirmed, isDeclined, confirmationTitle,
-  ORIGINS, ORIGIN_BY_KEY, originOf,
+  ORIGINS, ORIGIN_BY_KEY, originOf, LEAD_CHANNELS, LEAD_CHANNEL_BY_KEY,
   reservedFor, windowAccepts, windowAt,
   effectiveAppointmentPrice,
   presetAppointmentPrice,
@@ -1070,6 +1070,7 @@ const emptyForm = (day, prefill = {}) => {
     booking_kind: prefill.booking_kind || 'agendamento',
     // 🏥 item 300: CEVICO × Oftalmofácil — obrigatório ao criar (nasce em branco de propósito)
     origin: prefill.origin || '',
+    channel: '', // 🧭 item 362: como chegou
     // 🔎 item 346: paciente escolhido na busca (nome travado, consulta no cadastro dele)
     contact_id: prefill.contact_id || null,
     // 💰 item 324: consulta particular + valores lançados à mão neste card
@@ -1182,6 +1183,7 @@ const openEdit = task => {
     description: task.description ?? '',
     booking_kind: task.booking_kind || 'agendamento',
     origin: task.origin || '',
+    channel: task.channel?.key || '', // 🧭 item 362
     contact_id: task.contact_id || null,
     particular: !!task.particular,
     charges: (task.charges || []).map(c => ({ ...c })),
@@ -1229,6 +1231,15 @@ const hmOf = t => format(new Date(t.due_at), 'HH:mm');
 const originLocked = computed(() => Boolean(editingTask.value?.source));
 const originMissing = computed(() => !editingTask.value && !form.value.origin);
 const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.');
+// 🧭 item 362 (21/10): COMO CHEGOU — obrigatório ao criar paciente NOVO (o que
+// já tem carimbo automático de anúncio/página vem travado; o que já foi informado
+// vem preenchido). Vira carimbo canal_origem no contato e conta no CAC e nas Campanhas.
+const channelAuto = ref(false);
+const channelMissing = computed(() => !editingTask.value && !form.value.contact_id && !form.value.channel);
+const channelHint = computed(() => {
+  if (channelAuto.value) return 'Carimbo automático (clique no anúncio ou página): não precisa escolher.';
+  return LEAD_CHANNEL_BY_KEY[form.value.channel] ? 'Vira o rastro deste paciente no Financeiro & CAC e nas Campanhas.' : 'Pergunte: "como você chegou até a gente?" — é o que liga esta consulta ao canal que trouxe o paciente.';
+});
 // 📱 item 346: paciente NOVO só nasce com telefone (DDD + número) — sem ele
 // não há como achar o cadastro de quem já existe e o paciente duplica
 const phoneMissing = computed(() => !editingTask.value && !form.value.contact_id && (form.value.phone || '').replace(/\D/g, '').length < 10);
@@ -1246,6 +1257,9 @@ const pickPatient = p => {
   form.value.name = p.name || form.value.name;
   if (p.phone_number) form.value.phone = p.phone_number;
   if (!form.value.origin && p.origin) form.value.origin = p.origin;
+  // 🧭 item 362: o que já se sabe do canal vem junto (automático trava)
+  form.value.channel = p.channel?.key || '';
+  channelAuto.value = Boolean(p.channel?.auto);
   nameFocused.value = false;
   phoneOwner.value = null;
 };
@@ -1253,6 +1267,8 @@ const unpickPatient = () => {
   form.value.contact_id = null;
   form.value.name = '';
   form.value.phone = '';
+  form.value.channel = '';
+  channelAuto.value = false;
 };
 const onNameKey = e => {
   if (e.key === 'Escape') { nameFocused.value = false; return; }
@@ -1270,7 +1286,7 @@ watch(() => [form.value.phone, form.value.contact_id, showModal.value], ([phone,
     } catch { phoneOwner.value = null; }
   }, 400);
 });
-const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value && !phoneMissing.value));
+const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value && !phoneMissing.value && !channelMissing.value));
 
 const save = async () => {
   if (!canSave.value || isSaving.value) return;
@@ -1315,6 +1331,7 @@ const save = async () => {
         .map(c => ({ label: String(c.label || '').trim(), amount: String(c.amount).trim() })),
     };
     if (form.value.origin && !originLocked.value) payload.origin = form.value.origin;
+    if (form.value.channel && !channelAuto.value) payload.channel = form.value.channel; // 🧭 item 362
     // 🔎 item 346: paciente escolhido na busca → a consulta fica no cadastro dele
     if (form.value.contact_id) payload.contact_id = form.value.contact_id;
     // o ✅ digitado no nome sai do nome e vira o confirmado de verdade
@@ -2912,6 +2929,27 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <p class="text-[11px] mt-1.5" :class="originMissing ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-n-slate-10'">{{ originHint }}</p>
             </div>
+            <!-- 🧭 item 362: como o paciente chegou (obrigatório ao criar paciente novo) -->
+            <div v-if="!originLocked" class="mt-3">
+              <span class="cv-label block mb-1.5">Como chegou? {{ channelMissing ? '*' : '' }}</span>
+              <div class="cv-ag-origin cv-ag-channel" :class="channelMissing ? 'cv-ag-origin-need' : ''">
+                <button
+                  v-for="o in LEAD_CHANNELS"
+                  :key="'ch' + o.key"
+                  type="button"
+                  class="cv-ag-origin-opt"
+                  :class="form.channel === o.key ? 'cv-ag-origin-on' : ''"
+                  :style="{ '--o': o.color, '--o-rgb': hexToRgbSpaced(o.color) }"
+                  :disabled="channelAuto"
+                  :title="o.title || o.label"
+                  @click="form.channel = form.channel === o.key && !channelAuto ? '' : o.key"
+                >
+                  <span :class="form.channel === o.key ? 'i-lucide-circle-check' : o.icon" class="text-sm shrink-0" />
+                  <span class="truncate">{{ o.label }}</span>
+                </button>
+              </div>
+              <p class="text-[11px] mt-1.5" :class="channelMissing ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-n-slate-10'">{{ channelHint }}</p>
+            </div>
           </section>
 
           <!-- 2 · quando e onde -->
@@ -3068,7 +3106,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
           <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask && canEditAgenda ? '' : 'ml-auto'" @click="showModal = false">{{ canEditAgenda ? 'Cancelar' : 'Fechar' }}</button>
-          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : phoneMissing ? 'Informe o telefone do paciente com DDD' : ''" @click="save">
+          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : phoneMissing ? 'Informe o telefone do paciente com DDD' : channelMissing ? 'Informe como o paciente chegou' : ''" @click="save">
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
           </button>

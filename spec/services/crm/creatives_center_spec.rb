@@ -191,11 +191,17 @@ RSpec.describe 'Central de Criativos' do # rubocop:disable RSpec/DescribeClass
         create(:contact, account: account, phone_number: "+55119999000#{i}",
                          additional_attributes: { 'meta_ads' => { 'source_id' => '2301', 'captured_at' => 3.days.ago.iso8601 } })
       end
-      leads.first(3).each { |c| account.tasks.create!(title: 'consulta', task_type: 'consulta', contact_id: c.id, creator: creator, attendance: 'attended') }
+      leads.first(3).each do |c|
+        account.tasks.create!(title: 'consulta', task_type: 'consulta', contact_id: c.id, creator: creator, attendance: 'attended')
+      end
       Crm::Contact.create!(contact_id: leads.first.id, pipeline: pipeline, stage: stage, value: 9000)
+      # item 360: um dos que compareceram saiu com indicação de cirurgia (quem já operou conta como indicado)
+      account.tasks.where(task_type: 'consulta', contact_id: leads[1].id).update_all(surgery_indication: 'indicated') # rubocop:disable Rails/SkipsModelValidations
       row = service.overview[:rows].find { |r| r[:ad_id] == '2301' }
       spend = row[:totals]['spend'].to_f
       expect(row[:funnel]).to include(leads: 6, booked: 3, surgeries: 1, revenue: 9000.0)
+      expect(row[:funnel]).to include(attended: 3, indicated: 2)
+      expect(row[:rates]).to include('attend_rate' => 1.0, 'indication_rate' => 0.6667)
       expect(row[:rates]['cost_booked']).to eq((spend / 3).round(2))
       expect(row[:rates]['cost_surgery']).to eq(spend.round(2))
       expect(row[:rates]['roas']).to eq((9000 / spend).round(2))
