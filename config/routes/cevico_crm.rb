@@ -385,7 +385,9 @@ namespace :crm do
     end
   end
   # 💰 Financeiro & CAC (item 318): CAC de anúncios × total, canais, campanhas
-  resource :acquisition_cost, only: [:show], controller: 'acquisition_costs'
+  resource :acquisition_cost, only: [:show], controller: 'acquisition_costs' do
+    get :timeline # 📈 custo por fonte ao longo do tempo + faturamento × etapas
+  end
   # 📄 Agente de Páginas (item 353): placar, pódio, linha do tempo e fila de recomendações das páginas
   resource :page_agent, only: [:show], controller: 'page_agent' do
     get :timeline

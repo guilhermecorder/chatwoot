@@ -18,6 +18,7 @@ import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIco
 import ConversationChatModal from 'dashboard/routes/dashboard/crm/components/ConversationChatModal.vue';
 import CustomPanelGrid from 'dashboard/components-next/cevico/CustomPanelGrid.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import DonutChart from 'dashboard/components-next/cevico/DonutChart.vue';
 import AgendaDashboardCore from 'dashboard/components-next/cevico/AgendaDashboardCore.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { PERIOD_PRESETS } from 'dashboard/helper/cevicoPeriod';
@@ -2502,6 +2503,7 @@ const BLOCK_LABELS = {
   whatsapp: 'Status do WhatsApp',
   briefing: 'Briefing do gestor',
   campanhas: 'Agente de Campanhas',
+  custo_fonte: 'Custo por fonte',
   paginas: 'Agente de Páginas',
   radar: 'Radar de Oportunidades',
   tarefas: 'Tarefas esperando você',
@@ -2520,6 +2522,7 @@ const BLOCK_ICONS = {
   whatsapp: 'i-lucide-phone',
   briefing: 'i-lucide-gauge',
   campanhas: 'i-lucide-target',
+  custo_fonte: 'i-lucide-trending-down',
   paginas: 'i-lucide-file-text',
   radar: 'i-lucide-radar',
   tarefas: 'i-lucide-list-checks',
@@ -2539,6 +2542,7 @@ const TOP_BLOCKS_DEFAULT = [
   'whatsapp',
   'briefing',
   'campanhas',
+  'custo_fonte',
   'paginas',
   'radar',
   'tarefas',
@@ -5048,6 +5052,71 @@ const sparkPath = (values, w = 140, h = 28) => {
     .join(' ');
 };
 const campaignSeries = computed(() => campaignAgent.value?.series || null);
+// ── 📉 Custo por fonte (19/10): a versão ENXUTA dos gráficos do Financeiro &
+// CAC — estrela-guia (custo por agendamento) geral e por fonte, os três custos
+// numa tabelinha e quem trouxe os agendamentos. Mesma régua do painel; a conta
+// mora em GET crm/acquisition_cost/timeline (só quem vê o Financeiro & CAC).
+const canSeeCostBySource = computed(
+  () => isAdmin.value || cevicoCan('financeiro.cac')
+);
+const costTimeline = ref(null);
+const fetchCostTimeline = async () => {
+  if (!canSeeCostBySource.value) return;
+  try {
+    const { preset, from, to } = period.value;
+    const { data: payload } = await CrmAPI.getAcquisitionTimeline({
+      preset,
+      ...(preset === 'custom' ? { from, to } : {}),
+    });
+    costTimeline.value = payload;
+  } catch {
+    costTimeline.value = null;
+  }
+};
+watch(period, fetchCostTimeline, { immediate: true });
+const COST_SOURCES = [
+  { key: 'google', label: 'Google', color: '#0a84ff' },
+  { key: 'meta', label: 'Meta', color: '#db2777' },
+];
+const COST_FIELDS = [
+  { key: 'leads', label: 'por lead novo' },
+  { key: 'booked', label: 'por agendamento de consulta' },
+  { key: 'closed', label: 'por cirurgia fechada (CAC)' },
+];
+const costSum = (source, field) =>
+  (costTimeline.value?.sources?.[source]?.[field] || []).reduce(
+    (a, b) => a + Number(b || 0),
+    0
+  );
+const costPer = (source, field) => {
+  const spend = costSum(source, 'spend');
+  const count = costSum(source, field);
+  return spend > 0 && count > 0 ? spend / count : null;
+};
+const costRows = computed(() =>
+  COST_FIELDS.map(f => ({
+    ...f,
+    all: costPer('all', f.key),
+    google: costPer('google', f.key),
+    meta: costPer('meta', f.key),
+    count: costSum('all', f.key),
+  }))
+);
+const costStar = computed(() => costPer('all', 'booked'));
+const costDonut = computed(() => [
+  ...COST_SOURCES.map(s => ({ ...s, value: costSum(s.key, 'booked') })),
+  {
+    key: 'organico',
+    label: 'Orgânico / indicação',
+    color: '#30d158',
+    value: costSum('organico', 'booked'),
+  },
+]);
+const openCostBySource = () =>
+  router.push({
+    name: 'acquisition_cost_reports',
+    params: { accountId: accountId.value },
+  });
 // ── 📄 Agente de Páginas (item 353): a leitura do dia das páginas ──
 const pageAgent = computed(() => data.value?.page_agent || null);
 const pageSummary = computed(() => pageAgent.value?.summary || {});
@@ -5326,10 +5395,12 @@ onUnmounted(() => {
         <CvVitrine :paineis="vitrinePaineis" lembrar="cevico:vitrine:inicio" />
       </div>
 
-      <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin) -->
+      <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin).
+           19/10 (Guilherme): o Meu Painel novo conta SÓ a CEVICO — o Oftalmofácil
+           fica no ambiente dele (CRM → Oftalmofácil), nunca aqui -->
       <VisaoGeral
         v-if="!organizeMode && !estiloClassico"
-        :source="sourceLens"
+        source="cevico"
         :vars="cvVars"
       />
 
@@ -5973,6 +6044,129 @@ onUnmounted(() => {
                           · {{ managerLastRunTime }}
                         </template>
                       </p>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else-if="blockId === 'custo_fonte'">
+                  <!-- 📉 Custo por fonte (19/10): enxuto — estrela-guia por fonte,
+                       os três custos e quem trouxe os agendamentos. Só para quem
+                       vê o Financeiro & CAC; some sem gasto no período. -->
+                  <div
+                    v-if="canSeeCostBySource && costTimeline"
+                    class="cv-block mb-6"
+                  >
+                    <div class="p-4 sm:p-5">
+                      <div class="flex items-center gap-2 mb-2 flex-wrap">
+                        <span class="cv-icon">
+                          <span class="i-lucide-trending-down text-base" />
+                        </span>
+                        <h2 class="text-sm font-bold text-n-slate-12">
+                          Custo por fonte
+                        </h2>
+                        <span class="text-[11px] text-n-slate-9 ml-auto">
+                          anúncios ÷ resultado · no período da régua
+                        </span>
+                      </div>
+                      <div
+                        class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-4 items-start"
+                      >
+                        <div class="min-w-0">
+                          <p class="text-[10px] text-n-slate-9 uppercase">
+                            custo por agendamento de consulta · geral
+                          </p>
+                          <p class="text-xl font-bold text-n-slate-12">
+                            {{ campaignMoney(costStar) }}
+                            <span
+                              v-for="src in COST_SOURCES"
+                              :key="src.key"
+                              class="text-xs font-semibold ml-2 align-middle"
+                              :style="{ color: src.color }"
+                            >
+                              {{ src.label }}
+                              {{ campaignMoney(costPer(src.key, 'booked')) }}
+                            </span>
+                          </p>
+                          <table
+                            class="w-full mt-2 text-[11px] text-n-slate-11"
+                          >
+                            <thead>
+                              <tr class="text-[10px] uppercase text-n-slate-9">
+                                <th class="text-left font-semibold py-1">
+                                  custo
+                                </th>
+                                <th class="text-right font-semibold py-1">
+                                  geral
+                                </th>
+                                <th class="text-right font-semibold py-1">
+                                  Google
+                                </th>
+                                <th class="text-right font-semibold py-1">
+                                  Meta
+                                </th>
+                                <th class="text-right font-semibold py-1">
+                                  qtd.
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr
+                                v-for="r in costRows"
+                                :key="r.key"
+                                class="border-t border-n-slate-4"
+                              >
+                                <td class="py-1">{{ r.label }}</td>
+                                <td
+                                  class="py-1 text-right font-semibold text-n-slate-12 tabular-nums whitespace-nowrap"
+                                >
+                                  {{ campaignMoney(r.all) }}
+                                </td>
+                                <td
+                                  class="py-1 text-right tabular-nums whitespace-nowrap"
+                                >
+                                  {{ campaignMoney(r.google) }}
+                                </td>
+                                <td
+                                  class="py-1 text-right tabular-nums whitespace-nowrap"
+                                >
+                                  {{ campaignMoney(r.meta) }}
+                                </td>
+                                <td
+                                  class="py-1 text-right tabular-nums text-n-slate-9"
+                                >
+                                  {{ r.count }}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                        <div class="min-w-0 md:w-64">
+                          <p class="text-[10px] text-n-slate-9 uppercase mb-1">
+                            quem trouxe os agendamentos
+                          </p>
+                          <DonutChart
+                            :slices="costDonut"
+                            :size="104"
+                            :thickness="16"
+                            unit="agend."
+                            empty-text="nenhum no período"
+                          />
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2 mt-3 flex-wrap">
+                        <button
+                          type="button"
+                          class="cv-btn cv-btn-sm"
+                          @click="openCostBySource"
+                        >
+                          Ver os gráficos no Financeiro & CAC
+                          <span class="i-lucide-arrow-right text-xs" />
+                        </button>
+                        <span class="text-[10px] text-n-slate-9">
+                          gasto Meta + Google ÷ leads, agendamentos ou cirurgias
+                          fechadas · fonte pelo primeiro carimbo do paciente
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </template>

@@ -184,7 +184,7 @@ const ctxOcupacao = computed(() => {
   const m = agenda.value.mix;
   const aval = m.tipos.find(t => t.key === 'avaliacao');
   const exa = m.tipos.find(t => t.key === 'exames');
-  return `${n(o.ocupadas)} de ${n(o.vagas)} horários. Avaliação ${pctTxt(aval?.pct)} · exames ${pctTxt(exa?.pct)} · particular ${pctTxt(m.particular.pct)} · Oftalmofácil ${pctTxt(m.oftalmofacil.pct)}.`;
+  return `${n(o.ocupadas)} de ${n(o.vagas)} horários. Avaliação ${pctTxt(aval?.pct)} · exames ${pctTxt(exa?.pct)} · particular ${pctTxt(m.particular.pct)}.`;
 });
 const ctxConfirmacao = computed(() => {
   const a = agenda.value;
@@ -296,8 +296,12 @@ const totalPorCaixa = computed(() =>
     { chegaram: 0, agendaram: 0 }
   )
 );
-// item 342: VOLUME DO PERÍODO — 9 números, cada um com fórmula e quebras
+// item 342: VOLUMES — cada acontecimento um número com fórmula e quebras.
+// 19/10: deixaram de ser um bloco à parte e entraram na etapa da jornada
+// em que acontecem (marcadas/remarcadas/canceladas → confirmaram → vieram →
+// cirurgia); `vol(key)` acha cada um
 const volumes = computed(() => data.value?.volumes || []);
+const vol = key => volumes.value.find(v => v.key === key) || null;
 const RUIM_QUANDO_SOBE = ['reagendamentos', 'cancelamentos', 'faltas'];
 const cmpVolume = v =>
   cmp(v.valor, v.anterior, {
@@ -357,13 +361,7 @@ const barrasMix = computed(() => {
     sub: pctTxt(m.particular.pct),
     color: corGrad3.value,
   });
-  rows.push({
-    label: 'Oftalmofácil',
-    values: [m.oftalmofacil.count],
-    sub: pctTxt(m.oftalmofacil.pct),
-    color: corGrad3.value,
-  });
-  return rows;
+  return rows; // 19/10: só CEVICO aqui — o Oftalmofácil tem o ambiente dele
 });
 const barrasConfirmacao = computed(() => {
   const a = agenda.value;
@@ -572,8 +570,8 @@ const pessoaSub = p => {
       <div>
         <h2 class="cvg-titulo-bloco">Visão geral</h2>
         <p class="cvg-subtitulo">
-          As perguntas que importam, no período escolhido. Clique num número
-          para ver a história.
+          A jornada do paciente na ordem em que acontece: chegou, agendou, veio,
+          operou. Só pacientes da CEVICO. Clique num número para ver a história.
         </p>
       </div>
       <PeriodRuler v-model="periodo" glass />
@@ -582,15 +580,15 @@ const pessoaSub = p => {
     <SkeletonScreen v-if="isLoading && !data" variant="dashboard" />
 
     <template v-else-if="data">
-      <!-- ══ 1–5 · ENTRADA ══ -->
+      <!-- ══ 1 · CHEGARAM ══ -->
       <CvBloco
-        titulo="Quanto entrou e quanto virou"
-        subtitulo="Contatos novos pelas portas de entrada, até o orçamento e até a consulta marcada"
+        titulo="Chegaram"
+        subtitulo="Contatos novos pelas portas de entrada e quantos chegaram ao orçamento"
         tom="dia"
         icon="i-lucide-door-open"
       >
         <div class="cvg-bloco-pilha">
-          <div class="cvg-fila cvg-fila--5">
+          <div class="cvg-fila cvg-fila--heroi">
             <CvIndicador
               rotulo="Contatos novos"
               :valor="n(entrada.novos.valor)"
@@ -628,80 +626,8 @@ const pessoaSub = p => {
                 )
               "
             />
-            <CvIndicador
-              rotulo="Agendaram consulta (novos)"
-              :valor="n(entrada.agendaram_novos.valor)"
-              :comparacao="
-                cmp(
-                  entrada.agendaram_novos.valor,
-                  entrada.agendaram_novos.anterior
-                )
-              "
-              :contexto="ctxAgendaram"
-              :pe="`+ ${n(entrada.agendaram_base.valor)} da base`"
-              @abrir="
-                abrir(
-                  'agendaram',
-                  'Agendaram consulta (leads novos)',
-                  n(entrada.agendaram_novos.valor),
-                  cmp(
-                    entrada.agendaram_novos.valor,
-                    entrada.agendaram_novos.anterior
-                  )
-                )
-              "
-            />
-            <CvIndicador
-              rotulo="Taxa novo → consulta"
-              :valor="pctTxt(entrada.taxa_agendamento)"
-              :comparacao="
-                cmpPct(
-                  entrada.taxa_agendamento,
-                  entrada.taxa_agendamento_anterior
-                )
-              "
-              :contexto="ctxTaxa"
-              pe="novos que agendaram ÷ novos"
-            />
-            <!-- 📈 item 345b: rendimento do período (novos + base ÷ novos) -->
-            <CvIndicador
-              rotulo="Agendamentos ÷ novos"
-              :valor="pctTxt(entrada.taxa_geral)"
-              :comparacao="cmpPct(entrada.taxa_geral, entrada.taxa_geral_anterior)"
-              :contexto="ctxTaxaGeral"
-              pe="novos + base ÷ novos"
-            />
           </div>
-          <div class="cvg-graficos">
-            <div class="cvg-grafico">
-              <span class="cvg-grafico-titulo">
-                <span>Funil do período</span>
-                <span
-                  >{{ pctTxt(entrada.taxa_agendamento) }} viram consulta</span
-                >
-              </span>
-              <div class="cvg-grafico-corpo">
-                <FunnelSteps
-                  :steps="funilEntrada"
-                  :height="130"
-                  start-text="dos novos"
-                />
-              </div>
-            </div>
-            <div class="cvg-grafico">
-              <span class="cvg-grafico-titulo">
-                <span>Novos × agendaram</span>
-                <span>{{ rotuloBalde }}</span>
-              </span>
-              <div class="cvg-grafico-corpo">
-                <AreaChart
-                  :series="areaEntrada"
-                  :labels="series?.rotulos || []"
-                  :height="150"
-                  unit="pessoas"
-                />
-              </div>
-            </div>
+          <div class="cvg-graficos cvg-graficos--2">
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
                 <span>Por onde chegaram</span>
@@ -723,9 +649,135 @@ const pessoaSub = p => {
                 >caixa da primeira conversa de cada pessoa</span
               >
             </div>
+            <div class="cvg-grafico">
+              <span class="cvg-grafico-titulo">
+                <span>Novos × agendaram</span>
+                <span>{{ rotuloBalde }}</span>
+              </span>
+              <div class="cvg-grafico-corpo">
+                <AreaChart
+                  :series="areaEntrada"
+                  :labels="series?.rotulos || []"
+                  :height="150"
+                  unit="pessoas"
+                />
+              </div>
+            </div>
           </div>
-          <!-- item 342: quem chegou agendou (por caixa) × quando chegaram os que agendaram -->
-          <div class="cvg-graficos cvg-graficos--2">
+        </div>
+      </CvBloco>
+
+      <!-- ══ 2 · AGENDARAM (19/10: volume total da Agenda ao lado dos novos) ══ -->
+      <CvBloco
+        titulo="Agendaram"
+        subtitulo="Tudo o que foi marcado na Agenda e, dentro disso, quem chegou no período × quem já era da base"
+        icon="i-lucide-calendar-plus"
+      >
+        <div class="cvg-bloco-pilha">
+          <div class="cvg-fila cvg-fila--5">
+            <CvIndicador
+              v-if="vol('marcadas')"
+              rotulo="Consultas marcadas"
+              :valor="n(vol('marcadas').valor)"
+              :comparacao="cmpVolume(vol('marcadas'))"
+              :contexto="ctxVolume(vol('marcadas'))"
+              heroi
+              pe="volume total da Agenda"
+              @abrir="
+                abrir(
+                  'vol:marcadas',
+                  'Consultas marcadas',
+                  n(vol('marcadas').valor),
+                  cmpVolume(vol('marcadas'))
+                )
+              "
+            />
+            <CvIndicador
+              rotulo="Agendaram (novos)"
+              :valor="n(entrada.agendaram_novos.valor)"
+              :comparacao="
+                cmp(
+                  entrada.agendaram_novos.valor,
+                  entrada.agendaram_novos.anterior
+                )
+              "
+              :contexto="ctxAgendaram"
+              pe="quem chegou no período"
+              @abrir="
+                abrir(
+                  'agendaram',
+                  'Agendaram consulta (leads novos)',
+                  n(entrada.agendaram_novos.valor),
+                  cmp(
+                    entrada.agendaram_novos.valor,
+                    entrada.agendaram_novos.anterior
+                  )
+                )
+              "
+            />
+            <CvIndicador
+              rotulo="Agendaram (da base)"
+              :valor="n(entrada.agendaram_base.valor)"
+              :comparacao="
+                cmp(
+                  entrada.agendaram_base.valor,
+                  entrada.agendaram_base.anterior
+                )
+              "
+              contexto="Pacientes que já estavam na base e marcaram consulta no período."
+              pe="quem chegou antes"
+              @abrir="
+                abrir(
+                  'agendaram_base',
+                  'Agendaram da base',
+                  n(entrada.agendaram_base.valor),
+                  cmp(
+                    entrada.agendaram_base.valor,
+                    entrada.agendaram_base.anterior
+                  )
+                )
+              "
+            />
+            <CvIndicador
+              rotulo="Taxa novo → consulta"
+              :valor="pctTxt(entrada.taxa_agendamento)"
+              :comparacao="
+                cmpPct(
+                  entrada.taxa_agendamento,
+                  entrada.taxa_agendamento_anterior
+                )
+              "
+              :contexto="ctxTaxa"
+              pe="novos que agendaram ÷ novos"
+            />
+            <!-- 📈 item 345b: rendimento do período (novos + base ÷ novos) -->
+            <CvIndicador
+              rotulo="Agendamentos ÷ novos"
+              :valor="pctTxt(entrada.taxa_geral)"
+              :comparacao="
+                cmpPct(entrada.taxa_geral, entrada.taxa_geral_anterior)
+              "
+              :contexto="ctxTaxaGeral"
+              pe="novos + base ÷ novos"
+            />
+          </div>
+          <div class="cvg-graficos">
+            <div class="cvg-grafico">
+              <span class="cvg-grafico-titulo">
+                <span>Funil do período</span>
+                <span
+                  >{{ pctTxt(entrada.taxa_agendamento) }} viram consulta</span
+                >
+              </span>
+              <div class="cvg-grafico-corpo">
+                <FunnelSteps
+                  :steps="funilEntrada"
+                  :height="130"
+                  start-text="dos novos"
+                />
+              </div>
+            </div>
+            <!-- item 342: quem chegou agendou (por caixa) × quando chegaram os que agendaram -->
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
                 <span>Quem chegou {{ nomePeriodo }} agendou?</span>
@@ -815,51 +867,15 @@ const pessoaSub = p => {
         </div>
       </CvBloco>
 
-      <!-- ══ item 342 · VOLUME DO PERÍODO ══ -->
+      <!-- ══ 3 · CONFIRMARAM E VIERAM ══ -->
       <CvBloco
-        v-if="volumes.length"
-        titulo="Volume do período"
-        subtitulo="Cada acontecimento um número, sem misturar: clique para ver de onde veio e como é contado"
-        icon="i-lucide-list-ordered"
-      >
-        <div class="cvg-fila cvg-visao-volumes">
-          <CvIndicador
-            v-for="v in volumes"
-            :key="v.key"
-            :rotulo="v.label"
-            :valor="n(v.valor)"
-            :comparacao="cmpVolume(v)"
-            :contexto="ctxVolume(v)"
-            :pe="v.medida"
-            @abrir="abrir(`vol:${v.key}`, v.label, n(v.valor), cmpVolume(v))"
-          />
-        </div>
-      </CvBloco>
-
-      <!-- ══ 6–8 · AGENDA ══ -->
-      <CvBloco
-        titulo="Agenda"
-        subtitulo="Quanto está cheia, o que tem nela, quem confirmou e quem veio"
+        titulo="Confirmaram e vieram"
+        subtitulo="Depois de marcar: quem confirmou, quem veio, quem faltou, remarcou ou cancelou — e quanto a agenda ficou cheia"
         tom="apoio"
         icon="i-lucide-calendar-check"
       >
         <div class="cvg-bloco-pilha">
-          <div class="cvg-fila cvg-fila--3">
-            <CvIndicador
-              rotulo="Agenda ocupada"
-              :valor="pctTxt(agenda.ocupacao.pct)"
-              :comparacao="{
-                texto: `${n(agenda.ativas)} consultas no período`,
-                estado: 'neutro',
-              }"
-              :contexto="ctxOcupacao"
-              :serie="series?.consultas || []"
-              heroi
-              pe="mix da agenda"
-              @abrir="
-                abrir('ocupacao', 'Agenda ocupada', pctTxt(agenda.ocupacao.pct))
-              "
-            />
+          <div class="cvg-fila cvg-fila--5">
             <CvIndicador
               rotulo="Confirmaram"
               :valor="n(agenda.confirmaram)"
@@ -868,7 +884,9 @@ const pessoaSub = p => {
                 estado: estadoTaxa(agenda.taxa_confirmacao, 70, 50),
               }"
               :contexto="ctxConfirmacao"
-              pe="reagendaram · cancelaram"
+              :serie="series?.consultas || []"
+              heroi
+              pe="como é contado"
               @abrir="
                 abrir('confirmacao', 'Confirmação', n(agenda.confirmaram))
               "
@@ -881,12 +899,70 @@ const pessoaSub = p => {
                 estado: estadoTaxa(agenda.taxa_comparecimento, 80, 60),
               }"
               :contexto="ctxComparecimento"
+              :pe="vol('comparecimentos') ? 'quem veio' : ''"
+              @abrir="
+                vol('comparecimentos') &&
+                  abrir(
+                    'vol:comparecimentos',
+                    'Comparecimentos',
+                    n(vol('comparecimentos').valor),
+                    cmpVolume(vol('comparecimentos'))
+                  )
+              "
+            />
+            <CvIndicador
+              v-if="vol('faltas')"
+              rotulo="Faltaram"
+              :valor="n(vol('faltas').valor)"
+              :comparacao="cmpVolume(vol('faltas'))"
+              :contexto="ctxVolume(vol('faltas'))"
+              pe="quem faltou"
+              @abrir="
+                abrir(
+                  'vol:faltas',
+                  'Faltas',
+                  n(vol('faltas').valor),
+                  cmpVolume(vol('faltas'))
+                )
+              "
+            />
+            <CvIndicador
+              v-if="vol('reagendamentos')"
+              rotulo="Remarcaram"
+              :valor="n(vol('reagendamentos').valor)"
+              :comparacao="cmpVolume(vol('reagendamentos'))"
+              :contexto="ctxVolume(vol('reagendamentos'))"
+              pe="quem remarcou"
+              @abrir="
+                abrir(
+                  'vol:reagendamentos',
+                  'Reagendamentos',
+                  n(vol('reagendamentos').valor),
+                  cmpVolume(vol('reagendamentos'))
+                )
+              "
+            />
+            <CvIndicador
+              v-if="vol('cancelamentos')"
+              rotulo="Cancelaram"
+              :valor="n(vol('cancelamentos').valor)"
+              :comparacao="cmpVolume(vol('cancelamentos'))"
+              :contexto="ctxVolume(vol('cancelamentos'))"
+              pe="motivos"
+              @abrir="
+                abrir(
+                  'vol:cancelamentos',
+                  'Cancelamentos',
+                  n(vol('cancelamentos').valor),
+                  cmpVolume(vol('cancelamentos'))
+                )
+              "
             />
           </div>
           <div class="cvg-graficos">
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
-                <span>Ocupação e mix</span>
+                <span>Agenda ocupada</span>
                 <span>{{ n(agenda.mix.total) }} consultas</span>
               </span>
               <div class="cvg-grafico-corpo">
@@ -922,6 +998,27 @@ const pessoaSub = p => {
                   :highlight-max="false"
                 />
               </div>
+              <span
+                class="cvg-grafico-nota cvg-visao-nota-clicavel"
+                role="button"
+                tabindex="0"
+                @click="
+                  abrir(
+                    'ocupacao',
+                    'Agenda ocupada',
+                    pctTxt(agenda.ocupacao.pct)
+                  )
+                "
+                @keydown.enter="
+                  abrir(
+                    'ocupacao',
+                    'Agenda ocupada',
+                    pctTxt(agenda.ocupacao.pct)
+                  )
+                "
+              >
+                {{ ctxOcupacao }} ver a agenda ›
+              </span>
             </div>
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
@@ -954,14 +1051,14 @@ const pessoaSub = p => {
         </div>
       </CvBloco>
 
-      <!-- ══ 9–10 · CIRURGIA E JORNADA ══ -->
+      <!-- ══ 4 · CIRURGIA ══ -->
       <CvBloco
-        titulo="Cirurgia e jornada"
-        subtitulo="Das consultas realizadas, quem saiu com indicação, quem fechou e quanto tempo leva"
+        titulo="Cirurgia"
+        subtitulo="Das consultas realizadas, quem saiu com indicação, quem fechou, quem operou e quanto tempo leva"
         icon="i-lucide-stethoscope"
       >
         <div class="cvg-bloco-pilha">
-          <div class="cvg-fila cvg-fila--3">
+          <div class="cvg-fila cvg-fila--4">
             <CvIndicador
               rotulo="Indicações de cirurgia"
               :valor="n(cirurgia.indicadas)"
@@ -987,10 +1084,26 @@ const pessoaSub = p => {
                 texto: `${pctTxt(cirurgia.taxa_fechamento)} das indicações`,
                 estado: estadoTaxa(cirurgia.taxa_fechamento, 40, 20),
               }"
-              :contexto="`${n(cirurgia.cirurgias_marcadas)} cirurgias marcadas e ${n(cirurgia.cirurgias_realizadas)} realizadas no período.`"
+              :contexto="`${n(cirurgia.cirurgias_marcadas)} cirurgias marcadas no período.`"
               pe="quem fechou"
               @abrir="
                 abrir('fecharam', 'Fecharam cirurgia', n(cirurgia.fecharam))
+              "
+            />
+            <CvIndicador
+              v-if="vol('cirurgias_realizadas')"
+              rotulo="Cirurgias realizadas"
+              :valor="n(vol('cirurgias_realizadas').valor)"
+              :comparacao="cmpVolume(vol('cirurgias_realizadas'))"
+              :contexto="ctxVolume(vol('cirurgias_realizadas'))"
+              pe="quem operou"
+              @abrir="
+                abrir(
+                  'vol:cirurgias_realizadas',
+                  'Cirurgias realizadas',
+                  n(vol('cirurgias_realizadas').valor),
+                  cmpVolume(vol('cirurgias_realizadas'))
+                )
               "
             />
             <CvIndicador
@@ -1457,9 +1570,7 @@ const pessoaSub = p => {
           <p class="cvg-corpo cvg-texto-2 mt-3">
             Particular {{ n(agenda.mix.particular.count) }} ({{
               pctTxt(agenda.mix.particular.pct)
-            }}) · Oftalmofácil
-            {{ n(agenda.mix.oftalmofacil.count) }}
-            ({{ pctTxt(agenda.mix.oftalmofacil.pct) }}).
+            }}).
           </p>
           <h3 class="mt-4">Ocupação por médico</h3>
           <div
@@ -1626,10 +1737,7 @@ const pessoaSub = p => {
 
 <style lang="scss">
 /* 🧭 Visão geral do Meu Painel (item 337) */
-/* item 342: tabela "quem chegou agendou" e a fileira do volume do período */
-.cv-page .cvg-visao-volumes {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-}
+/* item 342: tabela "quem chegou agendou" */
 .cvg-visao-tabela {
   width: 100%;
   border-collapse: collapse;

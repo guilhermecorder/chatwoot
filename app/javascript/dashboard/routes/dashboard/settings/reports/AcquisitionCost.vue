@@ -15,7 +15,10 @@ import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import HBars from 'dashboard/components-next/cevico/HBars.vue';
 import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
 import AreaChart from 'dashboard/components-next/cevico/AreaChart.vue';
+import TimelineChart from 'dashboard/components-next/cevico/TimelineChart.vue';
+import DonutChart from 'dashboard/components-next/cevico/DonutChart.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { useUISettings } from 'dashboard/composables/useUISettings';
 import CrmAPI from 'dashboard/api/crm';
 
 const route = useRoute();
@@ -32,6 +35,16 @@ const pal = useCevicoPalette({
   scope: 'report:acquisition_cost',
   blocks: [
     { id: 'cac', label: 'Os dois CACs', icon: 'i-lucide-piggy-bank' },
+    {
+      id: 'custo_fonte',
+      label: 'Custo por fonte',
+      icon: 'i-lucide-trending-down',
+    },
+    {
+      id: 'faturamento',
+      label: 'Faturamento × funil',
+      icon: 'i-lucide-bar-chart-3',
+    },
     { id: 'gasto', label: 'De onde vem o gasto', icon: 'i-lucide-wallet' },
     { id: 'canais', label: 'Por canal', icon: 'i-lucide-git-fork' },
     { id: 'campanhas', label: 'Por campanha', icon: 'i-lucide-megaphone' },
@@ -61,8 +74,29 @@ const load = async () => {
     isLoading.value = false;
   }
 };
-watch(period, load, { deep: true });
-onMounted(load);
+// 📈 os dois gráficos da linha do tempo (19/10) chegam numa chamada à parte,
+// leve, para a tela não esperar por eles
+const timeline = ref(null);
+const timelineLoading = ref(false);
+const loadTimeline = async () => {
+  timelineLoading.value = true;
+  try {
+    const { data: payload } = await CrmAPI.getAcquisitionTimeline({
+      preset: period.value.preset,
+      ...(period.value.preset === 'custom'
+        ? { from: period.value.from, to: period.value.to }
+        : {}),
+    });
+    timeline.value = payload;
+  } catch {
+    timeline.value = null;
+  } finally {
+    timelineLoading.value = false;
+  }
+};
+const loadAll = () => Promise.all([load(), loadTimeline()]);
+watch(period, loadAll, { deep: true });
+onMounted(loadAll);
 
 const applyUsd = () => {
   const n = Number(String(usdInput.value).replace(',', '.'));
@@ -88,6 +122,8 @@ const axisShort = v =>
   v >= 1000
     ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil`
     : String(v);
+// eixo em R$ curto: "R$ 15 mil"
+const moneyAxis = v => `R$ ${axisShort(v)}`;
 const orDash = (v, fmt = money) =>
   v === null || v === undefined ? '—' : fmt(v);
 const roasFmt = v =>
@@ -249,6 +285,219 @@ const cacArea = computed(() => [
   },
 ]);
 
+// ══ 📈 LINHA DO TEMPO (19/10/2026): custo por fonte × tempo e faturamento × etapas ══
+const { uiSettings, updateUISettings } = useUISettings();
+// escolha salva POR PESSOA: indicador do custo, funil e colunas marcadas
+const tlPrefs = computed(() => uiSettings.value?.cevico_cac_timeline || {});
+const savePrefs = patch =>
+  updateUISettings({ cevico_cac_timeline: { ...tlPrefs.value, ...patch } });
+
+const COST_METRICS = [
+  { key: 'leads', label: 'Custo por lead novo', unit: 'lead(s) novo(s)' },
+  {
+    key: 'booked',
+    label: 'Custo por agendamento de consulta',
+    unit: 'agendamento(s)',
+  },
+  {
+    key: 'closed',
+    label: 'Custo por cirurgia fechada (CAC)',
+    unit: 'cirurgia(s) fechada(s)',
+  },
+];
+const costMetric = computed(() => tlPrefs.value.metric || 'leads');
+const costUnit = computed(
+  () => COST_METRICS.find(m => m.key === costMetric.value)?.unit || ''
+);
+// cores validadas (skill dataviz): azul × rosa passam no daltonismo; o Geral é
+// uma referência neutra tracejada, não uma fonte
+const SOURCE_LINES = [
+  { key: 'google', label: 'Google Ads', color: '#0a84ff' },
+  { key: 'meta', label: 'Meta Ads', color: '#db2777' },
+  {
+    key: 'all',
+    label: 'Geral (anúncios ÷ todas as fontes)',
+    color: '#64748b',
+    dashed: true,
+  },
+];
+const unitName = computed(() => timeline.value?.period?.unit || 'day');
+const bucketDate = iso => new Date(`${iso}T12:00:00`);
+const dayMonth = iso =>
+  bucketDate(iso).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+  });
+const bucketLabel = iso =>
+  unitName.value === 'month' ? monthLabel(iso.slice(0, 7)) : dayMonth(iso);
+const bucketTitle = iso => {
+  if (unitName.value === 'week') return `semana de ${dayMonth(iso)}`;
+  if (unitName.value === 'month') return monthLabel(iso.slice(0, 7));
+  return bucketDate(iso).toLocaleDateString('pt-BR', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+  });
+};
+const tlLabels = computed(() =>
+  (timeline.value?.buckets || []).map(bucketLabel)
+);
+const unitWord = computed(
+  () =>
+    ({ day: 'por dia', week: 'por semana', month: 'por mês' })[unitName.value]
+);
+const sourceData = key => timeline.value?.sources?.[key] || {};
+const costAt = (key, i) => {
+  const src = sourceData(key);
+  const spend = Number(src.spend?.[i] || 0);
+  const count = Number(src[costMetric.value]?.[i] || 0);
+  return spend > 0 && count > 0 ? spend / count : null;
+};
+const costLines = computed(() =>
+  SOURCE_LINES.map(line => ({
+    ...line,
+    values: tlLabels.value.map((_, i) => costAt(line.key, i)),
+  }))
+);
+// dica: gasto ÷ quantidade = custo, fonte a fonte (revelar de onde veio)
+const costTip = i => ({
+  title: bucketTitle(timeline.value.buckets[i]),
+  rows: [
+    ...SOURCE_LINES.map(line => {
+      const src = sourceData(line.key);
+      const spend = Number(src.spend?.[i] || 0);
+      const count = Number(src[costMetric.value]?.[i] || 0);
+      const cost = costAt(line.key, i);
+      return {
+        color: line.color,
+        dashed: line.dashed,
+        label: line.label,
+        value: cost === null ? '—' : money(cost, 0),
+        sub: `${money(spend, 0)} ÷ ${fmtNum(count)} ${costUnit.value}`,
+      };
+    }),
+    {
+      color: CHANNEL_COLORS.organico,
+      label: 'Orgânico / indicação',
+      value: `${fmtNum(sourceData('organico')[costMetric.value]?.[i] || 0)}`,
+      sub: 'sem gasto de anúncio — só a quantidade',
+    },
+  ],
+});
+
+// 🍩 as porcentagens do período: quem levou o gasto e quem trouxe o resultado
+const sumOf = arr => (arr || []).reduce((a, b) => a + Number(b || 0), 0);
+const donutSpend = computed(() =>
+  SOURCE_LINES.filter(l => l.key !== 'all').map(l => ({
+    key: l.key,
+    label: l.label,
+    color: l.color,
+    value: sumOf(sourceData(l.key).spend),
+  }))
+);
+const donutCount = computed(() => [
+  ...SOURCE_LINES.filter(l => l.key !== 'all').map(l => ({
+    key: l.key,
+    label: l.label,
+    color: l.color,
+    value: sumOf(sourceData(l.key)[costMetric.value]),
+  })),
+  {
+    key: 'organico',
+    label: 'Orgânico / indicação',
+    color: CHANNEL_COLORS.organico,
+    value: sumOf(sourceData('organico')[costMetric.value]),
+  },
+]);
+const METRIC_SHORT = {
+  leads: 'leads novos',
+  booked: 'agendamentos',
+  closed: 'cirurgias fechadas',
+};
+const costMetricShort = computed(() => METRIC_SHORT[costMetric.value]);
+
+// ── faturamento × etapas ──
+const pipelines = computed(() => timeline.value?.pipelines || []);
+const pipelineId = computed(() => {
+  const saved = Number(tlPrefs.value.pipeline_id);
+  return pipelines.value.some(p => p.id === saved)
+    ? saved
+    : pipelines.value[0]?.id;
+});
+const pipeline = computed(() =>
+  pipelines.value.find(p => p.id === pipelineId.value)
+);
+const CONV_KEY = 'conv';
+const CONV_COLOR = '#0a84ff';
+const stageKey = st => `stage:${st.id}`;
+const defaultLines = computed(() => {
+  const stages = pipeline.value?.stages || [];
+  const pick = re => stages.find(st => re.test(st.name));
+  return [
+    CONV_KEY,
+    pick(/agendamento|consulta agendada/i),
+    pick(/cirurgia agendada/i),
+  ]
+    .filter(Boolean)
+    .map(x => (typeof x === 'string' ? x : stageKey(x)));
+});
+const selectedLines = computed(() =>
+  Array.isArray(tlPrefs.value.lines) ? tlPrefs.value.lines : defaultLines.value
+);
+const lineOn = key => selectedLines.value.includes(key);
+const toggleLine = key =>
+  savePrefs({
+    lines: lineOn(key)
+      ? selectedLines.value.filter(k => k !== key)
+      : [...selectedLines.value, key],
+  });
+const pickPipeline = id => savePrefs({ pipeline_id: id, lines: null });
+const revenueBars = computed(() => ({
+  key: 'revenue',
+  label: 'Faturamento',
+  color: '#059669',
+  values: timeline.value?.revenue || [],
+}));
+const stageLines = computed(() => {
+  const stages = pipeline.value?.stages || [];
+  return selectedLines.value
+    .map(key => {
+      if (key === CONV_KEY)
+        return {
+          key,
+          label: 'Novas conversas',
+          color: CONV_COLOR,
+          values: timeline.value?.conversations || [],
+        };
+      const st = stages.find(x => stageKey(x) === key);
+      return st
+        ? { key, label: st.name, color: st.color, values: st.values }
+        : null;
+    })
+    .filter(Boolean);
+});
+const revenueTip = i => ({
+  title: bucketTitle(timeline.value.buckets[i]),
+  rows: [
+    {
+      color: revenueBars.value.color,
+      square: true,
+      label: 'Faturamento',
+      value: money(revenueBars.value.values[i] || 0, 0),
+      sub: 'cirurgias realizadas (pago no Oftalmofácil, senão valor do card)',
+    },
+    ...stageLines.value.map(line => ({
+      color: line.color,
+      label: line.label,
+      value: fmtNum(line.values[i] || 0),
+      sub: line.key === CONV_KEY ? 'conversas criadas' : 'entradas na coluna',
+    })),
+  ],
+});
+const revenueTotal = computed(() =>
+  (timeline.value?.revenue || []).reduce((a, b) => a + Number(b || 0), 0)
+);
+
 // ── pacientes ──
 const people = computed(() => data.value?.people || []);
 const shownPeople = computed(() =>
@@ -386,6 +635,177 @@ const partner = computed(() => data.value?.partner || {});
             confiável)
           </template>
         </p>
+      </div>
+
+      <!-- ══ 📈 CUSTO POR FONTE AO LONGO DO TEMPO (19/10) ══ -->
+      <div class="cv-block p-5 sm:p-6 mb-4" :style="blockVars('custo_fonte')">
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="cv-icon">
+            <span class="i-lucide-trending-down text-base" />
+          </span>
+          <h2 class="text-sm font-bold text-n-slate-12">
+            Custo por fonte ao longo do tempo
+          </h2>
+          <span v-if="timeline" class="text-[11px] text-n-slate-9 ml-auto">
+            {{ unitWord }}
+          </span>
+        </div>
+        <p class="text-[11px] text-n-slate-9 mb-3">
+          quanto cada fonte cobrou por resultado, {{ unitWord }} — a linha some
+          onde não houve resultado
+        </p>
+        <div class="flex flex-wrap gap-1.5 mb-4">
+          <button
+            v-for="m in COST_METRICS"
+            :key="m.key"
+            type="button"
+            class="cv-chip cv-chip-lg"
+            :class="costMetric === m.key ? 'cv-chip-on' : ''"
+            @click="savePrefs({ metric: m.key })"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+        <TimelineChart
+          v-if="timeline"
+          :labels="tlLabels"
+          :lines="costLines"
+          :height="240"
+          :left-format="moneyShort"
+          :left-width="60"
+          :tip="costTip"
+          legend-note="em média"
+          empty-text="sem gasto ou sem resultado no período"
+        />
+        <p v-else-if="timelineLoading" class="text-[11px] text-n-slate-9">
+          calculando…
+        </p>
+        <p v-else class="text-[11px] text-n-slate-9">
+          não consegui montar a linha do tempo agora.
+        </p>
+        <div v-if="timeline" class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-5">
+          <div>
+            <p class="text-[12px] font-semibold text-n-slate-11 mb-2">
+              Quem levou o gasto
+            </p>
+            <DonutChart
+              :slices="donutSpend"
+              :size="140"
+              :format="moneyShort"
+              unit="em anúncios"
+              empty-text="sem gasto no período"
+            />
+          </div>
+          <div>
+            <p class="text-[12px] font-semibold text-n-slate-11 mb-2">
+              Quem trouxe os {{ costMetricShort }}
+            </p>
+            <DonutChart
+              :slices="donutCount"
+              :size="140"
+              :unit="costMetricShort"
+              empty-text="nenhum no período"
+            />
+          </div>
+        </div>
+        <p class="text-[11px] text-n-slate-9 mt-3 leading-relaxed">
+          <b class="text-n-slate-11">De onde vem:</b> gasto da Meta = foto
+          diária dos anúncios (mesma base do Agente de Campanhas); gasto do
+          Google = GA4 por campanha e dia; lead novo = contato novo das caixas
+          de captação, fonte pelo primeiro carimbo (anúncio → WhatsApp ou
+          página); agendamento = primeira entrada na coluna de agendamento ou
+          consulta na Agenda; cirurgia fechada = primeira entrada em "Cirurgia
+          Agendada", cirurgia na Agenda ou no Oftalmofácil. Pacientes de
+          parceiro ficam fora.
+        </p>
+      </div>
+
+      <!-- ══ 📊 FATURAMENTO × ETAPAS DO CRM (19/10) ══ -->
+      <div class="cv-block p-5 sm:p-6 mb-4" :style="blockVars('faturamento')">
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="cv-icon">
+            <span class="i-lucide-bar-chart-3 text-base" />
+          </span>
+          <h2 class="text-sm font-bold text-n-slate-12">
+            Faturamento × etapas do CRM
+          </h2>
+          <span v-if="timeline" class="text-[11px] text-n-slate-9 ml-auto">
+            {{ moneyShort(revenueTotal) }} no período
+          </span>
+        </div>
+        <p class="text-[11px] text-n-slate-9 mb-3">
+          barras = faturamento (R$, eixo da esquerda); linhas = quantas vezes
+          entraram em cada coluna escolhida (eixo da direita)
+        </p>
+        <TimelineChart
+          v-if="timeline"
+          :labels="tlLabels"
+          :bars="revenueBars"
+          :lines="stageLines"
+          :height="260"
+          :left-format="moneyAxis"
+          :right-format="fmtNum"
+          :left-width="66"
+          :right-width="36"
+          :tip="revenueTip"
+          empty-text="sem faturamento no período"
+        />
+        <p v-else-if="timelineLoading" class="text-[11px] text-n-slate-9">
+          calculando…
+        </p>
+        <p v-else class="text-[11px] text-n-slate-9">
+          não consegui montar a linha do tempo agora.
+        </p>
+        <div v-if="timeline" class="mt-4">
+          <div class="flex items-center gap-2 flex-wrap mb-2">
+            <p class="text-[11px] font-semibold text-n-slate-11">
+              Adicionar coluna do CRM
+            </p>
+            <span class="text-[11px] text-n-slate-9">
+              — fica salvo para você
+            </span>
+            <div v-if="pipelines.length > 1" class="ml-auto flex gap-1">
+              <button
+                v-for="p in pipelines"
+                :key="p.id"
+                type="button"
+                class="cv-chip"
+                :class="p.id === pipelineId ? 'cv-chip-on' : ''"
+                @click="pickPipeline(p.id)"
+              >
+                {{ p.name }}
+              </button>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              class="cv-chip cv-chip-lg inline-flex items-center gap-1.5"
+              :class="lineOn(CONV_KEY) ? 'cv-chip-on' : ''"
+              @click="toggleLine(CONV_KEY)"
+            >
+              <span
+                class="w-2 h-2 rounded-full"
+                :style="{ background: CONV_COLOR }"
+              />
+              Novas conversas
+            </button>
+            <button
+              v-for="st in pipeline?.stages || []"
+              :key="st.id"
+              type="button"
+              class="cv-chip cv-chip-lg inline-flex items-center gap-1.5"
+              :class="lineOn(stageKey(st)) ? 'cv-chip-on' : ''"
+              @click="toggleLine(stageKey(st))"
+            >
+              <span
+                class="w-2 h-2 rounded-full"
+                :style="{ background: st.color }"
+              />
+              {{ st.name }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- ══ DE ONDE VEM O GASTO ══ -->
@@ -651,12 +1071,12 @@ const partner = computed(() => data.value?.partner || {});
           />
           <div class="flex items-center gap-4 mt-2 text-[11px] text-n-slate-10">
             <span class="inline-flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-[#bf5af2]" /> CAC de
-              anúncios (anúncios ÷ pacientes dos anúncios)
+              <span class="w-2 h-2 rounded-full bg-[#bf5af2]" /> CAC de anúncios
+              (anúncios ÷ pacientes dos anúncios)
             </span>
             <span class="inline-flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-[#ff9f0a]" /> CAC total
-              (tudo ÷ todos os pacientes novos)
+              <span class="w-2 h-2 rounded-full bg-[#ff9f0a]" /> CAC total (tudo
+              ÷ todos os pacientes novos)
             </span>
           </div>
         </template>

@@ -21,6 +21,9 @@ class Crm::AcquisitionPatients
   Patient = Struct.new(:key, :contact_id, :name, :first_on, :source, :partner, keyword_init: true)
 
   attr_reader :firsts, :partner_result
+  # [[chave, data, valor]] — cada real da receita COM a data em que entrou
+  # (o gráfico "Faturamento × etapas" soma por semana/mês)
+  attr_reader :revenue_events
 
   def initialize(account, from:, to:)
     @account = account
@@ -30,6 +33,7 @@ class Crm::AcquisitionPatients
     @own = Crm::PartnerGuard.own_provider_name(account)
     @firsts = {}
     @revenue = Hash.new(0.0)
+    @revenue_events = []
     @partner_result = 0.0
     load_crm
     load_agenda
@@ -125,6 +129,7 @@ class Crm::AcquisitionPatients
 
       value = paid.to_f.positive? ? paid.to_f : amount.to_f
       @revenue[key] += value
+      @revenue_events << [key, on, value]
       @partner_result += amount.to_f - clinic.to_f - profit.to_f if partner
     end
   end
@@ -136,7 +141,10 @@ class Crm::AcquisitionPatients
 
     Crm::Contact.joins(:pipeline).where(crm_pipelines: { account_id: @account.id }, contact_id: ids)
                 .group(:contact_id).maximum(:value)
-                .each { |cid, value| @revenue[cid] += value.to_f }
+                .each do |cid, value|
+      @revenue[cid] += value.to_f
+      @revenue_events << [cid, firsts[cid].first_on, value.to_f]
+    end
   end
 
   def surgery_type?(type)

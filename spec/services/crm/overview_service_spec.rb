@@ -126,10 +126,13 @@ RSpec.describe Crm::OverviewService do
     card!(person('Fabio', arrived: 200.days.ago), 'Cirurgia Realizada')
 
     vol = overview[:volumes].index_by { |v| v[:key] }
+    # 19/10: 'marcadas' = consultas NOVAS criadas hoje na Agenda (a canceladas e as
+    # já passadas ficam fora; a do Oftalmofácil também) — o volume total ao lado dos "novos"
     expect(vol.transform_values { |v| v[:valor] }).to eq(
-      'agendamentos' => 2, 'reagendamentos' => 1, 'cancelamentos' => 1, 'confirmacoes' => 1, 'comparecimentos' => 1,
+      'marcadas' => 1, 'agendamentos' => 2, 'reagendamentos' => 1, 'cancelamentos' => 1, 'confirmacoes' => 1, 'comparecimentos' => 1,
       'faltas' => 1, 'indicacoes' => 1, 'fechamentos' => 1, 'cirurgias_realizadas' => 1
     )
+    expect(vol['marcadas']).to include(medida: 'consultas', pessoas_distintas: 1)
     expect(vol['agendamentos']).to include(novos: 1, base: 1, medida: 'pessoas')
     expect(vol.values.pluck(:formula)).to all(be_present)
     expect(vol['comparecimentos'][:quebras].find { |q| q[:titulo] == 'Unidade' }[:rows]).to eq([{ label: 'Av. Paulista', count: 1 }])

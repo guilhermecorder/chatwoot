@@ -516,6 +516,13 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
     cur = booking_split(@since, @until_at)
     prev = booking_split(@prev_since, @prev_until)
     [
+      # 📅 19/10 (Guilherme: "tivemos 23 agendamentos hoje, mas ele conta apenas 5
+      # no novo; perto disso quero o volume total"): o TOTAL de consultas novas
+      # marcadas na Agenda no período (a régua da Agenda: conta consultas, não
+      # pessoas; retorno e pós-op entram; lançada, exame e tele ficam fora)
+      volume_tasks('marcadas', 'Consultas marcadas', 'consultas', ->(s, u) { marcadas_na_agenda(s, u) },
+                   'Consultas novas criadas na Agenda no período (pela data em que foram marcadas), não canceladas, de qualquer tipo ' \
+                   'menos exame e teleconsulta. Consulta lançada (já estava marcada fora do sistema) fica fora. Conta consultas, não pessoas.'),
       volume_agendamentos(cur, prev),
       volume_tasks('reagendamentos', 'Reagendamentos', 'consultas', ->(s, u) { consultas_todas.where(REAGENDADA_SQL, s: s, u: u) },
                    'Consultas que mudaram de dia ou hora no período (carimbo da remarcação — tocar na consulta não conta). ' \

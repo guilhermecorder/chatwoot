@@ -19,7 +19,7 @@
 // (Cevico::TrafficReport, com a régua padrão e o período anterior para
 // comparar); a série de 30 dias, a leitura, o A/B e os funis vêm do
 // pages_dashboard. Filtro por categoria/palavra-chave = page_ids no servidor.
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
@@ -38,6 +38,7 @@ import CvPainelLateral from 'dashboard/components-next/cevico/guia/CvPainelLater
 import ScoreRadar from 'dashboard/components-next/cevico/creatives/ScoreRadar.vue';
 import VerdictBars from 'dashboard/components-next/cevico/creatives/VerdictBars.vue';
 import PagesStory from './PagesStory.vue';
+import PageFicha from './PageFicha.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -671,17 +672,44 @@ const painel = ref(null); // { key, titulo, valor, comparacao, pageId? }
 const abrir = (key, titulo, valor, comparacao = null) => {
   painel.value = { key, titulo, valor, comparacao };
 };
+// 19/10: tocar numa página abre a FICHA dela em cima da lista (números reais,
+// caminho, histórico, placar, origens, Google, o que melhorar) — "por página,
+// mais visual e expansível"; tocar de novo fecha
+const fichaId = ref(null);
+const fichaPage = computed(
+  () => pageList.value.find(p => p.id === fichaId.value) || null
+);
+const previousRows = computed(() => report.value?.previous?.rows || []);
+const fichaPrevious = computed(() => {
+  const id = fichaPage.value?.id;
+  if (id === undefined || id === null) return null;
+  const found = previousRows.value.find(r =>
+    id === 'hub' ? r.page_id === null : r.page_id === id
+  );
+  return (
+    found || {
+      views: 0,
+      cta: 0,
+      leads: 0,
+      booked: 0,
+      conversions: 0,
+      revenue: 0,
+    }
+  );
+});
+const fichaScorecard = computed(() =>
+  fichaPage.value && fichaPage.value.id !== 'hub'
+    ? (agent.value?.scorecards || {})[fichaPage.value.id] || null
+    : null
+);
 const abrirPagina = p => {
-  painel.value = {
-    key: 'page',
-    pageId: p.id,
-    titulo: `${p.emoji || '📄'} ${p.title}`,
-    valor: `${n(p.leads)} lead(s)`,
-    comparacao: {
-      texto: `${n(p.views)} visitas · ${pctTxt(rate(p.leads, p.views))} viram lead`,
-      estado: 'neutro',
-    },
-  };
+  fichaId.value = fichaId.value === p.id ? null : p.id;
+  if (fichaId.value === null) return;
+  nextTick(() => {
+    document
+      .getElementById('cvg-ficha-pagina')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
 };
 const fechar = () => {
   painel.value = null;
@@ -1806,7 +1834,7 @@ const goTo = key => {
         <!-- ══ 4 · PÁGINA POR PÁGINA ══ -->
         <CvBloco
           titulo="Página por página"
-          subtitulo="Os mesmos três níveis de cada página. Toque numa página para ver a história completa dela."
+          subtitulo="Toque numa página para abrir a ficha dela: números reais, caminho, histórico, placar, origens, Google e o que melhorar."
           icon="i-lucide-files"
         >
           <template #acoes>
@@ -1841,6 +1869,28 @@ const goTo = key => {
             </div>
           </template>
 
+          <!-- 19/10: a FICHA da página escolhida, em cima da lista -->
+          <div v-if="fichaPage" id="cvg-ficha-pagina" class="scroll-mt-4">
+            <PageFicha
+              :key="fichaPage.id"
+              :page="fichaPage"
+              :previous="fichaPrevious"
+              :scorecard="fichaScorecard"
+              :insights="fichaPage.id === 'hub' ? [] : insightsOf(fichaPage.id)"
+              :periodo-txt="periodoTxt"
+              :source-labels="sourceLabels"
+              :gsc-ready="gscReady"
+              :category-label="
+                CATEGORY_META[fichaPage.category]?.label ||
+                fichaPage.category ||
+                ''
+              "
+              :color="cor"
+              @close="fichaId = null"
+              @otimizar="goOtimizar"
+            />
+          </div>
+
           <p v-if="!pageList.length" class="cvg-vazio">
             Nenhuma página neste recorte.
           </p>
@@ -1852,6 +1902,9 @@ const goTo = key => {
               :key="p.id"
               type="button"
               class="cvg-linha cvg-pa-linha"
+              :class="fichaId === p.id ? 'cvg-on ring-2 ring-offset-0' : ''"
+              :style="fichaId === p.id ? { '--tw-ring-color': cor } : null"
+              :aria-expanded="fichaId === p.id ? 'true' : 'false'"
               @click="abrirPagina(p)"
             >
               <span class="cvg-pa-quem">
@@ -1908,6 +1961,9 @@ const goTo = key => {
               :key="p.id"
               type="button"
               class="cvg-card cvg-pa-card"
+              :class="fichaId === p.id ? 'ring-2' : ''"
+              :style="fichaId === p.id ? { '--tw-ring-color': cor } : null"
+              :aria-expanded="fichaId === p.id ? 'true' : 'false'"
               @click="abrirPagina(p)"
             >
               <span class="cvg-legenda">

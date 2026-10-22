@@ -1610,6 +1610,11 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/acquisition_cost`, { params });
   }
 
+  // 📈 custo por fonte ao longo do tempo + faturamento × etapas do CRM (19/10)
+  getAcquisitionTimeline(params = {}) {
+    return axios.get(`${this.url}/acquisition_cost/timeline`, { params });
+  }
+
   // ── 📄 Agente de Páginas (item 353): placar, pódio, linha do tempo e fila ──
   getPageAgent(params = {}) {
     return axios.get(`${this.url}/page_agent`, { params });

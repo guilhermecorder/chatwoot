@@ -27,7 +27,8 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
       rows: report.rows,
       protocol: report.protocol,
       totals: report.totals,
-      previous: { since: previous.since_date, until: previous.until_date, totals: previous.totals },
+      # 19/10: rows do período anterior — a ficha de cada página compara "antes × agora"
+      previous: { since: previous.since_date, until: previous.until_date, totals: previous.totals, rows: previous.rows },
       series: report.series,
       campaigns: campaign_roi,
       insights: insights,
