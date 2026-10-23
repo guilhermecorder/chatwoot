@@ -13,6 +13,11 @@
 #   agendou) para a Biblioteca de guias. A chave é o próprio endereço dela:
 #   só responde para uma página PUBLICADA deste domínio com o marcador
 #   data-biblioteca="1" no HTML. Só contagens — nenhum dado de pessoa.
+# - /biblioteca/raio-x.json (23/10): o Raio-X de UMA página (?pagina=slug) no
+#   mesmo período — caminho, leitura por título, botões, origens, Google e o
+#   diagnóstico (Cevico::PageXray). Mesma chave e mesmas regras do numeros.json.
+# - /biblioteca/calor.json (23/10): o painel de calor de TODAS as páginas — os
+#   trechos onde mais gente para de ler ou toca errado (Cevico::PageSections).
 class CevicoSeoController < ActionController::Base # rubocop:disable Rails/ApplicationController
   include Crm::ResolvesPeriod
 
@@ -62,6 +67,31 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
     render json: numbers.merge(preset: preset)
   end
 
+  def library_heat
+    library = library_page
+    return head :not_found if library.nil?
+
+    since_date, until_date, preset = library_period
+    key = "cevico:biblioteca:calor:#{library.account_id}:#{since_date}:#{until_date}"
+    heat = Rails.cache.fetch(key, expires_in: 10.minutes) { heat_payload(library, since_date, until_date) }
+
+    expires_in 5.minutes, public: false
+    render json: heat.merge(since: since_date.iso8601, until: until_date.iso8601, preset: preset)
+  end
+
+  def library_xray
+    library = library_page
+    page = library && library.account.cevico_pages.published.find_by(slug: params[:pagina].to_s)
+    return head :not_found if page.nil?
+
+    since_date, until_date, preset = library_period
+    expires_in 5.minutes, public: false
+    render json: page_xray(page, since_date, until_date).merge(
+      periodo: { since: since_date.iso8601, until: until_date.iso8601, dias: (until_date - since_date).to_i + 1, preset: preset },
+      atualizado: Time.current.iso8601
+    )
+  end
+
   private
 
   # a Biblioteca pedida no ?de=: publicada, deste domínio e com o marcador
@@ -94,15 +124,75 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
     [since_date, until_date, params[:preset]]
   end
 
-  # contagens por página no período (sem a linha do hub) + o total
+  # contagens por página no período (sem a linha do hub) + o total; título e
+  # tipo vão junto para a Biblioteca listar também as páginas que não são guias
   def library_payload(account, since_date, until_date)
-    pages = Cevico::TrafficReport.new(account, since_date, until_date).rows.select { |row| row[:slug].present? }
-    numbers = pages.to_h do |row|
-      [row[:slug], { acessos: row[:views], cliques: row[:cta], leads: row[:leads], agendou: row[:booked] }]
-    end
+    pages = library_rows(account, since_date, until_date).select { |row| row[:slug].present? }
+    ads = ad_page_ids(account)
+    numbers = pages.to_h { |row| [row[:slug], library_numbers_of(row, ads)] }
     total = %i[acessos cliques leads agendou].index_with { |key| numbers.values.sum { |n| n[key] } }
     { since: since_date.iso8601, until: until_date.iso8601, dias: (until_date - since_date).to_i + 1,
       atualizado: Time.current.iso8601, paginas: numbers, total: total }
+  end
+
+  def library_numbers_of(row, ads)
+    { acessos: row[:views], cliques: row[:cta], leads: row[:leads], agendou: row[:booked],
+      titulo: row[:title], tipo: ads.include?(row[:page_id]) ? 'anuncio' : 'organica' }
+  end
+
+  def page_xray(page, since_date, until_date)
+    account = page.account
+    key = "cevico:biblioteca:raio-x:#{page.id}:#{page.updated_at.to_i}:#{since_date}:#{until_date}"
+    Rails.cache.fetch(key, expires_in: 10.minutes) do
+      Cevico::PageXray.new(page, since_date, until_date, rows: library_rows(account, since_date, until_date),
+                                                         ad_page_ids: ad_page_ids(account)).call
+    end
+  end
+
+  HEAT_ORDER = %w[problema atencao].freeze
+  HEAT_TOP = 10
+
+  # só as páginas com leitura medida no período carregam o HTML (para o mapa)
+  def heat_payload(library, since_date, until_date)
+    pages = CevicoPage.where(id: measured_page_ids(library, since_date, until_date)).order(:slug)
+                      .map { |page| heat_row(page, since_date, until_date) }
+    ranking = pages.flat_map { |page| page.delete(:trechos) }
+                   .sort_by { |t| [HEAT_ORDER.index(t[:status]), -t[:perdidas], -t[:erros]] }.first(HEAT_TOP)
+    { paginas: pages, ranking: ranking, totais: heat_totals(pages) }
+  end
+
+  def measured_page_ids(library, since_date, until_date)
+    days = (since_date..until_date).map(&:iso8601)
+    light = library.account.cevico_pages.published.where.not(id: library.id).select(:id, :daily_stats)
+    light.select { |page| days.any? { |day| page.daily_stats&.dig(day, 'scroll').present? } }.map(&:id)
+  end
+
+  def heat_row(page, since_date, until_date)
+    resumo = Cevico::PageSections.new(page, since_date, until_date).resumo
+    trechos = resumo[:trechos].map do |t|
+      { slug: page.slug, pagina: page.title, titulo: t['titulo'], status: t['status'], saida: t['saida'],
+        perdidas: t['perdidas'], erros: t['erros_total'], viram: t['viram'] }
+    end
+    { slug: page.slug, titulo: page.title, medidas: resumo[:medidas], status: resumo[:status], erros: resumo[:erros],
+      trechos: trechos }
+  end
+
+  def heat_totals(pages)
+    { medidas: pages.sum { |p| p[:medidas] }, erros: pages.sum { |p| p[:erros] },
+      status: %w[problema atencao boa].index_with { |s| pages.sum { |p| p[:status][s] } } }
+  end
+
+  def library_rows(account, since_date, until_date)
+    Rails.cache.fetch("cevico:biblioteca:linhas:#{account.id}:#{since_date}:#{until_date}", expires_in: 10.minutes) do
+      Cevico::TrafficReport.new(account, since_date, until_date).rows
+    end
+  end
+
+  # páginas de ANÚNCIO (variação -g/-m/-gd ou noindex): a régua delas é outra
+  def ad_page_ids(account)
+    Rails.cache.fetch("cevico:biblioteca:anuncios:#{account.id}", expires_in: 10.minutes) do
+      account.cevico_pages.published.select(:id, :slug, :custom_html).filter_map { |page| page.id if noindex?(page) }
+    end
   end
 
   def robots_text

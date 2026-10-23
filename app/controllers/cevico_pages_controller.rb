@@ -182,7 +182,9 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     page = CevicoPage.published.find_by(slug: params[:slug])
     return head :not_found if page.nil?
 
-    page.track_scroll!(params[:depth])
+    # página anexada (Raio-X, 23/10): além da rolagem, os títulos vistos, os botões clicados e os toques errados
+    page.track_reading!(depth: params[:depth], sections: beacon_keys(:secoes), buttons: beacon_keys(:botoes),
+                        misses: beacon_keys(:erros))
     head :no_content
   end
 
@@ -221,6 +223,11 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   end
 
   private
+
+  # "a,b,c" do beacon → no máximo 80 chaves distintas (o modelo confere cada uma no mapa da página)
+  def beacon_keys(name)
+    params[name].to_s.split(',').map(&:strip).compact_blank.uniq.first(80)
+  end
 
   WHATSAPP_URL = %r{\A(https?://(wa\.me|api\.whatsapp\.com)|whatsapp:)}i
   TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_id utm_content utm_term gclid gbraid wbraid fbclid ref_host].freeze

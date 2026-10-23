@@ -105,3 +105,118 @@
   }, true);
 })();
 </script>
+<%# 🩻 Raio-X da página (23/10): na página ANEXADA, por visita, até onde leu,
+    quais títulos (h2) apareceram na tela, quais botões foram tocados e os
+    TOQUES ERRADOS (foto, título, selo/chip que parece botão, texto, ou 3 toques
+    seguidos no mesmo lugar), marcados no trecho onde aconteceram. As
+    chaves seguem as MESMAS regras do Cevico::PageReading (id do título ou o
+    texto dele em forma de endereço; data-ev do botão ou "<título>#n"). Vai num
+    beacon quando a pessoa sai da aba; se ela voltar e seguir lendo, o próximo
+    beacon leva só o que é novo. A página montada já mede a rolagem sozinha. %>
+<% if page&.custom_html.present? %>
+<script nonce="<%= content_security_policy_nonce %>">
+(function () {
+  if (!navigator.sendBeacon || !window.IntersectionObserver) return;
+  var KEY = /^[a-z0-9_-]{1,48}$/;
+  var CTA = /wa\.me\/|api\.whatsapp\.com|^whatsapp:|\/cta(\?|$)|[?&]de=/i;
+  function slug(t) {
+    return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
+  }
+  var vistos = {}, tocados = {}, erros = {}, mandados = {}, atual = 'topo', conta = {}, maxDepth = 0, depthIda = false;
+  var H = [], toques = [], px = 0, py = 0;
+  var VIVO = 'a,button,summary,input,select,textarea,label,video,audio,iframe,[role="button"],[role="link"],[role="tab"],[onclick],[tabindex],[data-ev]';
+  var PARECE = /(^|[\s_-])(chip|pill|btn|botao|selo|tag|badge|cta)([\s_-]|$)/i;
+  var io = new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { vistos[e.target.getAttribute('data-cv-marco')] = 1; io.unobserve(e.target); } });
+  }, { rootMargin: '0px 0px -15% 0px' });
+  [].forEach.call(document.querySelectorAll('h2, a[href]'), function (el) {
+    if (el.tagName === 'H2') {
+      var k = KEY.test(el.id || '') ? el.id : slug(el.textContent);
+      if (!k) return;
+      atual = k; el.setAttribute('data-cv-marco', k); io.observe(el); H.push([el, k]);
+      return;
+    }
+    if (!CTA.test(el.getAttribute('href') || '')) return;
+    var ev = el.getAttribute('data-ev') || '';
+    if (!KEY.test(ev)) { conta[atual] = (conta[atual] || 0) + 1; ev = atual + '#' + conta[atual]; }
+    el.setAttribute('data-cv-botao', ev);
+  });
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('[data-cv-botao]');
+    if (a) tocados[a.getAttribute('data-cv-botao')] = 1;
+  }, true);
+  // toque errado: em quem NÃO faz nada (foto, título, texto, algo com cara de botão)
+  function trecho(el) {
+    var k = 'topo';
+    for (var i = 0; i < H.length; i++) {
+      if (H[i][0] === el || H[i][0].contains(el) || (H[i][0].compareDocumentPosition(el) & 4)) k = H[i][1]; else break;
+    }
+    // a etiqueta logo acima do título é do mesmo bloco: conta no trecho desse título
+    var sec = el.closest('section'), h = sec && sec.querySelector('[data-cv-marco]');
+    if (h && (h.compareDocumentPosition(el) & 2)) k = h.getAttribute('data-cv-marco');
+    return k;
+  }
+  function classe(n) { var c = n.className; return typeof c === 'string' ? c : (c && c.baseVal) || ''; }
+  function fotoNoPonto(el, x, y) {
+    for (var n = el, i = 0; n && n !== document.body && i < 3; n = n.parentElement, i++) {
+      var imgs = n.querySelectorAll('img');
+      for (var j = 0; j < imgs.length; j++) {
+        var r = imgs[j].getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+      }
+    }
+    return false;
+  }
+  function tipo(el, x, y) {
+    if (el.closest(VIVO)) return null;
+    if (el.closest('img,picture,svg,figure,canvas') || fotoNoPonto(el, x, y)) return 'foto';
+    if (el.closest('h1,h2,h3,h4')) return 'titulo';
+    for (var n = el; n && n !== document.body; n = n.parentElement) {
+      if (PARECE.test(classe(n))) return 'parece-botao';
+      if (getComputedStyle(n).cursor === 'pointer') return null; // tem ação própria
+    }
+    return el.closest('p,li,blockquote,span,b,strong,em,small,q') ? 'texto' : null;
+  }
+  document.addEventListener('pointerdown', function (e) { px = e.clientX; py = e.clientY; }, true);
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    if (!el || !el.closest || Math.abs(e.clientX - px) > 10 || Math.abs(e.clientY - py) > 10) return; // arrastou
+    var agora = Date.now();
+    toques = toques.filter(function (t) { return agora - t[0] < 900 && Math.abs(t[1] - e.clientX) < 30 && Math.abs(t[2] - e.clientY) < 30; });
+    toques.push([agora, e.clientX, e.clientY]);
+    if (toques.length >= 3) erros[trecho(el) + '~repetido'] = 1;
+    if (window.getSelection && String(window.getSelection())) return; // selecionando texto
+    var tp = tipo(el, e.clientX, e.clientY);
+    if (tp) erros[trecho(el) + '~' + tp] = 1;
+  }, true);
+  function mede() {
+    var doc = document.documentElement, total = doc.scrollHeight - window.innerHeight;
+    var pct = total > 0 ? ((window.scrollY || doc.scrollTop) / total) * 100 : 100;
+    var b = pct >= 95 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+    if (b > maxDepth) maxDepth = b;
+  }
+  function novos(set, tipo) {
+    return Object.keys(set).filter(function (k) { return !mandados[tipo + k]; });
+  }
+  function manda() {
+    var s = novos(vistos, 's'), b = novos(tocados, 'b'), er = novos(erros, 'e'), p = new URLSearchParams();
+    if (!depthIda) p.set('depth', String(maxDepth));
+    else if (!s.length && !b.length && !er.length) return;
+    if (s.length) p.set('secoes', s.join(','));
+    if (b.length) p.set('botoes', b.join(','));
+    if (er.length) p.set('erros', er.join(','));
+    if (navigator.sendBeacon('/p/<%= j page.slug %>/track', p)) {
+      depthIda = true;
+      s.forEach(function (k) { mandados['s' + k] = 1; });
+      b.forEach(function (k) { mandados['b' + k] = 1; });
+      er.forEach(function (k) { mandados['e' + k] = 1; });
+    }
+  }
+  window.addEventListener('scroll', mede, { passive: true });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') manda(); });
+  window.addEventListener('pagehide', manda);
+  mede();
+})();
+</script>
+<% end %>

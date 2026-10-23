@@ -26,6 +26,12 @@ get 'robots.txt', to: 'cevico_seo#robots', format: false, as: :cevico_robots
 # 📚 números por guia para a Biblioteca de guias (chave = endereço da biblioteca)
 get 'biblioteca/numeros.json', to: 'cevico_seo#library_numbers', format: false, as: :cevico_library_numbers,
                                constraints: ->(req) { Cevico::PublicSite.official_host?(req.host) }
+# 🩻 Raio-X de uma página na Biblioteca (23/10): leitura por título, botões, origens e diagnóstico
+get 'biblioteca/raio-x.json', to: 'cevico_seo#library_xray', format: false, as: :cevico_library_xray,
+                              constraints: ->(req) { Cevico::PublicSite.official_host?(req.host) }
+# 🔥 painel de calor: os trechos de todas as páginas onde mais gente para de ler ou toca errado
+get 'biblioteca/calor.json', to: 'cevico_seo#library_heat', format: false, as: :cevico_library_heat,
+                             constraints: ->(req) { Cevico::PublicSite.official_host?(req.host) }
 # Páginas públicas CEVICO (nutrição/procedimentos — preparadas p/ SEO)
 # /cta e /next = redirecionadores que CONTAM o clique (funil + conversão)
 get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
