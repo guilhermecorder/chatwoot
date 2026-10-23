@@ -4,6 +4,35 @@
 #      pedido ao laboratório e entrega). Idempotente: roda de novo sem duplicar.
 namespace :cevico do # rubocop:disable Metrics/BlockLength
   namespace :otica do # rubocop:disable Metrics/BlockLength
+    # 👓 VPS nova da ótica: monta funis, Agenda, atendentes, etiqueta e Jornada
+    # (estrutura de config/otica/preparo.yml) e, com CONTEUDO=arquivo.json, o
+    # roteiro e os textos da loja. Idempotente. DRY=1 só mostra.
+    #   bundle exec rake "cevico:otica:preparar[1]"
+    #   ACCOUNT_ID=1 CONTEUDO=/app/tmp/otica-conteudo.json bundle exec rake cevico:otica:preparar
+    desc 'Prepara a conta da ótica (funis, Agenda, atendentes, Jornada; CONTEUDO=arquivo opcional)'
+    task :preparar, [:account_id] => :environment do |_t, args|
+      id = args[:account_id].presence || ENV['ACCOUNT_ID'].presence
+      account = id ? Account.find(id) : Account.order(:id).first
+      abort 'Nenhuma conta encontrada. Crie a conta (cadastro inicial) e rode de novo.' if account.nil?
+
+      path = ENV['CONTEUDO'].presence
+      content = path ? JSON.parse(File.read(path)) : nil
+      result = Otica::Preparo.new(account, content: content, dry: ENV['DRY'] == '1').call
+      puts(result.lines.map { |l| "- #{l}" })
+    end
+
+    # tira o conteúdo da bancada para levar à VPS (o arquivo NÃO vai para o git)
+    #   bundle exec rake "cevico:otica:exportar[6517]"  → tmp/otica-conteudo.json
+    desc 'Exporta roteiro, textos dos atendentes e da Jornada de uma conta para tmp/otica-conteudo.json'
+    task :exportar, [:account_id] => :environment do |_t, args|
+      account = Account.find(args[:account_id].presence || ENV.fetch('ACCOUNT_ID'))
+      out = ENV['ARQUIVO'].presence || Rails.root.join('tmp/otica-conteudo.json').to_s
+      data = Otica::ConteudoExport.new(account).call
+      File.write(out, JSON.pretty_generate(data))
+      puts "Gravado #{out}: #{data['script'].size} seção(ões) do roteiro, #{data['prompts'].size} atendente(s), " \
+           "#{data['journey'].size} texto(s) da Jornada."
+    end
+
     desc 'Dados de exemplo da fase 1 (produtos, laboratório, cliente, O.S.) na conta informada'
     task :exemplos, [:account_id] => :environment do |_t, args| # rubocop:disable Metrics/BlockLength
       account = Account.find(args[:account_id] || ENV.fetch('ACCOUNT_ID'))

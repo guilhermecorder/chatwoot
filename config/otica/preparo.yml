@@ -1,0 +1,95 @@
+# 👓 SUA ÓTICA — a ESTRUTURA que o `rake cevico:otica:preparar` monta numa
+# conta (a VPS nova da ótica ou uma bancada). Tudo é achado POR NOME:
+# rodar de novo não duplica nada, só acerta o que mudou.
+#
+# ATENÇÃO: o repositório é PÚBLICO. Aqui fica só estrutura e textos neutros.
+# O conteúdo de verdade (roteiro dos agentes, textos da Jornada) vem do
+# arquivo exportado da bancada (rake cevico:otica:exportar), que NUNCA entra
+# no git.
+funis:
+  - nome: 'Aquisição'
+    descricao: 'Cliente novo: do primeiro contato até a primeira compra. Agente: Atendente de Agendamento.'
+    colunas:
+      - ['Novos contatos', '#F59E0B']
+      - ['Orçamento prévio enviado', '#3B82F6']
+      - ['Agendamento da visita', '#8B5CF6']
+      - ['Visita confirmada', '#06B6D4']
+      - ['Desmarcou ou não veio', '#EF4444']
+      - ['Visita realizada', '#22C55E']
+      - ['Pedido fechado (1ª compra)', '#10B981']
+      - ['Não fechou ainda', '#F97316']
+  - nome: 'Pós-venda e relacionamento'
+    descricao: 'Cliente da base: do pedido fechado para sempre (NPS, ajuste, segundo óculos, nova oferta). Agente: Atendente Pós-compra.'
+    colunas:
+      - ['Pedido em produção', '#64748B']
+      - ['Pronto para retirar', '#2563EB']
+      - ['Retirou o óculos', '#16A34A']
+      - ['1 semana (NPS e Google)', '#0891B2']
+      - ['30 dias (ajuste e limpeza)', '#06B6D4']
+      - ['6 meses (segundo óculos)', '#D97706']
+      - ['1 ano ou parcelas acabaram (nova oferta)', '#D4A017']
+      - ['Nova oferta em conversa', '#8B5CF6']
+      - ['Comprou de novo', '#10B981']
+      - ['Sem resposta', '#94A3B8']
+
+# a Agenda e o reflexo de comparecimento ligados às colunas (pelo nome)
+agenda:
+  booking:
+    stage_id: 'Agendamento da visita'
+    confirmed_stage_id: 'Visita confirmada'
+    budget_stage_id: 'Orçamento prévio enviado'
+  attendance_stages:
+    attended_stage_id: 'Visita realizada'
+    missed_stage_id: 'Desmarcou ou não veio'
+
+# os 3 atendentes: em que colunas cada um responde. Agente NOVO nasce em
+# modo SOMBRA (não fala com cliente); agente que já existe mantém o modo.
+agentes:
+  atendente_agendamento:
+    colunas: ['Novos contatos', 'Orçamento prévio enviado', 'Visita realizada', 'Não fechou ainda', 'Nova oferta em conversa']
+    sem_card: true
+    depois_de_agendar: 'Agendamento da visita'
+  atendente_pos:
+    colunas: ['Agendamento da visita', 'Visita confirmada', 'Desmarcou ou não veio']
+  atendente_pos_op:
+    colunas: ['Pedido fechado (1ª compra)', 'Pedido em produção', 'Pronto para retirar', 'Retirou o óculos', '1 semana (NPS e Google)',
+              '30 dias (ajuste e limpeza)', '6 meses (segundo óculos)', '1 ano ou parcelas acabaram (nova oferta)', 'Comprou de novo', 'Sem resposta']
+    dias_pos_compra: 0
+
+etiquetas:
+  - ['parcelas_10x', '#D4A017', 'Óculos em 10 parcelas (Jornada: oferta quando acabarem)']
+
+# Jornada do funil de pós-venda. Textos NEUTROS (o arquivo de conteúdo
+# troca pelos da loja). Aprovação manual e horário de silêncio sempre.
+jornada:
+  - nome: 'Óculos pronto para retirar'
+    etapa: pos_op
+    gatilho: { coluna: 'Pronto para retirar', dias: 0, hora: '10:00' }
+    espera_resposta: false
+    texto: "Oi, {{primeiro_nome}}! Aqui é da Sua Ótica. Seu óculos ficou pronto.\nQuer que eu deixe separado pra algum dia?"
+  - nome: '1 semana: está enxergando bem?'
+    etapa: pos_op
+    gatilho: { coluna: 'Retirou o óculos', dias: 7, hora: '10:30' }
+    espera_resposta: true
+    etiqueta_confirmou: 'otica_ok_1semana'
+    texto: "Oi, {{primeiro_nome}}! Faz uma semana que você retirou o seu óculos novo.\nEstá enxergando bem com ele?"
+  - nome: '30 dias: ajuste e limpeza sem custo'
+    etapa: pos_op
+    gatilho: { coluna: 'Retirou o óculos', dias: 30, hora: '10:30' }
+    espera_resposta: true
+    texto: "Oi, {{primeiro_nome}}! Faz um mês do seu óculos novo. Se estiver apertando ou escorregando, passa aqui pra um ajuste e uma limpeza, sem custo."
+  - nome: '6 meses: segundo óculos'
+    etapa: retorno
+    gatilho: { coluna: 'Retirou o óculos', dias: 180, hora: '10:30' }
+    espera_resposta: true
+    texto: "Oi, {{primeiro_nome}}! Já faz 6 meses do seu óculos. Pra cliente da casa tem condição especial no segundo óculos. Quer que eu te passe?"
+  - nome: '1 ano: conferir o grau (exame cortesia)'
+    etapa: retorno
+    gatilho: { coluna: 'Retirou o óculos', dias: 365, hora: '10:30' }
+    espera_resposta: true
+    texto: "Oi, {{primeiro_nome}}! Faz 1 ano do seu óculos. É a hora de conferir o grau. Quer que eu veja um horário?"
+  - nome: 'Parcelas acabaram: próximo óculos'
+    etapa: retorno
+    gatilho: { etiqueta: 'parcelas_10x', dias: 300, hora: '10:30' }
+    espera_resposta: true
+    texto: "Oi, {{primeiro_nome}}! As parcelas do seu óculos terminaram. Quer que eu te mande uma proposta pro próximo?"

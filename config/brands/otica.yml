@@ -1,0 +1,12 @@
+# Pacote de marca: SUA ÓTICA (ativado com MARCA=otica no ambiente da VPS da ótica)
+id: otica
+nome: 'Sistema Sua Ótica'
+brand_name: 'Sua Ótica'
+logos:
+  logo: '/brand-assets/otica/logo.png'
+  logo_dark: '/brand-assets/otica/logo_dark.png'          # letras brancas, óculos verde vivo
+  logo_thumbnail: '/brand-assets/otica/logo_thumbnail.png' # cartão branco arredondado (lê nos dois temas)
+favicons_dir: '/brand-assets/otica'   # favicon-16x16.png / 32 / 96 (só os óculos)
+cores:
+  primaria: '#018544'   # verde das letras
+  destaque: '#05EA05'   # verde vivo dos óculos
