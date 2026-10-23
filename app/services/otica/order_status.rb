@@ -16,6 +16,7 @@ class Otica::OrderStatus
     attrs[:delivered_at] = delivered_time(delivered_at) if new_status == 'entregue'
     attrs[:delivered_at] = nil if order.delivered? && new_status != 'entregue'
     order.update!(attrs)
+    Otica::StockLedger.apply_order!(order) # 📦 cancelou/devolveu → volta ao estoque; reabriu → baixa
     Otica::CrmBridge.reflect(order)
     order
   end

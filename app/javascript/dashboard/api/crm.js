@@ -1910,6 +1910,43 @@ class CrmAPI extends ApiClient {
   deleteOticaOrder(id) {
     return axios.delete(`${this.url}/otica/orders/${id}`);
   }
+
+  // 👓 Sua Ótica — fase 2 (estoque): visão, movimentações, inventário, compras
+  getOticaStock(params = {}) {
+    return axios.get(`${this.url}/otica/stock`, { params });
+  }
+
+  getOticaStockMoves(params = {}) {
+    return axios.get(`${this.url}/otica/stock/moves`, { params });
+  }
+
+  createOticaStockMove(payload) {
+    return axios.post(`${this.url}/otica/stock/moves`, payload);
+  }
+
+  postOticaInventory(payload) {
+    return axios.post(`${this.url}/otica/stock/inventory`, payload);
+  }
+
+  previewOticaPurchaseXml(payload) {
+    return axios.post(`${this.url}/otica/stock/purchases/preview_xml`, payload);
+  }
+
+  createOticaPurchase(payload) {
+    return axios.post(`${this.url}/otica/stock/purchases`, payload);
+  }
+
+  getOticaPurchases() {
+    return axios.get(`${this.url}/otica/stock/purchases`);
+  }
+
+  receiveOticaPurchase(id) {
+    return axios.post(`${this.url}/otica/stock/purchases/${id}/receive`);
+  }
+
+  deleteOticaPurchase(id) {
+    return axios.delete(`${this.url}/otica/stock/purchases/${id}`);
+  }
 }
 
 export default new CrmAPI();

@@ -115,8 +115,9 @@ class Otica::CsvImport
     'armacao'
   end
 
-  def save_row(attrs, line)
+  def save_row(attrs, line) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     product = attrs[:sku].present? ? @account.otica_products.find_by(sku: attrs[:sku]) : nil
+    quantity = attrs.delete(:quantity)
     if product
       product.assign_attributes(attrs.except(:kind))
       saved = product.save
@@ -126,6 +127,8 @@ class Otica::CsvImport
       saved = product.save
       @created += 1 if saved
     end
+    # 📦 fase 2: o saldo do CSV vira AJUSTE no livro de estoque (fica a história)
+    Otica::StockLedger.set_quantity!(product, quantity, origin: 'importacao', notes: 'saldo do CSV do SavWin') if saved && !quantity.nil?
     @errors << "linha #{line}: #{product.errors.full_messages.first}" unless saved
   rescue StandardError => e
     @errors << "linha #{line}: #{e.message[0, 120]}"

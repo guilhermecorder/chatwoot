@@ -213,6 +213,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     # controller confere "vendas OU produção" nessas ações (skip aqui)
     'crm/otica/orders' => { node: 'otica.vendas', skip: %w[index show whatsapp set_status lab_orders] },
     'crm/otica/lab_orders' => { node: 'otica.producao', skip: %w[update] },
+    'crm/otica/stock' => { node: 'otica.produtos', view: %w[show moves purchases] },
     # ── Configurações ──
     'crm/appointment_reminders' => { node: 'configuracoes.modelos' }
   }.freeze

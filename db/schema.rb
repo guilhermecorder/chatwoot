@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_22_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_10_23_010000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2295,6 +2295,68 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_22_010000) do
     t.index ["supplier_id"], name: "index_otica_products_on_supplier_id"
   end
 
+  create_table "otica_purchase_items", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "purchase_id", null: false
+    t.bigint "product_id"
+    t.string "description", default: "", null: false
+    t.string "ean", default: ""
+    t.string "ncm", default: ""
+    t.string "code", default: ""
+    t.integer "quantity", default: 1, null: false
+    t.decimal "unit_cost", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "total", precision: 12, scale: 2, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_otica_purchase_items_on_account_id"
+    t.index ["product_id"], name: "index_otica_purchase_items_on_product_id"
+    t.index ["purchase_id"], name: "index_otica_purchase_items_on_purchase_id"
+  end
+
+  create_table "otica_purchases", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "supplier_id"
+    t.string "status", default: "rascunho", null: false
+    t.string "supplier_name", default: ""
+    t.string "supplier_cnpj", default: ""
+    t.string "number", default: ""
+    t.string "series", default: ""
+    t.string "access_key", default: ""
+    t.date "issued_on"
+    t.datetime "received_at"
+    t.decimal "total", precision: 12, scale: 2, default: "0.0", null: false
+    t.string "notes", default: ""
+    t.integer "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "access_key"], name: "index_otica_purchases_on_account_id_and_access_key"
+    t.index ["account_id", "status"], name: "index_otica_purchases_on_account_id_and_status"
+    t.index ["account_id"], name: "index_otica_purchases_on_account_id"
+    t.index ["supplier_id"], name: "index_otica_purchases_on_supplier_id"
+  end
+
+  create_table "otica_stock_moves", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "product_id", null: false
+    t.string "kind", null: false
+    t.string "origin", default: "manual", null: false
+    t.integer "quantity", null: false
+    t.integer "delta", null: false
+    t.integer "balance_after", null: false
+    t.decimal "unit_cost", precision: 12, scale: 2
+    t.string "reference_type"
+    t.bigint "reference_id"
+    t.string "notes", default: ""
+    t.integer "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "created_at"], name: "index_otica_stock_moves_on_account_id_and_created_at"
+    t.index ["account_id", "product_id"], name: "index_otica_stock_moves_on_account_id_and_product_id"
+    t.index ["account_id"], name: "index_otica_stock_moves_on_account_id"
+    t.index ["product_id"], name: "index_otica_stock_moves_on_product_id"
+    t.index ["reference_type", "reference_id"], name: "index_otica_stock_moves_on_reference_type_and_reference_id"
+  end
+
   create_table "otica_suppliers", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.string "name", null: false
@@ -2732,6 +2794,13 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_22_010000) do
   add_foreign_key "otica_prescriptions", "contacts", on_delete: :cascade
   add_foreign_key "otica_products", "accounts"
   add_foreign_key "otica_products", "otica_suppliers", column: "supplier_id"
+  add_foreign_key "otica_purchase_items", "accounts"
+  add_foreign_key "otica_purchase_items", "otica_products", column: "product_id", on_delete: :nullify
+  add_foreign_key "otica_purchase_items", "otica_purchases", column: "purchase_id", on_delete: :cascade
+  add_foreign_key "otica_purchases", "accounts"
+  add_foreign_key "otica_purchases", "otica_suppliers", column: "supplier_id", on_delete: :nullify
+  add_foreign_key "otica_stock_moves", "accounts"
+  add_foreign_key "otica_stock_moves", "otica_products", column: "product_id", on_delete: :cascade
   add_foreign_key "otica_suppliers", "accounts"
   add_foreign_key "tasks", "accounts"
   add_foreign_key "tasks", "contacts", on_delete: :nullify

@@ -699,7 +699,7 @@ const MENU_LAYOUT = [
     color: '#30d158',
     label: 'Loja',
     icon: 'i-lucide-store',
-    items: ['Otica Venda', 'Otica Produtos', 'Otica Producao'],
+    items: ['Otica Venda', 'Otica Produtos', 'Otica Estoque', 'Otica Producao'],
   },
   {
     name: 'group:gestao', // para onde vai a clínica?
@@ -1472,6 +1472,16 @@ const menuItems = computed(() => {
             label: 'Produtos e estoque',
             icon: 'i-lucide-glasses',
             to: accountScopedRoute('otica_produtos'),
+          },
+        ]
+      : []),
+    ...(isOtica.value && show('Otica Estoque')
+      ? [
+          {
+            name: 'Otica Estoque',
+            label: 'Estoque',
+            icon: 'i-lucide-warehouse',
+            to: accountScopedRoute('otica_estoque'),
           },
         ]
       : []),

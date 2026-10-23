@@ -23,18 +23,28 @@ class Api::V1::Accounts::Crm::Otica::ProductsController < Api::V1::Accounts::Bas
     }
   end
 
+  # 📦 fase 2: o saldo digitado vira movimentação (cadastro / ajuste manual)
   def create
-    product = products.new(product_params)
+    attrs = product_params
+    quantity = attrs.delete(:quantity)
+    product = products.new(attrs)
     return render json: { error: product.errors.full_messages.first }, status: :unprocessable_entity unless product.save
 
-    render json: product.as_json_otica
+    ::Otica::StockLedger.set_quantity!(product, quantity, origin: 'cadastro', user: Current.user) if quantity.to_i.positive?
+    render json: product.reload.as_json_otica
   end
 
   def update
     product = products.find(params[:id])
-    return render json: { error: product.errors.full_messages.first }, status: :unprocessable_entity unless product.update(product_params)
+    attrs = product_params
+    quantity = attrs.delete(:quantity)
+    return render json: { error: product.errors.full_messages.first }, status: :unprocessable_entity unless product.update(attrs)
 
-    render json: product.as_json_otica
+    unless quantity.nil?
+      ::Otica::StockLedger.set_quantity!(product, quantity, origin: 'manual', notes: 'saldo alterado no cadastro',
+                                                            user: Current.user)
+    end
+    render json: product.reload.as_json_otica
   end
 
   def destroy

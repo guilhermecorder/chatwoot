@@ -86,7 +86,28 @@ namespace :cevico do # rubocop:disable Metrics/BlockLength
         puts "O.S. #{delivered.number} entregue para #{second.name}"
       end
 
-      puts "Produtos: #{account.otica_products.count} · Fornecedores: #{account.otica_suppliers.count} · O.S.: #{account.otica_orders.count}"
+      # 📦 fase 2: saldos dos produtos de exemplo viram movimentação de cadastro
+      # (idempotente: só o que ainda não tem linha no livro), as O.S. baixam o
+      # que venderam e uma compra de exemplo entra pela NF
+      account.otica_products.where(kind: Otica::Product::STOCK_KINDS).find_each do |p|
+        next if p.stock_moves.exists? || p.quantity.zero?
+
+        q = p.quantity
+        p.update_columns(quantity: 0) # rubocop:disable Rails/SkipsModelValidations
+        Otica::StockLedger.record!(product: p, kind: 'entrada', quantity: q, origin: 'cadastro', notes: 'saldo inicial de exemplo')
+      end
+      account.otica_orders.find_each { |o| Otica::StockLedger.apply_order!(o) }
+      unless account.otica_purchases.exists?
+        Otica::Purchases.create!(account: account, user: user, params: {
+                                   supplier_name: 'Distribuidora Exemplo', number: '4512', series: '1', issued_on: (Time.zone.today - 1).iso8601,
+                                   receive: true,
+                                   items: [{ product_id: account.otica_products.find_by(sku: 'ARM-001').id, quantity: 4, unit_cost: '175,00' },
+                                           { product_id: account.otica_products.find_by(sku: 'OUT-001').id, quantity: 10, unit_cost: '7,50' }]
+                                 })
+        puts 'Compra de exemplo (NF 4512) recebida.'
+      end
+      puts "Produtos: #{account.otica_products.count} · Fornecedores: #{account.otica_suppliers.count} · O.S.: #{account.otica_orders.count} · " \
+           "Movimentações: #{account.otica_stock_moves.count}"
     end
   end
 end

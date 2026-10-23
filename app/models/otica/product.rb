@@ -52,6 +52,7 @@ class Otica::Product < ApplicationRecord
   belongs_to :account
   belongs_to :supplier, class_name: 'Otica::Supplier', optional: true, inverse_of: :products
   has_many :order_items, class_name: 'Otica::OrderItem', dependent: :nullify, inverse_of: :product
+  has_many :stock_moves, class_name: 'Otica::StockMove', dependent: :destroy, inverse_of: :product
 
   KINDS = {
     'armacao' => 'Armação',
@@ -63,13 +64,18 @@ class Otica::Product < ApplicationRecord
   }.freeze
   LENS_TYPES = { 'visao_simples' => 'Visão simples', 'multifocal' => 'Multifocal', 'bifocal' => 'Bifocal' }.freeze
   LENS_KINDS = %w[lente lente_contato].freeze
+  # 📦 fase 2: o que tem SALDO na loja (lente de grau vem do laboratório por
+  # pedido; serviço não é peça)
+  STOCK_KINDS = %w[armacao solar lente_contato outro].freeze
 
   before_validation :compose_name
 
   validates :kind, inclusion: { in: KINDS.keys }
   validates :name, presence: true
   validates :lens_type, inclusion: { in: LENS_TYPES.keys }, allow_blank: true
-  validates :quantity, :min_quantity, :lab_days, numericality: { greater_than_or_equal_to: 0, only_integer: true }
+  # 📦 fase 2: o saldo PODE ficar negativo (vendeu peça que o sistema não conhecia; o inventário acerta)
+  validates :quantity, numericality: { only_integer: true }
+  validates :min_quantity, :lab_days, numericality: { greater_than_or_equal_to: 0, only_integer: true }
   validates :cost, :list_price, numericality: { greater_than_or_equal_to: 0 }
   validates :promo_price, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
 
@@ -90,6 +96,10 @@ class Otica::Product < ApplicationRecord
 
   def lens?
     LENS_KINDS.include?(kind)
+  end
+
+  def stock_tracked?
+    STOCK_KINDS.include?(kind)
   end
 
   # promoção vale se tem valor, é menor que a tabela e não venceu
@@ -118,7 +128,7 @@ class Otica::Product < ApplicationRecord
       sku: sku, barcode: barcode, ncm: ncm,
       cost: cost.to_f, list_price: list_price.to_f,
       promo_price: promo_price&.to_f, promo_until: promo_until&.iso8601, price: price,
-      active: active, quantity: quantity, min_quantity: min_quantity, low: low_stock?,
+      active: active, quantity: quantity, min_quantity: min_quantity, low: low_stock?, stock_tracked: stock_tracked?,
       lens_type: lens_type, lens_type_label: LENS_TYPES[lens_type], lens_material: lens_material,
       lens_treatment: lens_treatment, lab_days: lab_days,
       supplier_id: supplier_id, supplier_name: supplier&.name, notes: notes,

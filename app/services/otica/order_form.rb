@@ -13,7 +13,7 @@ class Otica::OrderForm
     @p = raw.with_indifferent_access
   end
 
-  def create
+  def create # rubocop:disable Metrics/AbcSize
     order = nil
     ActiveRecord::Base.transaction do
       contact = resolve_contact!
@@ -28,6 +28,7 @@ class Otica::OrderForm
       replace_payments!(order)
       order.recalculate!
     end
+    Otica::StockLedger.apply_order!(order, user: @user) # 📦 fase 2: venda gravada baixa o estoque
     Otica::CrmBridge.reflect(order) if order.status == 'aberta'
     order.reload
   end
@@ -52,6 +53,7 @@ class Otica::OrderForm
       replace_payments!(order) if @p.key?(:payments)
       order.recalculate!
     end
+    Otica::StockLedger.apply_order!(order, user: @user) # 📦 itens mudaram? só a diferença sai/volta
     Otica::CrmBridge.reflect(order) if was == 'orcamento' && order.status == 'aberta'
     order.reload
   end

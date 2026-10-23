@@ -3,7 +3,8 @@
 // em grade (grife · linha · modelo · cor · tamanho), com saldo, custo, preço
 // de tabela e promoção; importação do CSV exportado do SavWin; e os
 // fornecedores e laboratórios (o laboratório é um fornecedor do tipo "lab").
-// Saldo por produto (uma loja): a movimentação automática é a fase 2.
+// Saldo por produto (uma loja); desde a fase 2 toda mudança de saldo vira
+// movimentação (tela Estoque).
 import { ref, computed, onMounted } from 'vue';
 import { useAlert } from 'dashboard/composables';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
@@ -590,7 +591,7 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
                 <input v-model="productForm.promo_until" type="date" :class="INPUT" />
               </label>
               <label class="block">
-                <span :class="LABEL">Saldo (peças)</span>
+                <span :class="LABEL">Saldo (vira ajuste no estoque)</span>
                 <input
                   v-model.number="productForm.quantity"
                   type="number"
@@ -954,6 +955,10 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
                 linha, codigo_barras, ncm. Dinheiro pode vir como 1.234,56.
                 Linha sem código é criada como produto novo; linha sem preço é
                 pulada e aparece na lista de erros.
+              </p>
+              <p>
+                O saldo do CSV vira um ajuste de estoque, registrado nas
+                movimentações.
               </p>
             </div>
           </div>

@@ -317,6 +317,17 @@ namespace :crm do
       end
     end
     resources :lab_orders, only: [:update]
+    # 📦 fase 2: estoque (livro de movimentações, inventário, compras por XML da NF-e)
+    resource :stock, only: [:show], controller: 'stock' do
+      get :moves
+      post :moves, action: :create_move
+      post :inventory
+      get :purchases
+      post :purchases, action: :create_purchase
+      post 'purchases/preview_xml', action: :preview_xml
+      post 'purchases/:id/receive', action: :receive_purchase
+      delete 'purchases/:id', action: :delete_purchase
+    end
   end
   # Painel Estratégico (a empresa por pilares) — só admin
   resource :strategy, only: [:show], controller: 'strategy' do

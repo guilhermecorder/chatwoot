@@ -78,6 +78,7 @@ export const ROUTE_NODES = {
   // 👓 Sua Ótica (fase 1): venda, produtos e produção
   otica_venda: ['otica.vendas', 'otica'],
   otica_produtos: ['otica.produtos', 'otica'],
+  otica_estoque: ['otica.produtos', 'otica'],
   otica_producao: ['otica.producao', 'otica', 'otica.vendas'],
 };
 
@@ -106,6 +107,7 @@ export const MENU_NODES = {
   // 👓 Sua Ótica (fase 1)
   'Otica Venda': 'otica.vendas',
   'Otica Produtos': 'otica.produtos',
+  'Otica Estoque': 'otica.produtos',
   'Otica Producao': 'otica.producao',
   // Conteúdos (pai) e filhos
   'Cevico Pages': 'marketing.paginas',
