@@ -319,15 +319,27 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # reservadas (geradas das janelas) + o texto livre que a clínica escreve em
   # Agenda → Configurações → Regras para a IA. Vazio = nada entra no prompt.
   def rules_text(account)
-    lines = windows(account).reject { |w| accepts?(w, AI_MODALITY) }.map do |w|
+    custom = agenda_config(account)['ai_rules'].to_s.strip
+    (reserved_rules(account) + [hourly_rule(account), custom.presence]).compact.join("\n")
+  end
+
+  def reserved_rules(account)
+    windows(account).reject { |w| accepts?(w, AI_MODALITY) }.map do |w|
       kinds = reserved_for(w).map { |k| MODALITY_LABELS[k] }.join(' e ')
       "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
         "faixa reservada para #{kinds}. NÃO ofereça nem marque consulta nova nesta faixa " \
         "(ela só serve para remarcar #{kinds})."
     end
-    custom = agenda_config(account)['ai_rules'].to_s.strip
-    lines << custom if custom.present?
-    lines.join("\n")
+  end
+
+  # ⏱️ item 367 (23/10, ele pediu também no prompt): a lista de vagas e a conferência
+  # do horário já seguram o teto; a regra escrita é para o robô EXPLICAR a hora cheia
+  # ao paciente e oferecer outra, em vez de só dizer que não está livre
+  def hourly_rule(account)
+    cap = hourly_cap(account)
+    "- Cada unidade recebe no máximo #{cap} avaliações (consultas novas) por hora, para o atendimento fluir " \
+      'sem fila. Se a hora que o paciente pedir estiver completa, diga com naturalidade que esse horário já está ' \
+      'completo e ofereça os mais próximos da lista HORÁRIOS DISPONÍVEIS — de preferência espalhando ao longo do dia.'
   end
 
   # bloco pronto para colar no contexto do agente ('' quando não há regra)

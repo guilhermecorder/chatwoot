@@ -9610,6 +9610,7 @@ Conferido em produção: as 5 tarefas eram de 16/10 22:30 (deploy da :90cfd38 re
 - Distribuição: a lista oferecida pega uma vaga por hora, das horas mais vazias para as mais cheias, e volta em ordem do relógio.
 - Tela: no Dia, cada faixa do médico mostra "08h · 3/4" (hora cheia em vermelho, horários livres dela apagados); marcar a 5ª avaliação pela tela pergunta "Marcar mesmo assim, como encaixe?" (decisão dele: avisa e deixa).
 - Testes: agenda_slots_hourly_spec (6) + specs de vagas antigas verdes; testado na tela (atendente: hora cheia, aviso, encaixe; admin: mudar o número). Sem migration.
+- Prompt (pedido dele, 23/10): "REGRAS DA AGENDA" ganha a linha do teto por hora (com o número configurado), para o robô EXPLICAR que o horário já está completo e oferecer os mais próximos, espalhando no dia. Aparece também na prévia "o que a IA recebe" das Configurações.
 
 ## 368. 🔁 Reagendada com cor própria (23/10; "quando o agente de reagendamento reagenda o paciente… fica a mesma cor de retorno; as meninas se confundem — precisa ter uma outra corzinha")
 - O que confundia: "Remarcada" era ÂMBAR (#D97706) na tela Agendamentos, quase o DOURADO do Retorno na Agenda (#D4A017). Conferido em produção (23/10): o reagendamento não muda o tipo da consulta; os robôs criaram 61 avaliações desde 19/10 e nenhuma como retorno (antes de 19/10 havia — conserto da Vaneide, item do 19/10).
