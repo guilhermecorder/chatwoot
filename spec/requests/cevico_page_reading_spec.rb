@@ -33,6 +33,24 @@ RSpec.describe 'CEVICO leitura da página anexada', type: :request do
     expect(day['botoes']).to eq('cta_topo' => 1, 'investimento#1' => 1)
   end
 
+  it 'a rolagem sobe de faixa sem contar a visita duas vezes (beacon aos poucos)', :aggregate_failures do
+    post "/p/#{page.slug}/track", params: { depth: '0', secoes: 'como-e-feita' }
+    post "/p/#{page.slug}/track", params: { de: '0', depth: '50', secoes: 'investimento' }
+    post "/p/#{page.slug}/track", params: { de: '50', depth: '100' }
+
+    expect(day['scroll']).to eq('100' => 1)
+    expect(day['secoes']).to eq('como-e-feita' => 1, 'investimento' => 1)
+  end
+
+  it 'subida de faixa estranha não tira nada: faixa antiga maior, igual ou zerada', :aggregate_failures do
+    post "/p/#{page.slug}/track", params: { depth: '75' }
+    post "/p/#{page.slug}/track", params: { de: '100', depth: '25' } # anda para trás: só soma a nova
+    post "/p/#{page.slug}/track", params: { de: '50', depth: '50' } # igual: só soma
+    post "/p/#{page.slug}/track", params: { de: '0', depth: '25' } # faixa 0 vazia (visita de ontem): não fica negativa
+
+    expect(day['scroll']).to eq('75' => 1, '25' => 2, '50' => 1)
+  end
+
   it 'conta os toques errados por trecho, só de tipos e trechos que existem', :aggregate_failures do
     post "/p/#{page.slug}/track", params: { erros: 'investimento~foto,topo~parece-botao,inventado~foto,investimento~bomba' }
     expect(day['erros']).to eq('investimento~foto' => 1, 'topo~parece-botao' => 1)

@@ -183,8 +183,8 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     return head :not_found if page.nil?
 
     # página anexada (Raio-X, 23/10): além da rolagem, os títulos vistos, os botões clicados e os toques errados
-    page.track_reading!(depth: params[:depth], sections: beacon_keys(:secoes), buttons: beacon_keys(:botoes),
-                        misses: beacon_keys(:erros))
+    page.track_reading!(depth: params[:depth], from: params[:de], sections: beacon_keys(:secoes),
+                        buttons: beacon_keys(:botoes), misses: beacon_keys(:erros))
     head :no_content
   end
 

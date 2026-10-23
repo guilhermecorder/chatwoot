@@ -123,12 +123,13 @@
     return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
       .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
   }
-  var vistos = {}, tocados = {}, erros = {}, mandados = {}, atual = 'topo', conta = {}, maxDepth = 0, depthIda = false;
+  var vistos = {}, tocados = {}, erros = {}, mandados = {}, atual = 'topo', conta = {}, maxDepth = 0;
   var H = [], toques = [], px = 0, py = 0;
   var VIVO = 'a,button,summary,input,select,textarea,label,video,audio,iframe,[role="button"],[role="link"],[role="tab"],[onclick],[tabindex],[data-ev]';
   var PARECE = /(^|[\s_-])(chip|pill|btn|botao|selo|tag|badge|cta)([\s_-]|$)/i;
   var io = new IntersectionObserver(function (es) {
     es.forEach(function (e) { if (e.isIntersecting) { vistos[e.target.getAttribute('data-cv-marco')] = 1; io.unobserve(e.target); } });
+    agenda(2500);
   }, { rootMargin: '0px 0px -15% 0px' });
   [].forEach.call(document.querySelectorAll('h2, a[href]'), function (el) {
     if (el.tagName === 'H2') {
@@ -144,7 +145,7 @@
   });
   document.addEventListener('click', function (e) {
     var a = e.target.closest && e.target.closest('[data-cv-botao]');
-    if (a) tocados[a.getAttribute('data-cv-botao')] = 1;
+    if (a) { tocados[a.getAttribute('data-cv-botao')] = 1; manda(); }
   }, true);
   // toque errado: em quem NÃO faz nada (foto, título, texto, algo com cara de botão)
   function trecho(el) {
@@ -188,7 +189,7 @@
     if (toques.length >= 3) erros[trecho(el) + '~repetido'] = 1;
     if (window.getSelection && String(window.getSelection())) return; // selecionando texto
     var tp = tipo(el, e.clientX, e.clientY);
-    if (tp) erros[trecho(el) + '~' + tp] = 1;
+    if (tp) { erros[trecho(el) + '~' + tp] = 1; agenda(4000); }
   }, true);
   function mede() {
     var doc = document.documentElement, total = doc.scrollHeight - window.innerHeight;
@@ -199,24 +200,34 @@
   function novos(set, tipo) {
     return Object.keys(set).filter(function (k) { return !mandados[tipo + k]; });
   }
+  // 23/10 (noite): manda AOS POUCOS — 3 s depois de abrir, a cada título novo,
+  // no toque do botão e ao sair. O navegador interno do Instagram/Facebook não
+  // avisa "saiu da página", e só com o aviso de saída as visitas de anúncio
+  // nunca eram medidas. A rolagem já mandada sobe de faixa com `de=` (o
+  // servidor tira da faixa antiga e põe na nova: a visita conta uma vez).
+  var enviado = -1, timer = null;
   function manda() {
+    if (timer) { clearTimeout(timer); timer = null; }
     var s = novos(vistos, 's'), b = novos(tocados, 'b'), er = novos(erros, 'e'), p = new URLSearchParams();
-    if (!depthIda) p.set('depth', String(maxDepth));
+    if (enviado < 0) p.set('depth', String(maxDepth));
+    else if (maxDepth > enviado) { p.set('de', String(enviado)); p.set('depth', String(maxDepth)); }
     else if (!s.length && !b.length && !er.length) return;
     if (s.length) p.set('secoes', s.join(','));
     if (b.length) p.set('botoes', b.join(','));
     if (er.length) p.set('erros', er.join(','));
     if (navigator.sendBeacon('/p/<%= j page.slug %>/track', p)) {
-      depthIda = true;
+      enviado = maxDepth;
       s.forEach(function (k) { mandados['s' + k] = 1; });
       b.forEach(function (k) { mandados['b' + k] = 1; });
       er.forEach(function (k) { mandados['e' + k] = 1; });
     }
   }
-  window.addEventListener('scroll', mede, { passive: true });
+  function agenda(ms) { if (!timer) timer = setTimeout(manda, ms); }
+  window.addEventListener('scroll', function () { mede(); agenda(4000); }, { passive: true });
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') manda(); });
   window.addEventListener('pagehide', manda);
   mede();
+  agenda(3000);
 })();
 </script>
 <% end %>

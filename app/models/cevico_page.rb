@@ -367,17 +367,15 @@ class CevicoPage < ApplicationRecord
   # títulos (h2) que apareceram na tela e os botões clicados. Só entram as
   # chaves que existem no HTML da própria página (Cevico::PageReading). Os
   # toques errados ("<trecho>~<tipo>") também, uma vez por visita.
-  def track_reading!(depth: nil, sections: [], buttons: [], misses: [])
+  # `from` (23/10 noite): a visita já tinha mandado a rolagem `from` e agora
+  # chegou mais fundo — sai da faixa antiga e entra na nova, contando uma vez só
+  def track_reading!(depth: nil, from: nil, sections: [], buttons: [], misses: [])
     depth = SCROLL_BUCKETS.include?(depth.to_s) ? depth.to_s : nil
-    if [sections, buttons, misses].any?(&:present?)
-      map = Cevico::PageReading.map_for(self)
-      sections &= map['marcos'].pluck('key')
-      buttons &= map['botoes'].pluck('key')
-      misses = misses.select { |key| Cevico::PageReading.miss_key?(map, key) }
-    end
+    sections, buttons, misses = known_reading_keys(sections, buttons, misses)
     return if depth.nil? && [sections, buttons, misses].all?(&:blank?)
 
     bump_daily_stats! do |day|
+      unbump(day, 'scroll', scroll_bucket_before(from, depth))
       bump(day, 'scroll', [depth].compact)
       bump(day, 'secoes', sections)
       bump(day, 'botoes', buttons)
@@ -405,6 +403,31 @@ class CevicoPage < ApplicationRecord
 
     counts = (day[group] ||= {})
     keys.each { |key| counts[key] = counts[key].to_i + 1 }
+  end
+
+  # só as chaves que existem no HTML da própria página
+  def known_reading_keys(sections, buttons, misses)
+    return [sections, buttons, misses] if [sections, buttons, misses].all?(&:blank?)
+
+    map = Cevico::PageReading.map_for(self)
+    [sections & map['marcos'].pluck('key'), buttons & map['botoes'].pluck('key'),
+     misses.select { |key| Cevico::PageReading.miss_key?(map, key) }]
+  end
+
+  # faixa que a visita já tinha mandado, só se for mais rasa que a nova
+  def scroll_bucket_before(from, depth)
+    return nil if depth.nil? || SCROLL_BUCKETS.exclude?(from.to_s)
+
+    from.to_i < depth.to_i ? from.to_s : nil
+  end
+
+  # tira 1 da faixa (nunca abaixo de zero: a visita pode ter começado ontem)
+  def unbump(day, group, key)
+    counts = day[group]
+    return if key.nil? || counts.blank? || counts[key].to_i <= 0
+
+    counts[key] -= 1
+    counts.delete(key) if counts[key].zero?
   end
 
   def cta_url_allowed
