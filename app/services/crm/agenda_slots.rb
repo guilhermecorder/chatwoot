@@ -131,6 +131,45 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     SOFT_MODALITIES.include?(modality) ? 'flexivel' : 'consulta'
   end
 
+  # ⏱️ item 367 (23/10, ele: "o comparecimento aumentou… muitos agendamentos
+  # acumulados nas primeiras horas e sobrando horários no desenrolar do dia —
+  # limitar em 4 avaliações por hora, em todos os horários, e ir distribuindo"):
+  # cada unidade recebe no máximo N avaliações por hora (padrão 4; editável em
+  # Agenda → Configurações → Faixas de horário). Contam as avaliações e as
+  # consultas sem tipo — inclusive as do OftalmoFácil (decisão dele). NÃO contam
+  # exame (agenda das meninas), retorno e pós-op (marcados à mão) e teleconsulta.
+  # Vale para todo robô que oferece ou grava horário (todos passam por aqui).
+  HOURLY_DEFAULT = 4
+  HOURLY_RANGE = (1..20)
+  NOT_EVALUATION = %w[exames retorno pos_op teleconsulta].freeze
+
+  def hourly_cap(account)
+    cap_from(agenda_config(account))
+  end
+
+  def cap_from(cfg)
+    n = cfg.to_h['hourly_evaluations'].to_i
+    HOURLY_RANGE.cover?(n) ? n : HOURLY_DEFAULT
+  end
+
+  # "2026-10-27|08|tatuape" — a hora cheia de uma unidade
+  def hour_key(day, hhmm, unit)
+    "#{day}|#{hhmm.to_s[0, 2]}|#{unit}"
+  end
+
+  # avaliações já marcadas em cada unidade × hora do intervalo
+  def evaluations_per_hour(account, from_date, to_date)
+    account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
+           .where.not(unit: [nil, ''])
+           .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', NOT_EVALUATION)
+           .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
+           .pluck(:due_at, :unit)
+           .each_with_object(Hash.new(0)) do |(due, unit), out|
+             at = due.in_time_zone(TZ)
+             out[hour_key(at.to_date, at.strftime('%H'), unit)] += 1
+           end
+  end
+
   # item 297 (30/09): na janela do MÉDICO o agendamento ocupa SÓ o bloco em que
   # começa — a mesma regra da tela. Antes a duração presumida (cirurgia 60,
   # exame 30, consulta 15) tomava 2 ou 3 blocos de 10 min e a IA deixava de
@@ -170,6 +209,9 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       # item 330: exame não ocupa horário de consulta (tem agenda própria);
       # item 330b: retorno e pós-op também não travam — a IA pode encaixar UMA
       # avaliação no mesmo horário (e só uma: a avaliação, sim, trava)
+      # item 367: só a CONSULTA NOVA respeita o teto por hora (retorno e pós-op seguem as faixas deles)
+      per_hour: evaluations_per_hour(account, from_date, to_date),
+      cap: modality.to_s == AI_MODALITY ? hourly_cap(account) : nil,
       occupied: account.tasks
                        .where(task_type: 'consulta', canceled_at: nil)
                        .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', ['exames'] + SOFT_MODALITIES)
@@ -179,29 +221,37 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     }
   end
 
-  def day_slots(ctx, day, per_window:) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    return [] if day.saturday? || day.sunday?
-    return [] if ctx[:blocked_days].include?(day.to_s)
+  def day_slots(ctx, day, per_window:) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return [] if day.saturday? || day.sunday? || ctx[:blocked_days].include?(day.to_s)
 
-    slots = []
-    ctx[:wins].select { |w| w['dow'] == day.wday }.each do |win|
-      next if window_blocked?(ctx, day, win)
-
-      taken = 0
-      each_slot(win) do |hm|
-        break if taken >= per_window
-
-        slot_time = TZ.parse("#{day} #{hm}")
-        next if slot_time <= ctx[:now]
-        next if ctx[:blocked].include?("#{day}|#{hm}|#{win['unit']}")
-        next if ctx[:occupied].include?("#{day}|#{hm}|#{win['unit']}") || ctx[:occupied].include?("#{day}|#{hm}|")
-        next if hub_overlap?(ctx, day, hm, win)
-
-        slots << { date: day, time: hm, unit: win['unit'], doctor: win['doctor'] }
-        taken += 1
-      end
+    ctx[:wins].select { |w| w['dow'] == day.wday && !window_blocked?(ctx, day, w) }.flat_map do |win|
+      free = []
+      each_slot(win) { |hm| free << hm if slot_free?(ctx, day, win, hm) }
+      spread(ctx, day, win, free, per_window).map { |hm| { date: day, time: hm, unit: win['unit'], doctor: win['doctor'] } }
     end
-    slots
+  end
+
+  def slot_free?(ctx, day, win, hhmm)
+    return false if TZ.parse("#{day} #{hhmm}") <= ctx[:now]
+    return false if ctx[:blocked].include?("#{day}|#{hhmm}|#{win['unit']}")
+    return false if ctx[:occupied].include?("#{day}|#{hhmm}|#{win['unit']}") || ctx[:occupied].include?("#{day}|#{hhmm}|")
+    return false if hub_overlap?(ctx, day, hhmm, win)
+
+    ctx[:cap].nil? || ctx[:per_hour][hour_key(day, hhmm, win['unit'])] < ctx[:cap]
+  end
+
+  # item 367: em vez dos N primeiros horários do dia (que enchiam a manhã),
+  # uma vaga por hora, começando pelas horas MAIS VAZIAS, até completar N;
+  # a lista volta na ordem do relógio
+  def spread(ctx, day, win, free, limit)
+    return free if free.size <= limit
+
+    by_hour = free.group_by { |hm| hm[0, 2] }
+    hours = by_hour.keys.sort_by { |hh| [ctx[:per_hour][hour_key(day, hh, win['unit'])], hh] }
+    # rodadas: a 1ª vaga de cada hora (da mais vazia para a mais cheia), depois a 2ª…
+    rounds = by_hour.values.map(&:size).max
+    picked = (0...rounds).flat_map { |i| hours.filter_map { |hh| by_hour[hh][i] } }
+    picked.first(limit).sort
   end
 
   # 🔒 20/10 (ele: "quando alguém fechar o dia na agenda, o agente não agende"):

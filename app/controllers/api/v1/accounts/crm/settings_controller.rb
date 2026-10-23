@@ -1118,6 +1118,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # 🗂️ item 307: regras da agenda escritas pela clínica — entram no prompt dos
     # agentes num bloco próprio (Agenda → Configurações → Regras para a IA)
     cfg['ai_rules'] = params[:ai_rules].to_s.strip[0, 2000] if params.key?(:ai_rules)
+    # ⏱️ item 367: teto de avaliações por hora em cada unidade (1–20; fora disso volta ao padrão 4)
+    if params.key?(:hourly_evaluations)
+      n = params[:hourly_evaluations].to_i
+      cfg['hourly_evaluations'] = Crm::AgendaSlots::HOURLY_RANGE.cover?(n) ? n : Crm::AgendaSlots::HOURLY_DEFAULT
+    end
     # horários fechados com o cadeado (almoço, ausência do médico...)
     if params.key?(:blocked)
       cfg['blocked'] = Array(params[:blocked]).map do |b|
@@ -2343,6 +2348,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],
       agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
       agenda_ai_rules: (s.agenda_config || {})['ai_rules'].to_s, # item 307
+      agenda_hourly_evaluations: Crm::AgendaSlots.cap_from(s.agenda_config), # item 367
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
       retorno_team_user_ids: Array((s.agenda_config || {})[Crm::TaskOwner::RETORNO_TEAM_KEY]), # 🔁 item 343

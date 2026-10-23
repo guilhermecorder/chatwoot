@@ -674,6 +674,17 @@ export const GENERAL_TYPE = mkType({
   resource: null,
   hint: 'todos os tipos juntos — ligue e desligue as camadas',
 });
+// 🔁 item 368 (23/10, ele: "quando o agente reagenda… fica a mesma cor de retorno; as
+// meninas se confundem — precisa ter uma outra corzinha"): REAGENDADA tem cor própria,
+// azul-piscina, em toda tela. O âmbar do "Remarcada" era quase o dourado do Retorno.
+// Na Agenda a consulta continua com a cor do TIPO (avaliação × retorno muda valor e
+// lembrete) e ganha o contorno + o ↻ azul-piscina.
+export const RESCHEDULED_COLOR = '#0891B2';
+export const isRescheduled = task => Number(task?.rescheduled_count) > 0 && !task?.canceled_at;
+export const rescheduledTitle = task => {
+  const n = Number(task?.rescheduled_count) || 0;
+  return n > 1 ? `Reagendada ${n} vezes` : 'Reagendada';
+};
 export const typeOf = task => {
   if (!task) return 'avaliacao';
   if (task.task_type === 'cirurgia') return 'cirurgia';

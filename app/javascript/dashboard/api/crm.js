@@ -345,6 +345,11 @@ class CrmAPI extends ApiClient {
   }
 
   // 🗂️ item 307: regras da agenda para a IA + o que ela recebe agora
+  // ⏱️ item 367: teto de avaliações por hora em cada unidade
+  updateAgendaHourly(hourly) {
+    return axios.post(`${this.url}/settings/update_agenda`, { hourly_evaluations: hourly });
+  }
+
   updateAgendaAiRules(aiRules) {
     return axios.post(`${this.url}/settings/update_agenda`, {
       ai_rules: aiRules,

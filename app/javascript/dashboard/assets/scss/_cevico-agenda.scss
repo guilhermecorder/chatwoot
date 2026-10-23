@@ -1173,3 +1173,9 @@
 .cv-page .cv-ag-charge-amount { width: 8.5rem; flex: none; text-align: right; }
 .cv-page .cv-ag-charge-by { flex-basis: 100%; font-size: 10.5px; color: #64748b; margin-top: -2px; }
 .dark .cv-page .cv-ag-charge-by { color: rgba(255, 255, 255, 0.55); }
+
+/* 🔁 item 368: consulta REAGENDADA = contorno + ↻ azul-piscina (a cor de dentro segue o tipo) */
+.cv-page .cv-ag-ev-resched,
+.cv-page .cv-ag-slot-resched { outline: 2px solid #0891b2; outline-offset: -2px; }
+.cv-page .cv-ag-resched { color: #0891b2; font-size: 10px; flex: none; }
+.cv-page .cv-ag-ev-name .cv-ag-resched { margin-right: 3px; vertical-align: -1px; }

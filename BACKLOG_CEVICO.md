@@ -9603,3 +9603,15 @@ Conferido em produção: as 5 tarefas eram de 16/10 22:30 (deploy da :90cfd38 re
 - Testes: `spec/requests/agenda_locks_spec.rb` (4) + `cevico_security_spec` (open_to_team ganhou a rota) + settings_block_layout — 15 verdes; sem migration.
 - 23/10 tarde (trazido para outra sessão e testado na tela como atendente sem concessão, no servidor local): fechar/reabrir médico e o cadeado de um horário funcionam, sem erro; a agenda volta idêntica. Dois acertos: a janela pedia a prévia da IA (só de "Horários e regras") e mostrava o aviso de sem acesso — agora só pede para quem configura; título da janela vira "Abrir e fechar agenda" para a equipe. Admin conferido: as 5 abas e a prévia seguem iguais.
 - Estado: branch `fix/agenda-equipe-366` a partir de develop 00ff620 (Raio-X), sem migration.
+
+## 367. ⏱️ No máximo 4 avaliações por hora, espalhadas pelo dia (23/10; "o comparecimento aumentou… muitos agendamentos acumulados nas primeiras horas e sobrando horários no desenrolar do dia — limitar em 4 avaliações por hora, em todos os horários")
+- Causa do acúmulo: a lista que os robôs recebem trazia os 3 PRIMEIROS horários livres de cada médico por dia; com blocos de 10 min (Tatuapé e Dr. Henrique na Paulista) cabiam até 6 avaliações por hora.
+- Regra (Crm::AgendaSlots, vale para todo robô que oferece ou grava horário): no máximo N avaliações por hora em cada unidade (padrão 4, editável em Agenda → Configurações → Faixas de horário, 1–20). Contam avaliação e consulta sem tipo, inclusive do OftalmoFácil (decisão dele); exame, retorno, pós-op e teleconsulta não contam. Remarcar retorno/pós-op não respeita o teto.
+- Distribuição: a lista oferecida pega uma vaga por hora, das horas mais vazias para as mais cheias, e volta em ordem do relógio.
+- Tela: no Dia, cada faixa do médico mostra "08h · 3/4" (hora cheia em vermelho, horários livres dela apagados); marcar a 5ª avaliação pela tela pergunta "Marcar mesmo assim, como encaixe?" (decisão dele: avisa e deixa).
+- Testes: agenda_slots_hourly_spec (6) + specs de vagas antigas verdes; testado na tela (atendente: hora cheia, aviso, encaixe; admin: mudar o número). Sem migration.
+
+## 368. 🔁 Reagendada com cor própria (23/10; "quando o agente de reagendamento reagenda o paciente… fica a mesma cor de retorno; as meninas se confundem — precisa ter uma outra corzinha")
+- O que confundia: "Remarcada" era ÂMBAR (#D97706) na tela Agendamentos, quase o DOURADO do Retorno na Agenda (#D4A017). Conferido em produção (23/10): o reagendamento não muda o tipo da consulta; os robôs criaram 61 avaliações desde 19/10 e nenhuma como retorno (antes de 19/10 havia — conserto da Vaneide, item do 19/10).
+- Agora: reagendada = AZUL-PISCINA (#0891B2) em toda tela. Agenda: a consulta mantém a cor do TIPO (avaliação × retorno muda valor e lembrete) e ganha contorno + ↻ azul-piscina (coluna de horas, bloco do médico) e o selo "Reagendada (N vezes)" no cartão; legenda nas Camadas. Agendamentos: "Remarcada"/"Remarcadas" passam de âmbar para azul-piscina (tom novo .cv-cyan no kit).
+

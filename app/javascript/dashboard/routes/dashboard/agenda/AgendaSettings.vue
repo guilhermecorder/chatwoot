@@ -329,6 +329,27 @@ const savePrices = async () => {
   }
 };
 
+// ⏱️ item 367: teto de avaliações por hora em cada unidade (padrão 4)
+const hourly = ref(settings.value?.agenda_hourly_evaluations || 4);
+watch(() => settings.value?.agenda_hourly_evaluations, v => { if (v) hourly.value = v; });
+const saveHourly = async () => {
+  const n = Math.round(Number(hourly.value));
+  if (!(n >= 1 && n <= 20)) {
+    useAlert('Use um número de 1 a 20.');
+    return;
+  }
+  busy.value = 'hourly';
+  try {
+    await CrmAPI.updateAgendaHourly(n);
+    await refresh();
+    useAlert(`Pronto: no máximo ${n} avaliações por hora em cada unidade.`);
+  } catch {
+    useAlert('Não consegui salvar o limite por hora.');
+  } finally {
+    busy.value = '';
+  }
+};
+
 const saveRules = async () => {
   busy.value = 'rules';
   try {
@@ -476,6 +497,16 @@ onMounted(() => {
 
         <!-- 2. FAIXAS DE HORÁRIO -->
         <template v-else-if="tab === 'faixas'">
+          <!-- ⏱️ item 367: avaliações por hora -->
+          <section class="cv-sub p-3 flex items-center gap-3 flex-wrap">
+            <span class="i-lucide-gauge text-sm text-n-slate-10" />
+            <div class="flex-1 min-w-[220px]">
+              <p class="text-xs font-bold text-n-slate-12">Avaliações por hora em cada unidade</p>
+              <p class="text-[11px] text-n-slate-10">Os robôs nunca marcam mais que isso e espalham os horários ao longo do dia. A equipe pode encaixar, confirmando. Exame, retorno e pós-operatório não contam.</p>
+            </div>
+            <input v-model.number="hourly" type="number" min="1" max="20" class="text-center" style="width: 4.5rem; flex: none" :disabled="!canEdit('agenda.configuracao')">
+            <button v-if="canEdit('agenda.configuracao')" class="cv-btn cv-btn-sm" :disabled="busy === 'hourly' || Number(hourly) === (settings?.agenda_hourly_evaluations || 4)" @click="saveHourly">Salvar</button>
+          </section>
           <p class="text-[11px] text-n-slate-10 leading-relaxed">
             Cada faixa diz quando o médico atende e <b>para que ela serve</b>. Faixa "Tudo" aceita qualquer atendimento.
             Faixa reservada (ex.: só Pós-operatório) fica marcada na grade, a equipe é avisada ao marcar outro tipo ali e
