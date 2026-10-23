@@ -111,13 +111,52 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
       expect(numbers['dias']).to eq(30)
     end
 
+    describe 'régua padrão do sistema (?preset=)' do
+      let(:today) { Crm::ResolvesPeriod::PERIOD_TZ.today }
+
+      it 'ontem = só o dia de ontem', :aggregate_failures do
+        get '/biblioteca/numeros.json', params: { de: library.slug, preset: 'yesterday' }
+        expect(numbers['preset']).to eq('yesterday')
+        expect(numbers['since']).to eq((today - 1).iso8601)
+        expect(numbers['until']).to eq((today - 1).iso8601)
+        expect(numbers['dias']).to eq(1)
+      end
+
+      it 'semana passada = segunda a domingo anteriores', :aggregate_failures do
+        get '/biblioteca/numeros.json', params: { de: library.slug, preset: 'last_week' }
+        since_date = Date.parse(numbers['since'])
+        expect(since_date).to be_monday
+        expect(Date.parse(numbers['until'])).to eq(since_date + 6)
+        expect(numbers['dias']).to eq(7)
+      end
+
+      it 'este mês termina hoje (nunca no futuro)', :aggregate_failures do
+        get '/biblioteca/numeros.json', params: { de: library.slug, preset: 'month' }
+        expect(numbers['since']).to eq(today.beginning_of_month.iso8601)
+        expect(numbers['until']).to eq(today.iso8601)
+      end
+
+      it 'personalizado respeita De/Até e corta em 2 anos', :aggregate_failures do
+        get '/biblioteca/numeros.json', params: { de: library.slug, preset: 'custom', from: '2026-10-01', to: '2026-10-05' }
+        expect([numbers['since'], numbers['until'], numbers['dias']]).to eq(['2026-10-01', '2026-10-05', 5])
+
+        get '/biblioteca/numeros.json', params: { de: library.slug, preset: 'custom', from: '2015-01-01', to: today.iso8601 }
+        expect(numbers['dias']).to eq(731)
+      end
+
+      it 'preset desconhecido cai no ?dias= antigo' do
+        get '/biblioteca/numeros.json', params: { de: library.slug, preset: 'semestre', dias: 7 }
+        expect([numbers['preset'], numbers['dias']]).to eq(['dias', 7])
+      end
+    end
+
     it 'só contagens: sem a linha do hub e sem nenhum outro campo', :aggregate_failures do
       rows = [{ slug: '', views: 9, cta: 9, leads: 9, booked: 9 },
               { slug: 'guia-lasik', views: 5, cta: 2, leads: 1, booked: 1, title: 'x', sources: { 'seo' => 5 }, campaigns: { 'c' => 1 } }]
       allow(Cevico::TrafficReport).to receive(:new).and_return(instance_double(Cevico::TrafficReport, rows: rows))
       get '/biblioteca/numeros.json', params: { de: library.slug }
 
-      expect(numbers.keys).to match_array(%w[since until dias atualizado paginas total])
+      expect(numbers.keys).to match_array(%w[since until dias preset atualizado paginas total])
       expect(numbers['paginas']).to eq('guia-lasik' => { 'acessos' => 5, 'cliques' => 2, 'leads' => 1, 'agendou' => 1 })
       expect(numbers['total']).to eq('acessos' => 5, 'cliques' => 2, 'leads' => 1, 'agendou' => 1)
     end

@@ -14,6 +14,8 @@
 #   só responde para uma página PUBLICADA deste domínio com o marcador
 #   data-biblioteca="1" no HTML. Só contagens — nenhum dado de pessoa.
 class CevicoSeoController < ActionController::Base # rubocop:disable Rails/ApplicationController
+  include Crm::ResolvesPeriod
+
   layout false
 
   # variações de anúncio (Google, Meta, Google Demand Gen) — fora do orgânico
@@ -22,6 +24,8 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
   ROBOTS_META = /\bname\s*=\s*["']?(robots|googlebot)\b/i
   LIBRARY_MARK = /data-biblioteca\s*=\s*["']?1\b/
   LIBRARY_DAYS = [7, 30, 90, 365].freeze
+  LIBRARY_PRESETS = %w[today yesterday last7 last_week month last_month last90 year custom].freeze
+  LIBRARY_MAX_DAYS = 731 # personalizado: no máximo 2 anos
 
   def sitemap
     xml = Nokogiri::XML::Builder.new(encoding: 'UTF-8') do |doc|
@@ -48,13 +52,14 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
     library = library_page
     return head :not_found if library.nil?
 
-    days = LIBRARY_DAYS.include?(params[:dias].to_i) ? params[:dias].to_i : 30
-    numbers = Rails.cache.fetch("cevico:biblioteca:#{library.account_id}:#{days}", expires_in: 10.minutes) do
-      library_payload(library.account, days)
+    since_date, until_date, preset = library_period
+    key = "cevico:biblioteca:#{library.account_id}:#{since_date}:#{until_date}"
+    numbers = Rails.cache.fetch(key, expires_in: 10.minutes) do
+      library_payload(library.account, since_date, until_date)
     end
 
     expires_in 5.minutes, public: false
-    render json: numbers
+    render json: numbers.merge(preset: preset)
   end
 
   private
@@ -70,16 +75,34 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
     page.custom_html.to_s.match?(LIBRARY_MARK) ? page : nil
   end
 
+  # 22/10: a Biblioteca usa a RÉGUA PADRÃO do sistema (item 321 — Hoje, Ontem,
+  # 7 dias, Semana passada, Este mês, Mês passado, 90 dias, Este ano,
+  # Personalizado) via ?preset= (+ from/to no personalizado). Sem preset,
+  # continua o ?dias= antigo (7/30/90/365) — a versão publicada não quebra.
+  def library_period
+    range = LIBRARY_PRESETS.include?(params[:preset]) ? standard_period_range : nil
+    return library_preset_dates(range) if range
+
+    days = LIBRARY_DAYS.include?(params[:dias].to_i) ? params[:dias].to_i : 30
+    [Date.current - (days - 1), Date.current, 'dias']
+  end
+
+  # nunca no futuro e no máximo 2 anos (personalizado com De muito antigo)
+  def library_preset_dates(range)
+    until_date = [range.last.to_date, PERIOD_TZ.today].min
+    since_date = [range.first.to_date, until_date - (LIBRARY_MAX_DAYS - 1)].max
+    [since_date, until_date, params[:preset]]
+  end
+
   # contagens por página no período (sem a linha do hub) + o total
-  def library_payload(account, days)
-    since_date = Date.current - (days - 1)
-    pages = Cevico::TrafficReport.new(account, since_date, Date.current).rows.select { |row| row[:slug].present? }
+  def library_payload(account, since_date, until_date)
+    pages = Cevico::TrafficReport.new(account, since_date, until_date).rows.select { |row| row[:slug].present? }
     numbers = pages.to_h do |row|
       [row[:slug], { acessos: row[:views], cliques: row[:cta], leads: row[:leads], agendou: row[:booked] }]
     end
     total = %i[acessos cliques leads agendou].index_with { |key| numbers.values.sum { |n| n[key] } }
-    { since: since_date.iso8601, until: Date.current.iso8601, dias: days, atualizado: Time.current.iso8601,
-      paginas: numbers, total: total }
+    { since: since_date.iso8601, until: until_date.iso8601, dias: (until_date - since_date).to_i + 1,
+      atualizado: Time.current.iso8601, paginas: numbers, total: total }
   end
 
   def robots_text
