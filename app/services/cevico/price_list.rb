@@ -35,6 +35,12 @@ class Cevico::PriceList
     'unico' => /valor [úu]nico/i
   }.freeze
 
+  # a tabela gravada pela empresa (sem os padrões da clínica); [] quando não há
+  def self.saved_items(account)
+    table = CrmSetting.find_by(account: account)&.agenda_config&.dig('price_table', 'items')
+    Array(table).map { |item| item.slice('group', 'name', 'price', 'promo_price') }
+  end
+
   def self.items(account)
     table = CrmSetting.find_by(account: account)&.agenda_config&.dig('price_table', 'items')
     list = table.presence || DEFAULT_ITEMS
@@ -143,7 +149,21 @@ class Cevico::PriceList
   # uma linha por grupo, com promoção explícita quando existir e a unidade
   # (por olho / dois olhos / por sessão / valor único). Linha sem preço
   # (R$ 0 ou vazia) fica de fora até o admin preencher.
-  def self.prompt_block(account)
+  def self.prompt_block(account) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    # 👓 Sua Ótica (fase 1, 22/10): conta do ramo ótica com produtos cadastrados
+    # → o roteiro lê os preços praticados dos produtos (Otica::PriceBlock);
+    # qualquer linha digitada na Tabela de preços entra junto, antes
+    if Otica::PriceBlock.applies?(account)
+      # só o que a ótica DIGITOU na tabela (os padrões da clínica não valem aqui)
+      manual = saved_items(account).select { |i| priced?(i) }
+      manual_lines = manual.group_by { |i| i['group'] }.map do |g, rows|
+        "- #{g}: #{rows.map do |i|
+          "#{i['name']} R$ #{format_money(effective_price(i))}"
+        end.join(' · ')}."
+      end
+      return (manual_lines + [Otica::PriceBlock.prompt_block(account)]).join("\n")
+    end
+
     items(account).select { |i| priced?(i) }.group_by { |i| group_label(i['group']) }.map do |group, group_items|
       lines = group_items.map do |item|
         unit = unit_suffix(item, group)

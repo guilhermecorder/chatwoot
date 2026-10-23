@@ -402,6 +402,8 @@ const itemVisible = name => {
 };
 // atalho para o catálogo de itens: CEVICO decide pela árvore, core pelo admin
 const show = name => itemVisible(name) ?? isAdmin.value;
+// 👓 ramo ótica: a gaveta "Loja" (Venda, Produtos, Produção) só existe aqui
+const isOtica = computed(() => company.value?.segment === 'otica');
 
 // 🏢 vocabulário da empresa nos rótulos (ótica: "Jornada do cliente")
 const jornadaLabel = computed(() => {
@@ -691,6 +693,13 @@ const MENU_LAYOUT = [
         icon: 'i-lucide-file-chart-column',
       },
     ],
+  },
+  {
+    name: 'group:loja', // 👓 a loja da ótica (só aparece no ramo ótica)
+    color: '#30d158',
+    label: 'Loja',
+    icon: 'i-lucide-store',
+    items: ['Otica Venda', 'Otica Produtos', 'Otica Producao'],
   },
   {
     name: 'group:gestao', // para onde vai a clínica?
@@ -1441,6 +1450,38 @@ const menuItems = computed(() => {
             label: 'Estratégia',
             icon: 'i-lucide-compass',
             to: accountScopedRoute('cevico_strategy'),
+          },
+        ]
+      : []),
+    // 👓 Sua Ótica (fase 1): Venda · Produtos e estoque · Produção e entregas
+    // — só no ramo ótica (a clínica nem vê) e pelo nó de cada tela
+    ...(isOtica.value && show('Otica Venda')
+      ? [
+          {
+            name: 'Otica Venda',
+            label: 'Venda',
+            icon: 'i-lucide-receipt-text',
+            to: accountScopedRoute('otica_venda'),
+          },
+        ]
+      : []),
+    ...(isOtica.value && show('Otica Produtos')
+      ? [
+          {
+            name: 'Otica Produtos',
+            label: 'Produtos e estoque',
+            icon: 'i-lucide-glasses',
+            to: accountScopedRoute('otica_produtos'),
+          },
+        ]
+      : []),
+    ...(isOtica.value && show('Otica Producao')
+      ? [
+          {
+            name: 'Otica Producao',
+            label: 'Produção e entregas',
+            icon: 'i-lucide-package-check',
+            to: accountScopedRoute('otica_producao'),
           },
         ]
       : []),

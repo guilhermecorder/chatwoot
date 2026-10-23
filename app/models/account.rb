@@ -87,6 +87,14 @@ class Account < ApplicationRecord
   has_many :cevico_finance_entries, dependent: :destroy_async
   has_many :cevico_stock_items, dependent: :destroy_async
   has_many :cevico_stock_orders, dependent: :destroy_async
+  # 👓 Sua Ótica (fase 1): produtos, fornecedores, receitas e O.S. da loja
+  has_many :otica_suppliers, class_name: 'Otica::Supplier', dependent: :destroy_async
+  has_many :otica_products, class_name: 'Otica::Product', dependent: :destroy_async
+  has_many :otica_prescriptions, class_name: 'Otica::Prescription', dependent: :destroy_async
+  has_many :otica_orders, class_name: 'Otica::Order', dependent: :destroy_async
+  has_many :otica_order_items, class_name: 'Otica::OrderItem', dependent: :destroy_async
+  has_many :otica_lab_orders, class_name: 'Otica::LabOrder', dependent: :destroy_async
+  has_many :otica_payments, class_name: 'Otica::Payment', dependent: :destroy_async
   has_many :cevico_tools, dependent: :destroy_async
   has_many :canned_responses, dependent: :destroy_async
   has_many :categories, dependent: :destroy_async, class_name: '::Category'

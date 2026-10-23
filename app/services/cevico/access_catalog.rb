@@ -206,6 +206,13 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/finance' => { node: 'financeiro.lancamentos', view: %w[show profitability compare entries] },
     'crm/stock' => { node: 'financeiro.estoque', view: %w[show items orders], skip: %w[lookup create_order] },
     'crm/strategy' => { node: 'estrategia', view: %w[show] },
+    # ── 👓 Sua Ótica (fase 1) ──
+    'crm/otica/products' => { node: 'otica.produtos', view: %w[index] },
+    'crm/otica/suppliers' => { node: 'otica.produtos', view: %w[index] },
+    # a O.S.: quem só tem Produção também vê e mexe no laboratório/retirada — o
+    # controller confere "vendas OU produção" nessas ações (skip aqui)
+    'crm/otica/orders' => { node: 'otica.vendas', skip: %w[index show whatsapp set_status lab_orders] },
+    'crm/otica/lab_orders' => { node: 'otica.producao', skip: %w[update] },
     # ── Configurações ──
     'crm/appointment_reminders' => { node: 'configuracoes.modelos' }
   }.freeze

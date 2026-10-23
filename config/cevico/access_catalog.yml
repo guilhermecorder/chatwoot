@@ -313,6 +313,30 @@
       levels: [view, edit]
       default: inherit
 
+# 👓 Sua Ótica (fase 1, 22/10): só aparece em empresa do ramo ótica
+- key: otica
+  label: Loja (ótica)
+  hint: "a venda (O.S.), os produtos com estoque e a produção e entrega dos óculos"
+  levels: [view, edit]
+  default: edit
+  segment: otica
+  children:
+    - key: vendas
+      label: Venda (O.S.)
+      hint: "ver = lê as vendas; editar = grava a O.S., pagamentos e muda o status"
+      levels: [view, edit]
+      default: inherit
+    - key: produtos
+      label: Produtos e estoque
+      hint: "ver = consulta produtos e preços; editar = cadastra, importa do SavWin, muda saldo e custo"
+      levels: [view, edit]
+      default: view
+    - key: producao
+      label: Produção e entregas
+      hint: "ver = o quadro; editar = recebe do laboratório, marca pronta e retirada"
+      levels: [view, edit]
+      default: inherit
+
 - key: financeiro
   label: Financeiro
   hint: dinheiro da empresa

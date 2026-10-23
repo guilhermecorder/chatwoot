@@ -303,6 +303,21 @@ namespace :crm do
     post :update_order
     post :delete_order
   end
+  # 👓 SUA ÓTICA (fase 1, 22/10): produtos, fornecedores, O.S. e laboratório
+  namespace :otica do
+    resources :products, only: [:index, :create, :update, :destroy] do
+      collection { post :import_csv }
+    end
+    resources :suppliers, only: [:index, :create, :update, :destroy]
+    resources :orders, only: [:index, :show, :create, :update, :destroy] do
+      member do
+        post :set_status
+        post :lab_orders
+        get :whatsapp
+      end
+    end
+    resources :lab_orders, only: [:update]
+  end
   # Painel Estratégico (a empresa por pilares) — só admin
   resource :strategy, only: [:show], controller: 'strategy' do
     post :create_pillar

@@ -1834,6 +1834,82 @@ class CrmAPI extends ApiClient {
   loginNegocio(chave) {
     return axios.post(`${this.url}/negocios/${chave}/login`);
   }
+
+  // ── 👓 Sua Ótica, fase 1 (22/10): produtos, fornecedores, O.S. e laboratório ──
+  getOticaProducts(params = {}) {
+    return axios.get(`${this.url}/otica/products`, { params });
+  }
+
+  createOticaProduct(payload) {
+    return axios.post(`${this.url}/otica/products`, payload);
+  }
+
+  updateOticaProduct(id, payload) {
+    return axios.patch(`${this.url}/otica/products/${id}`, payload);
+  }
+
+  deleteOticaProduct(id) {
+    return axios.delete(`${this.url}/otica/products/${id}`);
+  }
+
+  importOticaProductsCsv(payload) {
+    return axios.post(`${this.url}/otica/products/import_csv`, payload);
+  }
+
+  getOticaSuppliers() {
+    return axios.get(`${this.url}/otica/suppliers`);
+  }
+
+  createOticaSupplier(payload) {
+    return axios.post(`${this.url}/otica/suppliers`, payload);
+  }
+
+  updateOticaSupplier(id, payload) {
+    return axios.patch(`${this.url}/otica/suppliers/${id}`, payload);
+  }
+
+  deleteOticaSupplier(id) {
+    return axios.delete(`${this.url}/otica/suppliers/${id}`);
+  }
+
+  getOticaOrders(params = {}) {
+    return axios.get(`${this.url}/otica/orders`, { params });
+  }
+
+  getOticaOrder(id) {
+    return axios.get(`${this.url}/otica/orders/${id}`);
+  }
+
+  createOticaOrder(payload) {
+    return axios.post(`${this.url}/otica/orders`, payload);
+  }
+
+  updateOticaOrder(id, payload) {
+    return axios.patch(`${this.url}/otica/orders/${id}`, payload);
+  }
+
+  setOticaOrderStatus(id, payload) {
+    return axios.post(`${this.url}/otica/orders/${id}/set_status`, payload);
+  }
+
+  createOticaLabOrders(orderId, payload) {
+    return axios.post(
+      `${this.url}/otica/orders/${orderId}/lab_orders`,
+      payload
+    );
+  }
+
+  updateOticaLabOrder(id, payload) {
+    return axios.patch(`${this.url}/otica/lab_orders/${id}`, payload);
+  }
+
+  getOticaOrderWhatsapp(id) {
+    return axios.get(`${this.url}/otica/orders/${id}/whatsapp`);
+  }
+
+  deleteOticaOrder(id) {
+    return axios.delete(`${this.url}/otica/orders/${id}`);
+  }
 }
 
 export default new CrmAPI();

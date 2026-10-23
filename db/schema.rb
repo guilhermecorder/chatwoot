@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_19_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_10_22_010000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2154,6 +2154,162 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_19_010000) do
     t.index ["user_id"], name: "index_notifications_on_user_id"
   end
 
+  create_table "otica_lab_orders", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "order_id", null: false
+    t.bigint "order_item_id"
+    t.bigint "supplier_id"
+    t.string "status", default: "pendente", null: false
+    t.datetime "sent_at"
+    t.date "expected_on"
+    t.datetime "received_at"
+    t.decimal "cost", precision: 12, scale: 2, default: "0.0", null: false
+    t.string "notes", default: ""
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "status"], name: "index_otica_lab_orders_on_account_id_and_status"
+    t.index ["account_id"], name: "index_otica_lab_orders_on_account_id"
+    t.index ["order_id"], name: "index_otica_lab_orders_on_order_id"
+    t.index ["order_item_id"], name: "index_otica_lab_orders_on_order_item_id"
+    t.index ["supplier_id"], name: "index_otica_lab_orders_on_supplier_id"
+  end
+
+  create_table "otica_order_items", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "order_id", null: false
+    t.bigint "product_id"
+    t.string "kind", default: "outro", null: false
+    t.string "description", default: "", null: false
+    t.integer "quantity", default: 1, null: false
+    t.decimal "unit_price", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "discount", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "total", precision: 12, scale: 2, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_otica_order_items_on_account_id"
+    t.index ["order_id"], name: "index_otica_order_items_on_order_id"
+    t.index ["product_id"], name: "index_otica_order_items_on_product_id"
+  end
+
+  create_table "otica_orders", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "contact_id", null: false
+    t.bigint "seller_id"
+    t.bigint "prescription_id"
+    t.bigint "second_pair_of_id"
+    t.integer "number", null: false
+    t.string "status", default: "aberta", null: false
+    t.string "doctor_name", default: ""
+    t.date "sold_on", null: false
+    t.date "due_on"
+    t.datetime "delivered_at"
+    t.decimal "gross", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "discount", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "net", precision: 12, scale: 2, default: "0.0", null: false
+    t.text "notes"
+    t.integer "crm_contact_id"
+    t.integer "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "number"], name: "index_otica_orders_on_account_id_and_number", unique: true
+    t.index ["account_id", "sold_on"], name: "index_otica_orders_on_account_id_and_sold_on"
+    t.index ["account_id", "status"], name: "index_otica_orders_on_account_id_and_status"
+    t.index ["account_id"], name: "index_otica_orders_on_account_id"
+    t.index ["contact_id"], name: "index_otica_orders_on_contact_id"
+    t.index ["prescription_id"], name: "index_otica_orders_on_prescription_id"
+    t.index ["second_pair_of_id"], name: "index_otica_orders_on_second_pair_of_id"
+    t.index ["seller_id"], name: "index_otica_orders_on_seller_id"
+  end
+
+  create_table "otica_payments", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "order_id", null: false
+    t.string "method", default: "pix", null: false
+    t.integer "installments", default: 1, null: false
+    t.decimal "amount", precision: 12, scale: 2, default: "0.0", null: false
+    t.date "paid_on"
+    t.string "notes", default: ""
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_otica_payments_on_account_id"
+    t.index ["order_id"], name: "index_otica_payments_on_order_id"
+  end
+
+  create_table "otica_prescriptions", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "contact_id", null: false
+    t.string "doctor_name", default: ""
+    t.date "prescribed_on"
+    t.date "valid_until"
+    t.decimal "od_sphere", precision: 6, scale: 2
+    t.decimal "od_cylinder", precision: 6, scale: 2
+    t.integer "od_axis"
+    t.decimal "od_addition", precision: 6, scale: 2
+    t.decimal "od_dnp", precision: 6, scale: 2
+    t.decimal "od_height", precision: 6, scale: 2
+    t.decimal "oe_sphere", precision: 6, scale: 2
+    t.decimal "oe_cylinder", precision: 6, scale: 2
+    t.integer "oe_axis"
+    t.decimal "oe_addition", precision: 6, scale: 2
+    t.decimal "oe_dnp", precision: 6, scale: 2
+    t.decimal "oe_height", precision: 6, scale: 2
+    t.string "photo_url", default: ""
+    t.string "notes", default: ""
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_otica_prescriptions_on_account_id"
+    t.index ["contact_id"], name: "index_otica_prescriptions_on_contact_id"
+  end
+
+  create_table "otica_products", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "supplier_id"
+    t.string "kind", default: "armacao", null: false
+    t.string "name", default: "", null: false
+    t.string "brand", default: ""
+    t.string "line", default: ""
+    t.string "model", default: ""
+    t.string "color", default: ""
+    t.string "size", default: ""
+    t.string "sku", default: ""
+    t.string "barcode", default: ""
+    t.string "ncm", default: ""
+    t.decimal "cost", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "list_price", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "promo_price", precision: 12, scale: 2
+    t.date "promo_until"
+    t.boolean "active", default: true, null: false
+    t.integer "quantity", default: 0, null: false
+    t.integer "min_quantity", default: 0, null: false
+    t.string "lens_type", default: ""
+    t.string "lens_material", default: ""
+    t.string "lens_treatment", default: ""
+    t.integer "lab_days", default: 0, null: false
+    t.string "notes", default: ""
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "barcode"], name: "index_otica_products_on_account_id_and_barcode"
+    t.index ["account_id", "kind"], name: "index_otica_products_on_account_id_and_kind"
+    t.index ["account_id", "sku"], name: "index_otica_products_on_account_id_and_sku"
+    t.index ["account_id"], name: "index_otica_products_on_account_id"
+    t.index ["supplier_id"], name: "index_otica_products_on_supplier_id"
+  end
+
+  create_table "otica_suppliers", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "name", null: false
+    t.string "kind", default: "fornecedor", null: false
+    t.string "phone", default: ""
+    t.string "email", default: ""
+    t.integer "lab_days", default: 0, null: false
+    t.string "notes", default: ""
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "kind"], name: "index_otica_suppliers_on_account_id_and_kind"
+    t.index ["account_id"], name: "index_otica_suppliers_on_account_id"
+  end
+
   create_table "platform_app_permissibles", force: :cascade do |t|
     t.bigint "platform_app_id", null: false
     t.string "permissible_type", null: false
@@ -2558,6 +2714,25 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_19_010000) do
   add_foreign_key "crm_weekly_feedbacks", "users"
   add_foreign_key "crm_whatsapp_charges", "accounts"
   add_foreign_key "inboxes", "portals"
+  add_foreign_key "otica_lab_orders", "accounts"
+  add_foreign_key "otica_lab_orders", "otica_order_items", column: "order_item_id", on_delete: :nullify
+  add_foreign_key "otica_lab_orders", "otica_orders", column: "order_id", on_delete: :cascade
+  add_foreign_key "otica_lab_orders", "otica_suppliers", column: "supplier_id", on_delete: :nullify
+  add_foreign_key "otica_order_items", "accounts"
+  add_foreign_key "otica_order_items", "otica_orders", column: "order_id", on_delete: :cascade
+  add_foreign_key "otica_order_items", "otica_products", column: "product_id", on_delete: :nullify
+  add_foreign_key "otica_orders", "accounts"
+  add_foreign_key "otica_orders", "contacts", on_delete: :cascade
+  add_foreign_key "otica_orders", "otica_orders", column: "second_pair_of_id", on_delete: :nullify
+  add_foreign_key "otica_orders", "otica_prescriptions", column: "prescription_id", on_delete: :nullify
+  add_foreign_key "otica_orders", "users", column: "seller_id", on_delete: :nullify
+  add_foreign_key "otica_payments", "accounts"
+  add_foreign_key "otica_payments", "otica_orders", column: "order_id", on_delete: :cascade
+  add_foreign_key "otica_prescriptions", "accounts"
+  add_foreign_key "otica_prescriptions", "contacts", on_delete: :cascade
+  add_foreign_key "otica_products", "accounts"
+  add_foreign_key "otica_products", "otica_suppliers", column: "supplier_id"
+  add_foreign_key "otica_suppliers", "accounts"
   add_foreign_key "tasks", "accounts"
   add_foreign_key "tasks", "contacts", on_delete: :nullify
   add_foreign_key "tasks", "users", column: "assignee_id"

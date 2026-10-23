@@ -75,6 +75,10 @@ export const ROUTE_NODES = {
   dominio_settings_index: 'configuracoes.dominio',
   acessos_settings_index: 'configuracoes.acessos',
   empresa_settings_index: 'configuracoes.empresa',
+  // 👓 Sua Ótica (fase 1): venda, produtos e produção
+  otica_venda: ['otica.vendas', 'otica'],
+  otica_produtos: ['otica.produtos', 'otica'],
+  otica_producao: ['otica.producao', 'otica', 'otica.vendas'],
 };
 
 export const MENU_NODES = {
@@ -99,6 +103,10 @@ export const MENU_NODES = {
   Builder: 'inicio',
   Strategy: 'estrategia',
   Finance: 'financeiro',
+  // 👓 Sua Ótica (fase 1)
+  'Otica Venda': 'otica.vendas',
+  'Otica Produtos': 'otica.produtos',
+  'Otica Producao': 'otica.producao',
   // Conteúdos (pai) e filhos
   'Cevico Pages': 'marketing.paginas',
   'Pages List': 'marketing.paginas',

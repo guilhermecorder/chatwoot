@@ -24,6 +24,7 @@ import cevicoFinanceRoutes from './finance/routes';
 import inicioRoutes from './inicio/routes';
 import negociosRoutes from './negocios/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
+import oticaRoutes from './otica/routes';
 import AppContainer from './Dashboard.vue';
 import Suspended from './suspended/Index.vue';
 import NoAccounts from './noAccounts/Index.vue';
@@ -61,6 +62,7 @@ export default {
         ...inicioRoutes.routes,
         ...negociosRoutes.routes,
         ...cevicoAutomationsRoutes.routes,
+        ...oticaRoutes.routes,
       ],
     },
     {
