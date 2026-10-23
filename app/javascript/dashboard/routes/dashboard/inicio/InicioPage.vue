@@ -4817,7 +4817,9 @@ const deleteVariant = async () => {
 // ── cabeçalho (varredura 12/09) ──
 // o olho CEVICO (public/brand-assets) como marca d'água — binding dinâmico
 // de propósito: src fixo com barra inicial vira import de módulo no Vite
-const HERO_EYE = '/brand-assets/cevico-eye.svg';
+// 🏷️ segue o pacote de marca da VPS (ótica: óculos; CEVICO: olho)
+const HERO_EYE =
+  window.cevicoMarca?.marcaDagua || '/brand-assets/cevico-eye.svg';
 // o que este painel acompanha, em uma frase
 const HERO_LEADS = {
   agendamento:

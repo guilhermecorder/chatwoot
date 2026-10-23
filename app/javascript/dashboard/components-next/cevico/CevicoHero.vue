@@ -30,7 +30,9 @@ const {
   paletteLabel,
 } = props.pal;
 // :src dinâmico de propósito: src fixo em /brand-assets vira import no Vite
-const HERO_EYE = '/brand-assets/cevico-eye.svg';
+// 🏷️ a marca d'água segue o pacote de marca da VPS (ótica: óculos; CEVICO: olho)
+const HERO_EYE =
+  window.cevicoMarca?.marcaDagua || '/brand-assets/cevico-eye.svg';
 const todayLabel = computed(() => {
   const label = new Date().toLocaleDateString('pt-BR', {
     weekday: 'long',

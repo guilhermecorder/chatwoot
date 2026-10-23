@@ -60,6 +60,8 @@
         selectedLocale: '<%= I18n.locale %>'
       }
       window.globalConfig = <%= raw @global_config.to_json %>
+      // 🏷️ pacote de marca da VPS (MARCA=…): a marca d'água dos cabeçalhos e o id
+      window.cevicoMarca = <%= raw({ id: MARCA['id'], marcaDagua: MARCA['marca_dagua'].presence || '/brand-assets/cevico-eye.svg' }.to_json) %>;
       window.browserConfig = {
         browser_name: '<%= browser.name %>',
       }

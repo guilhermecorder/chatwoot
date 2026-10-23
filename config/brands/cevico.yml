@@ -6,6 +6,7 @@ logos:
   logo: '/brand-assets/logo.png'
   logo_dark: '/brand-assets/logo_dark.png'
   logo_thumbnail: '/brand-assets/logo_thumbnail.png'
+marca_dagua: '/brand-assets/cevico-eye.svg'   # o olho no canto dos cabeçalhos
 favicons_dir: ''   # vazio = favicons padrão da raiz (/favicon-*.png)
 cores:
   # paleta de referência da marca (uso futuro no CSS por marca)

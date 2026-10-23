@@ -86,11 +86,13 @@ export default {
     isSmallScreen() {
       return this.windowWidth < wootConstants.SMALL_SCREEN_BREAKPOINT;
     },
-    // Título da aba segue a EMPRESA da conta aberta (Sua Ótica, etc.);
-    // sem empresa configurada, fica o nome da instalação.
+    // Título da aba: na instalação da CEVICO (que também hospeda empresas
+    // irmãs) segue a EMPRESA da conta aberta; numa VPS com marca própria
+    // (MARCA=otica, life…) fica o nome do sistema dela (ex.: "ÓTICA S.Un").
     cevicoTabTitle() {
       const company = this.$store.getters['crm/getCompany'];
-      if (company?.configured && company.name) return company.name;
+      const ownBrand = (window.cevicoMarca?.id || 'cevico') !== 'cevico';
+      if (!ownBrand && company?.configured && company.name) return company.name;
       return this.baseTabTitle;
     },
     showUpgradePage() {
