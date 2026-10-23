@@ -1924,7 +1924,7 @@ const typeItems = (day, time, band) =>
       openCreateOnDay(day, prefill);
     },
   }));
-// fechar/reabrir UM horário: o mesmo cadeado do bloco do médico (só admin)
+// fechar/reabrir UM horário: o mesmo cadeado do bloco do médico (item 366: nó agenda.bloqueios)
 const blockSlotItem = (day, win, slot) =>
   canEdit('agenda.bloqueios') && {
     label: isBlocked(day, win, slot) ? `Reabrir o horário das ${slot}` : `Fechar o horário das ${slot}`,
@@ -2223,9 +2223,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <!-- 01/10 (item 307, pedido dele: "deixar mais fácil e evidente abrir e fechar agendas"):
                    um botão só para tudo que muda na agenda -->
-              <button v-if="canView('agenda.configuracao')" class="cv-btn cv-btn-ghost" title="Abrir e fechar agendas, faixas de horário, regras para a IA e conferência do dia" @click="openSettings('abrir')">
+              <!-- item 366: quem só tem "Fechar e reabrir dias" entra direto em Abrir e fechar -->
+              <button v-if="canView('agenda.configuracao') || canEdit('agenda.bloqueios')" class="cv-btn cv-btn-ghost" title="Abrir e fechar agendas, faixas de horário, regras para a IA e conferência do dia" @click="openSettings('abrir')">
                 <span class="i-lucide-settings-2 text-sm" />
-                Configurações da agenda
+                {{ canView('agenda.configuracao') ? 'Configurações da agenda' : 'Abrir e fechar agenda' }}
               </button>
               <button v-if="canEditAgenda" class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
                 <span class="i-lucide-plus text-sm" />

@@ -525,9 +525,9 @@ class CrmAPI extends ApiClient {
     });
   }
 
-  // médicos com a agenda fechada (item 76)
+  // médicos com a agenda fechada (item 76) — item 366: porta da equipe
   updateClosedDoctors(closedDoctors) {
-    return axios.post(`${this.url}/settings/update_agenda`, {
+    return axios.post(`${this.url}/settings/update_agenda_locks`, {
       closed_doctors: closedDoctors,
     });
   }
@@ -539,8 +539,9 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // cadeado de UM horário — item 366: porta da equipe (nó agenda.bloqueios)
   updateAgendaBlocked(blocked) {
-    return axios.post(`${this.url}/settings/update_agenda`, { blocked });
+    return axios.post(`${this.url}/settings/update_agenda_locks`, { blocked });
   }
 
   // item 267: rota própria, liberada para a equipe inteira (não só admin)

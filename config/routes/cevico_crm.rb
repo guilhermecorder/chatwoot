@@ -170,6 +170,7 @@ namespace :crm do
     post :update_agenda
     get :agenda_ai_preview # item 307: regras e vagas que a IA recebe
     post :update_blocked_days # item 267: qualquer pessoa da equipe fecha/reabre dias
+    post :update_agenda_locks # item 366: cadeado de horário e fechar médico (nó agenda.bloqueios)
     post :agenda_backfill
     # Configurações → Domínio (público das páginas/formulários)
     get :public_domain

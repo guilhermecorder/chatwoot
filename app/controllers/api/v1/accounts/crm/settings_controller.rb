@@ -51,6 +51,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   before_action -> { require_capability(:settings) }, only: ADMIN_SETTINGS_ACTIONS
   # 🔐 rodada 334: nós mais finos da árvore para o que não é "integração"
   before_action -> { require_access('agenda.configuracao', :edit) }, only: %i[update_agenda agenda_backfill agenda_ai_preview]
+  # item 366: fechar/reabrir dia, horário e médico = nó "Fechar e reabrir dias"
+  before_action -> { require_access('agenda.bloqueios', :edit) }, only: %i[update_blocked_days update_agenda_locks]
   before_action -> { require_access('configuracoes.precos', :edit) }, only: [:update_price_table]
   # Rodada 2: ler o domínio público = nó "Domínio público" da árvore (só admin)
   before_action -> { require_access('configuracoes.dominio', :view) }, only: [:public_domain]
@@ -1075,6 +1077,19 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     days = sanitize_blocked_days(params[:blocked_days])
     Cevico::SettingMerge.merge!(Current.account, :agenda_config) { |cfg| cfg.merge('blocked_days' => days) }
     render json: { agenda_blocked_days: days }
+  end
+
+  # item 366 (23/10, "as meninas precisam poder fazer isso ou aquilo na
+  # agenda"): o cadeado de UM horário e o "fechar médico" da engrenagem
+  # gravavam pelo update_agenda, que exige "Horários e regras" — o botão
+  # aparecia para a equipe e o salvar dava erro. Porta própria, com o mesmo
+  # nó do fechar dia; faixas, valores e modelos seguem no update_agenda.
+  def update_agenda_locks
+    keys = {}
+    keys['blocked'] = sanitize_blocked_slots(params[:blocked]) if params.key?(:blocked)
+    keys['closed_doctors'] = Array(params[:closed_doctors]).map { |d| d.to_s[0, 80] }.compact_blank.uniq if params.key?(:closed_doctors)
+    Cevico::SettingMerge.merge!(Current.account, :agenda_config) { |cfg| cfg.merge(keys) } if keys.any?
+    render json: { agenda_blocked: keys['blocked'], agenda_closed_doctors: keys['closed_doctors'] }.compact
   end
 
   def update_agenda
@@ -2761,6 +2776,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
       part = { 'date' => date, 'unit' => h['unit'].to_s[0, 40].presence, 'doctor' => h['doctor'].to_s[0, 80].presence }.compact
       part.size == 1 ? date : part
+    end.uniq
+  end
+
+  # item 366: cadeado de UM horário ({date, time, unit, doctor}); lixo cai fora
+  def sanitize_blocked_slots(list)
+    Array(list).filter_map do |b|
+      h = b.respond_to?(:permit) ? b.permit(:date, :time, :unit, :doctor).to_h : b.to_h
+      next if h['date'].to_s !~ /\A\d{4}-\d{2}-\d{2}\z/ || h['time'].to_s !~ /\A\d{1,2}:\d{2}\z/
+
+      { 'date' => h['date'], 'time' => h['time'], 'unit' => h['unit'].to_s[0, 40].presence,
+        'doctor' => h['doctor'].to_s[0, 80].presence }.compact
     end.uniq
   end
 

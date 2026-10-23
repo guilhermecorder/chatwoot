@@ -16,6 +16,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CrmAPI from 'dashboard/api/crm';
 import {
   DOCTORS, TYPE_BY_KEY, RESERVABLE, AI_MODALITY,
@@ -32,6 +33,11 @@ const emit = defineEmits(['close', 'reschedule', 'openExamWindows', 'openSurgery
 
 const store = useStore();
 const { isAdmin } = useAdmin();
+// item 366: fechar/reabrir médico e horário = nó "Fechar e reabrir dias";
+// quem só tem esse nó vê só a aba "Abrir e fechar"
+const { canView, canEdit } = useCevicoAccess();
+const canLock = computed(() => canEdit('agenda.bloqueios'));
+const canConfigure = computed(() => canView('agenda.configuracao'));
 const settings = useMapGetter('crm/getSettings');
 const allTasks = useMapGetter('tasks/getTasks');
 
@@ -42,7 +48,8 @@ const TABS = [
   { key: 'valores', label: 'Valores', icon: 'i-lucide-badge-dollar-sign' },
   { key: 'conferencia', label: 'Conferência do dia', icon: 'i-lucide-list-checks' },
 ];
-const tab = ref(props.initialTab);
+const visibleTabs = computed(() => (canConfigure.value ? TABS : TABS.filter(x => x.key === 'abrir')));
+const tab = ref(canConfigure.value ? props.initialTab : 'abrir');
 
 const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const WEEKDAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -361,7 +368,10 @@ const tryClose = () => {
   emit('close');
 };
 
-onMounted(loadPreview);
+// item 366: a prévia da IA é de "Horários e regras" — para quem só abre e fecha, pedir dava o aviso de sem acesso
+onMounted(() => {
+  if (canConfigure.value) loadPreview();
+});
 </script>
 
 <template>
@@ -370,15 +380,15 @@ onMounted(loadPreview);
       <div class="cv-modal-head flex items-center gap-3">
         <span class="i-lucide-settings-2 text-xl" />
         <div class="flex-1 min-w-0">
-          <h2 class="text-base font-bold">Configurações da agenda</h2>
-          <p class="text-[11px] opacity-85">abrir e fechar, para que serve cada faixa de horário e o que a IA oferece — tudo num lugar só</p>
+          <h2 class="text-base font-bold">{{ canConfigure ? 'Configurações da agenda' : 'Abrir e fechar agenda' }}</h2>
+          <p class="text-[11px] opacity-85">{{ canConfigure ? 'abrir e fechar, para que serve cada faixa de horário e o que a IA oferece — tudo num lugar só' : 'fechar e reabrir médicos, dias e horários' }}</p>
         </div>
         <button class="cv-glass-btn cv-iconbtn" title="Fechar" @click="tryClose"><span class="i-lucide-x" /></button>
       </div>
 
       <div class="px-4 sm:px-5 pt-4">
         <div class="cv-seg cv-seg-sm grid grid-cols-2 sm:grid-cols-5 gap-1 w-full">
-          <button v-for="t in TABS" :key="t.key" class="cv-seg-item justify-center" :class="tab === t.key ? 'cv-seg-on' : ''" @click="tab = t.key">
+          <button v-for="t in visibleTabs" :key="t.key" class="cv-seg-item justify-center" :class="tab === t.key ? 'cv-seg-on' : ''" @click="tab = t.key">
             <span :class="t.icon" class="text-xs" /> {{ t.label }}
           </button>
         </div>
@@ -418,7 +428,7 @@ onMounted(loadPreview);
                 </p>
                 <p class="text-[11px] text-n-slate-10 mt-0.5">{{ doctorSummary(d.name) }}</p>
               </div>
-              <button v-if="isAdmin" class="cv-btn" :class="isDoctorClosed(d.name) ? '' : 'cv-btn-ghost cv-btn-danger'" :disabled="busy === `doc:${d.name}`" @click="toggleDoctor(d.name)">
+              <button v-if="canLock" class="cv-btn" :class="isDoctorClosed(d.name) ? '' : 'cv-btn-ghost cv-btn-danger'" :disabled="busy === `doc:${d.name}`" @click="toggleDoctor(d.name)">
                 <span :class="isDoctorClosed(d.name) ? 'i-lucide-lock-open' : 'i-lucide-lock'" class="text-sm" />
                 {{ isDoctorClosed(d.name) ? 'Reabrir agenda' : 'Fechar agenda' }}
               </button>
@@ -439,13 +449,13 @@ onMounted(loadPreview);
                   <option v-for="s in closeScopes" :key="s.key" :value="s.key">{{ s.label }}</option>
                 </select>
               </label>
-              <button class="cv-btn" :disabled="!newClose.date || busy === 'days'" @click="addClosing"><span class="i-lucide-lock text-sm" /> Fechar</button>
+              <button v-if="canLock" class="cv-btn" :disabled="!newClose.date || busy === 'days'" @click="addClosing"><span class="i-lucide-lock text-sm" /> Fechar</button>
             </div>
             <div v-for="(b, i) in futureClosings" :key="i" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2">
               <span class="i-lucide-calendar-off text-sm text-n-slate-10" />
               <span class="text-xs font-semibold text-n-slate-12">{{ fmtDay(parseKey(dayOf(b))) }}</span>
               <span class="cv-chip cv-red">{{ closeScopeLabel(b) }}</span>
-              <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'days'" @click="reopenDay(b)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
+              <button v-if="canLock" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'days'" @click="reopenDay(b)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
             </div>
             <p v-if="!futureClosings.length" class="text-xs text-n-slate-9 pl-1">Nenhum dia fechado daqui para frente.</p>
           </section>
@@ -458,7 +468,7 @@ onMounted(loadPreview);
               <span class="text-xs font-semibold text-n-slate-12 tabular-nums">{{ fmtDay(parseKey(s.date)) }} · {{ s.time }}</span>
               <span class="cv-chip cv-slate">{{ unitLabel(s.unit) }}</span>
               <span v-if="s.doctor" class="text-[11px] text-n-slate-10">{{ doctorShort(s.doctor) }}</span>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'slots'" @click="reopenSlot(s)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
+              <button v-if="canLock" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'slots'" @click="reopenSlot(s)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
             </div>
             <p v-if="!lockedSlots.length" class="text-xs text-n-slate-9 pl-1">Nenhum horário fechado daqui para frente.</p>
           </section>
