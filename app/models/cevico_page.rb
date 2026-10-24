@@ -369,17 +369,22 @@ class CevicoPage < ApplicationRecord
   # toques errados ("<trecho>~<tipo>") também, uma vez por visita.
   # `from` (23/10 noite): a visita já tinha mandado a rolagem `from` e agora
   # chegou mais fundo — sai da faixa antiga e entra na nova, contando uma vez só
-  def track_reading!(depth: nil, from: nil, sections: [], buttons: [], misses: [])
+  # `taps` (24/10, mapa visual): onde a pessoa tocou, "<trecho>@<coluna><linha>" numa grade 10×10 do trecho
+  # ("!" no fim = toque errado); `device` 'pc' guarda em 'toques_pc' — o computador tem outro desenho de página.
+  # `times` (24/10): segundos com cada trecho na tela, "<trecho>:<segundos>" (parcelas; até 120 s por aviso)
+  def track_reading!(depth: nil, from: nil, device: nil, **groups)
     depth = SCROLL_BUCKETS.include?(depth.to_s) ? depth.to_s : nil
-    sections, buttons, misses = known_reading_keys(sections, buttons, misses)
-    return if depth.nil? && [sections, buttons, misses].all?(&:blank?)
+    keys = known_reading_keys(groups)
+    return if depth.nil? && keys.values.all?(&:blank?)
 
     bump_daily_stats! do |day|
       unbump(day, 'scroll', scroll_bucket_before(from, depth))
       bump(day, 'scroll', [depth].compact)
-      bump(day, 'secoes', sections)
-      bump(day, 'botoes', buttons)
-      bump(day, 'erros', misses)
+      bump(day, 'secoes', keys[:sections])
+      bump(day, 'botoes', keys[:buttons])
+      bump(day, 'erros', keys[:misses])
+      bump(day, device.to_s == 'pc' ? 'toques_pc' : 'toques', keys[:taps])
+      add(day, 'tempo', keys[:times])
     end
   end
 
@@ -406,12 +411,15 @@ class CevicoPage < ApplicationRecord
   end
 
   # só as chaves que existem no HTML da própria página
-  def known_reading_keys(sections, buttons, misses)
-    return [sections, buttons, misses] if [sections, buttons, misses].all?(&:blank?)
+  def known_reading_keys(groups)
+    keys = { sections: [], buttons: [], misses: [], taps: [], times: [] }.merge(groups.compact)
+    return keys.merge(times: {}) if keys.values.all?(&:blank?)
 
     map = Cevico::PageReading.map_for(self)
-    [sections & map['marcos'].pluck('key'), buttons & map['botoes'].pluck('key'),
-     misses.select { |key| Cevico::PageReading.miss_key?(map, key) }]
+    { sections: keys[:sections] & map['marcos'].pluck('key'), buttons: keys[:buttons] & map['botoes'].pluck('key'),
+      misses: keys[:misses].select { |key| Cevico::PageReading.miss_key?(map, key) },
+      taps: keys[:taps].select { |key| Cevico::PageReading.tap_key?(map, key) },
+      times: Cevico::PageReading.seconds_by_marker(map, keys[:times]) }
   end
 
   # faixa que a visita já tinha mandado, só se for mais rasa que a nova
@@ -419,6 +427,14 @@ class CevicoPage < ApplicationRecord
     return nil if depth.nil? || SCROLL_BUCKETS.exclude?(from.to_s)
 
     from.to_i < depth.to_i ? from.to_s : nil
+  end
+
+  # soma quantidades (segundos) em vez de 1
+  def add(day, group, amounts)
+    return if amounts.blank?
+
+    counts = (day[group] ||= {})
+    amounts.each { |key, n| counts[key] = counts[key].to_i + n }
   end
 
   # tira 1 da faixa (nunca abaixo de zero: a visita pode ter começado ontem)

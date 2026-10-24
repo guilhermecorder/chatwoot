@@ -210,7 +210,10 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
                             'scroll' => { '0' => 4, '25' => 6, '50' => 20, '100' => 10 },
                             'secoes' => { 'isso-acontececom-voce' => 40, 'investimento' => 30, 'duvidas' => 6 },
                             'botoes' => { 'cta_topo' => 1, 'investimento#1' => 0 },
-                            'erros' => { 'investimento~foto' => 3, 'investimento~texto' => 1 }
+                            'erros' => { 'investimento~foto' => 3, 'investimento~texto' => 1 },
+                            'toques' => { 'investimento@45' => 5, 'investimento@46!' => 2, 'topo@11' => 1 },
+                            'toques_pc' => { 'investimento@70' => 3 },
+                            'tempo' => { 'topo' => 200, 'investimento' => 465 }
                           } })
     end
 
@@ -236,6 +239,10 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
                             ])
       investimento = xray['trechos'][2]
       expect(investimento['erros']).to eq('foto' => 3, 'texto' => 1)
+      expect(investimento['pontos']).to eq([{ 'c' => 4, 'l' => 5, 'n' => 5, 'erro' => false }, { 'c' => 4, 'l' => 6, 'n' => 2, 'erro' => true }])
+      expect(investimento['pontos_pc']).to eq([{ 'c' => 7, 'l' => 0, 'n' => 3, 'erro' => false }])
+      expect(xray['trechos'][0]['pontos']).to eq([{ 'c' => 1, 'l' => 1, 'n' => 1, 'erro' => false }])
+      expect(xray['trechos'].map { |t| t['segundos'] }).to eq([5.0, nil, 15.5, nil])
       expect(investimento['recomendacoes'].join).to include('o que está incluso').and include('tocam na foto')
       expect(investimento['teste']).to eq('Investimento antes × depois das dúvidas.')
       expect(xray['botoes'].pluck('key', 'cliques', 'marco_titulo')).to eq([['cta_topo', 1, 'Isso acontece com você?'],
@@ -249,6 +256,26 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
       CevicoPageTraffic.where(cevico_page_id: guia.id).delete_all
       get '/biblioteca/raio-x.json', params: { de: library.slug, pagina: guia.slug }
       expect(xray['diagnostico'].first).to include('nivel' => 'info', 'titulo' => 'Ainda pouca visita para tirar conclusões')
+    end
+
+    it 'compara os mesmos dias antes e depois da última mudança da página', :aggregate_failures do
+      d = ->(n) { (Date.current - n).iso8601 }
+      guia.update_columns(updated_at: 3.days.ago, daily_stats: { # rubocop:disable Rails/SkipsModelValidations
+                            d.call(5) => { 'scroll' => { '0' => 8, '50' => 2 }, 'secoes' => { 'isso-acontececom-voce' => 2 } },
+                            d.call(1) => { 'scroll' => { '0' => 2, '50' => 6, '100' => 2 }, 'secoes' => { 'isso-acontececom-voce' => 8 } }
+                          })
+      get '/biblioteca/raio-x.json', params: { de: library.slug, pagina: guia.slug }
+
+      m = xray['mudanca']
+      expect(m).to include('em' => d.call(3), 'dias' => 4)
+      expect(m['antes']).to include('medidas' => 10, 'saida_abertura' => 0.8, 'metade' => 0.2)
+      expect(m['depois']).to include('medidas' => 10, 'saida_abertura' => 0.2, 'metade' => 0.8, 'acessos' => 40)
+    end
+
+    it 'sem dado de um dos lados, não compara' do
+      guia.update_columns(updated_at: 3.days.ago) # rubocop:disable Rails/SkipsModelValidations
+      get '/biblioteca/raio-x.json', params: { de: library.slug, pagina: guia.slug }
+      expect(xray['mudanca']).to be_nil
     end
 
     it 'o painel de calor junta os trechos com problema de todas as páginas', :aggregate_failures do

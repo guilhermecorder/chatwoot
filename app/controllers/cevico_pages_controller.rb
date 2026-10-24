@@ -10,7 +10,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   layout false
   include Cevico::PublicSecurity # 🔐 CSP só-relatar + sem iframe (rodada 171)
 
-  def show # rubocop:disable Metrics/AbcSize
+  def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     @page = CevicoPage.published.find_by(slug: params[:slug])
     return render plain: 'Página não encontrada.', status: :not_found if @page.nil?
 
@@ -24,6 +24,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
 
     @cevico_tracking = Cevico::PublicSite.tracking_config_for(@page.account)
     request.env['cevico.gzip'] = true # 🗜️ 20/10: resposta comprimida (Rack::Deflater em config/application.rb)
+    return show_for_xray if xray_frame?
 
     # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela);
     # item 306: quem volta à página vê a MESMA variação
@@ -184,7 +185,8 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
 
     # página anexada (Raio-X, 23/10): além da rolagem, os títulos vistos, os botões clicados e os toques errados
     page.track_reading!(depth: params[:depth], from: params[:de], sections: beacon_keys(:secoes),
-                        buttons: beacon_keys(:botoes), misses: beacon_keys(:erros))
+                        buttons: beacon_keys(:botoes), misses: beacon_keys(:erros), taps: beacon_keys(:toques),
+                        device: params[:aparelho], times: beacon_keys(:tempo))
     head :no_content
   end
 
@@ -294,7 +296,10 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # noscript logo após o <body>) — é o que o "Testar" do GTM confere
   def render_custom_page(preview_banner: nil)
     html = @page.custom_html_for_serving # item 306: headline da variação no lugar do <h1>
-    if preview_banner.nil? # ao vivo: injeta o rastreio; prévia fica limpa
+    if @raiox # Ver na página: só as marcas dos trechos, nada de rastreio
+      snippet = render_to_string(partial: 'cevico_pages/tracking_snippet', locals: { page: @page, raiox: true })
+      html = html.match?(%r{</body>}i) ? html.sub(%r{</body>}i) { "#{snippet}</body>" } : html + snippet
+    elsif preview_banner.nil? # ao vivo: injeta o rastreio; prévia fica limpa
       html = Cevico::Gtm.inject(html)
       snippet = render_to_string(partial: 'cevico_pages/analytics_snippet', locals: { page: @page, include_gtm: false }) +
                 render_to_string(partial: 'cevico_pages/tracking_snippet', locals: { page: @page })
@@ -322,6 +327,28 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
       page = published.find { |pg| pg.slug.match?(door[:match]) || pg.title.match?(door[:match]) }
       door.merge(page_slug: page&.slug)
     end
+  end
+
+  # 🩻 24/10 "Ver na página": a Biblioteca (mesmo domínio) abre a página num
+  # iframe e desenha o mapa de calor por cima. Aqui a página sai LIMPA: não
+  # conta visita, não carrega Pixel/GA4/Clarity, não manda beacon — só marca os
+  # títulos e botões (data-cv-marco / data-cv-botao) para o desenho achar cada trecho.
+  def xray_frame?
+    params[:raiox] == '1'
+  end
+
+  # o concern Cevico::PublicSecurity pergunta: iframe da própria origem só neste modo
+  def same_origin_frame?
+    xray_frame?
+  end
+
+  def show_for_xray
+    @raiox = true
+    @page.serving_variant = requested_variant(@page)
+    request.content_security_policy = request.content_security_policy.clone.tap { |policy| policy.frame_ancestors :self }
+    return render_custom_page if @page.custom_html.present?
+
+    render :show
   end
 
   # slug da página de origem do funil (?de=...), saneado

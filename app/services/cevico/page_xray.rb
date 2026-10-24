@@ -12,6 +12,8 @@
 #                cada origem converte
 #   google       a página no Search Console (foto em cache, últimos 28 dias)
 #   diagnostico  frases curtas, da mais grave para a mais leve
+#   mudanca      (24/10) antes × depois da última mudança da página: os mesmos
+#                dias de cada lado (até 7), para saber se a mudança funcionou
 #
 # A régua é sempre a MÉDIA DAS PRÓPRIAS PÁGINAS do mesmo tipo no período
 # (anúncio com anúncio, orgânica com orgânica) — nunca um número de mercado.
@@ -25,6 +27,8 @@ class Cevico::PageXray # rubocop:disable Metrics/ClassLength
   ABOVE = 1.3
   MARKS = %w[25 50 75 100].freeze
   LEVELS = %w[alerta atencao oportunidade info ok].freeze
+  CHANGE_WINDOW = 7
+  CHANGE_MAX_AGE = 60 # dias: mudança mais velha que isso já não é "a última" que interessa
 
   def initialize(page, since_date, until_date, rows:, ad_page_ids:)
     @page = page
@@ -36,7 +40,8 @@ class Cevico::PageXray # rubocop:disable Metrics/ClassLength
 
   def call
     { pagina: page_info, numeros: numbers, leitura: reading, trechos: sections.trechos, botoes: buttons,
-      origens: sources, google: google, media: average, diagnostico: diagnosis, parametros: Cevico::PageSections.parameters }
+      origens: sources, google: google, media: average, diagnostico: diagnosis, mudanca: change,
+      parametros: Cevico::PageSections.parameters }
   end
 
   private
@@ -119,6 +124,41 @@ class Cevico::PageXray # rubocop:disable Metrics/ClassLength
 
   def ratio(part, whole)
     whole.to_i.positive? ? (part.to_f / whole).round(4) : nil
+  end
+
+  # ── antes × depois da última mudança ──────────────────────────────────
+  # a mesma quantidade de dias de cada lado (até 7); o "depois" vai do dia da
+  # mudança até hoje. Só aparece com algum dado dos dois lados (visitas ou leitura medida).
+  def change
+    changed_on = @page.updated_at.to_date
+    return nil if changed_on < CHANGE_MAX_AGE.days.ago.to_date
+
+    days = [CHANGE_WINDOW, (Date.current - changed_on).to_i + 1].min
+
+    before = window_stats(changed_on - days, changed_on - 1)
+    after = window_stats(changed_on, changed_on + days - 1)
+    return nil if [before, after].any? { |w| w[:acessos].zero? && w[:medidas].zero? }
+
+    { em: changed_on.iso8601, dias: days, antes: before, depois: after }
+  end
+
+  def window_stats(since, until_date)
+    traffic_window(since, until_date).merge(reading_window(since, until_date))
+  end
+
+  def traffic_window(since, until_date)
+    row = Cevico::TrafficReport.new(@page.account, since, until_date, page_ids: [@page.id]).rows
+                               .find { |r| r[:page_id] == @page.id } || {}
+    { acessos: row[:views].to_i, cliques: row[:cta].to_i, leads: row[:leads].to_i, agendou: row[:booked].to_i,
+      tx_clique: ratio(row[:cta], row[:views]), tx_lead: ratio(row[:leads], row[:views]) }
+  end
+
+  def reading_window(since, until_date)
+    reading = Cevico::PageSections.new(@page, since, until_date)
+    measured = reading.measured
+    half = reading.stats['scroll'].sum { |key, n| key.to_i >= 50 ? n : 0 }
+    { medidas: measured, saida_abertura: measured.positive? ? reading.trechos.first['saida'] : nil,
+      metade: ratio(half, measured) }
   end
 
   # ── diagnóstico ───────────────────────────────────────────────────────

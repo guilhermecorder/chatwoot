@@ -42,6 +42,16 @@ RSpec.describe Cevico::PageReading do
     expect(map['marcos'].pluck('key')).to eq(['isso-acontececom-voce'])
   end
 
+  it 'toque com posição vale só num trecho que existe, na grade 10×10', :aggregate_failures do
+    map = described_class.new('<h2 id="investimento">Quanto custa</h2>').map
+    expect(described_class.tap_key?(map, 'topo@00')).to be(true)
+    expect(described_class.tap_key?(map, 'investimento@99')).to be(true)
+    expect(described_class.tap_key?(map, 'investimento@99!')).to be(true)
+    expect(described_class.tap_key?(map, 'outro@11')).to be(false)
+    expect(described_class.tap_key?(map, 'investimento@1')).to be(false)
+    expect(described_class.tap_key?(map, 'investimento@1a')).to be(false)
+  end
+
   it 'slugify corta em 48 sem hífen no fim' do
     expect(described_class.slugify("#{'a' * 47} bcd")).to eq('a' * 47)
   end

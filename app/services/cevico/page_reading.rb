@@ -12,6 +12,12 @@
 #           — onde a pessoa tocou (o trecho, pelo título anterior) e no quê:
 #           foto, titulo, parece-botao, texto, ou repetido (3 toques seguidos no
 #           mesmo lugar). Vale se o marco existe na página e o tipo é um destes.
+#   toques  (mapa visual, 24/10) também fora do mapa: "<marco>@<coluna><linha>" —
+#           onde a pessoa tocou, numa grade 10×10 do trecho (coluna da tela ×
+#           altura do trecho); "!" no fim = tocou onde não há nada para tocar.
+#           Vale se o marco existe.
+#   tempo   (24/10) "<marco>:<segundos>" — segundos com o trecho na tela, em parcelas;
+#           vale se o marco existe e os segundos vão de 1 a 120.
 #
 # O beacon da página (cevico_pages/_tracking_snippet) monta as MESMAS chaves no
 # navegador, com as mesmas regras; o servidor só aceita chaves deste mapa — o
@@ -24,7 +30,32 @@ class Cevico::PageReading
 
   def self.miss_key?(map, key)
     marco, tipo = key.to_s.split('~', 2)
-    MISS_TYPES.include?(tipo) && (marco == TOP || map['marcos'].any? { |m| m['key'] == marco })
+    MISS_TYPES.include?(tipo) && marker?(map, marco)
+  end
+
+  TAP_KEY = /\A([a-z0-9_-]{1,48})@([0-9]{2})!?\z/
+
+  def self.tap_key?(map, key)
+    marco = key.to_s[TAP_KEY, 1]
+    marco.present? && marker?(map, marco)
+  end
+
+  TIME_KEY = /\A([a-z0-9_-]{1,48}):([0-9]{1,3})\z/
+  MAX_SECONDS = 120
+
+  # { marco => segundos } só do que vale
+  def self.seconds_by_marker(map, keys)
+    Array(keys).each_with_object({}) do |key, out|
+      marco, seconds = key.to_s.match(TIME_KEY)&.captures
+      next unless marco && marker?(map, marco)
+
+      seconds = seconds.to_i
+      out[marco] = out[marco].to_i + seconds if seconds.between?(1, MAX_SECONDS)
+    end
+  end
+
+  def self.marker?(map, marco)
+    marco == TOP || map['marcos'].any? { |m| m['key'] == marco }
   end
 
   # o mapa muda só quando a página muda: cache pela data da última edição

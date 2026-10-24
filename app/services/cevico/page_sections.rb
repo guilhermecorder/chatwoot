@@ -10,6 +10,10 @@
 #   botoes     toques nos botões que ficam no trecho
 #   erros      toques errados no trecho: foto, título, algo com cara de botão,
 #              texto, ou 3 toques seguidos no mesmo lugar
+#   pontos     (mapa visual, 24/10) onde tocaram no celular: [{c, l, n, erro}] na
+#              grade 10×10 do trecho — coluna da tela, linha da altura do trecho,
+#              quantos, e erro = tocou onde não há nada para tocar. pontos_pc = no computador
+#   segundos   (24/10) tempo médio com o trecho na tela, por visita que o viu
 #   status     boa / atencao / problema pelos PARÂMETROS abaixo (pouco = ainda
 #              sem visitas suficientes para julgar)
 #   recomendacoes + teste   o que mudar no texto e qual teste fazer, pelo tipo
@@ -19,7 +23,7 @@
 # Os parâmetros são referências de partida para páginas de saúde em celular,
 # calibradas depois com os números da própria CEVICO — não são promessa.
 class Cevico::PageSections # rubocop:disable Metrics/ClassLength
-  GROUPS = %w[scroll secoes botoes erros].freeze
+  GROUPS = %w[scroll secoes botoes erros toques toques_pc tempo].freeze
   MIN_SEEN = 20 # abaixo disso o trecho fica "pouco": cedo para julgar
   # de quem chegou ao trecho, quantos param nele: [até aqui é boa, até aqui é atenção]
   EXIT_LIMITS = { 'abertura' => [0.30, 0.45], 'padrao' => [0.10, 0.25] }.freeze
@@ -148,7 +152,9 @@ class Cevico::PageSections # rubocop:disable Metrics/ClassLength
     out = trecho.merge('tipo' => kind, 'pct' => share(seen), 'saida' => exit_rate,
                        'perdidas' => lost, 'botoes' => taps,
                        'tem_botao' => map['botoes'].any? { |b| b['marco'] == trecho['key'] },
-                       'erros' => misses, 'erros_total' => misses.values.sum)
+                       'erros' => misses, 'erros_total' => misses.values.sum,
+                       'pontos' => taps_of(trecho['key'], 'toques'), 'pontos_pc' => taps_of(trecho['key'], 'toques_pc'),
+                       'segundos' => seconds_of(trecho['key'], seen))
     out.merge(judge(out))
   end
 
@@ -170,6 +176,22 @@ class Cevico::PageSections # rubocop:disable Metrics/ClassLength
       n = stats['erros']["#{key}~#{type}"]
       out[type] = n if n.positive?
     end
+  end
+
+  def seconds_of(key, seen)
+    total = stats['tempo'][key]
+    seen.positive? && total.positive? ? (total.to_f / seen).round(1) : nil
+  end
+
+  def taps_of(key, group)
+    prefix = "#{key}@"
+    points = stats[group].filter_map { |k, n| tap_point(k, n) if k.start_with?(prefix) }
+    points.sort_by { |p| [-p['n'], p['l'], p['c']] }
+  end
+
+  def tap_point(key, count)
+    cell = key.delete_suffix('!')
+    { 'c' => cell[-2].to_i, 'l' => cell[-1].to_i, 'n' => count, 'erro' => key.end_with?('!') }
   end
 
   def buttons_of(key)

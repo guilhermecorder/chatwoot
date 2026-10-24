@@ -51,6 +51,42 @@ RSpec.describe 'CEVICO leitura da página anexada', type: :request do
     expect(day['scroll']).to eq('75' => 1, '25' => 2, '50' => 1)
   end
 
+  it 'guarda onde a pessoa tocou, na grade do trecho (mapa visual)', :aggregate_failures do
+    post "/p/#{page.slug}/track", params: { toques: 'topo@37,investimento@92!,investimento@92!,inventado@11,topo@3,topo@3a' }
+    post "/p/#{page.slug}/track", params: { toques: 'topo@55', aparelho: 'pc' }
+    expect(day['toques']).to eq('topo@37' => 1, 'investimento@92!' => 1)
+    expect(day['toques_pc']).to eq('topo@55' => 1)
+  end
+
+  it 'soma os segundos com cada trecho na tela, em parcelas, até 120 por aviso', :aggregate_failures do
+    post "/p/#{page.slug}/track", params: { tempo: 'topo:12,investimento:7,inventado:9,topo:x,como-e-feita:0' }
+    post "/p/#{page.slug}/track", params: { tempo: 'topo:3,investimento:121' }
+    expect(day['tempo']).to eq('topo' => 15, 'investimento' => 7)
+  end
+
+  describe 'Ver na página (?raiox=1): a Biblioteca abre a página num iframe, sem rastreio' do
+    it 'sai só com as marcas dos trechos e pode ser embutida pela própria origem', :aggregate_failures do
+      get "/p/#{page.slug}", params: { raiox: '1' }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers['X-Frame-Options']).to eq('SAMEORIGIN')
+      expect(response.headers['Content-Security-Policy-Report-Only']).to include("frame-ancestors 'self'")
+      expect(response.body).to include('data-cv-raiox').and include('SO_MARCA = true')
+      expect(response.body).not_to include('/ref')
+      expect(response.body).not_to include('clarity.ms')
+      expect(response.body).not_to include('fbevents')
+      expect(page.reload.views_count).to eq(0)
+      expect(page.daily_stats).to eq({})
+    end
+
+    it 'a página normal continua sem iframe e contando a visita', :aggregate_failures do
+      get "/p/#{page.slug}"
+      expect(response.headers['X-Frame-Options']).to eq('DENY')
+      expect(response.body).to include('SO_MARCA = false')
+      expect(page.reload.views_count).to eq(1)
+    end
+  end
+
   it 'conta os toques errados por trecho, só de tipos e trechos que existem', :aggregate_failures do
     post "/p/#{page.slug}/track", params: { erros: 'investimento~foto,topo~parece-botao,inventado~foto,investimento~bomba' }
     expect(day['erros']).to eq('investimento~foto' => 1, 'topo~parece-botao' => 1)
