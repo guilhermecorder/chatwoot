@@ -272,6 +272,15 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
       expect(m['depois']).to include('medidas' => 10, 'saida_abertura' => 0.2, 'metade' => 0.8, 'acessos' => 40)
     end
 
+    it 'a média de segundos conta só as visitas dos dias em que o tempo já era medido' do
+      ontem = (Date.current - 1).iso8601
+      # ontem, antes da coleta de tempo: 100 visitas viram a abertura e 50 o investimento, sem segundos
+      antes = { 'scroll' => { '0' => 100 }, 'secoes' => { 'investimento' => 50 } }
+      guia.update_columns(daily_stats: guia.daily_stats.merge(ontem => antes)) # rubocop:disable Rails/SkipsModelValidations
+      get '/biblioteca/raio-x.json', params: { de: library.slug, pagina: guia.slug }
+      expect(xray['trechos'].map { |t| t['segundos'] }).to eq([5.0, nil, 15.5, nil])
+    end
+
     it 'sem dado de um dos lados, não compara' do
       guia.update_columns(updated_at: 3.days.ago) # rubocop:disable Rails/SkipsModelValidations
       get '/biblioteca/raio-x.json', params: { de: library.slug, pagina: guia.slug }

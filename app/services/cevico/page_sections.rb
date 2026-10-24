@@ -13,7 +13,8 @@
 #   pontos     (mapa visual, 24/10) onde tocaram no celular: [{c, l, n, erro}] na
 #              grade 10×10 do trecho — coluna da tela, linha da altura do trecho,
 #              quantos, e erro = tocou onde não há nada para tocar. pontos_pc = no computador
-#   segundos   (24/10) tempo médio com o trecho na tela, por visita que o viu
+#   segundos   (24/10) tempo médio com o trecho na tela, por visita que o viu —
+#              contando só as visitas dos dias em que o tempo já era medido
 #   status     boa / atencao / problema pelos PARÂMETROS abaixo (pouco = ainda
 #              sem visitas suficientes para julgar)
 #   recomendacoes + teste   o que mudar no texto e qual teste fazer, pelo tipo
@@ -91,13 +92,20 @@ class Cevico::PageSections # rubocop:disable Metrics/ClassLength
   # soma do daily_stats no período: rolagem, títulos vistos, botões tocados, toques errados
   def stats
     @stats ||= begin
-      out = GROUPS.index_with { Hash.new(0) }.merge('desde' => nil)
+      out = GROUPS.index_with { Hash.new(0) }.merge('desde' => nil, 'viram_com_tempo' => Hash.new(0))
       period_days.each do |day, data|
         GROUPS.each { |group| add_counts(out[group], data[group]) }
         out['desde'] ||= day if data['scroll'].present?
+        add_timed_views(out['viram_com_tempo'], data) if data['tempo'].present?
       end
       out
     end
+  end
+
+  # quem viu cada trecho nos dias em que o tempo já era medido (a abertura = visitas medidas)
+  def add_timed_views(totals, data)
+    totals[Cevico::PageReading::TOP] += (data['scroll'] || {}).values.sum(&:to_i)
+    add_counts(totals, data['secoes'])
   end
 
   def add_counts(totals, counts)
@@ -154,7 +162,7 @@ class Cevico::PageSections # rubocop:disable Metrics/ClassLength
                        'tem_botao' => map['botoes'].any? { |b| b['marco'] == trecho['key'] },
                        'erros' => misses, 'erros_total' => misses.values.sum,
                        'pontos' => taps_of(trecho['key'], 'toques'), 'pontos_pc' => taps_of(trecho['key'], 'toques_pc'),
-                       'segundos' => seconds_of(trecho['key'], seen))
+                       'segundos' => seconds_of(trecho['key']))
     out.merge(judge(out))
   end
 
@@ -178,8 +186,9 @@ class Cevico::PageSections # rubocop:disable Metrics/ClassLength
     end
   end
 
-  def seconds_of(key, seen)
+  def seconds_of(key)
     total = stats['tempo'][key]
+    seen = stats['viram_com_tempo'][key]
     seen.positive? && total.positive? ? (total.to_f / seen).round(1) : nil
   end
 
