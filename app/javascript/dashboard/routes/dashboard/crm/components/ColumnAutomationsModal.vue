@@ -1041,7 +1041,9 @@ const save = async () => {
               etiqueta (ex.: refrativa), ela viaja dentro do evento. Para contar
               no Google Ads, o evento precisa estar marcado como
               <b>evento-chave</b> no Analytics e <b>importado</b> nas conversões
-              do Ads — o painel Google mostra a conferência.
+              do Ads — o painel Google mostra a conferência. Com "Conversões
+              direto no Google Ads" ligado (Integrações → Google), esta etapa vai
+              direto ao Ads pelo clique do anúncio, com valor e procedimento.
             </p>
           </div>
           <div class="grid grid-cols-2 gap-3">

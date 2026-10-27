@@ -37,6 +37,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   ADMIN_SETTINGS_ACTIONS = %i[
     update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
     update_google_ads test_google_ads test_search_console update_sheets test_sheets
+    prepare_google_ads test_google_ads_api
     update_oftalmofacil test_oftalmofacil sync_oftalmofacil
     update_calls enable_calls_at_meta calls_meta_status
     update_voice test_voice sync_voice voice_whatsapp_accounts voice_voices voice_state
@@ -457,12 +458,43 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg['measurement_id']  = params[:measurement_id]  if params[:measurement_id].present?
     cfg['api_secret']      = params[:api_secret]      if params[:api_secret].present?
     cfg['client_id']       = params[:client_id]       if params[:client_id].present?
-    # Google Ads API (insights) — aguardando developer token (processo no Google)
+    # Google Ads API: developer token (Central de API) + ID da conta
     cfg['developer_token'] = params[:developer_token] if params[:developer_token].present?
     cfg['customer_id']     = params[:customer_id]     if params.key?(:customer_id)
     apply_google_cost_config(cfg)
+    apply_google_ads_api_config(cfg)
     crm_settings.update!(google_ads_config: cfg)
     render json: google_ads_json(crm_settings)
+  end
+
+  # 🎯 item 371: conversões DIRETO no Google Ads (gclid). Acesso por OAuth
+  # (client id + secret + refresh token, write-only) ou pela conta de serviço
+  # representando um e-mail do Workspace; chave conversions_via liga/desliga.
+  def apply_google_ads_api_config(cfg)
+    cfg['login_customer_id'] = params[:login_customer_id].to_s.gsub(/\D/, '') if params.key?(:login_customer_id)
+    cfg['ads_impersonate_email'] = params[:ads_impersonate_email].to_s.strip[0, 120] if params.key?(:ads_impersonate_email)
+    cfg['conversions_via'] = params[:conversions_via].to_s == 'ads_api' ? 'ads_api' : 'ga4' if params.key?(:conversions_via)
+    apply_google_oauth_config(cfg)
+  end
+
+  # segredos do OAuth: só trocam quando vêm preenchidos (write-only)
+  def apply_google_oauth_config(cfg)
+    %w[oauth_client_id oauth_client_secret oauth_refresh_token].each { |k| cfg[k] = params[k].to_s.strip if params[k].present? }
+  end
+
+  # cria/confere no Google Ads as ações de conversão por etapa + variáveis
+  def prepare_google_ads
+    result = Crm::GoogleAdsSetupService.new(Current.account).call
+    render json: result.merge(google_ads: google_ads_json(crm_settings.reload))
+  end
+
+  # envio de TESTE (validateOnly): o Google confere a conversão e não grava
+  def test_google_ads_api
+    result = Crm::GoogleAdsClickConversionService.new(
+      account: Current.account, event_name: 'agendou_consulta', contact: nil, value: 1.0, procedure: 'teste',
+      order_id: "teste_#{Time.current.to_i}", validate_only: true
+    ).call
+    render json: result
   end
 
   # Custo automático via API de dados do GA4 (sem developer token):
@@ -1373,9 +1405,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     end
     # 27/09: PAPEL E RESPONSABILIDADES de cada pessoa — o Mentor do Time julga
     # cada um pelo próprio papel (fechamento de cirurgia ≠ linha de frente)
-    if params.key?(:team_roles) && Current.account_user.administrator?
-      cfg['team_roles'] = sanitize_team_roles(params[:team_roles])
-    end
+    cfg['team_roles'] = sanitize_team_roles(params[:team_roles]) if params.key?(:team_roles) && Current.account_user.administrator?
     # conferência do dia → CRM: para onde vai o card em cada caso
     if params.key?(:attendance_stages)
       cfg['attendance_stages'] = params.require(:attendance_stages)
@@ -1463,9 +1493,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       cfg['appointment_reminders'] = sanitize_appointment_reminders(params[:appointment_reminders])
     end
     # item 256: pesquisa de satisfação pós-cirurgia (NPS)
-    if params.key?(:nps_survey) && Current.account_user.administrator?
-      cfg[Crm::NpsSurvey::CONFIG_KEY] = sanitize_nps_survey(params[:nps_survey])
-    end
+    cfg[Crm::NpsSurvey::CONFIG_KEY] = sanitize_nps_survey(params[:nps_survey]) if params.key?(:nps_survey) && Current.account_user.administrator?
     # item 253: interruptor geral do agente "Confirmação de consulta" (Agentes de IA)
     if params.key?(:appointment_confirmation) && Current.account_user.administrator?
       cfg[Crm::AppointmentReminderSendJob::MASTER_KEY] = appointment_confirmation_cfg(cfg[Crm::AppointmentReminderSendJob::MASTER_KEY])
@@ -2126,7 +2154,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     return 'ID do Tag Manager inválido — é o código que começa com GTM-, ex.: GTM-MWDV8T35' if gtm.present? && !gtm.match?(/\AGTM-[A-Z0-9]{4,12}\z/)
 
     clarity = params[:clarity_id].to_s.strip
-    return 'ID do Clarity inválido — são as letras e números do projeto, ex.: abc1de2fgh' if clarity.present? && !clarity.match?(/\A[a-z0-9]{6,20}\z/i)
+    if clarity.present? && !clarity.match?(/\A[a-z0-9]{6,20}\z/i)
+      return 'ID do Clarity inválido — são as letras e números do projeto, ex.: abc1de2fgh'
+    end
 
     nil
   end
@@ -2854,6 +2884,25 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       search_console_site: cfg['search_console_site'].presence || Cevico::SearchConsole::DEFAULT_SITE,
       search_console_fetched_at: (cfg.dig('search_console_cache', 'fetched_at') unless cfg.dig('search_console_cache', 'demo')),
       search_console_error: cfg.dig('search_console_cache', 'error')
+    }.merge(google_ads_api_json(cfg))
+  end
+
+  # 🎯 item 371: estado do envio direto ao Google Ads (segredos nunca voltam)
+  def google_ads_api_json(cfg)
+    api = Cevico::GoogleAdsApi.new(cfg)
+    {
+      login_customer_id: cfg['login_customer_id'],
+      oauth_client_id: cfg['oauth_client_id'],
+      oauth_secret_set: cfg['oauth_client_secret'].present?,
+      oauth_refresh_token_set: cfg['oauth_refresh_token'].present?,
+      ads_impersonate_email: cfg['ads_impersonate_email'],
+      ads_auth_mode: api.auth_mode,
+      ads_api_configured: api.configured?,
+      conversions_via: cfg['conversions_via'].presence || 'ga4',
+      ads_actions: cfg['ads_conversion_actions'] || {},
+      ads_variables: cfg['ads_custom_variables'] || {},
+      ads_prepared_at: cfg['ads_prepared_at'],
+      ads_last_error: cfg['ads_last_error']
     }
   end
 

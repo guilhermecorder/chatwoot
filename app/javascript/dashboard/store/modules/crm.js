@@ -434,6 +434,16 @@ const actions = {
     const { data } = await CrmAPI.testGoogleAds();
     return data;
   },
+  // 🎯 item 371: prepara o Google Ads (ações + variáveis) e devolve o estado novo
+  async prepareGoogleAds({ commit }) {
+    const { data } = await CrmAPI.prepareGoogleAds();
+    if (data.google_ads) commit('setSettings', { google_ads: data.google_ads });
+    return data;
+  },
+  async testGoogleAdsApi() {
+    const { data } = await CrmAPI.testGoogleAdsApi();
+    return data;
+  },
 
   // 📞 Ligações (WhatsApp) — item 167: o backend devolve a config `calls`
   // já com os defaults preenchidos; guardamos em settings.calls

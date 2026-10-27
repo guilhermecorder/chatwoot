@@ -147,6 +147,9 @@ namespace :crm do
     post :copywriter_content
     post :update_google_ads
     post :test_google_ads
+    # 🎯 item 371: conversões direto no Google Ads (gclid)
+    post :prepare_google_ads
+    post :test_google_ads_api
     post :test_search_console
     post :update_sheets
     post :test_sheets

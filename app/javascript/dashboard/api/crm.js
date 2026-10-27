@@ -973,6 +973,15 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/test_google_ads`);
   }
 
+  // 🎯 item 371: conversões direto no Google Ads (gclid)
+  prepareGoogleAds() {
+    return axios.post(`${this.url}/settings/prepare_google_ads`);
+  }
+
+  testGoogleAdsApi() {
+    return axios.post(`${this.url}/settings/test_google_ads_api`);
+  }
+
   // 🔎 16/10: Search Console (mesma conta de serviço do GA4)
   testSearchConsole() {
     return axios.post(`${this.url}/settings/test_search_console`);
