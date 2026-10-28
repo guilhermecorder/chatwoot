@@ -23,6 +23,7 @@ import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { hexFromGrad, hexToRgb } from 'dashboard/helper/cevicoPalettes';
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { frase } from 'dashboard/helper/segmento';
 import {
   inboxGradientFor,
   inboxSolidFor,
@@ -60,7 +61,7 @@ const PALETTE = [AZUL, ROXO, OURO, LIME, '#3B82F6', '#A78BFA', '#F0C420', '#22D3
 // página (o admin escolhe pelo chip do banner; cada bloco pode ter a sua)
 const pal = useCevicoPalette({
   scope: 'report:crm',
-  blocks: [
+  blocks: computed(() => [
     { id: 'kpis', label: 'Indicadores', icon: 'i-lucide-gauge' },
     { id: 'caixas', label: 'Resultados por caixa', icon: 'i-lucide-inbox' },
     { id: 'agentes', label: 'Atendimento por agente', icon: 'i-lucide-headset' },
@@ -68,13 +69,13 @@ const pal = useCevicoPalette({
     { id: 'tempo', label: 'Conversas no tempo', icon: 'i-lucide-chart-area' },
     { id: 'faturamento', label: 'Faturamento por caixa', icon: 'i-lucide-trending-up' },
     { id: 'etiquetas', label: 'Etiquetas', icon: 'i-lucide-tags' },
-    { id: 'radar', label: 'Radar × Consultas', icon: 'i-lucide-radar' },
+    { id: 'radar', label: frase('dash.crm_bloco_radar', 'Radar × Consultas'), icon: 'i-lucide-radar' },
     { id: 'perdas', label: 'Perdas por motivo', icon: 'i-lucide-heart-crack' },
     { id: 'nps', label: 'Satisfação (NPS)', icon: 'i-lucide-smile' },
-    { id: 'cirurgias', label: 'Cirurgias (planilha)', icon: 'i-lucide-sheet' },
+    { id: 'cirurgias', label: frase('dash.crm_bloco_vendas_planilha', 'Cirurgias (planilha)'), icon: 'i-lucide-sheet' },
     { id: 'dinheiro_parado', label: 'Dinheiro parado', icon: 'i-lucide-hourglass' },
     { id: 'funil', label: 'Etapas do funil', icon: 'i-lucide-funnel' },
-  ],
+  ]),
 });
 const { cvVars, blockVars, blockFamily } = pal;
 // tom sólido (hex) de um degrau da família do bloco — para os gráficos em
@@ -305,19 +306,19 @@ const openKpiPopup = key => {
       label: 'Valor fechado', icon: 'i-lucide-badge-dollar-sign',
       grad: 'linear-gradient(135deg, #65A30D, #84CC16)',
       value: formatCurrency(k.closed_value),
-      sub: 'cirurgias dos leads do período',
+      sub: frase('dash.crm_sub_valor_fechado', 'cirurgias dos leads do período'),
       chartKey: 'revenue', format: 'currency',
-      about: 'O número do card soma o valor dos leads do período que fecharam (coorte). O gráfico mostra o faturamento REGISTRADO em cada balde (entrou em "Cirurgia Realizada") — dois ângulos do mesmo fechamento.',
+      about: frase('dash.crm_about_valor_fechado', 'O número do card soma o valor dos leads do período que fecharam (coorte). O gráfico mostra o faturamento REGISTRADO em cada balde (entrou em "Cirurgia Realizada") — dois ângulos do mesmo fechamento.'),
     },
     closed_count: {
       label: 'Fechamentos', icon: 'i-lucide-heart-pulse',
       grad: blockFamily('kpis')[1],
       value: k.closed_count ?? 0,
-      sub: 'leads do período que chegaram à cirurgia',
+      sub: frase('dash.crm_sub_fechamentos', 'leads do período que chegaram à cirurgia'),
       chartMatch: 'cirurgia agendada',
       goalTarget: goals.goalFor('surgeries_booked')?.target || null,
       components: ['indications'],
-      about: 'O card conta a coorte (leads do período que já fecharam). O gráfico mostra o ritmo: entradas na coluna "Cirurgia Agendada" em cada balde.',
+      about: frase('dash.crm_about_fechamentos', 'O card conta a coorte (leads do período que já fecharam). O gráfico mostra o ritmo: entradas na coluna "Cirurgia Agendada" em cada balde.'),
     },
     close_rate: {
       label: 'Taxa de fechamento', icon: 'i-lucide-percent',
@@ -326,7 +327,7 @@ const openKpiPopup = key => {
       sub: `${k.closed_count ?? 0} de ${k.cohort_total ?? 0} leads do período`,
       chartMatch: 'cirurgia agendada',
       components: ['new_leads', 'indications'],
-      about: 'De cada 100 leads do período, quantos chegaram à cirurgia. O gráfico mostra o ritmo de fechamento; as séries abaixo mostram a matéria-prima (entrada e indicações).',
+      about: frase('dash.crm_about_taxa_fechamento', 'De cada 100 leads do período, quantos chegaram à cirurgia. O gráfico mostra o ritmo de fechamento; as séries abaixo mostram a matéria-prima (entrada e indicações).'),
     },
   };
   kpiPopup.value = defs[key] || null;
@@ -615,7 +616,7 @@ const timelineChart = computed(() => {
       datasets: [
         areaDataset('Novas conversas', t.map(d => d.count), '#3B82F6'),
         areaDataset('Chegaram a agendar', t.map(d => d.agendamentos), '#FBBF24'),
-        areaDataset('Chegaram à cirurgia', t.map(d => d.cirurgias), '#84CC16'),
+        areaDataset(frase('dash.crm_chegaram_venda', 'Chegaram à cirurgia'), t.map(d => d.cirurgias), '#84CC16'),
       ],
     },
     options: layeredAreaOptions(),
@@ -1005,7 +1006,7 @@ const agentView = computed(() => {
             label="Valor fechado"
             :value="Math.round(data.kpis.closed_value || 0)"
             prefix="R$ "
-            sub="cirurgias dos leads do período"
+            :sub="frase('dash.crm_sub_valor_fechado', 'cirurgias dos leads do período')"
             from="#65A30D"
             to="#84CC16"
           />
@@ -1015,7 +1016,7 @@ const agentView = computed(() => {
             glass
             label="Fechamentos"
             :value="data.kpis.closed_count"
-            sub="leads do período que chegaram à cirurgia"
+            :sub="frase('dash.crm_sub_fechamentos', 'leads do período que chegaram à cirurgia')"
             :grad="blockFamily('kpis')[1]"
             :state="goals.stateFor('surgeries_booked')"
             :goal="goals.goalFor('surgeries_booked')"
@@ -1034,7 +1035,7 @@ const agentView = computed(() => {
           glass
           label="Tempo médio"
           :value="formatDuration(data.kpis.avg_conversion_minutes)"
-          sub="da chegada até fechar a cirurgia"
+          :sub="frase('dash.crm_sub_tempo_medio', 'da chegada até fechar a cirurgia')"
         />
       </div>
       </div>
@@ -1190,7 +1191,7 @@ const agentView = computed(() => {
               <span
                 v-if="row.inbox_id && !row.is_capture"
                 class="cv-chip cv-slate"
-                title="Caixa operacional: recebe pacientes que já chegaram pelas portas de entrada — só fica com quem nunca passou por porta nenhuma"
+                :title="frase('dash.crm_title_caixa_operacional', 'Caixa operacional: recebe pacientes que já chegaram pelas portas de entrada — só fica com quem nunca passou por porta nenhuma')"
               >
                 ⚙️ operacional
               </span>
@@ -1244,7 +1245,7 @@ const agentView = computed(() => {
                 </p>
               </div>
               <div>
-                <p class="text-[11px] text-n-slate-10">Fecharam cirurgia</p>
+                <p class="text-[11px] text-n-slate-10">{{ frase('dash.crm_fecharam_venda', 'Fecharam cirurgia') }}</p>
                 <p class="text-xl font-bold" style="color: #65A30D">
                   {{ row.closed }}
                   <span class="text-xs font-semibold">· {{ row.close_rate }}%</span>
@@ -1268,7 +1269,7 @@ const agentView = computed(() => {
                   <p class="text-xl font-bold text-n-slate-12">{{ row.cost_per_attendance ? formatMoney2(row.cost_per_attendance) : '—' }}</p>
                 </div>
                 <div>
-                  <p class="text-[11px] text-n-slate-10">CAC <span class="opacity-70">· custo por cirurgia</span></p>
+                  <p class="text-[11px] text-n-slate-10">CAC <span class="opacity-70">· {{ frase('dash.crm_custo_por_venda', 'custo por cirurgia') }}</span></p>
                   <p class="text-xl font-bold text-n-slate-12">{{ row.cac ? formatMoney2(row.cac) : '—' }}</p>
                 </div>
                 <div>
@@ -1293,7 +1294,7 @@ const agentView = computed(() => {
           </p>
           <p class="text-[11px] text-n-slate-9 flex items-center gap-1.5">
             <span class="i-lucide-info text-xs" />
-            A receita vem do valor dos cards que chegaram à coluna de cirurgia — a mesma régua do card "Valor fechado".
+            {{ frase('dash.crm_nota_receita_coluna_venda', 'A receita vem do valor dos cards que chegaram à coluna de cirurgia — a mesma régua do card "Valor fechado".') }}
           </p>
         </div>
       </div>
@@ -1320,7 +1321,7 @@ const agentView = computed(() => {
             <p class="text-2xl font-bold text-n-slate-12">{{ agentView.open }}</p>
           </div>
           <div class="cv-sub p-4" style="border-left: 4px solid #D4A017">
-            <p class="text-xs text-n-slate-10 mb-1">Sem resposta (paciente aguardando)</p>
+            <p class="text-xs text-n-slate-10 mb-1">{{ frase('dash.crm_sem_resposta_cliente', 'Sem resposta (paciente aguardando)') }}</p>
             <p class="text-2xl font-bold" :style="{ color: agentView.unanswered > 0 ? '#B8860B' : undefined }">
               {{ agentView.unanswered }}
             </p>
@@ -1403,7 +1404,7 @@ const agentView = computed(() => {
             </button>
           </div>
           <p class="text-[11px] mb-4" style="color: rgba(255, 255, 255, 0.78)">
-            {{ timelineGranularity }}, pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar
+            {{ timelineGranularity }}, {{ frase('dash.crm_sub_linha_tempo', 'pela data em que o lead chegou — e, desses leads, quantos avançaram até agendar ou operar') }}
           </p>
           <div class="h-64">
             <Line
@@ -1466,7 +1467,7 @@ const agentView = computed(() => {
           </div>
         </div>
         <p class="text-[11px] mb-4" style="color: rgba(255, 255, 255, 0.78)">
-          {{ revenueGranularityLabel }} · receita das cirurgias fechadas, pela data de chegada do lead · cada camada é uma caixa de entrada
+          {{ revenueGranularityLabel }} · {{ frase('dash.crm_sub_faturamento_caixa', 'receita das cirurgias fechadas, pela data de chegada do lead · cada camada é uma caixa de entrada') }}
         </p>
         <div class="h-72">
           <Line
@@ -1476,7 +1477,7 @@ const agentView = computed(() => {
           />
           <div v-else class="flex flex-col items-center justify-center h-full text-sm gap-2" style="color: rgba(255, 255, 255, 0.62)">
             <span class="i-lucide-trending-up text-2xl" />
-            <span>Sem faturamento no período — cards que chegarem à coluna de cirurgia aparecem aqui.</span>
+            <span>{{ frase('dash.crm_vazio_faturamento', 'Sem faturamento no período — cards que chegarem à coluna de cirurgia aparecem aqui.') }}</span>
           </div>
         </div>
       </div>
@@ -1533,11 +1534,11 @@ const agentView = computed(() => {
               <p class="text-xs font-medium text-white/80 mb-1">Oportunidades detectadas</p>
               <p class="text-3xl font-bold">{{ data.radar?.opportunities ?? 0 }}</p>
               <p class="text-[11px] text-white/70 mt-1">
-                pacientes quentes sem atendimento{{ inboxFilterActive ? ' · todas as caixas' : '' }}
+                {{ frase('dash.crm_radar_quentes', 'pacientes quentes sem atendimento') }}{{ inboxFilterActive ? ' · todas as caixas' : '' }}
               </p>
             </div>
             <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg" :style="{ background: blockFamily('radar')[2] }">
-              <p class="text-xs font-medium text-white/80 mb-1">Consultas agendadas</p>
+              <p class="text-xs font-medium text-white/80 mb-1">{{ frase('atendimentos_agendados', 'Consultas agendadas') }}</p>
               <p class="text-3xl font-bold">{{ data.radar?.appointments ?? 0 }}</p>
               <p class="text-[11px] text-white/70 mt-1">criadas na Agenda no período</p>
             </div>
@@ -1568,7 +1569,7 @@ const agentView = computed(() => {
           style="border-style: dashed"
         >
           <p class="text-xs text-n-slate-11 mb-2.5">
-            Padrão CEVICO de motivos de perda ({{ missingLossLabels.length }} faltando) — cada um vira uma
+            {{ frase('dash.crm_padrao_perdas', 'Padrão CEVICO de motivos de perda') }} ({{ missingLossLabels.length }} faltando) — cada um vira uma
             etiqueta vermelha <b>perda_*</b> pronta para a atendente aplicar no balão quando o lead esfriar:
           </p>
           <div class="flex flex-wrap gap-1.5 mb-3">
@@ -1605,7 +1606,7 @@ const agentView = computed(() => {
             :key="r.title"
             class="w-full flex items-center gap-2 text-xs group"
             :class="r.count ? 'cursor-pointer' : 'cursor-default'"
-            :title="r.count ? 'Ver os pacientes deste motivo (lista de resgate)' : ''"
+            :title="r.count ? frase('dash.crm_title_ver_clientes_motivo', 'Ver os pacientes deste motivo (lista de resgate)') : ''"
             @click="openLossModal(r)"
           >
             <span class="text-n-slate-12 w-32 truncate flex-shrink-0 text-left group-hover:underline">{{ r.name }}</span>
@@ -1631,7 +1632,7 @@ const agentView = computed(() => {
           </button>
           <p class="text-[11px] text-n-slate-9 pt-1 flex items-center gap-1.5">
             <span class="i-lucide-info text-xs" />
-            Clique no motivo pra ver os pacientes — é a matéria-prima da campanha de resgate (Colheitadeira / Tratamento de dados). R$ = valor dos cards perdidos que tinham valor preenchido.
+            {{ frase('dash.crm_nota_perdas', 'Clique no motivo pra ver os pacientes — é a matéria-prima da campanha de resgate (Colheitadeira / Tratamento de dados). R$ = valor dos cards perdidos que tinham valor preenchido.') }}
           </p>
         </div>
       </div>
@@ -1640,14 +1641,14 @@ const agentView = computed(() => {
       <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('nps')">
         <div class="flex items-center gap-2 mb-5 flex-wrap">
           <span class="cv-icon"><span class="i-lucide-smile text-base" /></span>
-          <h3 class="text-sm font-bold text-n-slate-12">Satisfação dos pacientes (NPS)</h3>
+          <h3 class="text-sm font-bold text-n-slate-12">{{ frase('dash.crm_nps_titulo', 'Satisfação dos pacientes (NPS)') }}</h3>
           <span class="text-[11px] text-n-slate-9 ml-auto">
-            {{ data.nps?.stage_name ? `pacientes do período que chegaram a "${data.nps.stage_name}"` : 'leads do período' }} · notas lidas pelo agente de NPS
+            {{ data.nps?.stage_name ? `${frase('dash.crm_nps_clientes_chegaram', 'pacientes do período que chegaram a')} "${data.nps.stage_name}"` : 'leads do período' }} · notas lidas pelo agente de NPS
           </span>
         </div>
         <div v-if="!data.nps?.total" class="flex flex-col items-center justify-center py-8 text-n-slate-10 text-sm gap-2">
           <span class="i-lucide-smile text-2xl" />
-          <span>Sem respostas de NPS ainda — ligue o Agente de NPS numa coluna do pós-operatório (Automações → Agentes de IA).</span>
+          <span>{{ frase('dash.crm_nps_vazio', 'Sem respostas de NPS ainda — ligue o Agente de NPS numa coluna do pós-operatório (Automações → Agentes de IA).') }}</span>
         </div>
         <div v-else class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
           <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg text-center" :style="{ background: blockFamily('nps')[1] }">
@@ -1688,7 +1689,7 @@ const agentView = computed(() => {
       >
         <div class="flex items-center gap-2 mb-5">
           <span class="cv-icon"><span class="i-lucide-sheet text-base" /></span>
-          <h3 class="text-sm font-bold text-n-slate-12">Cirurgias — planilha (Google Sheets)</h3>
+          <h3 class="text-sm font-bold text-n-slate-12">{{ frase('dash.crm_vendas_planilha_titulo', 'Cirurgias — planilha (Google Sheets)') }}</h3>
           <span class="text-[11px] text-n-slate-9 ml-auto">
             mesmo período selecionado acima{{ inboxFilterActive ? ' · a planilha não separa por caixa' : '' }}
           </span>
@@ -1700,7 +1701,7 @@ const agentView = computed(() => {
         <template v-else>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
             <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg" :style="{ background: blockFamily('cirurgias')[0] }">
-              <p class="text-xs font-medium text-white/80 mb-1">Cirurgias no período</p>
+              <p class="text-xs font-medium text-white/80 mb-1">{{ frase('dash.crm_vendas_periodo', 'Cirurgias no período') }}</p>
               <p class="text-3xl font-bold">{{ data.sheet_surgeries.count }}</p>
             </div>
             <div class="cv-tile relative rounded-2xl p-5 text-white shadow-lg" style="background: linear-gradient(135deg, #65A30D, #84CC16)">
@@ -1708,7 +1709,7 @@ const agentView = computed(() => {
               <p class="text-2xl font-bold leading-tight">{{ formatCurrency(data.sheet_surgeries.revenue) }}</p>
             </div>
             <div class="cv-sub col-span-2 p-5">
-              <p class="text-xs font-medium text-n-slate-10 mb-2">Por unidade</p>
+              <p class="text-xs font-medium text-n-slate-10 mb-2">{{ frase('dash.por_unidade', 'Por unidade') }}</p>
               <div v-if="data.sheet_surgeries.by_unit?.length" class="space-y-1.5">
                 <div v-for="u in data.sheet_surgeries.by_unit" :key="u.name" class="flex items-center gap-2 text-sm">
                   <span class="text-n-slate-12 flex-1 truncate">{{ u.name }}</span>
@@ -1721,7 +1722,7 @@ const agentView = computed(() => {
           </div>
 
           <div v-if="data.sheet_surgeries.by_procedure?.length">
-            <p class="text-xs font-medium text-n-slate-10 mb-2">Por procedimento</p>
+            <p class="text-xs font-medium text-n-slate-10 mb-2">{{ frase('dash.crm_por_procedimento', 'Por procedimento') }}</p>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1.5">
               <div v-for="p in data.sheet_surgeries.by_procedure" :key="p.name" class="flex items-center gap-2 text-sm">
                 <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background: var(--cv)" />
@@ -1732,7 +1733,7 @@ const agentView = computed(() => {
             </div>
           </div>
           <p v-if="!data.sheet_surgeries.count" class="text-sm text-n-slate-10">
-            Nenhuma cirurgia na planilha dentro do período selecionado.
+            {{ frase('dash.crm_vazio_vendas_planilha', 'Nenhuma cirurgia na planilha dentro do período selecionado.') }}
           </p>
         </template>
       </div>
@@ -1752,7 +1753,7 @@ const agentView = computed(() => {
               {{ formatCurrency(stalledSpot.stalled_value) }} parados em "{{ stalledSpot.stage_name }}"
             </p>
             <p class="text-xs text-n-slate-10 mt-0.5">
-              {{ stalledSpot.stalled_count }} paciente(s) sem se mexer há mais de {{ stalledSpot.stalled_days }} dias
+              {{ stalledSpot.stalled_count }} {{ frase('dash.cliente_s', 'paciente(s)') }} sem se mexer há mais de {{ stalledSpot.stalled_days }} dias
               · a coluna tem {{ stalledSpot.count }} no total ({{ formatCurrency(stalledSpot.value) }})
             </p>
           </div>
@@ -1874,20 +1875,20 @@ const agentView = computed(() => {
               </button>
             </div>
             <p class="text-xs text-white/85 mt-1">
-              {{ lossModal.count }} paciente(s) no período
+              {{ lossModal.count }} {{ frase('dash.cliente_s', 'paciente(s)') }} no período
               <template v-if="lossModal.value"> · {{ formatCurrency(lossModal.value) }} em cards com valor</template>
             </p>
           </div>
           <div class="p-4 overflow-y-auto">
             <div v-if="loadingLossContacts" class="flex items-center justify-center py-8 text-n-slate-10 text-sm gap-2">
-              <span class="i-lucide-loader-circle animate-spin" /> buscando os pacientes…
+              <span class="i-lucide-loader-circle animate-spin" /> {{ frase('dash.crm_buscando_clientes', 'buscando os pacientes…') }}
             </div>
             <template v-else>
               <button
                 v-for="c in lossContacts"
                 :key="c.contact_id"
                 class="cv-sub cv-sub-hover w-full flex items-center gap-2.5 px-3 py-2 mb-1.5 text-left"
-                title="Abrir o Espaço do Paciente"
+                :title="`Abrir o ${frase('espaco_cliente', 'Espaço do Paciente')}`"
                 @click="openPatientSpace(c)"
               >
                 <span class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">
@@ -1903,11 +1904,11 @@ const agentView = computed(() => {
                 <span v-if="c.value" class="text-[11px] font-bold text-red-500 flex-shrink-0">{{ formatCurrency(c.value) }}</span>
               </button>
               <p v-if="!lossContacts.length" class="text-center text-xs text-n-slate-10 py-6">
-                Nenhum paciente encontrado neste recorte.
+                {{ frase('dash.crm_vazio_clientes_recorte', 'Nenhum paciente encontrado neste recorte.') }}
               </p>
               <p v-else class="text-[11px] text-n-slate-9 mt-2 flex items-start gap-1.5">
                 <span class="i-lucide-lightbulb text-xs mt-0.5" />
-                Essa lista é a matéria-prima do resgate: a 🌾 Colheitadeira (Automações → Agentes) ou o Tratamento de dados atacam esses pacientes em massa com etiqueta e mensagem aprovada.
+                {{ frase('dash.crm_nota_resgate', 'Essa lista é a matéria-prima do resgate: a 🌾 Colheitadeira (Automações → Agentes) ou o Tratamento de dados atacam esses pacientes em massa com etiqueta e mensagem aprovada.') }}
               </p>
             </template>
           </div>

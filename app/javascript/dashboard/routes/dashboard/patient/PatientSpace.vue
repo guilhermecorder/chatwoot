@@ -20,6 +20,7 @@ import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallB
 import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 import { hexToRgbSpaced } from 'dashboard/helper/cevicoAgenda';
 import { PRICE_UNITS } from 'dashboard/routes/dashboard/settings/precos/priceRows';
+import { frase, termo, termoCap } from 'dashboard/helper/segmento';
 
 const route = useRoute();
 const router = useRouter();
@@ -223,13 +224,13 @@ const fmtDuration = minutes => {
   return `${Math.round(minutes / 60 / 24)} dia(s)`;
 };
 
-const MODALITY_LABELS = {
-  avaliacao: 'Avaliação',
-  retorno: 'Retorno',
-  pos_op: 'Pós-operatório',
-  exames: 'Exame',
-  teleconsulta: 'Teleconsulta',
-};
+const MODALITY_LABELS = computed(() => ({
+  avaliacao: frase('espaco.modalidade_avaliacao', 'Avaliação'),
+  retorno: frase('espaco.modalidade_retorno', 'Retorno'),
+  pos_op: frase('espaco.modalidade_pos_op', 'Pós-operatório'),
+  exames: frase('espaco.modalidade_exames', 'Exame'),
+  teleconsulta: frase('espaco.modalidade_teleconsulta', 'Teleconsulta'),
+}));
 const UNIT_LABELS = { tatuape: 'Tatuapé', paulista: 'Av. Paulista', online: 'Online' };
 const CHANNEL_LABELS = {
   Whatsapp: 'WhatsApp',
@@ -626,12 +627,19 @@ const orderStockForPatient = async () => {
       quantity: 1,
       reason:
         `Indicação: ${noteForm.value.indicated_procedure || stockQuery.value}` +
-        (identity.value?.name ? ` — paciente ${identity.value.name}` : ''),
+        (identity.value?.name
+          ? ` — ${termo('cliente')} ${identity.value.name}`
+          : ''),
       task_id: noteForm.value.task_id,
       contact_id: contactId.value,
     });
     stockOrderCreated.value = true;
-    useAlert('Pedido criado e vinculado ao paciente. 🛒');
+    useAlert(
+      frase(
+        'espaco.pedido_vinculado_cliente',
+        'Pedido criado e vinculado ao paciente. 🛒'
+      )
+    );
   } catch {
     useAlert('Não consegui criar o pedido de estoque.');
   } finally {
@@ -781,7 +789,12 @@ const saveNote = async () => {
 const deleteNote = async note => {
   // eslint-disable-next-line no-alert
   if (
-    !window.confirm('Excluir esta anotação clínica? Essa ação não tem volta.')
+    !window.confirm(
+      frase(
+        'espaco.excluir_anotacao_confirmacao',
+        'Excluir esta anotação clínica? Essa ação não tem volta.'
+      )
+    )
   )
     return;
   try {
@@ -806,7 +819,7 @@ const consultOptions = computed(() =>
     .filter(e => e.type === 'consulta' && e.task_id)
     .map(e => ({
       id: e.task_id,
-      label: `${fmtDate(e.at)} — ${MODALITY_LABELS[e.modality] || 'Consulta'}${e.doctor ? ` · ${e.doctor}` : ''}`,
+      label: `${fmtDate(e.at)} — ${MODALITY_LABELS.value[e.modality] || termoCap('atendimento')}${e.doctor ? ` · ${e.doctor}` : ''}`,
     }))
     .reverse()
 );
@@ -820,10 +833,10 @@ const notePills = note => {
   else if (f.procedure_type) pills.push(f.procedure_type);
   const option = f.procedure_option || f.technique || f.lens_type;
   if (option) pills.push(option);
-  if (f.eye) pills.push(`Olho: ${f.eye}`);
+  if (f.eye) pills.push(`${frase('espaco.olho', 'Olho')}: ${f.eye}`);
   if (f.pio_od || f.pio_oe)
     pills.push(
-      `PIO ${[f.pio_od && `OD ${f.pio_od}`, f.pio_oe && `OE ${f.pio_oe}`].filter(Boolean).join(' · ')}`
+      `${frase('espaco.pio', 'PIO')} ${[f.pio_od && `OD ${f.pio_od}`, f.pio_oe && `OE ${f.pio_oe}`].filter(Boolean).join(' · ')}`
     );
   return pills;
 };
@@ -895,7 +908,12 @@ watch(contactId, () => {
 
       <div v-else-if="!data" class="text-center py-16">
         <p class="text-sm text-n-slate-10">
-          Não consegui carregar este paciente.
+          {{
+            frase(
+              'espaco.erro_carregar_cliente',
+              'Não consegui carregar este paciente.'
+            )
+          }}
         </p>
       </div>
 
@@ -928,7 +946,7 @@ watch(contactId, () => {
             <div class="flex-1 min-w-[220px]">
               <div class="flex items-center gap-2 flex-wrap">
                 <h1 class="text-xl font-bold leading-tight">
-                  {{ identity.name || 'Paciente' }}
+                  {{ identity.name || termoCap('cliente') }}
                 </h1>
                 <CevicoViewOnlyPill v-if="!canEditPatient" />
                 <span
@@ -974,14 +992,19 @@ watch(contactId, () => {
                 </span>
                 <span class="flex items-center gap-1">
                   <span class="i-lucide-clock text-xs" />
-                  paciente desde {{ fmtDate(identity.created_at) }}
+                  {{ termo('cliente') }} desde {{ fmtDate(identity.created_at) }}
                 </span>
               </div>
               <!-- 💬📞 chamar o paciente daqui mesmo: conversa nova, ligar, abrir a última conversa -->
               <div class="flex items-center gap-1.5 flex-wrap mt-2">
                 <button
                   class="cevico-hero-btn"
-                  title="Começar uma conversa com este paciente por qualquer caixa"
+                  :title="
+                    frase(
+                      'espaco.comecar_conversa_cliente',
+                      'Começar uma conversa com este paciente por qualquer caixa'
+                    )
+                  "
                   @click="openNovaConversa({ contactId: Number(contactId) })"
                 >
                   <span class="i-lucide-message-square-plus text-[13px]" />
@@ -990,7 +1013,12 @@ watch(contactId, () => {
                 <span
                   v-if="identity.phone_number && cevicoCallsOn"
                   class="cevico-call-pill cevico-hero-btn !pl-1"
-                  title="Ligar para o paciente pelo WhatsApp"
+                  :title="
+                    frase(
+                      'espaco.ligar_cliente_whatsapp',
+                      'Ligar para o paciente pelo WhatsApp'
+                    )
+                  "
                 >
                   <CevicoCallButton
                     :contact-id="Number(contactId)"
@@ -1002,7 +1030,12 @@ watch(contactId, () => {
                 </span>
                 <button
                   class="cevico-hero-btn"
-                  title="Abrir a conversa mais recente aqui mesmo, sem sair do Espaço do Paciente"
+                  :title="
+                    frase(
+                      'espaco.abrir_conversa_recente',
+                      'Abrir a conversa mais recente aqui mesmo, sem sair do Espaço do Paciente'
+                    )
+                  "
                   @click="openPatientChat({ contactId: Number(contactId) })"
                 >
                   <span class="i-lucide-messages-square text-[13px]" />
@@ -1040,7 +1073,12 @@ watch(contactId, () => {
                 <button
                   v-if="identity.scheduled_by"
                   class="cevico-hero-btn"
-                  title="Abrir o painel de quem agendou esta consulta"
+                  :title="
+                    frase(
+                      'espaco.abrir_painel_quem_agendou',
+                      'Abrir o painel de quem agendou esta consulta'
+                    )
+                  "
                   @click="openLinkedPatient(identity.scheduled_by)"
                 >
                   <span class="i-lucide-user-round-check text-[13px]" />
@@ -1187,13 +1225,13 @@ watch(contactId, () => {
                 class="i-lucide-stethoscope text-xs"
                 :style="{ color: theme.accent }"
               />
-              Consultas · {{ consultEvents.length }}
+              {{ termoCap('atendimentos') }} · {{ consultEvents.length }}
             </p>
             <div
               v-if="!consultEvents.length"
               class="text-[11px] text-n-slate-9 py-2"
             >
-              Nenhuma consulta ainda.
+              {{ frase('espaco.nenhum_atendimento_ainda', 'Nenhuma consulta ainda.') }}
             </div>
             <div v-else class="space-y-1 max-h-24 overflow-y-auto">
               <p
@@ -1204,7 +1242,7 @@ watch(contactId, () => {
                 <span class="font-semibold text-n-slate-12">{{
                   fmtShortDate(c.at)
                 }}</span>
-                · {{ MODALITY_LABELS[c.modality] || 'Consulta' }}
+                · {{ MODALITY_LABELS[c.modality] || termoCap('atendimento') }}
                 <template v-if="c.procedure"> · {{ c.procedure }}</template>
                 <span v-if="c.attendance === 'attended'" class="text-green-600">
                   ✓</span>
@@ -1228,7 +1266,10 @@ watch(contactId, () => {
           <div v-if="isAdmin && surgeries.length" class="cv-sub px-4 py-3.5">
             <p class="text-[11px] font-semibold text-n-slate-10 flex items-center gap-1.5 mb-2">
               <span class="i-lucide-hospital text-xs" :style="{ color: theme.accent }" />
-              Cirurgias no OftalmoFácil · {{ surgeries.length }}
+              {{
+                frase('espaco.vendas_no_oftalmofacil', 'Cirurgias no OftalmoFácil')
+              }}
+              · {{ surgeries.length }}
               <span class="ml-auto text-[10px] font-normal text-n-slate-9">só admin</span>
             </p>
             <div v-for="sg in surgeries" :key="sg.id" class="rounded-lg bg-n-alpha-1 px-3 py-2 mb-1.5 last:mb-0">
@@ -1264,7 +1305,10 @@ watch(contactId, () => {
             </p>
             <template v-if="latestIndication">
               <p class="text-[12px] font-bold text-n-slate-12 leading-snug">
-                {{ latestIndication.procedure || 'Cirurgia indicada' }}
+                {{
+                  latestIndication.procedure ||
+                  frase('indicacao_impressao', 'Cirurgia indicada')
+                }}
               </p>
               <p class="text-[11px] text-n-slate-10 mt-0.5">
                 <template v-if="latestIndication.value">
@@ -1293,7 +1337,12 @@ watch(contactId, () => {
               </p>
             </template>
             <p v-else class="text-[11px] text-n-slate-9 py-2">
-              Sem indicação de cirurgia ainda.
+              {{
+                frase(
+                  'espaco.sem_indicacao_venda_ainda',
+                  'Sem indicação de cirurgia ainda.'
+                )
+              }}
             </p>
           </div>
 
@@ -1363,7 +1412,7 @@ watch(contactId, () => {
                 class="text-[11px] text-amber-600 flex items-center gap-1"
               >
                 <span class="i-lucide-pause text-[10px]" /> follow-up pausado p/
-                este paciente
+                este {{ termo('cliente') }}
               </p>
               <p
                 v-if="(automations.stage_automations || []).length"
@@ -1435,7 +1484,12 @@ watch(contactId, () => {
                   v-if="!funnelJourney.rows.length"
                   class="text-xs text-n-slate-10 py-6 text-center"
                 >
-                  Este paciente ainda não entrou no funil.
+                  {{
+                    frase(
+                      'espaco.cliente_nao_entrou_funil',
+                      'Este paciente ainda não entrou no funil.'
+                    )
+                  }}
                 </div>
 
                 <div v-else>
@@ -1625,8 +1679,9 @@ watch(contactId, () => {
                         <p class="text-[13px] text-n-slate-12">
                           <strong>{{
                             event.type === 'cirurgia'
-                              ? 'Cirurgia'
-                              : MODALITY_LABELS[event.modality] || 'Consulta'
+                              ? termoCap('venda')
+                              : MODALITY_LABELS[event.modality] ||
+                                termoCap('atendimento')
                           }}</strong>
                           <template v-if="event.doctor">
                             com {{ event.doctor }}
@@ -1697,7 +1752,13 @@ watch(contactId, () => {
                           v-else-if="event.comment_restricted"
                           class="text-[10px] text-n-slate-9 mt-0.5"
                         >
-                          🔒 comentário só com acesso clínico
+                          🔒
+                          {{
+                            frase(
+                              'espaco.comentario_so_acesso_clinico',
+                              'comentário só com acesso clínico'
+                            )
+                          }}
                         </p>
                       </template>
 
@@ -1728,9 +1789,20 @@ watch(contactId, () => {
                           <span
                             v-else-if="event.restricted && event.completed"
                             class="ml-1.5 text-[10px] text-n-slate-9"
-                            title="As respostas do paciente são dado de saúde — só médicos, administradores ou a equipe com o acesso clínico liberado"
+                            :title="
+                              frase(
+                                'espaco.respostas_dado_saude',
+                                'As respostas do paciente são dado de saúde — só médicos, administradores ou a equipe com o acesso clínico liberado'
+                              )
+                            "
                           >
-                            🔒 respostas só com acesso clínico
+                            🔒
+                            {{
+                              frase(
+                                'espaco.respostas_so_acesso_clinico',
+                                'respostas só com acesso clínico'
+                              )
+                            }}
                           </span>
                         </p>
                         <div
@@ -1783,7 +1855,7 @@ watch(contactId, () => {
                   class="text-sm font-bold text-n-slate-12 flex items-center gap-2"
                 >
                   <span class="cv-icon cv-icon-sm cv-gold"><span class="i-lucide-notebook-pen text-xs" /></span>
-                  Espaço do Médico
+                  {{ frase('espaco_profissional', 'Espaço do Médico') }}
                 </h2>
                 <div class="flex items-center gap-1.5">
                   <button
@@ -1804,8 +1876,12 @@ watch(contactId, () => {
                 </div>
               </div>
               <p class="text-[10px] text-n-slate-9 mb-3">
-                Anotações internas da clínica · dado sensível (LGPD) · acesso
-                restrito
+                {{
+                  frase(
+                    'espaco.anotacoes_internas_aviso',
+                    'Anotações internas da clínica · dado sensível (LGPD) · acesso restrito'
+                  )
+                }}
               </p>
 
               <!-- config de acesso (admin) -->
@@ -1814,7 +1890,7 @@ watch(contactId, () => {
                 class="mb-4 bg-n-alpha-1 rounded-xl p-3"
               >
                 <p class="text-[11px] font-semibold text-n-slate-12 mb-2">
-                  Médicos (podem anotar):
+                  {{ termoCap('profissionais') }} (podem anotar):
                 </p>
                 <label
                   v-for="agent in agents"
@@ -1853,9 +1929,13 @@ watch(contactId, () => {
                 <p
                   class="text-[10px] uppercase tracking-wide text-white/70 mb-1"
                 >
-                  À uma vista — última consulta anotada ({{
-                    fmtDate(latestNote.performed_at)
-                  }})
+                  {{
+                    frase(
+                      'espaco.ultimo_atendimento_anotado',
+                      'À uma vista — última consulta anotada'
+                    )
+                  }}
+                  ({{ fmtDate(latestNote.performed_at) }})
                 </p>
                 <div class="flex items-center gap-1.5 flex-wrap">
                   <span
@@ -1874,7 +1954,7 @@ watch(contactId, () => {
                     ⭐
                     {{
                       latestNote.fields?.indicated_procedure ||
-                      'Cirurgia indicada'
+                      frase('indicacao_impressao', 'Cirurgia indicada')
                     }}
                     <template v-if="latestNote.fields?.indicated_value">
                       · {{ fmtMoney(latestNote.fields.indicated_value) }}
@@ -1897,9 +1977,19 @@ watch(contactId, () => {
                 v-else-if="!notes.length"
                 class="text-xs text-n-slate-10 py-4 text-center"
               >
-                Nenhuma anotação clínica ainda.
+                {{
+                  frase(
+                    'espaco.nenhuma_anotacao_ainda',
+                    'Nenhuma anotação clínica ainda.'
+                  )
+                }}
                 <template v-if="canEditNotes">
-                  <br />Clique em “Nova anotação” após a consulta.
+                  <br />{{
+                    frase(
+                      'espaco.clique_nova_anotacao',
+                      'Clique em “Nova anotação” após a consulta.'
+                    )
+                  }}
                 </template>
               </div>
 
@@ -1972,7 +2062,7 @@ watch(contactId, () => {
                     "
                     class="mt-1.5 text-[11px] text-n-slate-11"
                   >
-                    <span class="font-medium text-n-slate-12">Refração:</span>
+                    <span class="font-medium text-n-slate-12">{{ frase('espaco.refracao', 'Refração') }}:</span>
                     <template v-if="note.fields.refraction_od">
                       OD {{ note.fields.refraction_od }}
                     </template>
@@ -1984,7 +2074,7 @@ watch(contactId, () => {
                     v-if="note.fields?.acuity_od || note.fields?.acuity_oe"
                     class="text-[11px] text-n-slate-11"
                   >
-                    <span class="font-medium text-n-slate-12">Acuidade:</span>
+                    <span class="font-medium text-n-slate-12">{{ frase('espaco.acuidade', 'Acuidade') }}:</span>
                     <template v-if="note.fields.acuity_od">
                       OD {{ note.fields.acuity_od }}
                     </template>
@@ -1996,14 +2086,14 @@ watch(contactId, () => {
                     v-if="note.fields?.biomicroscopy"
                     class="text-[11px] text-n-slate-11"
                   >
-                    <span class="font-medium text-n-slate-12">Biomicroscopia:</span>
+                    <span class="font-medium text-n-slate-12">{{ frase('espaco.biomicroscopia', 'Biomicroscopia') }}:</span>
                     {{ note.fields.biomicroscopy }}
                   </p>
                   <p
                     v-if="note.fields?.fundoscopy"
                     class="text-[11px] text-n-slate-11"
                   >
-                    <span class="font-medium text-n-slate-12">Fundoscopia:</span>
+                    <span class="font-medium text-n-slate-12">{{ frase('espaco.fundoscopia', 'Fundoscopia') }}:</span>
                     {{ note.fields.fundoscopy }}
                   </p>
 
@@ -2032,7 +2122,7 @@ watch(contactId, () => {
                     class="mt-1"
                   >
                     <p class="text-[11px] font-medium text-n-slate-12">
-                      Exames pedidos:
+                      {{ frase('espaco.exames_pedidos', 'Exames pedidos') }}:
                     </p>
                     <div class="flex items-center gap-1 flex-wrap mt-0.5">
                       <span
@@ -2081,7 +2171,9 @@ watch(contactId, () => {
                 class="text-sm font-bold text-n-slate-12 flex items-center gap-2 mb-3"
               >
                 <span class="cv-icon cv-icon-sm"><span class="i-lucide-bell-ring text-xs" /></span>
-                Atualizações do paciente
+                {{
+                  frase('espaco.atualizacoes_do_cliente', 'Atualizações do paciente')
+                }}
               </h2>
 
               <div v-if="(updates.upcoming || []).length" class="mb-3">
@@ -2112,8 +2204,8 @@ watch(contactId, () => {
                   <span class="truncate">
                     {{
                       t.task_type === 'cirurgia'
-                        ? 'Cirurgia'
-                        : MODALITY_LABELS[t.modality] || 'Consulta'
+                        ? termoCap('venda')
+                        : MODALITY_LABELS[t.modality] || termoCap('atendimento')
                     }}
                     <template v-if="t.doctor"> · {{ t.doctor }}</template>
                     <template v-if="t.unit">
@@ -2184,7 +2276,14 @@ watch(contactId, () => {
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-sm font-bold text-n-slate-12 flex items-center gap-2">
             <PatientSpaceIcon :size="22" />
-            {{ editingNote ? 'Editar anotação' : 'Nova anotação de consulta' }}
+            {{
+              editingNote
+                ? 'Editar anotação'
+                : frase(
+                    'espaco.nova_anotacao_atendimento',
+                    'Nova anotação de consulta'
+                  )
+            }}
           </h3>
           <button
             class="w-7 h-7 rounded-lg hover:bg-n-alpha-1 flex items-center justify-center text-n-slate-10"
@@ -2196,7 +2295,7 @@ watch(contactId, () => {
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Data da consulta</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.data_do_atendimento', 'Data da consulta') }}</span>
             <input
               v-model="noteForm.performed_at"
               type="date"
@@ -2204,7 +2303,7 @@ watch(contactId, () => {
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Médico</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ termoCap('profissional') }}</span>
             <select
               v-model="noteForm.doctor"
               class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
@@ -2216,7 +2315,7 @@ watch(contactId, () => {
             </select>
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Ligar à consulta da Agenda</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.ligar_ao_atendimento_agenda', 'Ligar à consulta da Agenda') }}</span>
             <select
               v-model="noteForm.task_id"
               class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
@@ -2291,7 +2390,7 @@ class="opacity-70"
             </button>
           </div>
           <div class="flex items-center gap-2 flex-wrap mt-2">
-            <span class="text-[11px] font-medium text-n-slate-11">Olho:</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.olho', 'Olho') }}:</span>
             <button
               v-for="eye in EYES"
               :key="eye"
@@ -2313,7 +2412,7 @@ class="opacity-70"
 
         <div class="grid grid-cols-2 gap-3 mb-3">
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Refração OD</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.refracao', 'Refração') }} OD</span>
             <input
               v-model="noteForm.refraction_od"
               type="text"
@@ -2322,7 +2421,7 @@ class="opacity-70"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Refração OE</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.refracao', 'Refração') }} OE</span>
             <input
               v-model="noteForm.refraction_oe"
               type="text"
@@ -2331,7 +2430,7 @@ class="opacity-70"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Acuidade OD</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.acuidade', 'Acuidade') }} OD</span>
             <input
               v-model="noteForm.acuity_od"
               type="text"
@@ -2340,7 +2439,7 @@ class="opacity-70"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Acuidade OE</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.acuidade', 'Acuidade') }} OE</span>
             <input
               v-model="noteForm.acuity_oe"
               type="text"
@@ -2349,7 +2448,7 @@ class="opacity-70"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">PIO OD (mmHg)</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.pio', 'PIO') }} OD (mmHg)</span>
             <input
               v-model="noteForm.pio_od"
               type="text"
@@ -2358,7 +2457,7 @@ class="opacity-70"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">PIO OE (mmHg)</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.pio', 'PIO') }} OE (mmHg)</span>
             <input
               v-model="noteForm.pio_oe"
               type="text"
@@ -2370,7 +2469,7 @@ class="opacity-70"
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Biomicroscopia</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.biomicroscopia', 'Biomicroscopia') }}</span>
             <textarea
               v-model="noteForm.biomicroscopy"
               rows="2"
@@ -2378,7 +2477,7 @@ class="opacity-70"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Fundoscopia</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.fundoscopia', 'Fundoscopia') }}</span>
             <textarea
               v-model="noteForm.fundoscopy"
               rows="2"
@@ -2390,12 +2489,17 @@ class="opacity-70"
             <textarea
               v-model="noteForm.conductText"
               rows="3"
-              placeholder="Indicada cirurgia refrativa&#10;Colírio lubrificante 4x/dia"
+              :placeholder="
+                frase(
+                  'espaco.conduta_exemplo',
+                  'Indicada cirurgia refrativa\nColírio lubrificante 4x/dia'
+                )
+              "
               class="mt-1 w-full rounded-lg border border-n-weak bg-n-solid-2 px-2 py-1.5 text-[13px] text-n-slate-12"
             />
           </label>
           <label class="block">
-            <span class="text-[11px] font-medium text-n-slate-11">Exames pedidos (um por linha)</span>
+            <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.exames_pedidos', 'Exames pedidos') }} (um por linha)</span>
             <textarea
               v-model="noteForm.examsText"
               rows="3"
@@ -2411,7 +2515,13 @@ class="opacity-70"
             class="flex items-center gap-2 text-[12px] text-n-slate-12 font-medium cursor-pointer"
           >
             <input v-model="noteForm.surgery_indicated" type="checkbox" />
-            ⭐ Saiu com indicação de cirurgia
+            ⭐
+            {{
+              frase(
+                'espaco.saiu_com_indicacao_venda',
+                'Saiu com indicação de cirurgia'
+              )
+            }}
           </label>
           <template v-if="noteForm.surgery_indicated">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
@@ -2437,7 +2547,12 @@ class="opacity-70"
               no valor do card do CRM (se vazio) e depois é comparado com o
               fechamento para medir a taxa de performance.
               <template v-if="noteForm.task_id">
-                A consulta ligada também é marcada e o card se move no funil.
+                {{
+                  frase(
+                    'espaco.atendimento_ligado_marcado',
+                    'A consulta ligada também é marcada e o card se move no funil.'
+                  )
+                }}
               </template>
             </p>
 
@@ -2456,14 +2571,14 @@ class="opacity-70"
                 {{ stockAvailable.map(m => `${m.name}${m.specification ? ` (${m.specification})` : ''} — ${m.quantity} un.`).join(' · ') }}
               </p>
               <div class="flex items-center gap-2 mt-1.5 flex-wrap">
-                <p class="text-[10px] text-n-slate-10">Dá para agendar a cirurgia para uma data próxima.</p>
+                <p class="text-[10px] text-n-slate-10">{{ frase('espaco.da_para_agendar_venda', 'Dá para agendar a cirurgia para uma data próxima.') }}</p>
                 <button
                   type="button"
                   class="h-7 px-2.5 rounded-lg text-[10px] font-bold text-white"
                   style="background: #059669"
                   @click="goToAgendaForSurgery"
                 >
-                  📅 Agendar cirurgia
+                  📅 {{ frase('agendar_venda', 'Agendar cirurgia') }}
                 </button>
               </div>
             </div>
@@ -2478,11 +2593,11 @@ class="opacity-70"
               <div class="flex items-center gap-2 mt-1.5 flex-wrap">
                 <template v-if="stockOrderCreated">
                   <p class="text-[10px] font-semibold" style="color: #059669">
-                    ✓ Pedido criado e vinculado ao card deste paciente — acompanhe em Financeiro → Estoque.
+                    ✓ {{ frase('espaco.pedido_vinculado_card_cliente', 'Pedido criado e vinculado ao card deste paciente — acompanhe em Financeiro → Estoque.') }}
                   </p>
                 </template>
                 <template v-else>
-                  <p class="text-[10px] text-n-slate-10">Encomende agora: o pedido fica vinculado ao card do paciente com o motivo.</p>
+                  <p class="text-[10px] text-n-slate-10">{{ frase('espaco.encomende_agora_card_cliente', 'Encomende agora: o pedido fica vinculado ao card do paciente com o motivo.') }}</p>
                   <button
                     type="button"
                     class="h-7 px-2.5 rounded-lg text-[10px] font-bold text-white disabled:opacity-60"
@@ -2490,7 +2605,7 @@ class="opacity-70"
                     :disabled="orderingStock"
                     @click="orderStockForPatient"
                   >
-                    {{ orderingStock ? 'Criando pedido…' : '🛒 Encomendar para este paciente' }}
+                    {{ orderingStock ? 'Criando pedido…' : `🛒 ${frase('espaco.encomendar_para_cliente', 'Encomendar para este paciente')}` }}
                   </button>
                 </template>
               </div>
@@ -2509,7 +2624,7 @@ class="opacity-70"
 
         <!-- fotos de exames -->
         <div class="mb-4">
-          <span class="text-[11px] font-medium text-n-slate-11">Fotos de exames</span>
+          <span class="text-[11px] font-medium text-n-slate-11">{{ frase('espaco.fotos_de_exames', 'Fotos de exames') }}</span>
           <div class="flex items-center gap-2 flex-wrap mt-1.5">
             <template v-if="editingNote">
               <div

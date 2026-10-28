@@ -38,6 +38,7 @@ import {
   kindVars,
   hexToRgbSpaced,
 } from 'dashboard/helper/cevicoAgenda';
+import { frase, termo, termoCap } from 'dashboard/helper/segmento';
 
 // 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
 // (clicar abre o Espaço do Paciente, onde se faz tudo no contato da pessoa)
@@ -225,12 +226,23 @@ const toggleBookingKind = async row => {
     await TasksAPI.update(row.task_id, { booking_kind: next });
     useAlert(
       next === 'registro'
-        ? 'Marcada como "já estava marcada": sai de Consultas agendadas.'
-        : 'Marcada como consulta nova: conta em Consultas agendadas.'
+        ? frase(
+            'agendamentos.marcada_como_ja_estava',
+            'Marcada como "já estava marcada": sai de Consultas agendadas.'
+          )
+        : frase(
+            'agendamentos.marcada_como_nova',
+            'Marcada como consulta nova: conta em Consultas agendadas.'
+          )
     );
     await fetchFeed({ quiet: true });
   } catch {
-    useAlert('Não deu para mudar o tipo desta consulta.');
+    useAlert(
+      frase(
+        'agendamentos.erro_mudar_tipo',
+        'Não deu para mudar o tipo desta consulta.'
+      )
+    );
   } finally {
     isTogglingKind.value = null;
   }
@@ -260,7 +272,7 @@ const originItems = computed(() =>
     label: b.name || 'sem conversa',
     value: b.count,
     color: b.inbox_id ? inboxSolidFor(inboxes.value, b.inbox_id) : '#94a3b8',
-    hint: `${b.count} marcada(s) de pacientes que chegaram por ${b.name || 'fora do sistema'}`,
+    hint: `${b.count} ${frase('agendamentos.marcadas_de_clientes_por', 'marcada(s) de pacientes que chegaram por')} ${b.name || 'fora do sistema'}`,
     i,
   }))
 );
@@ -473,7 +485,7 @@ const entryPerson = r => ({
     r.stage_now ? `hoje em ${r.stage_now}` : null,
     r.consult
       ? `${r.consult.source === 'ia' ? 'robô' : 'equipe'} · ${r.consult.unit || ''}`
-      : 'sem consulta na Agenda',
+      : frase('agendamentos.sem_atendimento_na_agenda', 'sem consulta na Agenda'),
   ]
     .filter(Boolean)
     .join(' · '),
@@ -524,7 +536,7 @@ const counts = computed(() => feed.value?.counts || {});
 const booking = computed(() => feed.value?.booking || null);
 // ── item 271 (28/09): QUEM são os pacientes das marcadas + a LISTA por trás
 // de cada card ("não tenho informações claras sobre eles — e preciso ter") ──
-const PATIENT_KINDS = [
+const PATIENT_KINDS = computed(() => [
   {
     key: 'novo',
     label: 'leads novos',
@@ -537,29 +549,38 @@ const PATIENT_KINDS = [
     label: 'leads antigos',
     one: 'lead antigo',
     color: '#0891b2',
-    hint: 'chegaram há mais de 30 dias e nunca tinham consultado — ainda é aquisição',
+    hint: frase(
+      'agendamentos.lead_antigo_dica',
+      'chegaram há mais de 30 dias e nunca tinham consultado — ainda é aquisição'
+    ),
   },
   {
     key: 'retorno',
-    label: 'retornos',
-    one: 'retorno',
+    label: frase('agendamentos.retornos', 'retornos'),
+    one: frase('agendamentos.retorno', 'retorno'),
     color: '#7c3aed',
-    hint: 'já tinham consultado antes',
+    hint: frase('agendamentos.retorno_dica', 'já tinham consultado antes'),
   },
   {
     key: 'cirurgia',
-    label: 'pacientes de cirurgia',
-    one: 'paciente de cirurgia',
+    label: frase('agendamentos.clientes_de_venda', 'pacientes de cirurgia'),
+    one: frase('agendamentos.cliente_de_venda', 'paciente de cirurgia'),
     color: '#be123c',
-    hint: 'já tinham cirurgia (Agenda ou Oftalmofácil)',
+    hint: frase(
+      'agendamentos.clientes_de_venda_dica',
+      'já tinham cirurgia (Agenda ou Oftalmofácil)'
+    ),
   },
   {
     key: 'sem_cadastro',
     label: 'sem cadastro',
     color: '#64748b',
-    hint: 'consulta sem paciente ligado',
+    hint: frase(
+      'agendamentos.sem_cadastro_dica',
+      'consulta sem paciente ligado'
+    ),
   },
-];
+]);
 const kindCounts = computed(() => counts.value?.kinds || {});
 const listPopup = ref(null);
 const personOf = r => ({
@@ -617,14 +638,17 @@ const openOriginList = o => {
   const ids = new Set(o.task_ids || []);
   openList(
     `Marcadas que chegaram por ${o.name || 'fora do sistema'}`,
-    'caixa da primeira conversa do paciente',
+    frase(
+      'agendamentos.caixa_primeira_conversa_cliente',
+      'caixa da primeira conversa do paciente'
+    ),
     rows.value.filter(r => r.kind === 'agendada' && ids.has(r.task_id)),
     `linear-gradient(135deg, ${o.inbox_id ? inboxSolidFor(inboxes.value, o.inbox_id) : '#94a3b8'}, #0f172a)`,
     'i-lucide-inbox'
   );
 };
 const marcadasKindsText = computed(() =>
-  PATIENT_KINDS.filter(k => kindCounts.value[k.key])
+  PATIENT_KINDS.value.filter(k => kindCounts.value[k.key])
     .map(
       k =>
         `${kindCounts.value[k.key]} ${kindCounts.value[k.key] === 1 ? k.one || k.label : k.label}`
@@ -641,7 +665,7 @@ const marcadasSub = computed(() => {
   // item 271: a "base" aberta (leads antigos · retornos · cirurgia · sem cadastro)
   return (
     marcadasKindsText.value ||
-    `${novos} de leads novos · ${base} de pacientes da base`
+    `${novos} de leads novos · ${base} ${frase('agendamentos.de_clientes_da_base', 'de pacientes da base')}`
   );
 });
 const iaShare = computed(() => {
@@ -710,7 +734,7 @@ const kindArea = computed(() =>
     r => r.event_at,
     r => r.patient_kind || 'sem_cadastro',
     k => {
-      const pk = PATIENT_KINDS.find(x => x.key === k) || {};
+      const pk = PATIENT_KINDS.value.find(x => x.key === k) || {};
       return { label: pk.label || k, color: pk.color, hint: pk.hint, ref: pk };
     }
   )
@@ -758,9 +782,9 @@ const bridgeSides = computed(() => {
   return [
     {
       key: 'column',
-      title: `Entraram em ${b.stage?.name || 'Agendamento de Consulta'}`,
+      title: `Entraram em ${b.stage?.name || frase('agendamentos.coluna_agendamento_atendimento', 'Agendamento de Consulta')}`,
       total: b.column_total,
-      unit: b.column_total === 1 ? 'paciente' : 'pacientes',
+      unit: b.column_total === 1 ? termo('cliente') : termo('clientes'),
       caption: 'o card chegou na coluna do CRM',
       color: b.stage?.color || '#6d28d9',
       branches: b.column,
@@ -769,10 +793,13 @@ const bridgeSides = computed(() => {
       key: 'agenda',
       title: 'Marcadas na Agenda',
       total: b.agenda_total,
-      unit: b.agenda_total === 1 ? 'consulta nova' : 'consultas novas',
+      unit:
+        b.agenda_total === 1
+          ? frase('agendamentos.atendimento_novo', 'consulta nova')
+          : frase('agendamentos.atendimentos_novos', 'consultas novas'),
       caption:
         b.agenda_patients !== b.agenda_total
-          ? `de ${b.agenda_patients} pacientes`
+          ? `de ${b.agenda_patients} ${termo('clientes')}`
           : 'criadas no período',
       color: '#2563eb',
       branches: b.agenda,
@@ -787,7 +814,7 @@ const bridgeSentence = computed(() => {
   const others = (b.agenda || []).filter(x => x.key !== 'both');
   const rest = others.reduce((a, x) => a + x.count, 0);
   const parts = others.map(x => `${x.count} ${x.label}`);
-  const head = `${plural(b.column_total, 'paciente entrou', 'pacientes entraram')} na coluna e ${plural(b.agenda_total, 'consulta foi marcada', 'consultas foram marcadas')} na Agenda. ${plural(b.both_patients, 'paciente está', 'pacientes estão')} nos dois números.`;
+  const head = `${plural(b.column_total, frase('agendamentos.cliente_entrou', 'paciente entrou'), frase('agendamentos.clientes_entraram', 'pacientes entraram'))} na coluna e ${plural(b.agenda_total, frase('agendamentos.atendimento_foi_marcado', 'consulta foi marcada'), frase('agendamentos.atendimentos_foram_marcados', 'consultas foram marcadas'))} na Agenda. ${plural(b.both_patients, frase('agendamentos.cliente_esta', 'paciente está'), frase('agendamentos.clientes_estao', 'pacientes estão'))} nos dois números.`;
   if (!rest) return head;
   return `${head} As outras ${rest} marcadas são de quem não passou pela coluna neste período: ${parts.join(' · ')}.`;
 });
@@ -802,14 +829,16 @@ const bridgePerson = p => ({
   id: p.id,
   task_id: p.task_id,
   contact_id: p.contact_id,
-  name: p.name || 'Paciente',
+  name: p.name || termoCap('cliente'),
   phone: p.phone,
   when: p.when,
   meta: [
     p.stage_now ? `hoje em ${p.stage_now}` : 'sem card no CRM',
     p.pipeline ? `funil ${p.pipeline}` : null,
     p.passed_at ? `passou pela coluna em ${shortDay(p.passed_at)}` : null,
-    p.due_at ? `consulta em ${shortDay(p.due_at)}` : null,
+    p.due_at
+      ? `${frase('agendamentos.atendimento_em', 'consulta em')} ${shortDay(p.due_at)}`
+      : null,
     p.source === 'ia' ? 'marcada pelo Atendente de IA' : null,
   ]
     .filter(Boolean)
@@ -1026,7 +1055,7 @@ onBeforeUnmount(() => {
       <CevicoHero
         :pal="pal"
         title="Agendamentos"
-        :subtitle="`${cap(nounPlural)} marcadas, remarcadas, confirmadas, canceladas ou lançadas, quem marcou e por qual caixa; abra a conversa, o Espaço do Paciente ou ligue daqui`"
+        :subtitle="`${cap(nounPlural)} marcadas, remarcadas, confirmadas, canceladas ou lançadas, quem marcou e por qual caixa; abra a conversa, o ${frase('espaco_cliente', 'Espaço do Paciente')} ou ligue daqui`"
         :icon="trackKind.icon"
         :hero-bg="trackKind.hero"
         :palette="false"
@@ -1111,7 +1140,7 @@ onBeforeUnmount(() => {
             {{
               mode === 'consultas'
                 ? `${nounPlural} cuja data cai no período escolhido`
-                : `o que aconteceu no período com as ${nounPlural}: marcações, remarcações, confirmações, cancelamentos e lançamentos (consulta que já estava marcada fora do sistema)`
+                : `o que aconteceu no período com as ${nounPlural}: marcações, remarcações, confirmações, cancelamentos e lançamentos (${frase('agendamentos.lancamento_explicacao', 'consulta que já estava marcada fora do sistema')})`
             }}
           </p>
           <!-- item 277: o NÚMERO dele — entrou na coluna "Agendamento de Consulta" -->
@@ -1126,15 +1155,24 @@ onBeforeUnmount(() => {
                 title="ver a lista: quem são, de onde vieram, como foi"
                 @click="
                   openEntries(
-                    `Entraram em ${stageEntries.stage?.name || 'Agendamento de Consulta'}`,
-                    'um por paciente · clique para abrir a conversa',
+                    `Entraram em ${stageEntries.stage?.name || frase('agendamentos.coluna_agendamento_atendimento', 'Agendamento de Consulta')}`,
+                    frase(
+                      'agendamentos.um_por_cliente_abrir_conversa',
+                      'um por paciente · clique para abrir a conversa'
+                    ),
                     () => true
                   )
                 "
               >
                 <p class="cv-ag-block-title">
                   Entraram em
-                  {{ stageEntries.stage?.name || 'Agendamento de Consulta' }}
+                  {{
+                    stageEntries.stage?.name ||
+                    frase(
+                      'agendamentos.coluna_agendamento_atendimento',
+                      'Agendamento de Consulta'
+                    )
+                  }}
                 </p>
                 <p
                   class="text-5xl font-bold tabular-nums tracking-tight text-n-slate-12 leading-none mt-1"
@@ -1142,8 +1180,12 @@ onBeforeUnmount(() => {
                   {{ stageEntries.total }}
                 </p>
                 <p class="cv-ag-block-sub mt-1">
-                  pacientes cujo card CHEGOU nessa coluna do CRM no período (a
-                  regra oficial de agendamento)
+                  {{
+                    frase(
+                      'agendamentos.entraram_coluna_sub',
+                      'pacientes cujo card CHEGOU nessa coluna do CRM no período (a regra oficial de agendamento)'
+                    )
+                  }}
                   <template v-if="stageEntries.passages > stageEntries.total">
                     · {{ stageEntries.passages }} passagens
                   </template>
@@ -1175,7 +1217,7 @@ onBeforeUnmount(() => {
                     @click="
                       openEntries(
                         `Chegaram por ${o.name || 'fora do sistema'}`,
-                        'e entraram em Agendamento de Consulta no período',
+                        `e entraram em ${frase('agendamentos.coluna_agendamento_atendimento', 'Agendamento de Consulta')} no período`,
                         r => (r.origin_id || null) === (o.inbox_id || null)
                       )
                     "
@@ -1223,7 +1265,12 @@ onBeforeUnmount(() => {
                   <span
                     v-if="stageEntries.by_source"
                     class="cv-chip ml-auto"
-                    title="das consultas ligadas a essas entradas, quem marcou"
+                    :title="
+                      frase(
+                        'agendamentos.quem_marcou_entradas',
+                        'das consultas ligadas a essas entradas, quem marcou'
+                      )
+                    "
                   >
                     <span class="i-lucide-bot text-xs" /> robô
                     <b class="tabular-nums">{{ stageEntries.by_source.ia }}</b>
@@ -1247,22 +1294,28 @@ onBeforeUnmount(() => {
               {{ plural(bridge.agenda_total, 'foi marcada', 'foram marcadas') }}
             </p>
             <p class="cv-ag-block-sub mb-5">
-              são duas réguas: a <b>coluna do CRM</b> conta o paciente cujo card
-              chegou em {{ bridge.stage?.name }}; a <b>Agenda</b> conta cada
-              consulta nova criada. {{ bridgeSentence }} Clique em um ramo para
+              são duas réguas: a <b>coluna do CRM</b> conta o
+              {{ termo('cliente') }} cujo card chegou em
+              {{ bridge.stage?.name }}; a <b>Agenda</b> conta cada
+              {{ frase('agendamentos.atendimento_novo', 'consulta nova') }}
+              criada. {{ bridgeSentence }} Clique em um ramo para
               ver os nomes.
             </p>
             <BridgeFlow :sides="bridgeSides" @pick="openBridge" />
           </div>
 
           <p class="text-[11px] text-n-slate-10 mb-3">
-            abaixo, o que a <b>Agenda</b> registrou (consultas marcadas,
-            remarcadas, confirmadas…)
+            abaixo, o que a <b>Agenda</b> registrou ({{
+              frase(
+                'agendamentos.agenda_registrou_sub',
+                'consultas marcadas, remarcadas, confirmadas…'
+              )
+            }})
           </p>
           <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div
               class="cursor-pointer transition-transform hover:-translate-y-0.5"
-              title="ver a lista de pacientes"
+              :title="frase('agendamentos.ver_lista_clientes', 'ver a lista de pacientes')"
               @click="openKindList('agendada')"
             >
               <DashKpi
@@ -1277,7 +1330,7 @@ onBeforeUnmount(() => {
             </div>
             <div
               class="cursor-pointer transition-transform hover:-translate-y-0.5"
-              title="ver a lista de pacientes"
+              :title="frase('agendamentos.ver_lista_clientes', 'ver a lista de pacientes')"
               @click="openKindList('reagendada')"
             >
               <DashKpi
@@ -1292,7 +1345,7 @@ onBeforeUnmount(() => {
             </div>
             <div
               class="cursor-pointer transition-transform hover:-translate-y-0.5"
-              title="ver a lista de pacientes"
+              :title="frase('agendamentos.ver_lista_clientes', 'ver a lista de pacientes')"
               @click="openKindList('confirmada')"
             >
               <DashKpi
@@ -1307,7 +1360,7 @@ onBeforeUnmount(() => {
             </div>
             <div
               class="cursor-pointer transition-transform hover:-translate-y-0.5"
-              title="ver a lista de pacientes"
+              :title="frase('agendamentos.ver_lista_clientes', 'ver a lista de pacientes')"
               @click="openKindList('nao_confirmou')"
             >
               <DashKpi
@@ -1322,7 +1375,7 @@ onBeforeUnmount(() => {
             </div>
             <div
               class="cursor-pointer transition-transform hover:-translate-y-0.5"
-              title="ver a lista de pacientes"
+              :title="frase('agendamentos.ver_lista_clientes', 'ver a lista de pacientes')"
               @click="openKindList('cancelada')"
             >
               <DashKpi
@@ -1337,7 +1390,7 @@ onBeforeUnmount(() => {
             </div>
             <div
               class="cursor-pointer transition-transform hover:-translate-y-0.5"
-              title="ver a lista de pacientes"
+              :title="frase('agendamentos.ver_lista_clientes', 'ver a lista de pacientes')"
               @click="openKindList('lancada')"
             >
               <DashKpi
@@ -1375,12 +1428,23 @@ onBeforeUnmount(() => {
           <!-- item 271: QUEM SÃO os pacientes das marcadas — cada chip abre a lista -->
           <div class="cv-ag-divider" />
           <div class="cv-ag-block p-5 sm:p-6">
-            <p class="cv-ag-block-title">Quem são os pacientes das marcadas</p>
+            <p class="cv-ag-block-title">
+              {{
+                frase(
+                  'agendamentos.quem_sao_clientes_marcadas',
+                  'Quem são os pacientes das marcadas'
+                )
+              }}
+            </p>
             <p class="cv-ag-block-sub mb-4">
-              das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, quem é
-              cada paciente: lead novo (até 30 dias), lead antigo (chegou há
-              mais tempo e nunca tinha consultado — ainda é aquisição), retorno
-              (já consultou), paciente de cirurgia ou sem cadastro ·
+              das <b>{{ Number(counts.agendada || 0) }} marcadas</b>,
+              {{
+                frase(
+                  'agendamentos.quem_sao_clientes_marcadas_sub',
+                  'quem é cada paciente: lead novo (até 30 dias), lead antigo (chegou há mais tempo e nunca tinha consultado — ainda é aquisição), retorno (já consultou), paciente de cirurgia ou sem cadastro'
+                )
+              }}
+              ·
               {{ granText(kindArea.granularity) }} · clique para ver os nomes
             </p>
             <AreaChart
@@ -1428,7 +1492,7 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
             <p class="cv-ag-block-title">De quais caixas vieram as marcações</p>
             <p class="cv-ag-block-sub mb-4">
               das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, a caixa
-              por onde o paciente <b>chegou</b> (a primeira conversa dele:
+              por onde o {{ termo('cliente') }} <b>chegou</b> (a primeira conversa dele:
               Google, Instagram…), não a da conversa mais recente — por isso a
               caixa de confirmação não rouba o crédito
             </p>
@@ -1473,7 +1537,7 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
               <p class="cv-ag-block-title">Quando esses leads chegaram</p>
               <p class="cv-ag-block-sub mb-4">
                 das <b>{{ Number(counts.agendada || 0) }} marcadas</b>, quantos
-                dias entre o paciente chegar (cadastro) e a {{ noun }} ser
+                dias entre o {{ termo('cliente') }} chegar (cadastro) e a {{ noun }} ser
                 marcada · clique para filtrar a lista
               </p>
               <AreaChart
@@ -1536,17 +1600,25 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
                 <template v-if="showGlossary">
                   <li>
                     <b>Caixa de entrada</b> = a da conversa de onde a
-                    {{ noun }} saiu (ou a conversa mais recente do paciente).
+                    {{ noun }} saiu (ou a conversa mais recente do {{ termo('cliente') }}).
                   </li>
                   <li>
-                    <b>Meu Painel · Marcadas na Agenda</b> = estas mesmas
-                    marcadas, sem exame, tele, cancelada e parceiro do
-                    Oftalmofácil.
+                    <b>Meu Painel · Marcadas na Agenda</b> =
+                    {{
+                      frase(
+                        'agendamentos.glossario_marcadas_painel',
+                        'estas mesmas marcadas, sem exame, tele, cancelada e parceiro do Oftalmofácil.'
+                      )
+                    }}
                   </li>
                   <li>
                     <b>Meu Painel · Entrou em Agendamento</b> = pessoas cujo
-                    card MUDOU para a coluna "Agendamento de Consulta" no
-                    período (é a taxa oficial). Difere das marcadas: quem já
+                    card MUDOU para a coluna "{{
+                      frase(
+                        'agendamentos.coluna_agendamento_atendimento',
+                        'Agendamento de Consulta'
+                      )
+                    }}" no período (é a taxa oficial). Difere das marcadas: quem já
                     estava na coluna, ou foi marcado sem card, não entra.
                   </li>
                   <li>
@@ -1585,7 +1657,12 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
               v-if="booking?.can_edit"
               class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
               :class="showSettings ? 'cv-blue' : ''"
-              title="O que acontece sozinho quando uma consulta é confirmada"
+              :title="
+                frase(
+                  'agendamentos.ajustes_titulo',
+                  'O que acontece sozinho quando uma consulta é confirmada'
+                )
+              "
               @click="toggleSettings"
             >
               <span class="i-lucide-settings-2 text-xs" /> Ajustes
@@ -1593,18 +1670,23 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
           </div>
           <p class="text-xs text-n-slate-10 mb-5">
             agrupados por dia; cada linha mostra a caixa da conversa, as
-            etiquetas do paciente, a coluna do CRM e quem marcou
+            etiquetas do {{ termo('cliente') }}, a coluna do CRM e quem marcou
           </p>
 
           <!-- AJUSTES (só admin) -->
           <div v-if="showSettings && booking" class="cv-pop p-4 sm:p-6 mb-6">
             <p class="text-sm font-semibold text-n-slate-12 mb-1">
-              Ao confirmar uma consulta
+              {{
+                frase('agendamentos.ao_confirmar_atendimento', 'Ao confirmar uma consulta')
+              }}
             </p>
             <p class="text-xs text-n-slate-10 mb-4">
-              Quando o robô ou a equipe confirma uma consulta na conversa, o
-              sistema registra na Agenda, etiqueta o paciente e move o card
-              sozinho.
+              {{
+                frase(
+                  'agendamentos.ao_confirmar_atendimento_sub',
+                  'Quando o robô ou a equipe confirma uma consulta na conversa, o sistema registra na Agenda, etiqueta o paciente e move o card sozinho.'
+                )
+              }}
             </p>
 
             <label class="flex items-center gap-2.5 mb-4 cursor-pointer">
@@ -1616,7 +1698,12 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
                 @click.prevent="form.labels_enabled = !form.labels_enabled"
               />
               <span class="text-sm text-n-slate-12">
-                Etiquetar o paciente automaticamente
+                {{
+                  frase(
+                    'agendamentos.etiquetar_cliente_auto',
+                    'Etiquetar o paciente automaticamente'
+                  )
+                }}
               </span>
             </label>
 
@@ -1627,7 +1714,9 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
                   v-model="form.labels.created"
                   type="text"
                   class="cv-input w-full"
-                  placeholder="ex.: consulta_marcada"
+                  :placeholder="
+                    frase('agendamentos.ex_etiqueta_marcada', 'ex.: consulta_marcada')
+                  "
                   :disabled="!form.labels_enabled"
                 />
               </label>
@@ -1637,7 +1726,12 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
                   v-model="form.labels.rescheduled"
                   type="text"
                   class="cv-input w-full"
-                  placeholder="ex.: consulta_remarcada"
+                  :placeholder="
+                    frase(
+                      'agendamentos.ex_etiqueta_remarcada',
+                      'ex.: consulta_remarcada'
+                    )
+                  "
                   :disabled="!form.labels_enabled"
                 />
               </label>
@@ -1647,7 +1741,12 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
                   v-model="form.labels.canceled"
                   type="text"
                   class="cv-input w-full"
-                  placeholder="ex.: consulta_cancelada"
+                  :placeholder="
+                    frase(
+                      'agendamentos.ex_etiqueta_cancelada',
+                      'ex.: consulta_cancelada'
+                    )
+                  "
                   :disabled="!form.labels_enabled"
                 />
               </label>
@@ -1689,7 +1788,8 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
               </label>
               <label class="flex flex-col gap-1 sm:col-span-2">
                 <span class="cv-label">
-                  💰 Quando a clínica manda um valor (R$), mover o card para
+                  💰 Quando a {{ termo('empresa') }} manda um valor (R$), mover o card
+                  para
                 </span>
                 <select v-model="form.budget_stage_id" class="cv-input w-full">
                   <option value="">
@@ -1874,7 +1974,7 @@ v-if="counts.agendada" class="opacity-60 tabular-nums"
                     :key="'fc' + c.key"
                     class="cv-chip"
                     :class="cohort === c.key ? 'cv-chip-on' : ''"
-                    :title="`Marcadas cujo paciente chegou ${c.label} da marcação`"
+                    :title="`${frase('agendamentos.marcadas_cujo_cliente_chegou', 'Marcadas cujo paciente chegou')} ${c.label} da marcação`"
                     @click="cohort = cohort === c.key ? '' : c.key"
                   >
                     <span
@@ -2106,7 +2206,8 @@ class="cv-chip" :class="kindMeta(row).tone"
                       class="cv-btn cv-btn-ghost cv-btn-sm"
                       :to="patientUrl(row)"
                     >
-                      <span class="i-lucide-user-round text-xs" /> Paciente
+                      <span class="i-lucide-user-round text-xs" />
+                      {{ termoCap('cliente') }}
                     </router-link>
                     <router-link
                       v-if="row.due_at"
@@ -2229,7 +2330,7 @@ class="cv-chip" :class="kindMeta(row).tone"
                           }"
                           :title="
                             row.lead_arrived_at
-                              ? `Paciente chegou em ${new Date(row.lead_arrived_at).toLocaleDateString('pt-BR')}`
+                              ? `${frase('agendamentos.cliente_chegou_em', 'Paciente chegou em')} ${new Date(row.lead_arrived_at).toLocaleDateString('pt-BR')}`
                               : 'sem cadastro ligado'
                           "
                         >
@@ -2251,8 +2352,14 @@ class="cv-chip" :class="kindMeta(row).tone"
                           :disabled="isTogglingKind === row.task_id"
                           :title="
                             row.booking_kind === 'registro'
-                              ? 'Está como já marcada fora do sistema (fora dos números). Clique para contar como consulta nova.'
-                              : 'Está contando como consulta nova. Clique se ela já estava marcada fora do sistema (só foi lançada).'
+                              ? frase(
+                                  'agendamentos.tipo_ja_marcada_dica',
+                                  'Está como já marcada fora do sistema (fora dos números). Clique para contar como consulta nova.'
+                                )
+                              : frase(
+                                  'agendamentos.tipo_nova_dica',
+                                  'Está contando como consulta nova. Clique se ela já estava marcada fora do sistema (só foi lançada).'
+                                )
                           "
                           @click="toggleBookingKind(row)"
                         >
@@ -2267,7 +2374,9 @@ class="cv-chip" :class="kindMeta(row).tone"
                           v-for="lb in shownLabels(row)"
                           :key="lb"
                           class="cv-chip"
-                          title="Etiqueta do paciente"
+                          :title="
+                            frase('agendamentos.etiqueta_do_cliente', 'Etiqueta do paciente')
+                          "
                         >
                           <span class="i-lucide-tag text-[10px]" />
                           {{ lb }}
@@ -2322,12 +2431,17 @@ class="cv-chip" :class="kindMeta(row).tone"
                         v-if="row.contact?.id"
                         class="cv-side-action"
                         :to="patientUrl(row)"
-                        title="Abrir o Espaço do Paciente"
+                        :title="
+                          frase(
+                            'agendamentos.abrir_espaco_cliente',
+                            'Abrir o Espaço do Paciente'
+                          )
+                        "
                       >
                         <span class="cv-side-action-btn">
                           <span class="i-lucide-user-round" />
                         </span>
-                        <span>Paciente</span>
+                        <span>{{ termoCap('cliente') }}</span>
                       </router-link>
                       <button
                         v-else
@@ -2338,7 +2452,7 @@ class="cv-chip" :class="kindMeta(row).tone"
                         <span class="cv-side-action-btn">
                           <span class="i-lucide-user-round" />
                         </span>
-                        <span>Paciente</span>
+                        <span>{{ termoCap('cliente') }}</span>
                       </button>
                       <div
                         v-if="callsOn && row.contact?.id && row.phone"

@@ -11,6 +11,10 @@ import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { SEGMENTO, termoCap, frase } from 'dashboard/helper/segmento';
 
+// 🎨 28/10: esta tela também vive EMBUTIDA em Configurações → Personalização
+// (bloco "Equipe e lugares"); `embutido` tira a moldura de página e o título
+defineProps({ embutido: { type: Boolean, default: false } });
+
 const store = useStore();
 const crmSettings = useMapGetter('crm/getSettings');
 
@@ -110,9 +114,9 @@ const restoreDefaults = async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full overflow-y-auto bg-n-surface-1">
-    <div class="max-w-4xl w-full mx-auto p-6 space-y-6">
-      <div>
+  <div :class="embutido ? 'w-full' : 'flex flex-col h-full w-full overflow-y-auto bg-n-surface-1'">
+    <div :class="embutido ? 'w-full space-y-4' : 'max-w-4xl w-full mx-auto p-6 space-y-6'">
+      <div v-if="!embutido">
         <h1 class="text-xl font-bold text-n-slate-12">🧩 Personalização</h1>
         <p class="text-sm text-n-slate-10 mt-1">
           Adapte o sistema ao seu negócio: {{ termoCap('profissionais') }}, unidades, listas da Agenda,

@@ -42,6 +42,7 @@ import {
 } from 'dashboard/helper/cevicoAgenda';
 import AgendaSettings from './AgendaSettings.vue';
 import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
+import { frase, termo, termoCap } from 'dashboard/helper/segmento';
 
 const store = useStore();
 const { isAdmin } = useAdmin();
@@ -128,7 +129,7 @@ const typeVarsOf = key => {
 };
 // "Nova avaliação" / "Agendar cirurgia" / "Novo agendamento" (geral)
 const newLabel = computed(() =>
-  isSurgeryMode.value ? 'Agendar cirurgia' : `${k.value.article === 'o' ? 'Novo' : 'Nova'} ${k.value.noun}`
+  isSurgeryMode.value ? frase('agendar_venda', 'Agendar cirurgia') : `${k.value.article === 'o' ? 'Novo' : 'Nova'} ${k.value.noun}`
 );
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -165,9 +166,9 @@ const saveExamWindows = async () => {
     await CrmAPI.updateExamWindows(clean);
     await store.dispatch('crm/fetchSettings');
     showExamWindowsModal.value = false;
-    useAlert('Janela de exames salva!');
+    useAlert(frase('agenda.janela_exames_salva', 'Janela de exames salva!'));
   } catch {
-    useAlert('Erro ao salvar a janela de exames.');
+    useAlert(frase('agenda.erro_salvar_janela_exames', 'Erro ao salvar a janela de exames.'));
   } finally {
     isSavingExamWindows.value = false;
   }
@@ -196,7 +197,7 @@ const saveSurgeryWindows = async () => {
     await CrmAPI.updateSurgeryWindows(clean);
     await store.dispatch('crm/fetchSettings');
     showSurgeryWindowsModal.value = false;
-    useAlert('Janelas da sala cirúrgica salvas!');
+    useAlert(frase('agenda.janelas_sala_salvas', 'Janelas da sala cirúrgica salvas!'));
   } catch {
     useAlert('Erro ao salvar as janelas.');
   } finally {
@@ -262,7 +263,7 @@ const saveLocations = async () => {
     await CrmAPI.updateSurgeryLocations(list);
     await store.dispatch('crm/fetchSettings');
     showLocationsModal.value = false;
-    useAlert('Locais de cirurgia salvos');
+    useAlert(frase('agenda.locais_venda_salvos', 'Locais de cirurgia salvos'));
   } catch {
     useAlert('Erro ao salvar os locais.');
   } finally {
@@ -309,7 +310,7 @@ const procedureOptions = computed(() => {
   return PROBLEMAS;
 });
 const procedureLabel = computed(() => {
-  if (form.value.kind === 'exames') return 'Exame';
+  if (form.value.kind === 'exames') return frase('agenda.motivo_exame', 'Exame');
   if (form.value.kind === 'cirurgias') return 'Procedimento';
   return 'Problema';
 });
@@ -426,7 +427,7 @@ const bandsForDay = day =>
     endMin: toMin(w.end),
     block: Number(w.block) || 15,
     color: winColor(w),
-    label: (w.doctor ? doctorShort(w.doctor) : w.exam ? 'Exames' : surgeryLocationLabel(w.unit)) + (reservedFor(w).length ? ` · só ${reservedLabelOf(w)}` : ''),
+    label: (w.doctor ? doctorShort(w.doctor) : w.exam ? frase('agenda.exames', 'Exames') : surgeryLocationLabel(w.unit)) + (reservedFor(w).length ? ` · só ${reservedLabelOf(w)}` : ''),
     title: `${winTitle(w)} · ${w.start}–${w.end} (${winUnitLabel(w)}) · blocos de ${w.block} min` + (reservedFor(w).length ? ` · faixa reservada para ${reservedLabelOf(w)}` : ''),
     unit: w.unit,
     doctor: w.doctor || '',
@@ -470,7 +471,7 @@ const occupiesWindow = (t, win) => {
 // item 330: retorno e pós-operatório são consultas "menos prioritárias" — ficam
 // no bloco do médico, mas com balão mais leve, lembrando que podem receber encaixe
 const isSoftTask = t => !isSurgeryTask(t) && ['retorno', 'pos_op'].includes(t.modality);
-const softTitle = t => (isSoftTask(t) ? ' · retorno/pós-op (pode receber encaixe de avaliação)' : '');
+const softTitle = t => (isSoftTask(t) ? ` · ${frase('agenda.retorno_pos_op_encaixe', 'retorno/pós-op (pode receber encaixe de avaliação)')}` : '');
 // agendamentos ocupando um bloco (pode haver ENCAIXE: 2+ no mesmo horário)
 const tasksAtSlotAll = (day, win, slot) => {
   const slotStart = toMin(slot);
@@ -832,7 +833,7 @@ const tagOf = task => {
 const evVars = task => ({ '--ev': accentOf(task), '--ev-rgb': hexToRgbSpaced(accentOf(task)) });
 const modalityOf = task =>
   MODALITIES.find(m => m.key === (task.modality || 'avaliacao')) || MODALITIES[0];
-const kindLabelOf = task => TYPE_BY_KEY[typeOf(task)]?.noun || 'consulta';
+const kindLabelOf = task => TYPE_BY_KEY[typeOf(task)]?.noun || termo('atendimento');
 
 // ── Ocupação da agenda (% preenchida — dia/semana/mês) ──
 // Consultas e exames dividem os MESMOS blocos dos médicos (a ocupação soma
@@ -912,8 +913,8 @@ const winColor = win => {
   return win.doctor ? doctorColor(win.doctor) : surgeryLocations.value.find(l => l.key === win.unit)?.color || k.value.color;
 };
 const winTitle = win => {
-  if (win.exam) return `Exames — ${UNITS[win.unit]?.label || win.unit}`;
-  return win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
+  if (win.exam) return `${frase('agenda.exames', 'Exames')} — ${UNITS[win.unit]?.label || win.unit}`;
+  return win.doctor || `${frase('sala_execucao', 'Sala cirúrgica')} — ${surgeryLocationLabel(win.unit)}`;
 };
 const winUnitLabel = win => (win.doctor || win.exam ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
 const winVars = win => ({ '--w': winColor(win), '--w-rgb': hexToRgbSpaced(winColor(win)), '--w-deep': winColor(win) });
@@ -1004,17 +1005,18 @@ const trashTasks = computed(() => {
     .filter(t => t.canceled_at && t.due_at && new Date(t.canceled_at).getTime() >= floor)
     .sort((a, b) => new Date(b.canceled_at) - new Date(a.canceled_at));
 });
-const REASON_LABELS = {
+// (frase() lê a conta aberta — por isso é função, não constante)
+const reasonLabels = () => ({
   excluida_agenda: 'excluído na Agenda',
   cancelada_equipe: 'cancelado pela equipe',
-  paciente_desmarcou: 'paciente desmarcou (Secretário da Agenda)',
+  paciente_desmarcou: frase('agenda.motivo_cliente_desmarcou', 'paciente desmarcou (Secretário da Agenda)'),
   oftalmofacil: 'cancelado no Oftalmofácil',
-};
+});
 const trashWho = t => {
   const when = t.canceled_at
     ? `${new Date(t.canceled_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${new Date(t.canceled_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
     : '';
-  const reason = REASON_LABELS[t.cancel_reason] || (t.source === 'oftalmofacil' ? 'cancelado no Oftalmofácil' : 'cancelado pelo sistema');
+  const reason = reasonLabels()[t.cancel_reason] || (t.source === 'oftalmofacil' ? 'cancelado no Oftalmofácil' : 'cancelado pelo sistema');
   const by = t.canceled_by?.name ? `por ${t.canceled_by.name}` : '';
   return [reason, by, when].filter(Boolean).join(' · ');
 };
@@ -1090,12 +1092,12 @@ const removeCharge = idx => form.value.charges.splice(idx, 1);
 const chargeBy = c => (c.by_name ? `lançado por ${c.by_name}${c.at ? ` · ${format(new Date(c.at), 'dd/MM HH:mm')}` : ''}` : 'novo — fica no seu nome ao salvar');
 // avisos de horário (faixa reservada / encaixe / Oftalmofácil) ficam recolhidos dentro de "Quando e onde"
 const conflictsOpen = ref(false);
-const BOOKING_KINDS = [
-  { key: 'agendamento', label: 'Nova (agendamento)', hint: 'Foi marcada agora, pelo robô ou pela equipe — conta em "Consultas agendadas".' },
-  { key: 'registro', label: 'Já estava marcada', hint: 'Veio do Oftalmofácil/telefone e só está sendo lançada na Agenda — aparece como "Lançada" e fica fora dos números de agendamento.' },
-];
+const BOOKING_KINDS = computed(() => [
+  { key: 'agendamento', label: 'Nova (agendamento)', hint: frase('agenda.dica_nova_agendamento', 'Foi marcada agora, pelo robô ou pela equipe — conta em "Consultas agendadas".') },
+  { key: 'registro', label: 'Já estava marcada', hint: frase('agenda.dica_ja_estava_marcada', 'Veio do Oftalmofácil/telefone e só está sendo lançada na Agenda — aparece como "Lançada" e fica fora dos números de agendamento.') },
+]);
 const bookingHint = computed(
-  () => (BOOKING_KINDS.find(b => b.key === form.value.booking_kind) || BOOKING_KINDS[0]).hint
+  () => (BOOKING_KINDS.value.find(b => b.key === form.value.booking_kind) || BOOKING_KINDS.value[0]).hint
 );
 // item 234: o TIPO do formulário (6 opções) — o trilho + a modalidade por trás
 const formType = computed(() => {
@@ -1228,7 +1230,7 @@ const hmOf = t => format(new Date(t.due_at), 'HH:mm');
 // origem) continua opcional — o que veio do hub já tem dono e não muda aqui
 const originLocked = computed(() => Boolean(editingTask.value?.source));
 const originMissing = computed(() => !editingTask.value && !form.value.origin);
-const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.');
+const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || frase('agenda.dica_origem_cliente', 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.'));
 // 📱 item 346: paciente NOVO só nasce com telefone (DDD + número) — sem ele
 // não há como achar o cadastro de quem já existe e o paciente duplica
 const phoneMissing = computed(() => !editingTask.value && !form.value.contact_id && (form.value.phone || '').replace(/\D/g, '').length < 10);
@@ -1281,7 +1283,7 @@ const save = async () => {
   if (timeChanged && hubConflicts.value.length) {
     const who = hubConflicts.value.map(t => `${hmOf(t)} ${displayName(t)}`).join(', ');
     // eslint-disable-next-line no-alert
-    if (!window.confirm(`Este horário já está ocupado por paciente do Oftalmofácil (${who}). Agendar mesmo assim?`)) return;
+    if (!window.confirm(`${frase('agenda.confirmar_ocupado_hub', 'Este horário já está ocupado por paciente do Oftalmofácil')} (${who}). Agendar mesmo assim?`)) return;
   }
   // item 307: faixa reservada para outro tipo = a equipe decide, mas confirma
   const typeChanged = !editingTask.value || (editingTask.value.modality || 'avaliacao') !== (form.value.modality || 'avaliacao');
@@ -1366,7 +1368,7 @@ const setAttendance = async (task, value) => {
       indicationPickerId.value = 0;
     }
     await store.dispatch('tasks/update', payload);
-    if (next === 'attended') useAlert(isSurgeryTask(task) ? '✓ Realizada.' : '✓ Compareceu — agora marque se houve indicação de cirurgia.');
+    if (next === 'attended') useAlert(isSurgeryTask(task) ? '✓ Realizada.' : frase('compareceu_marcar_indicacao', '✓ Compareceu — agora marque se houve indicação de cirurgia.'));
     else if (next === 'missed') useAlert('✗ Falta registrada — card movido no CRM (se a coluna estiver configurada).');
   } catch {
     useAlert('Erro ao registrar a conferência.');
@@ -1390,9 +1392,9 @@ const setIndication = async (task, value, procedure = null) => {
       indicated_procedure: next === 'indicated' ? procedure : null,
     });
     indicationPickerId.value = 0;
-    if (next === 'indicated') useAlert(`🎯 Cirurgia de ${procedure} indicada — card movido no CRM (se configurado).`);
+    if (next === 'indicated') useAlert(`🎯 ${termoCap('venda')} de ${procedure} indicada — card movido no CRM (se configurado).`);
   } catch {
-    useAlert('Erro ao registrar a indicação.');
+    useAlert(frase('agenda.erro_registrar_indicacao', 'Erro ao registrar a indicação.'));
   } finally {
     savingAttendanceId.value = 0;
   }
@@ -1421,7 +1423,7 @@ const confirmNoSurgery = async task => {
       description: reason ? `⚠️ Veio e não operou: ${reason}\n${task.description || ''}` : task.description,
     });
     noSurgeryReasonId.value = 0;
-    useAlert('Registrado: o paciente veio, mas a cirurgia não aconteceu.');
+    useAlert(frase('veio_nao_fez', 'Registrado: o paciente veio, mas a cirurgia não aconteceu.'));
   } catch {
     useAlert('Erro ao registrar.');
   } finally {
@@ -1442,7 +1444,7 @@ const scheduleSurgeryFrom = task => {
     phone: task.phone || '',
     procedure: task.indicated_procedure || task.procedure || '',
     unit: surgeryLocations.value[0]?.key || '',
-    description: `Origem: consulta de ${format(new Date(task.due_at), 'dd/MM')} às ${chipTime(task)} — cirurgia indicada.`,
+    description: `Origem: ${termo('atendimento')} de ${format(new Date(task.due_at), 'dd/MM')} às ${chipTime(task)} — ${termo('venda')} indicada.`,
   });
   showDeleteConfirm.value = false;
   showModal.value = true;
@@ -1556,43 +1558,43 @@ const printObs = raw => {
 };
 // 🖨️ 24/09 (pedido dele): a pessoa ESCOLHE as colunas e a orientação da folha
 // (caixinhas no painel "Imprimir"), lembrado no navegador dela.
-const PRINT_COLUMNS = [
+const PRINT_COLUMNS = computed(() => [
   { key: 'time', label: 'Hora', width: 34, on: true },
-  { key: 'name', label: 'Paciente', width: 86, on: true },
+  { key: 'name', label: termoCap('cliente'), width: 86, on: true },
   { key: 'phone', label: 'Telefone', width: 70, on: true },
-  { key: 'proc', label: 'Problema / exame / procedimento', width: 56, on: true },
-  { key: 'doctor', label: 'Médico', width: 60, on: false },
+  { key: 'proc', label: frase('agenda.coluna_problema_exame_procedimento', 'Problema / exame / procedimento'), width: 56, on: true },
+  { key: 'doctor', label: termoCap('profissional'), width: 60, on: false },
   { key: 'unit', label: 'Unidade / local', width: 58, on: false },
   { key: 'obs', label: 'Observações', width: 58, on: true },
   { key: 'pay', label: 'Pagamento (dinheiro · pix · débito · crédito)', width: 56, on: true },
-  { key: 'pres', label: 'Presença (compareceu · faltou · cirurgia indicada)', width: 80, on: true },
-  { key: 'origin', label: 'Origem do paciente (6 opções com valor)', width: 116, on: true },
+  { key: 'pres', label: frase('agenda.coluna_presenca', 'Presença (compareceu · faltou · cirurgia indicada)'), width: 80, on: true },
+  { key: 'origin', label: frase('agenda.coluna_origem_cliente', 'Origem do paciente (6 opções com valor)'), width: 116, on: true },
   { key: 'notes', label: 'Anotações (espaço em branco)', width: 0, on: true },
   { key: 'nf', label: 'Nota fiscal (sim · não)', width: 34, on: true },
-];
+]);
 const PRINT_KEY = 'cevico_agenda_print';
 const loadPrintOpts = () => {
-  const base = { orientation: 'portrait', cols: Object.fromEntries(PRINT_COLUMNS.map(c => [c.key, c.on])) };
+  const base = { orientation: 'portrait', cols: Object.fromEntries(PRINT_COLUMNS.value.map(c => [c.key, c.on])) };
   try {
     const saved = JSON.parse(localStorage.getItem(PRINT_KEY) || 'null');
     if (saved && typeof saved === 'object') {
       if (saved.orientation === 'landscape' || saved.orientation === 'portrait') base.orientation = saved.orientation;
-      if (saved.cols) PRINT_COLUMNS.forEach(c => { if (typeof saved.cols[c.key] === 'boolean') base.cols[c.key] = saved.cols[c.key]; });
+      if (saved.cols) PRINT_COLUMNS.value.forEach(c => { if (typeof saved.cols[c.key] === 'boolean') base.cols[c.key] = saved.cols[c.key]; });
     }
   } catch (e) { /* sem preferências salvas */ }
   return base;
 };
 const printOpts = ref(loadPrintOpts());
 const showPrintModal = ref(false);
-const printColsOn = computed(() => PRINT_COLUMNS.filter(c => printOpts.value.cols[c.key]));
-const resetPrintOpts = () => { printOpts.value = { orientation: 'portrait', cols: Object.fromEntries(PRINT_COLUMNS.map(c => [c.key, c.on])) }; };
+const printColsOn = computed(() => PRINT_COLUMNS.value.filter(c => printOpts.value.cols[c.key]));
+const resetPrintOpts = () => { printOpts.value = { orientation: 'portrait', cols: Object.fromEntries(PRINT_COLUMNS.value.map(c => [c.key, c.on])) }; };
 const printDayList = () => {
   localStorage.setItem(PRINT_KEY, JSON.stringify(printOpts.value));
   const day = cursor.value;
   const list = [...dayViewTasks.value].sort((a, b) => new Date(a.due_at) - new Date(b.due_at));
   const title = `CEVICO — ${cap(k.value.plural)} de ${day.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}`;
   const esc = s => String(s ?? '').replace(/</g, '&lt;');
-  const procHeader = { cirurgias: 'Procedimento', exames: 'Exame' }[k.value.kind] || 'Problema';
+  const procHeader = { cirurgias: 'Procedimento', exames: frase('agenda.motivo_exame', 'Exame') }[k.value.kind] || 'Problema';
   const opt = label => `<span><i></i>${label}</span>`;
   const cols = printColsOn.value;
   const cell = {
@@ -1604,14 +1606,14 @@ const printDayList = () => {
     unit: t => `<td class="doc">${esc(unitOf(t)?.label || '')}</td>`,
     obs: t => `<td class="obs">${esc(printObs(t.description))}</td>`,
     pay: () => `<td class="opts">${['Dinheiro', 'Pix', 'Débito', 'Crédito'].map(opt).join('')}</td>`,
-    pres: () => `<td class="opts">${['Compareceu', 'Faltou', isSurgeryMode.value ? 'Realizada' : 'Cirurgia indicada'].map(opt).join('')}</td>`,
-    origin: () => `<td class="opts origin">${['Indicação', 'Site', 'WhatsApp', 'Médico parceiro', 'Pac. antigo / Rotina', 'Convênio'].map(o => opt(`${o} <em>R$ ____</em>`)).join('')}</td>`,
+    pres: () => `<td class="opts">${['Compareceu', 'Faltou', isSurgeryMode.value ? 'Realizada' : frase('indicacao_impressao', 'Cirurgia indicada')].map(opt).join('')}</td>`,
+    origin: () => `<td class="opts origin">${['Indicação', 'Site', 'WhatsApp', frase('agenda.origem_profissional_parceiro', 'Médico parceiro'), frase('agenda.origem_cliente_antigo', 'Pac. antigo / Rotina'), 'Convênio'].map(o => opt(`${o} <em>R$ ____</em>`)).join('')}</td>`,
     notes: () => '<td class="notes"></td>',
     nf: () => `<td class="opts">${['Sim', 'Não'].map(opt).join('')}</td>`,
   };
   const head = {
-    time: 'Hora', name: 'Paciente', phone: 'Telefone', proc: procHeader, doctor: 'Médico', unit: isSurgeryMode.value ? 'Local' : 'Unidade',
-    obs: 'Obs.', pay: 'Pagamento', pres: 'Presença', origin: 'Origem do paciente', notes: 'Anotações', nf: 'Nota fiscal',
+    time: 'Hora', name: termoCap('cliente'), phone: 'Telefone', proc: procHeader, doctor: termoCap('profissional'), unit: isSurgeryMode.value ? 'Local' : 'Unidade',
+    obs: 'Obs.', pay: 'Pagamento', pres: 'Presença', origin: frase('agenda.origem_cliente', 'Origem do paciente'), notes: 'Anotações', nf: 'Nota fiscal',
   };
   const landscape = printOpts.value.orientation === 'landscape';
   const rows = list.map(t => `<tr>${cols.map(c => cell[c.key](t)).join('')}</tr>`).join('');
@@ -1728,7 +1730,7 @@ const setConfirmed = async (task, value) => {
     // desfazer um ✅ digitado no nome = tirar o ✅ do nome
     if (!value && handConfirmed(task)) payload.title = displayName(task);
     await store.dispatch('tasks/update', payload);
-    useAlert(value ? '✓ Consulta confirmada — card movido no CRM (se a coluna existir).' : 'Confirmação desfeita.');
+    useAlert(value ? frase('agenda.atendimento_confirmado_card', '✓ Consulta confirmada — card movido no CRM (se a coluna existir).') : 'Confirmação desfeita.');
   } catch {
     useAlert('Erro ao salvar a confirmação.');
   } finally {
@@ -1755,7 +1757,7 @@ const taskMenu = (task, extra = []) => {
       { label: 'Remarcar', icon: 'i-lucide-calendar-clock', hint: 'dia e horário', action: () => openEdit(task) },
       { separator: true },
       !task.attendance && !task.canceled_at && {
-        label: isConfirmed(task) ? 'Desfazer "Confirmou"' : 'Marcar: paciente confirmou',
+        label: isConfirmed(task) ? 'Desfazer "Confirmou"' : frase('agenda.marcar_cliente_confirmou', 'Marcar: paciente confirmou'),
         icon: 'i-lucide-badge-check',
         hint: isDeclined(task) ? 'respondeu NÃO ao lembrete' : '',
         disabled: busy,
@@ -1781,7 +1783,7 @@ const taskMenu = (task, extra = []) => {
         action: () => toggleNoSurgery(task),
       },
       canIndicate && {
-        label: 'Cirurgia indicada',
+        label: frase('indicacao_impressao', 'Cirurgia indicada'),
         icon: 'i-lucide-target',
         hint: task.surgery_indication === 'indicated' ? task.indicated_procedure || 'sim' : '',
         disabled: busy,
@@ -1792,7 +1794,7 @@ const taskMenu = (task, extra = []) => {
         })),
       },
       canIndicate && {
-        label: task.surgery_indication === 'not_indicated' ? 'Desfazer "Sem indicação"' : 'Sem indicação de cirurgia',
+        label: task.surgery_indication === 'not_indicated' ? 'Desfazer "Sem indicação"' : frase('agenda.sem_indicacao_venda', 'Sem indicação de cirurgia'),
         icon: 'i-lucide-circle-slash',
         disabled: busy,
         action: () => setIndication(task, 'not_indicated'),
@@ -1803,7 +1805,7 @@ const taskMenu = (task, extra = []) => {
         action: () => scheduleFollowUpFrom(task),
       },
       canEdit('agenda.cirurgias') && !surgery && task.surgery_indication === 'indicated' && {
-        label: 'Agendar cirurgia',
+        label: frase('agendar_venda', 'Agendar cirurgia'),
         icon: 'i-lucide-slice',
         action: () => scheduleSurgeryFrom(task),
       },
@@ -1815,7 +1817,7 @@ const taskMenu = (task, extra = []) => {
         action: () => openTaskChat(task),
       },
       task.contact_id && {
-        label: 'Abrir o Espaço do Paciente',
+        label: frase('agenda.abrir_espaco_cliente', 'Abrir o Espaço do Paciente'),
         icon: 'i-lucide-user-round',
         action: () => openPatientSpace(task),
       },
@@ -1940,14 +1942,14 @@ const columnMenu = ({ day, minutes, band }) => {
 const slotMenu = (day, win, slot) => {
   const list = tasksAtSlotAll(day, win, slot);
   const encaixe = canEditAgenda.value && {
-    label: 'Encaixar outro paciente neste horário',
+    label: frase('agenda.encaixar_outro_cliente', 'Encaixar outro paciente neste horário'),
     icon: 'i-lucide-plus',
     action: () => openCreateSlot(day, win, slot),
   };
   if (list.length === 1) return taskMenu(list[0], [{ separator: true }, encaixe]);
   if (list.length > 1) {
     return {
-      title: `${slot} · ${list.length} pacientes`,
+      title: `${slot} · ${list.length} ${termo('clientes')}`,
       subtitle: winTitle(win),
       rgb: hexToRgbSpaced(winColor(win)),
       items: [
@@ -2155,16 +2157,16 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <button
                     v-if="isExam && canView('agenda.configuracao')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
-                    title="Dias e horários em que a clínica faz exames (padrão: segunda a sexta, 08h–17h, Av. Paulista)"
+                    :title="frase('agenda.dica_janela_exames', 'Dias e horários em que a clínica faz exames (padrão: segunda a sexta, 08h–17h, Av. Paulista)')"
                     @click="openExamWindowsModal"
                   >
                     <span class="i-lucide-clock text-xs" />
-                    <span class="hidden 2xl:inline">Janela de exames</span>
+                    <span class="hidden 2xl:inline">{{ frase('agenda.janela_exames', 'Janela de exames') }}</span>
                   </button>
                   <button
                     v-else-if="isPhysical && canView('agenda.configuracao')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
-                    title="Faixas de horário dos médicos: quando cada um atende e para que serve cada faixa"
+                    :title="frase('agenda.dica_faixas_profissionais', 'Faixas de horário dos médicos: quando cada um atende e para que serve cada faixa')"
                     @click="openSettings('faixas')"
                   >
                     <span class="i-lucide-clock text-xs" />
@@ -2173,11 +2175,11 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <button
                     v-else-if="isSurgeryMode && canView('agenda.configuracao')"
                     class="cv-btn cv-btn-ghost cv-btn-sm"
-                    title="Dias e horários em que a sala cirúrgica de cada clínica está disponível"
+                    :title="frase('agenda.dica_janela_sala', 'Dias e horários em que a sala cirúrgica de cada clínica está disponível')"
                     @click="openSurgeryWindowsModal"
                   >
                     <span class="i-lucide-clock text-xs" />
-                    <span class="hidden 2xl:inline">Sala cirúrgica</span>
+                    <span class="hidden 2xl:inline">{{ frase('sala_execucao', 'Sala cirúrgica') }}</span>
                   </button>
               </div>
               <!-- 28/09 (pedido dele: "precisa ser mais simples e evidente esse botão de fechar dia"):
@@ -2187,7 +2189,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   class="cv-btn"
                   :class="isDayBlocked(cursor) || partialBlocksFor(cursor).length ? 'cv-ag-dayclosed' : 'cv-btn-ghost cv-btn-danger'"
                   :disabled="isSavingBlock"
-                  title="Fechar o dia inteiro, só uma unidade ou só um médico (feriado, congresso, folga): some da grade e a IA não oferece"
+                  :title="frase('agenda.dica_fechar_dia', 'Fechar o dia inteiro, só uma unidade ou só um médico (feriado, congresso, folga): some da grade e a IA não oferece')"
                   @click.stop="blockMenu = blockMenu === dateKey(cursor) ? null : dateKey(cursor)"
                 >
                   <span :class="isDayBlocked(cursor) ? 'i-lucide-lock-open' : 'i-lucide-lock'" class="text-sm" />
@@ -2260,7 +2262,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       :class="view === 'clinic' ? 'cv-chip-on' : ''"
                       @click="view = 'clinic'"
                     >
-                      {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
+                      {{ isSurgeryMode ? 'Todos os locais' : frase('agenda.toda_empresa', 'Toda a clínica') }}
                     </button>
                     <template v-if="!isSurgeryMode">
                       <button
@@ -2302,7 +2304,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <span class="w-2 h-2 rounded-full" :style="{ background: view === `unit:${loc.key}` ? '#fff' : loc.color }" />
                         {{ loc.label }}
                       </button>
-                      <button v-if="canEdit('agenda.cirurgias')" class="cv-chip" title="Gerenciar clínicas parceiras" @click="openLocationsModal">
+                      <button v-if="canEdit('agenda.cirurgias')" class="cv-chip" :title="frase('agenda.gerenciar_parceiras', 'Gerenciar clínicas parceiras')" @click="openLocationsModal">
                         <span class="i-lucide-map-pin text-[10px]" /> locais
                       </button>
                     </template>
@@ -2316,11 +2318,11 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   </div>
                   <div class="flex items-center gap-1.5 ml-auto flex-wrap">
                     <select v-model="view" class="cv-input !h-8 text-xs !w-auto max-w-[160px]" title="Ver a agenda de…">
-                      <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}</option>
+                      <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : frase('agenda.toda_empresa', 'Toda a clínica') }}</option>
                       <optgroup v-if="!isSurgeryMode && !isTele" label="Unidades">
                         <option v-for="(u, key) in visibleUnits" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
                       </optgroup>
-                      <optgroup v-if="!isSurgeryMode" label="Médicos">
+                      <optgroup v-if="!isSurgeryMode" :label="termoCap('profissionais')">
                         <option v-for="d in DOCTORS" :key="d.name" :value="`doctor:${d.name}`">{{ d.name }}</option>
                       </optgroup>
                       <option value="me">Minha agenda pessoal</option>
@@ -2373,7 +2375,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button class="w-full flex items-center gap-2.5 text-left" @click="showOccDetail = !showOccDetail">
             <span class="i-lucide-gauge text-sm text-n-slate-10" />
             <p class="text-xs font-semibold text-n-slate-12 whitespace-nowrap">Ocupação</p>
-            <span class="cv-chip">{{ activeDoctor ? doctorShort(activeDoctor) : activeUnit ? (UNITS[activeUnit]?.label || surgeryLocationLabel(activeUnit)) : (isSurgeryMode ? 'todos os locais' : 'toda a clínica') }}</span>
+            <span class="cv-chip">{{ activeDoctor ? doctorShort(activeDoctor) : activeUnit ? (UNITS[activeUnit]?.label || surgeryLocationLabel(activeUnit)) : (isSurgeryMode ? 'todos os locais' : frase('agenda.toda_empresa_min', 'toda a clínica')) }}</span>
             <div class="cv-track cv-track-sm flex-1 min-w-[80px] flex">
               <template v-if="occCurrent.total && occSegments(occCurrent)">
                 <div v-for="s in occSegments(occCurrent)" :key="s.key" class="h-full" :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }" :title="`${s.label}: ${s.count} bloco(s)`" />
@@ -2403,7 +2405,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
             <p v-if="!isSurgeryMode" class="sm:col-span-3 text-[10px] text-n-slate-9 flex items-center gap-2.5 flex-wrap">
               <span v-for="m in OCC_MODALITIES" :key="m.key" class="flex items-center gap-1"><span class="w-2 h-2 rounded-full" :style="{ background: m.color }" />{{ m.label }}</span>
-              <span>· {{ isExam ? 'exames têm janela própria (seg–sex 08h–17h por padrão)' : 'exames têm janela própria, fora dos blocos dos médicos' }} · cadeados fora da conta</span>
+              <span>· {{ isExam ? frase('agenda.exames_janela_propria_padrao', 'exames têm janela própria (seg–sex 08h–17h por padrão)') : frase('agenda.exames_janela_propria_fora_blocos', 'exames têm janela própria, fora dos blocos dos médicos') }} · cadeados fora da conta</span>
             </p>
           </div>
         </div>
@@ -2480,7 +2482,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 class="cv-ag-daylock"
                 :class="{ 'cv-ag-daylock-on': isDayBlocked(day) || partialBlocksFor(day).length }"
                 :disabled="isSavingBlock"
-                :title="dayBlockSummary(day) ? `${dayBlockSummary(day)} — clique para reabrir ou fechar mais` : 'Fechar este dia (inteiro, uma unidade ou um médico)'"
+                :title="dayBlockSummary(day) ? `${dayBlockSummary(day)} — clique para reabrir ou fechar mais` : frase('agenda.fechar_este_dia', 'Fechar este dia (inteiro, uma unidade ou um médico)')"
                 @click.stop="blockMenu = blockMenu === dateKey(day) ? null : dateKey(day)"
               >
                 <span class="i-lucide-lock" />
@@ -2552,7 +2554,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
           <p class="text-[10px] text-n-slate-9 mt-2 text-center">
-            clique num espaço vazio para agendar naquele horário · arraste um balão para reagendar · faixas coloridas = horário em que cada médico atende
+            {{ frase('agenda.dica_rodape_grade', 'clique num espaço vazio para agendar naquele horário · arraste um balão para reagendar · faixas coloridas = horário em que cada médico atende') }}
           </p>
         </div>
 
@@ -2618,7 +2620,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
             <!-- painel do dia (recolhível): trilho fino quando fechado -->
             <div v-if="!dayPanelOpen" class="cv-ag-side cv-ag-side-rail w-full lg:w-[52px] flex lg:flex-col items-center gap-2 p-1.5">
-              <button class="cv-ag-rail-btn" title="Mostrar o bloco do médico e a conferência do dia" @click="toggleDayPanel">
+              <button class="cv-ag-rail-btn" :title="frase('agenda.dica_bloco_profissional_dia', 'Mostrar o bloco do médico e a conferência do dia')" @click="toggleDayPanel">
                 <span class="i-lucide-panel-right-open text-base" />
               </button>
               <span v-if="pendingCount" class="cv-chip cv-amber cv-ag-rail-vert" :title="`${pendingCount} pendente(s) na conferência`">{{ pendingCount }} pend.</span>
@@ -2641,8 +2643,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   <button class="cv-seg-item" :class="dayPanelMode === 'itens' ? 'cv-seg-on' : ''" title="Só as caixas do dia: hora, quem, o quê e os selos (clique na caixa para abrir)" @click="setDayPanelMode('itens')">
                     <span class="i-lucide-list text-sm" /> Itens do dia
                   </button>
-                  <button class="cv-seg-item" :class="dayPanelMode === 'bloco' ? 'cv-seg-on' : ''" title="Bloco do médico com a grade de horários + conferência (compareceu / faltou / indicação)" @click="setDayPanelMode('bloco')">
-                    <span class="i-lucide-stethoscope text-sm" /> Bloco do médico · Conferência
+                  <button class="cv-seg-item" :class="dayPanelMode === 'bloco' ? 'cv-seg-on' : ''" :title="frase('agenda.dica_modo_bloco', 'Bloco do médico com a grade de horários + conferência (compareceu / faltou / indicação)')" @click="setDayPanelMode('bloco')">
+                    <span class="i-lucide-stethoscope text-sm" /> {{ frase('agenda.bloco_profissional_conferencia', 'Bloco do médico · Conferência') }}
                   </button>
                 </div>
                 <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" title="Recolher este painel e dar a largura toda ao calendário" @click="toggleDayPanel">
@@ -2659,7 +2661,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                     <p class="text-sm font-bold text-n-slate-12">{{ winTitle(win) }}</p>
                     <span class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(winColor(win)), '--cv-deep': winColor(win) }">{{ winUnitLabel(win) }}</span>
                     <span class="text-xs text-n-slate-10"><template v-if="win.turno">{{ win.turno }} · </template>{{ win.start }}–{{ win.end }} · {{ win.block }} min</span>
-                    <span v-if="reservedFor(win).length" class="cv-chip cv-amber" title="Faixa reservada: a IA não oferece consulta nova aqui e a equipe é avisada ao marcar outro tipo">só {{ reservedLabelOf(win) }}</span>
+                    <span v-if="reservedFor(win).length" class="cv-chip cv-amber" :title="frase('agenda.dica_faixa_reservada', 'Faixa reservada: a IA não oferece consulta nova aqui e a equipe é avisada ao marcar outro tipo')">só {{ reservedLabelOf(win) }}</span>
                     <span class="text-[10px] px-2 py-0.5 rounded-full font-bold text-white ml-auto" :style="{ backgroundColor: occColor(winOccupancy(cursor, win).pct) }" :title="`${winOccupancy(cursor, win).filled} de ${winOccupancy(cursor, win).total} blocos ocupados`">
                       {{ winOccupancy(cursor, win).pct }}%
                     </span>
@@ -2677,7 +2679,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                             <span v-if="isConfirmed(st)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(st)" /><span v-else-if="isDeclined(st)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
                             <span class="truncate">{{ displayName(st) }}</span>
                           </button>
-                          <button v-if="si === 0" class="cv-ag-corner" title="Encaixe: agendar OUTRO paciente neste mesmo horário" @click.stop="openCreateSlot(cursor, win, slot)"><span class="i-lucide-plus" /></button>
+                          <button v-if="si === 0" class="cv-ag-corner" :title="frase('agenda.dica_encaixe', 'Encaixe: agendar OUTRO paciente neste mesmo horário')" @click.stop="openCreateSlot(cursor, win, slot)"><span class="i-lucide-plus" /></button>
                         </span>
                       </template>
                       <button v-else-if="isBlocked(cursor, win, slot)" v-cv-menu="() => slotMenu(cursor, win, slot)" class="cv-ag-slot cv-ag-slot-locked" :title="canEdit('agenda.bloqueios') ? 'Horário fechado — clique para reabrir' : 'Horário fechado'" @click="canEdit('agenda.bloqueios') && toggleBlock(cursor, win, slot)">
@@ -2736,7 +2738,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                           <span v-if="task.phone"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
                           <span v-if="task.doctor"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
                           <button v-if="task.contact_id" class="hover:underline text-[11px] font-semibold" :style="{ color: accentOf(task) }" @click.stop="openPatientSpace(task)">
-                            <PatientSpaceIcon :size="12" /> Espaço do Paciente
+                            <PatientSpaceIcon :size="12" /> {{ frase('espaco_cliente', 'Espaço do Paciente') }}
                           </button>
                         </div>
                       </div>
@@ -2753,14 +2755,14 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <span v-if="isAdmin && isSurgeryTask(task) && task.crm_value" class="cv-chip cv-green" :title="task.surgery_payment ? `Forma de pagamento: ${task.surgery_payment}` : 'Valor do card no CRM'">
                           💰 {{ fmtBRL(task.crm_value) }}<template v-if="task.surgery_payment"> · {{ task.surgery_payment }}</template>
                         </span>
-                        <span v-if="task.surgery_indication === 'indicated'" class="cv-chip cv-gold cv-chip-on" :title="task.indicated_procedure || 'Cirurgia indicada'"><span class="truncate">🎯 {{ task.indicated_procedure || 'Cirurgia indicada' }}</span></span>
-                        <span v-else-if="task.surgery_indication === 'not_indicated'" class="cv-chip cv-slate">Sem indicação</span>
+                        <span v-if="task.surgery_indication === 'indicated'" class="cv-chip cv-gold cv-chip-on" :title="task.indicated_procedure || frase('indicacao_impressao', 'Cirurgia indicada')"><span class="truncate">🎯 {{ task.indicated_procedure || frase('indicacao_impressao', 'Cirurgia indicada') }}</span></span>
+                        <span v-else-if="task.surgery_indication === 'not_indicated'" class="cv-chip cv-slate">{{ frase('agenda.sem_indicacao', 'Sem indicação') }}</span>
                       </div>
                     </div>
 
                     <div v-if="detailOf(task) && (detailOf(task).labels.length || detailOf(task).form_response)" class="flex items-center gap-1.5 mt-1.5 flex-wrap">
                       <span v-for="lbl in detailOf(task).labels" :key="task.id + lbl" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(accentOf(task)), '--cv-deep': accentOf(task) }">🏷 {{ lbl }}</span>
-                      <button v-if="detailOf(task).form_response" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #5B21B6, #7C3AED); --cv-deep-rgb: 91 33 182" title="Respostas que o paciente deu no formulário — leia antes da consulta" @click.stop="openFormAnswers(task)">
+                      <button v-if="detailOf(task).form_response" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #5B21B6, #7C3AED); --cv-deep-rgb: 91 33 182" :title="frase('agenda.dica_respostas_formulario', 'Respostas que o paciente deu no formulário — leia antes da consulta')" @click.stop="openFormAnswers(task)">
                         📖 Ler respostas do formulário
                       </button>
                     </div>
@@ -2781,29 +2783,29 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <button class="cv-ag-act" style="--a: #059669" :class="task.attendance === 'attended' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setAttendance(task, 'attended')">
                         {{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}
                       </button>
-                      <button v-if="isSurgeryTask(task)" class="cv-ag-act" style="--a: #D97706" :class="task.attendance === 'attended_not_done' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" title="O paciente veio, mas a cirurgia não aconteceu — registre o motivo" @click="toggleNoSurgery(task)">
+                      <button v-if="isSurgeryTask(task)" class="cv-ag-act" style="--a: #D97706" :class="task.attendance === 'attended_not_done' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" :title="frase('agenda.dica_veio_nao_fez', 'O paciente veio, mas a cirurgia não aconteceu — registre o motivo')" @click="toggleNoSurgery(task)">
                         ⚠️ Veio e não fez
                       </button>
                       <button class="cv-ag-act" style="--a: #DC2626" :class="task.attendance === 'missed' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setAttendance(task, 'missed')">
                         {{ isSurgeryTask(task) ? '✗ Não veio' : '✗ Faltou' }}
                       </button>
                       <div v-if="noSurgeryReasonId === task.id" class="w-full flex items-center gap-1.5 mt-1">
-                        <input v-model="noSurgeryReason" class="cv-input flex-1 !h-8 text-xs" placeholder="Qual foi o motivo? (pressão alta, desistiu, exame pendente...)" @keyup.enter="confirmNoSurgery(task)" />
+                        <input v-model="noSurgeryReason" class="cv-input flex-1 !h-8 text-xs" :placeholder="frase('agenda.placeholder_motivo_nao_fez', 'Qual foi o motivo? (pressão alta, desistiu, exame pendente...)')" @keyup.enter="confirmNoSurgery(task)" />
                         <button class="cv-btn cv-btn-sm cv-amber" :disabled="savingAttendanceId === task.id" @click="confirmNoSurgery(task)">Registrar</button>
                       </div>
 
                       <template v-if="task.attendance === 'attended' && !isSurgeryTask(task)">
                         <span class="text-n-slate-8 text-[10px]">·</span>
-                        <button class="cv-ag-act" style="--a: #B8860B" :class="task.surgery_indication === 'indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'indicated')">🎯 Cirurgia indicada</button>
-                        <button class="cv-ag-act" style="--a: #64748B" :class="task.surgery_indication === 'not_indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'not_indicated')">Sem indicação</button>
+                        <button class="cv-ag-act" style="--a: #B8860B" :class="task.surgery_indication === 'indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'indicated')">🎯 {{ frase('indicacao_impressao', 'Cirurgia indicada') }}</button>
+                        <button class="cv-ag-act" style="--a: #64748B" :class="task.surgery_indication === 'not_indicated' ? 'cv-ag-act-on' : ''" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'not_indicated')">{{ frase('agenda.sem_indicacao', 'Sem indicação') }}</button>
                         <button v-if="['exames', 'teleconsulta'].includes(typeOf(task))" class="cv-ag-act" style="--a: #2563EB" title="Marcar um retorno presencial a partir deste atendimento" @click="scheduleFollowUpFrom(task)">📅 Marcar retorno</button>
                       </template>
-                      <button v-if="!isSurgeryTask(task) && task.surgery_indication === 'indicated'" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #0369A1, #38BDF8); --cv-deep-rgb: 7 89 133" title="Abre a Agenda de Cirurgias com os dados do paciente preenchidos" @click="scheduleSurgeryFrom(task)">
-                        🔪 Agendar cirurgia
+                      <button v-if="!isSurgeryTask(task) && task.surgery_indication === 'indicated'" class="cv-btn cv-btn-sm" style="--cv-grad: linear-gradient(135deg, #0369A1, #38BDF8); --cv-deep-rgb: 7 89 133" :title="frase('agenda.dica_agendar_venda_daqui', 'Abre a Agenda de Cirurgias com os dados do paciente preenchidos')" @click="scheduleSurgeryFrom(task)">
+                        🔪 {{ frase('agendar_venda', 'Agendar cirurgia') }}
                       </button>
                     </div>
                     <div v-if="indicationPickerId === task.id" class="flex flex-wrap gap-1 mt-1.5" @click.stop>
-                      <span class="text-[10px] text-n-slate-10 w-full">Qual procedimento foi indicado?</span>
+                      <span class="text-[10px] text-n-slate-10 w-full">{{ frase('agenda.qual_procedimento_indicado', 'Qual procedimento foi indicado?') }}</span>
                       <button v-for="proc in PROCEDURES" :key="proc" class="cv-chip cv-gold" :disabled="savingAttendanceId === task.id" @click="setIndication(task, 'indicated', proc)">{{ proc }}</button>
                     </div>
                   </div>
@@ -2822,20 +2824,20 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span :class="formKind.icon" class="text-base" /></span>
           <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">
-              {{ editingTask ? `Editar ${formKind.noun}` : (formKind.key === 'cirurgia' ? 'Agendar cirurgia' : `${formKind.article === 'o' ? 'Novo' : 'Nova'} ${formKind.noun}`) }}
+              {{ editingTask ? `Editar ${formKind.noun}` : (formKind.key === 'cirurgia' ? frase('agendar_venda', 'Agendar cirurgia') : `${formKind.article === 'o' ? 'Novo' : 'Nova'} ${formKind.noun}`) }}
             </p>
-            <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : 'Paciente') }}</h2>
+            <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : termoCap('cliente')) }}</h2>
             <p class="text-[11px] opacity-90 truncate">{{ formSummary || formKind.hint }}</p>
             <p v-if="ORIGIN_BY_KEY[form.origin] || (editingTask && isConfirmed(editingTask))" class="flex items-center gap-1.5 mt-1 flex-wrap">
               <span v-if="ORIGIN_BY_KEY[form.origin]" class="cv-ag-head-pill"><span :class="ORIGIN_BY_KEY[form.origin].icon" class="text-[10px]" /> {{ ORIGIN_BY_KEY[form.origin].label }}</span>
               <span v-if="editingTask && isConfirmed(editingTask)" class="cv-ag-head-pill" :title="confirmationTitle(editingTask)"><span class="i-lucide-badge-check text-[11px]" /> Confirmou</span>
             </p>
           </div>
-          <button v-if="editingTask && (editingTask.contact_id || editingTask.phone)" class="cv-glass-btn" title="Abrir a conversa deste paciente, sem sair da Agenda" @click="openTaskChat(editingTask)">
+          <button v-if="editingTask && (editingTask.contact_id || editingTask.phone)" class="cv-glass-btn" :title="frase('agenda.dica_abrir_conversa_cliente', 'Abrir a conversa deste paciente, sem sair da Agenda')" @click="openTaskChat(editingTask)">
             <span class="i-lucide-message-circle" /> <span class="hidden sm:inline">Conversa</span>
           </button>
-          <button v-if="editingTask?.contact_id" class="cv-glass-btn" title="Abrir o Espaço do Paciente" @click="openPatientSpace(editingTask)">
-            <PatientSpaceIcon :size="16" /> <span class="hidden sm:inline">Paciente</span>
+          <button v-if="editingTask?.contact_id" class="cv-glass-btn" :title="frase('agenda.abrir_espaco_cliente', 'Abrir o Espaço do Paciente')" @click="openPatientSpace(editingTask)">
+            <PatientSpaceIcon :size="16" /> <span class="hidden sm:inline">{{ termoCap('cliente') }}</span>
           </button>
           <button class="cv-glass-btn cv-iconbtn" @click="showModal = false"><span class="i-lucide-x" /></button>
         </div>
@@ -2867,12 +2869,12 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <div class="space-y-4 lg:space-y-5 min-w-0">
           <!-- 1 · quem -->
           <section class="cv-ag-sec">
-            <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>Paciente</h3><p>quem vem</p></div></header>
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>{{ termoCap('cliente') }}</h3><p>quem vem</p></div></header>
             <div class="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-3">
               <div class="relative">
-                <span class="cv-label block mb-1">Nome do paciente *</span>
+                <span class="cv-label block mb-1">{{ frase('agenda.nome_cliente', 'Nome do paciente') }} *</span>
                 <!-- 🔎 item 346: paciente do cadastro → nome travado -->
-                <div v-if="form.contact_id" class="cv-input w-full flex items-center gap-2 !bg-n-alpha-1" title="Paciente do cadastro: o nome não se edita aqui">
+                <div v-if="form.contact_id" class="cv-input w-full flex items-center gap-2 !bg-n-alpha-1" :title="frase('agenda.dica_cliente_cadastro', 'Paciente do cadastro: o nome não se edita aqui')">
                   <span class="i-lucide-lock text-xs text-n-slate-10" />
                   <span class="flex-1 min-w-0 truncate font-semibold">{{ form.name }}</span>
                   <button type="button" class="text-[11px] font-semibold text-n-blue-11 hover:underline" @click="unpickPatient">trocar</button>
@@ -2888,13 +2890,13 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <span v-if="phoneMissing && form.phone" class="text-[11px] text-amber-700 mt-1 block">Com DDD: (11) 98888-7777</span>
                 <span v-if="phoneOwner" class="text-[11px] text-amber-800 mt-1 flex items-center gap-1 flex-wrap">
                   <span class="i-lucide-triangle-alert text-xs" /> Este telefone já é de <strong>{{ phoneOwner.name }}</strong>
-                  <button type="button" class="font-semibold text-n-blue-11 hover:underline" @click="pickPatient(phoneOwner)">usar este paciente</button>
+                  <button type="button" class="font-semibold text-n-blue-11 hover:underline" @click="pickPatient(phoneOwner)">{{ frase('agenda.usar_este_cliente', 'usar este paciente') }}</button>
                 </span>
               </div>
             </div>
             <!-- 🏥 item 300: de quem é o paciente (obrigatório ao criar) -->
             <div v-if="!originLocked" class="mt-3">
-              <span class="cv-label block mb-1.5">Paciente de quem? {{ editingTask ? '' : '*' }}</span>
+              <span class="cv-label block mb-1.5">{{ frase('agenda.cliente_de_quem', 'Paciente de quem?') }} {{ editingTask ? '' : '*' }}</span>
               <div class="cv-ag-origin" :class="originMissing ? 'cv-ag-origin-need' : ''">
                 <button
                   v-for="o in ORIGINS"
@@ -2916,7 +2918,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
           <!-- 2 · quando e onde -->
           <section class="cv-ag-sec">
-            <header class="cv-ag-sec-head"><span class="cv-ag-num">2</span><div><h3>Quando e onde</h3><p>dia, horário, médico e unidade</p></div></header>
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">2</span><div><h3>Quando e onde</h3><p>{{ frase('agenda.sub_quando_onde', 'dia, horário, médico e unidade') }}</p></div></header>
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <span class="cv-label block mb-1">Dia *</span>
@@ -2927,7 +2929,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <input v-model="form.time" type="time" class="cv-input w-full" />
               </div>
               <div>
-                <span class="cv-label block mb-1">Médico</span>
+                <span class="cv-label block mb-1">{{ termoCap('profissional') }}</span>
                 <select v-model="form.doctor" class="cv-input w-full">
                   <option value="">A definir</option>
                   <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
@@ -2946,7 +2948,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <div v-else>
                 <span class="cv-label mb-1 flex items-center justify-between">
-                  Local da cirurgia
+                  {{ frase('agenda.local_venda', 'Local da cirurgia') }}
                   <button v-if="canEdit('agenda.cirurgias')" type="button" class="normal-case tracking-normal font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">gerenciar</button>
                 </span>
                 <select v-model="form.unit" class="cv-input w-full">
@@ -2963,7 +2965,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <div v-if="formConflicts.length" class="cv-ag-note mt-3" :class="hubConflicts.length ? 'cv-ag-note-red' : 'cv-ag-note-amber'">
               <button type="button" class="cv-ag-note-head w-full text-left" :title="conflictsOpen ? 'Recolher' : 'Ver quem está neste horário'" @click="conflictsOpen = !conflictsOpen">
                 <span class="i-lucide-triangle-alert text-sm shrink-0" />
-                <span class="flex-1 min-w-0">{{ hubConflicts.length ? 'Horário ocupado por paciente do Oftalmofácil' : 'Já tem agendamento neste horário (encaixe)' }}</span>
+                <span class="flex-1 min-w-0">{{ hubConflicts.length ? frase('agenda.horario_ocupado_hub', 'Horário ocupado por paciente do Oftalmofácil') : 'Já tem agendamento neste horário (encaixe)' }}</span>
                 <span class="cv-ag-note-count">{{ formConflicts.length }}</span>
                 <span :class="conflictsOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="text-sm shrink-0" />
               </button>
@@ -2976,17 +2978,17 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <div class="space-y-4 lg:space-y-5 min-w-0">
           <!-- 3 · motivo -->
           <section class="cv-ag-sec">
-            <header class="cv-ag-sec-head"><span class="cv-ag-num">3</span><div><h3>Motivo</h3><p>{{ form.kind === 'cirurgias' ? 'procedimento' : form.kind === 'exames' ? 'exame e origem do agendamento' : 'tipo, problema e origem do agendamento' }}</p></div></header>
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">3</span><div><h3>Motivo</h3><p>{{ form.kind === 'cirurgias' ? 'procedimento' : form.kind === 'exames' ? frase('agenda.sub_motivo_exame', 'exame e origem do agendamento') : 'tipo, problema e origem do agendamento' }}</p></div></header>
             <div class="space-y-3">
               <div v-if="editingTask && form.kind === 'consultas'">
-                <span class="cv-label block mb-1.5">Tipo de consulta</span>
+                <span class="cv-label block mb-1.5">{{ frase('tipo_atendimento', 'Tipo de consulta') }}</span>
                 <div class="cv-seg cv-seg-sm">
                   <button v-for="m in consultaModalities" :key="m.key" type="button" class="cv-seg-item" :class="form.modality === m.key ? 'cv-seg-on' : ''" @click="form.modality = m.key">{{ m.label }}</button>
                 </div>
               </div>
               <div>
                 <span class="cv-label block mb-1">{{ procedureLabel }}</span>
-                <input v-model="form.procedure" list="agenda-procedimentos" class="cv-input w-full" :placeholder="form.kind === 'exames' ? 'Pentacam, OCT…' : form.kind === 'cirurgias' ? 'Catarata, PRK…' : 'Catarata, refrativa…'" />
+                <input v-model="form.procedure" list="agenda-procedimentos" class="cv-input w-full" :placeholder="form.kind === 'exames' ? frase('agenda.exemplo_exames', 'Pentacam, OCT…') : form.kind === 'cirurgias' ? frase('agenda.exemplo_procedimentos', 'Catarata, PRK…') : frase('agenda.exemplo_problemas', 'Catarata, refrativa…')" />
                 <datalist id="agenda-procedimentos">
                   <option v-for="p in procedureOptions" :key="p" :value="p" />
                 </datalist>
@@ -3007,23 +3009,23 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <header class="cv-ag-sec-head"><span class="cv-ag-num">4</span><div><h3>Valor</h3><p>o que vai na mensagem de confirmação</p></div></header>
             <div class="space-y-3">
               <div v-if="form.kind === 'consultas'">
-                <span class="cv-label block mb-1.5">Esta consulta é</span>
+                <span class="cv-label block mb-1.5">{{ frase('agenda.este_atendimento_e', 'Esta consulta é') }}</span>
                 <div class="cv-seg cv-seg-sm">
                   <button type="button" class="cv-seg-item" :class="!form.particular ? 'cv-seg-on' : ''" @click="form.particular = false">Padrão</button>
-                  <button type="button" class="cv-seg-item" :class="form.particular ? 'cv-seg-on' : ''" title="Consulta particular: vale o valor pré-configurado do médico" @click="form.particular = true">Particular</button>
+                  <button type="button" class="cv-seg-item" :class="form.particular ? 'cv-seg-on' : ''" :title="frase('agenda.dica_particular', 'Consulta particular: vale o valor pré-configurado do médico')" @click="form.particular = true">Particular</button>
                 </div>
-                <p v-if="form.particular && !form.doctor" class="text-[11px] text-amber-700 dark:text-amber-400 font-semibold mt-1.5">Escolha o médico em "Quando e onde" para puxar o valor particular dele.</p>
+                <p v-if="form.particular && !form.doctor" class="text-[11px] text-amber-700 dark:text-amber-400 font-semibold mt-1.5">{{ frase('agenda.escolha_profissional_valor', 'Escolha o médico em "Quando e onde" para puxar o valor particular dele.') }}</p>
               </div>
               <div class="cv-ag-price">
                 <span class="cv-ag-price-label">Vai na confirmação</span>
                 <span class="cv-ag-price-value">{{ priceEffective?.text ? priceLabel(priceEffective.text) : (priceEffective ? 'valor padrão' : '—') }}</span>
-                <span class="cv-ag-price-source">{{ priceEffective ? priceEffective.label : 'cirurgia: só valor lançado à mão' }}</span>
+                <span class="cv-ag-price-source">{{ priceEffective ? priceEffective.label : frase('agenda.venda_so_valor_mao', 'cirurgia: só valor lançado à mão') }}</span>
               </div>
               <p v-if="pricePreset && priceEffective?.source !== 'preset'" class="text-[11px] text-n-slate-11">Pré-configurado para este tipo: <b class="text-n-slate-12">{{ priceLabel(pricePreset.text) }}</b> ({{ pricePreset.label }}) — o valor lançado à mão tem prioridade.</p>
               <div>
                 <span class="cv-label block mb-1.5">Valores lançados à mão</span>
                 <div v-for="(c, idx) in form.charges" :key="'ch' + idx" class="cv-ag-charge">
-                  <input v-model="c.label" class="cv-input flex-1 min-w-0" maxlength="60" placeholder="Descrição (consulta, exame…)" />
+                  <input v-model="c.label" class="cv-input flex-1 min-w-0" maxlength="60" :placeholder="frase('agenda.placeholder_descricao_cobranca', 'Descrição (consulta, exame…)')" />
                   <input v-model="c.amount" class="cv-input cv-ag-charge-amount" maxlength="20" inputmode="decimal" placeholder="R$ 0,00" />
                   <button type="button" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar este valor" @click="removeCharge(idx)"><span class="i-lucide-x" /></button>
                   <p class="cv-ag-charge-by">{{ chargeBy(c) }}</p>
@@ -3068,7 +3070,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
           <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask && canEditAgenda ? '' : 'ml-auto'" @click="showModal = false">{{ canEditAgenda ? 'Cancelar' : 'Fechar' }}</button>
-          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : phoneMissing ? 'Informe o telefone do paciente com DDD' : ''" @click="save">
+          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? frase('agenda.escolha_origem_cliente', 'Escolha se o paciente é da CEVICO ou do Oftalmofácil') : phoneMissing ? frase('agenda.informe_telefone_cliente', 'Informe o telefone do paciente com DDD') : ''" @click="save">
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
           </button>
@@ -3149,15 +3151,15 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <div class="cv-modal-head flex items-center gap-3">
           <span class="i-lucide-clock text-xl" />
           <div class="flex-1">
-            <h2 class="text-base font-bold">Janela da sala cirúrgica</h2>
-            <p class="text-[11px] opacity-85">dias e horários em que a sala de cada clínica parceira está disponível</p>
+            <h2 class="text-base font-bold">{{ frase('agenda.janela_sala', 'Janela da sala cirúrgica') }}</h2>
+            <p class="text-[11px] opacity-85">{{ frase('agenda.sub_janela_sala', 'dias e horários em que a sala de cada clínica parceira está disponível') }}</p>
           </div>
           <button class="cv-glass-btn cv-iconbtn" @click="showSurgeryWindowsModal = false"><span class="i-lucide-x" /></button>
         </div>
         <div class="flex-1 overflow-y-auto p-5 space-y-3">
           <p class="text-xs text-n-slate-10">
-            A ocupação e os blocos livres do trilho de cirurgias vêm daqui.
-            <button v-if="canEdit('agenda.cirurgias')" class="font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">Gerenciar clínicas →</button>
+            {{ frase('agenda.explica_janela_sala', 'A ocupação e os blocos livres do trilho de cirurgias vêm daqui.') }}
+            <button v-if="canEdit('agenda.cirurgias')" class="font-semibold hover:underline" style="color: var(--cv)" @click="openLocationsModal">{{ frase('agenda.gerenciar_parceiras_seta', 'Gerenciar clínicas →') }}</button>
           </p>
           <div v-if="!editSurgeryWindows.length" class="cv-sub text-center py-6 text-n-slate-10 text-sm">Nenhuma janela ainda — adicione a primeira.</div>
           <div v-for="(w, i) in editSurgeryWindows" :key="i" class="cv-sub grid grid-cols-2 sm:grid-cols-6 gap-2 items-center p-2.5">
@@ -3190,14 +3192,14 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <div class="cv-modal-head flex items-center gap-3">
           <span class="i-lucide-scan-eye text-xl" />
           <div class="flex-1">
-            <h2 class="text-base font-bold">Janela de exames</h2>
-            <p class="text-[11px] opacity-85">dias, horários e unidade em que a clínica faz exames — separada da agenda dos médicos</p>
+            <h2 class="text-base font-bold">{{ frase('agenda.janela_exames', 'Janela de exames') }}</h2>
+            <p class="text-[11px] opacity-85">{{ frase('agenda.sub_janela_exames', 'dias, horários e unidade em que a clínica faz exames — separada da agenda dos médicos') }}</p>
           </div>
           <button class="cv-glass-btn cv-iconbtn" @click="showExamWindowsModal = false"><span class="i-lucide-x" /></button>
         </div>
         <div class="flex-1 overflow-y-auto p-5 space-y-3">
           <p class="text-xs text-n-slate-10">
-            Padrão da CEVICO: segunda a sexta, das 08h às 17h, no IOP da Av. Paulista, em blocos de 30 min. A ocupação e os blocos livres do trilho de exames vêm daqui; os exames aparecem na cor deles em toda a agenda.
+            {{ frase('agenda.explica_janela_exames', 'Padrão da CEVICO: segunda a sexta, das 08h às 17h, no IOP da Av. Paulista, em blocos de 30 min. A ocupação e os blocos livres do trilho de exames vêm daqui; os exames aparecem na cor deles em toda a agenda.') }}
           </p>
           <div v-if="!editExamWindows.length" class="cv-sub text-center py-6 text-n-slate-10 text-sm">Nenhuma janela — adicione a primeira.</div>
           <div v-for="(w, i) in editExamWindows" :key="i" class="cv-sub grid grid-cols-2 sm:grid-cols-6 gap-2 items-center p-2.5">
@@ -3229,13 +3231,13 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
       <div class="cv-modal cv-ag-pop w-full max-w-sm flex flex-col" :style="kindVars('cirurgias')">
         <div class="cv-modal-head flex items-center gap-3">
           <span class="i-lucide-map-pin text-xl" />
-          <h2 class="text-base font-bold flex-1">Locais de cirurgia</h2>
+          <h2 class="text-base font-bold flex-1">{{ frase('agenda.locais_venda', 'Locais de cirurgia') }}</h2>
           <button class="cv-glass-btn cv-iconbtn" @click="showLocationsModal = false"><span class="i-lucide-x" /></button>
         </div>
         <div class="p-5 space-y-2">
-          <p class="text-xs text-n-slate-10">Clínicas parceiras onde as cirurgias acontecem (ex.: IOP). Aparecem no campo "Local da cirurgia" ao agendar.</p>
+          <p class="text-xs text-n-slate-10">{{ frase('agenda.explica_locais_venda', 'Clínicas parceiras onde as cirurgias acontecem (ex.: IOP). Aparecem no campo "Local da cirurgia" ao agendar.') }}</p>
           <div v-for="(loc, i) in locationsDraft" :key="i" class="flex items-center gap-2">
-            <input v-model="loc.label" class="cv-input flex-1" placeholder="Nome da clínica (ex.: IOP)" />
+            <input v-model="loc.label" class="cv-input flex-1" :placeholder="frase('agenda.placeholder_nome_parceira', 'Nome da clínica (ex.: IOP)')" />
             <button class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm" @click="removeLocationRow(i)" />
           </div>
           <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="addLocationRow"><span class="i-lucide-plus text-xs" /> Adicionar local</button>
@@ -3264,20 +3266,20 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <span class="i-lucide-list-checks text-sm" style="color: #B8860B" /> Conferência do dia → CRM
           </p>
           <p class="text-[11px] text-n-slate-10 leading-relaxed">
-            Ao marcar <b>Compareceu / Faltou / Cirurgia indicada</b> na lista do dia, o card do paciente move sozinho para a coluna escolhida — e as automações dessa coluna disparam.
+            Ao marcar <b>Compareceu / Faltou / {{ frase('indicacao_impressao', 'Cirurgia indicada') }}</b> na lista do dia, {{ frase('agenda.card_cliente_move', 'o card do paciente move sozinho para a coluna escolhida — e as automações dessa coluna disparam.') }}
           </p>
           <div class="cv-row cv-amber p-2.5 space-y-2">
             <p class="text-[10px] font-semibold text-n-slate-11">⏰ Prazo da conferência — sem conferir até o horário, nasce a tarefa "Concluir a conferência do dia" para a responsável</p>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <div>
-                <span class="cv-label block mb-0.5">Consultas — responsável</span>
+                <span class="cv-label block mb-0.5">{{ frase('conferencia_atendimentos', 'Consultas') }} — responsável</span>
                 <select v-model="attendanceOwners.consulta_user_id" class="cv-input w-full !h-8 text-xs">
                   <option value="">Ninguém (desligado)</option>
                   <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
                 </select>
               </div>
               <div>
-                <span class="cv-label block mb-0.5">Cirurgias — responsável</span>
+                <span class="cv-label block mb-0.5">{{ frase('conferencia_vendas', 'Cirurgias') }} — responsável</span>
                 <select v-model="attendanceOwners.cirurgia_user_id" class="cv-input w-full !h-8 text-xs">
                   <option value="">Ninguém (desligado)</option>
                   <option v-for="agent in agents" :key="agent.id" :value="String(agent.id)">{{ agent.name }}</option>
@@ -3303,9 +3305,9 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <div v-for="opt in [
               { key: 'attended_stage_id', label: '✓ Compareceu → mover card para' },
               { key: 'missed_stage_id', label: '✗ Faltou → mover card para' },
-              { key: 'indicated_stage_id', label: '🎯 Cirurgia indicada → mover card para' },
-              { key: 'surgery_done_stage_id', label: '🔪 Cirurgia realizada → mover card para' },
-              { key: 'surgery_missed_stage_id', label: '✗ Não veio à cirurgia → mover card para' },
+              { key: 'indicated_stage_id', label: frase('agenda.indicada_mover_card', '🎯 Cirurgia indicada → mover card para') },
+              { key: 'surgery_done_stage_id', label: frase('agenda.venda_realizada_mover_card', '🔪 Cirurgia realizada → mover card para') },
+              { key: 'surgery_missed_stage_id', label: frase('agenda.nao_veio_venda_mover_card', '✗ Não veio à cirurgia → mover card para') },
             ]" :key="opt.key">
               <span class="cv-label block mb-0.5">{{ opt.label }}</span>
               <select v-model="attendanceStages[opt.key]" class="cv-input w-full !h-8 text-xs">

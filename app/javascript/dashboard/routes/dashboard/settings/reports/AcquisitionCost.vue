@@ -17,6 +17,7 @@ import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
 import AreaChart from 'dashboard/components-next/cevico/AreaChart.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import CrmAPI from 'dashboard/api/crm';
+import { frase, termo, termoCap } from 'dashboard/helper/segmento';
 
 const route = useRoute();
 const isLoading = ref(true);
@@ -30,15 +31,15 @@ const peopleFilter = ref('all');
 
 const pal = useCevicoPalette({
   scope: 'report:acquisition_cost',
-  blocks: [
+  blocks: computed(() => [
     { id: 'cac', label: 'Os dois CACs', icon: 'i-lucide-piggy-bank' },
     { id: 'gasto', label: 'De onde vem o gasto', icon: 'i-lucide-wallet' },
     { id: 'canais', label: 'Por canal', icon: 'i-lucide-git-fork' },
     { id: 'campanhas', label: 'Por campanha', icon: 'i-lucide-megaphone' },
     { id: 'meses', label: 'Mês a mês', icon: 'i-lucide-activity' },
     { id: 'pacientes', label: 'Quem são', icon: 'i-lucide-users' },
-    { id: 'parceiros', label: 'Oftalmofácil', icon: 'i-lucide-handshake' },
-  ],
+    { id: 'parceiros', label: frase('dash.cac_bloco_parceiros', 'Oftalmofácil'), icon: 'i-lucide-handshake' },
+  ]),
 });
 const { cvVars, blockVars, blockFamily } = pal;
 
@@ -127,11 +128,11 @@ const CHANNEL_ICONS = {
   meta: 'i-lucide-instagram',
   organico: 'i-lucide-sprout',
 };
-const SOURCE_LABELS = {
-  crm: 'CRM (coluna Cirurgia Realizada)',
-  agenda: 'Agenda (presença na cirurgia)',
-  oftalmofacil: 'Oftalmofácil (data já passou)',
-};
+const sourceLabels = computed(() => ({
+  crm: frase('dash.cac_fonte_crm', 'CRM (coluna Cirurgia Realizada)'),
+  agenda: frase('dash.cac_fonte_agenda', 'Agenda (presença na cirurgia)'),
+  oftalmofacil: frase('dash.cac_fonte_parceiro', 'Oftalmofácil (data já passou)'),
+}));
 
 // ── avisos de cada fonte de gasto ──
 const spendNote = key => {
@@ -187,7 +188,7 @@ const channelBars = computed(() =>
     .map(c => ({
       key: c.key,
       label: c.label,
-      sub: `${fmtNum(c.patients)} paciente(s) · ${money(c.spend, 0)} em anúncio`,
+      sub: `${fmtNum(c.patients)} ${frase('dash.cliente_s', 'paciente(s)')} · ${money(c.spend, 0)} em anúncio`,
       values: [c.cac || 0],
       color: CHANNEL_COLORS[c.key],
     }))
@@ -199,7 +200,7 @@ const campaignBars = computed(() =>
   campaigns.value.map((c, i) => ({
     key: `${c.channel}-${c.name}`,
     label: c.name,
-    sub: `${c.channel === 'google' ? 'Google' : 'Meta'} · ${money(c.spend, 0)} · ${fmtNum(c.patients)} paciente(s) · retorno ${roasFmt(c.roas)}`,
+    sub: `${c.channel === 'google' ? 'Google' : 'Meta'} · ${money(c.spend, 0)} · ${fmtNum(c.patients)} ${frase('dash.cliente_s', 'paciente(s)')} · retorno ${roasFmt(c.roas)}`,
     values: [c.cac || 0],
     color: CHANNEL_COLORS[c.channel] || blockFamily('campanhas')[i % 4],
   }))
@@ -260,7 +261,7 @@ const contactHref = id =>
   id ? `/app/accounts/${route.params.accountId}/contacts/${id}` : null;
 const sources = computed(() =>
   Object.entries(data.value?.sources || {}).map(([k, v]) => ({
-    label: SOURCE_LABELS[k] || k,
+    label: sourceLabels.value[k] || k,
     value: v,
     color: { crm: '#0a84ff', agenda: '#30d158', oftalmofacil: '#ff9f0a' }[k],
   }))
@@ -274,7 +275,7 @@ const partner = computed(() => data.value?.partner || {});
     <CevicoHero
       :pal="pal"
       title="Financeiro & CAC"
-      subtitle="quanto custa cada paciente que operou · por canal e campanha · retorno do investimento"
+      :subtitle="frase('dash.sub_cac', 'quanto custa cada paciente que operou · por canal e campanha · retorno do investimento')"
       icon="i-lucide-piggy-bank"
     />
 
@@ -319,8 +320,8 @@ const partner = computed(() => data.value?.partner || {});
         </div>
         <p class="text-[11px] text-n-slate-9 mb-4">
           {{ dateBR(data.period.from) }} a {{ dateBR(data.period.to) }} ·
-          cliente = paciente cuja <b>primeira cirurgia realizada</b> caiu no
-          período (o 2º olho depois não conta de novo)
+          cliente = {{ termo('cliente') }} cuja <b>{{ frase('dash.cac_primeira_venda_realizada', 'primeira cirurgia realizada') }}</b>
+          {{ frase('dash.cac_caiu_no_periodo', 'caiu no período (o 2º olho depois não conta de novo)') }}
         </p>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
@@ -328,19 +329,19 @@ const partner = computed(() => data.value?.partner || {});
             glass
             label="CAC de anúncios"
             :value="orDash(s.cac_ads)"
-            :sub="`${money(sp.ads, 0)} em Google + Meta ÷ ${fmtNum(s.paid_patients)} paciente(s) que vieram dos anúncios`"
+            :sub="`${money(sp.ads, 0)} em Google + Meta ÷ ${fmtNum(s.paid_patients)} ${frase('dash.cac_clientes_dos_anuncios', 'paciente(s) que vieram dos anúncios')}`"
             :grad="blockFamily('cac')[0]"
           />
           <DashKpi
             glass
             label="CAC total (tecnologia e anúncios)"
             :value="orDash(s.cac_total)"
-            :sub="`${money(sp.total, 0)} (anúncios + WhatsApp + IA) ÷ ${fmtNum(s.patients)} paciente(s) novos`"
+            :sub="`${money(sp.total, 0)} (anúncios + WhatsApp + IA) ÷ ${fmtNum(s.patients)} ${frase('dash.cac_clientes_novos', 'paciente(s) novos')}`"
             :grad="blockFamily('cac')[1]"
           />
           <DashKpi
             glass
-            label="Pacientes operados (novos)"
+            :label="frase('dash.cac_clientes_operados_novos', 'Pacientes operados (novos)')"
             :value="s.patients || 0"
             :sub="`${fmtNum(s.paid_patients)} dos anúncios · ${fmtNum(s.patients - s.paid_patients)} orgânicos/indicação`"
             :grad="blockFamily('cac')[2]"
@@ -350,7 +351,7 @@ const partner = computed(() => data.value?.partner || {});
           <DashKpi
             compact
             glass
-            label="Receita das cirurgias"
+            :label="frase('dash.cac_receita_vendas', 'Receita das cirurgias')"
             :value="moneyShort(s.revenue)"
             :sub="`realizadas no período · ${moneyShort(s.paid_revenue)} vieram dos anúncios`"
           />
@@ -359,7 +360,7 @@ const partner = computed(() => data.value?.partner || {});
             glass
             label="Retorno dos anúncios"
             :value="roasFmt(s.roas_ads)"
-            sub="receita dos pacientes dos anúncios ÷ gasto em anúncio"
+            :sub="frase('dash.cac_sub_retorno_anuncios', 'receita dos pacientes dos anúncios ÷ gasto em anúncio')"
           />
           <DashKpi
             compact
@@ -377,13 +378,10 @@ const partner = computed(() => data.value?.partner || {});
           />
         </div>
         <p class="text-[11px] text-n-slate-9 mt-3">
-          CAC de anúncios "misturado" (gasto em anúncio ÷ todos os pacientes
-          novos, inclusive orgânicos):
+          {{ frase('dash.cac_misturado', 'CAC de anúncios "misturado" (gasto em anúncio ÷ todos os pacientes novos, inclusive orgânicos):') }}
           <b class="text-n-slate-11">{{ orDash(s.cac_ads_blended) }}</b>
           <template v-if="data.bulk_skipped">
-            · {{ fmtNum(data.bulk_skipped) }} cartão(ões) entraram em "Cirurgia
-            Realizada" por carga em massa no período e ficaram fora (sem data
-            confiável)
+            · {{ fmtNum(data.bulk_skipped) }} {{ frase('dash.cac_cartoes_carga_massa', 'cartão(ões) entraram em "Cirurgia Realizada" por carga em massa no período e ficaram fora (sem data confiável)') }}
           </template>
         </p>
       </div>
@@ -447,9 +445,7 @@ const partner = computed(() => data.value?.partner || {});
           <h2 class="text-sm font-bold text-n-slate-12">Por canal</h2>
         </div>
         <p class="text-[11px] text-n-slate-9 mb-4">
-          o canal é o primeiro carimbo do paciente: clique no anúncio que abre o
-          WhatsApp, ou a landing page (utm/gclid). Sem carimbo = orgânico /
-          indicação. O CAC por canal é só com anúncio.
+          {{ frase('dash.cac_explica_canal', 'o canal é o primeiro carimbo do paciente: clique no anúncio que abre o WhatsApp, ou a landing page (utm/gclid). Sem carimbo = orgânico / indicação. O CAC por canal é só com anúncio.') }}
         </p>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <div v-for="c in channels" :key="c.key" class="cv-sub p-4">
@@ -492,7 +488,7 @@ const partner = computed(() => data.value?.partner || {});
                 </p>
               </div>
               <div>
-                <p class="text-[10px] text-n-slate-9">Operados</p>
+                <p class="text-[10px] text-n-slate-9">{{ frase('dash.cac_operados', 'Operados') }}</p>
                 <p class="font-semibold text-n-slate-11">
                   {{ fmtNum(c.patients) }}
                 </p>
@@ -558,7 +554,7 @@ const partner = computed(() => data.value?.partner || {});
           :format="v => (v ? money(v, 0) : '—')"
           :label-width="15"
           :highlight-max="false"
-          empty-text="nenhuma campanha com gasto ou paciente no período"
+          :empty-text="frase('dash.cac_vazio_campanhas', 'nenhuma campanha com gasto ou paciente no período')"
         />
         <div
           v-else
@@ -602,7 +598,7 @@ const partner = computed(() => data.value?.partner || {});
                 </p>
               </div>
               <div>
-                <p class="text-[10px] text-n-slate-9">Operados</p>
+                <p class="text-[10px] text-n-slate-9">{{ frase('dash.cac_operados', 'Operados') }}</p>
                 <p class="font-semibold text-n-slate-11">
                   {{ fmtNum(c.patients) }}
                 </p>
@@ -637,7 +633,7 @@ const partner = computed(() => data.value?.partner || {});
             class="mb-5"
           />
           <p class="text-[11px] text-n-slate-9 mb-3">
-            e quanto custou cada paciente operado
+            {{ frase('dash.cac_quanto_custou_cliente', 'e quanto custou cada paciente operado') }}
           </p>
           <AreaChart
             :series="cacArea"
@@ -647,16 +643,14 @@ const partner = computed(() => data.value?.partner || {});
             :axis-format="axisShort"
             :axis-width="46"
             :legend="false"
-            unit="por paciente"
+            :unit="frase('dash.cac_por_cliente', 'por paciente')"
           />
           <div class="flex items-center gap-4 mt-2 text-[11px] text-n-slate-10">
             <span class="inline-flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-[#bf5af2]" /> CAC de
-              anúncios (anúncios ÷ pacientes dos anúncios)
+              <span class="w-2 h-2 rounded-full bg-[#bf5af2]" /> {{ frase('dash.cac_legenda_anuncios', 'CAC de anúncios (anúncios ÷ pacientes dos anúncios)') }}
             </span>
             <span class="inline-flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-[#ff9f0a]" /> CAC total
-              (tudo ÷ todos os pacientes novos)
+              <span class="w-2 h-2 rounded-full bg-[#ff9f0a]" /> {{ frase('dash.cac_legenda_total', 'CAC total (tudo ÷ todos os pacientes novos)') }}
             </span>
           </div>
         </template>
@@ -671,7 +665,7 @@ const partner = computed(() => data.value?.partner || {});
         <div class="flex items-center gap-2 mb-1 flex-wrap">
           <span class="cv-icon"><span class="i-lucide-users text-base" /></span>
           <h2 class="text-sm font-bold text-n-slate-12">
-            Quem são os pacientes do CAC
+            {{ frase('dash.cac_quem_sao', 'Quem são os pacientes do CAC') }}
           </h2>
           <div class="ml-auto flex items-center gap-1 flex-wrap">
             <button
@@ -705,7 +699,7 @@ const partner = computed(() => data.value?.partner || {});
           </div>
         </div>
         <p class="text-[11px] text-n-slate-9 mb-3">
-          de onde veio a data da 1ª cirurgia:
+          {{ frase('dash.cac_origem_data_primeira_venda', 'de onde veio a data da 1ª cirurgia:') }}
         </p>
         <ShareBar
           :items="sources"
@@ -718,8 +712,8 @@ const partner = computed(() => data.value?.partner || {});
           <table class="w-full text-xs">
             <thead>
               <tr class="text-left text-[10px] text-n-slate-9">
-                <th class="py-1.5 pr-3 font-semibold">Paciente</th>
-                <th class="py-1.5 pr-3 font-semibold">1ª cirurgia</th>
+                <th class="py-1.5 pr-3 font-semibold">{{ termoCap('cliente') }}</th>
+                <th class="py-1.5 pr-3 font-semibold">{{ frase('dash.cac_primeira_venda', '1ª cirurgia') }}</th>
                 <th class="py-1.5 pr-3 font-semibold">Canal</th>
                 <th class="py-1.5 pr-3 font-semibold">Campanha / origem</th>
                 <th class="py-1.5 font-semibold text-right">
@@ -769,7 +763,7 @@ const partner = computed(() => data.value?.partner || {});
             </tbody>
           </table>
           <p v-if="!shownPeople.length" class="text-[11px] text-n-slate-9 py-3">
-            nenhum paciente operado nesse recorte
+            {{ frase('dash.cac_vazio_clientes', 'nenhum paciente operado nesse recorte') }}
           </p>
         </div>
         <div
@@ -795,7 +789,7 @@ const partner = computed(() => data.value?.partner || {});
               {{ p.campaign || p.detail }}
             </p>
             <p class="text-[11px] text-n-slate-9">
-              1ª cirurgia {{ dateBR(p.date)
+              {{ frase('dash.cac_primeira_venda', '1ª cirurgia') }} {{ dateBR(p.date)
               }}<template v-if="p.revenue">
                 · {{ moneyShort(p.revenue) }}
               </template>
@@ -809,32 +803,31 @@ const partner = computed(() => data.value?.partner || {});
         <div class="flex items-center gap-2 mb-1">
           <span class="cv-icon"><span class="i-lucide-handshake text-base"/></span>
           <h2 class="text-sm font-bold text-n-slate-12">
-            Oftalmofácil (parceiros) — fora do CAC
+            {{ frase('dash.cac_parceiros_titulo', 'Oftalmofácil (parceiros) — fora do CAC') }}
           </h2>
         </div>
         <p class="text-[11px] text-n-slate-9 mb-4">
-          pacientes dos parceiros do hub não vêm dos nossos anúncios: ficam
-          aqui, à parte, para não baixar o CAC artificialmente.
+          {{ frase('dash.cac_parceiros_explica', 'pacientes dos parceiros do hub não vêm dos nossos anúncios: ficam aqui, à parte, para não baixar o CAC artificialmente.') }}
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <DashKpi
             compact
             glass
-            label="Pacientes operados"
+            :label="frase('dash.cac_clientes_operados', 'Pacientes operados')"
             :value="partner.patients || 0"
-            sub="1ª cirurgia no período"
+            :sub="frase('dash.cac_primeira_venda_periodo', '1ª cirurgia no período')"
           />
           <DashKpi
             compact
             glass
-            label="Valor das cirurgias"
+            :label="frase('dash.cac_valor_vendas', 'Valor das cirurgias')"
             :value="moneyShort(partner.revenue)"
-            sub="pago (ou cobrado) no Oftalmofácil"
+            :sub="frase('dash.cac_sub_valor_parceiro', 'pago (ou cobrado) no Oftalmofácil')"
           />
           <DashKpi
             compact
             glass
-            label="O que fica para a CEVICO"
+            :label="frase('dash.cac_fica_para_empresa', 'O que fica para a CEVICO')"
             :value="moneyShort(partner.result)"
             sub="cobrado − prestador − taxa da plataforma"
           />

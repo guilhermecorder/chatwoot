@@ -12,6 +12,7 @@ import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import CrmAPI from 'dashboard/api/crm';
 import { DOCTORS } from 'dashboard/helper/cevicoAgenda';
+import { frase, termo } from 'dashboard/helper/segmento';
 
 const { isAdmin } = useAdmin();
 const isLoading = ref(true);
@@ -22,13 +23,13 @@ const data = ref(null);
 // As cores dos médicos (DOCTORS[].color) são identidade e ficam como estão.
 const pal = useCevicoPalette({
   scope: 'report:medicos',
-  blocks: [
+  blocks: computed(() => [
     { id: 'kpis', label: 'Resumo do período', icon: 'i-lucide-gauge' },
     { id: 'ranking', label: 'Ranking de conversão', icon: 'i-lucide-trophy' },
-    { id: 'clinicas', label: 'Cirurgias por clínica', icon: 'i-lucide-building-2' },
-    { id: 'unidades', label: 'Consultas por unidade', icon: 'i-lucide-map-pin' },
-    { id: 'gestao', label: 'Gestão do time médico', icon: 'i-lucide-clipboard-list' },
-  ],
+    { id: 'clinicas', label: frase('dash.vendas_por_clinica', 'Cirurgias por clínica'), icon: 'i-lucide-building-2' },
+    { id: 'unidades', label: frase('dash.atendimentos_por_unidade', 'Consultas por unidade'), icon: 'i-lucide-map-pin' },
+    { id: 'gestao', label: frase('dash.gestao_time_profissional', 'Gestão do time médico'), icon: 'i-lucide-clipboard-list' },
+  ]),
 });
 const { cvVars, blockVars, blockFamily, tileGradAt } = pal;
 
@@ -181,7 +182,7 @@ onMounted(() => {
       <CevicoHero
         :pal="pal"
         title="Dashboard dos Médicos"
-        subtitle="quem mais converte consulta em cirurgia · indicações · NPS · cirurgias por clínica"
+        :subtitle="frase('dash.sub_dashboard_profissionais', 'quem mais converte consulta em cirurgia · indicações · NPS · cirurgias por clínica')"
         icon="i-lucide-stethoscope"
       />
 
@@ -199,7 +200,7 @@ onMounted(() => {
           :class="activeTab === 'gestao' ? 'cv-seg-on' : ''"
           @click="activeTab = 'gestao'"
         >
-          <span class="i-lucide-clipboard-list text-sm" /> Gestão do time médico
+          <span class="i-lucide-clipboard-list text-sm" /> {{ frase('dash.gestao_time_profissional', 'Gestão do time médico') }}
         </button>
       </div>
 
@@ -214,7 +215,7 @@ onMounted(() => {
       <div v-else-if="activeTab === 'gestao' && isAdmin" class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('gestao')">
         <div class="flex items-center gap-2 mb-1 flex-wrap">
           <span class="cv-icon"><span class="i-lucide-clipboard-list text-base" /></span>
-          <h2 class="text-sm font-bold text-n-slate-12">Gestão do time médico</h2>
+          <h2 class="text-sm font-bold text-n-slate-12">{{ frase('dash.gestao_time_profissional', 'Gestão do time médico') }}</h2>
           <span
             class="cv-chip cv-chip-wrap ml-auto"
             :class="profileSaveState === 'error' ? 'cv-red' : ''"
@@ -229,7 +230,7 @@ onMounted(() => {
           </span>
         </div>
         <p class="text-xs text-n-slate-10 mb-5">
-          O raio-X de gestão de cada médico — status, forças, pontos a desenvolver e as suas anotações.
+          {{ frase('dash.raio_x_gestao_profissional', 'O raio-X de gestão de cada médico — status, forças, pontos a desenvolver e as suas anotações.') }}
           Só administradores veem esta aba.
         </p>
 
@@ -252,7 +253,7 @@ onMounted(() => {
                 <input
                   v-model="d.profile.specialty"
                   class="w-full text-[11px] bg-transparent border-b border-transparent hover:border-n-weak focus:border-n-brand focus:outline-none text-n-slate-10"
-                  placeholder="Especialidade (ex.: catarata, refrativa, córnea…)"
+                  :placeholder="frase('dash.ph_especialidade', 'Especialidade (ex.: catarata, refrativa, córnea…)')"
                 />
               </div>
               <button
@@ -285,7 +286,7 @@ onMounted(() => {
             <div v-if="d.row" class="grid grid-cols-3 gap-1.5 mb-3">
               <div class="cv-stat text-center">
                 <p class="text-sm font-bold text-n-slate-12">{{ d.row.consultations }}</p>
-                <p class="cv-label">consultas</p>
+                <p class="cv-label">{{ termo('atendimentos') }}</p>
               </div>
               <div class="cv-stat text-center">
                 <p class="text-sm font-bold" :style="{ color: d.row.conversion_rate >= 50 ? '#059669' : '#B45309' }">
@@ -365,7 +366,7 @@ onMounted(() => {
               <input
                 v-model="newDoctorName"
                 class="cv-input flex-1 min-w-0 !text-xs text-n-slate-12"
-                placeholder="Dr(a). Nome"
+                :placeholder="frase('dash.ph_nome_profissional', 'Dr(a). Nome')"
                 @keydown.enter.prevent="addDoctor"
               />
               <button
@@ -386,7 +387,7 @@ onMounted(() => {
           <DashKpi
             compact
             glass
-            label="Consultas realizadas"
+            :label="frase('dash.atendimentos_realizados', 'Consultas realizadas')"
             :value="totals.consultations"
             :grad="blockFamily('kpis')[0]"
             :state="goals.stateFor('consultations_attended')"
@@ -395,14 +396,14 @@ onMounted(() => {
           <DashKpi
             compact
             glass
-            label="Viraram cirurgia"
+            :label="frase('dash.viraram_venda', 'Viraram cirurgia')"
             :value="totals.conversions"
             :grad="blockFamily('kpis')[1]"
           />
           <DashKpi
             compact
             glass
-            label="Cirurgias realizadas"
+            :label="frase('vendas_realizadas', 'Cirurgias realizadas')"
             :value="totals.surgeriesDone"
             :grad="blockFamily('kpis')[2]"
             :state="goals.stateFor('surgeries_done')"
@@ -426,14 +427,14 @@ onMounted(() => {
         <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('ranking')">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
             <span class="cv-icon"><span class="i-lucide-trophy text-base" /></span>
-            <h2 class="text-sm font-bold text-n-slate-12">Conversão de consulta em cirurgia — ranking</h2>
+            <h2 class="text-sm font-bold text-n-slate-12">{{ frase('dash.ranking_conversao', 'Conversão de consulta em cirurgia — ranking') }}</h2>
           </div>
           <p class="text-xs text-n-slate-10 mb-5">
-            conversão = pacientes que o médico INDICOU e que têm cirurgia marcada (rastreado pelo telefone do contato)
+            {{ frase('dash.explica_conversao', 'conversão = pacientes que o médico INDICOU e que têm cirurgia marcada (rastreado pelo telefone do contato)') }}
           </p>
 
           <div v-if="!data.doctors?.length" class="text-center py-10 text-n-slate-10 text-sm">
-            Nenhuma consulta com médico no período — os dados vêm da conferência do dia na Agenda.
+            {{ frase('dash.vazio_atendimentos_profissional_agenda', 'Nenhuma consulta com médico no período — os dados vêm da conferência do dia na Agenda.') }}
           </div>
 
           <div v-else class="space-y-3">
@@ -459,7 +460,7 @@ onMounted(() => {
               <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
                 <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.consultations }}</p>
-                  <p class="text-[10px] text-n-slate-10">consultas</p>
+                  <p class="text-[10px] text-n-slate-10">{{ termo('atendimentos') }}</p>
                 </div>
                 <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.show_rate }}%</p>
@@ -467,15 +468,15 @@ onMounted(() => {
                 </div>
                 <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.indications }}</p>
-                  <p class="text-[10px] text-n-slate-10">indicações ({{ row.indication_rate }}%)</p>
+                  <p class="text-[10px] text-n-slate-10">{{ frase('dash.indicacoes_min', 'indicações') }} ({{ row.indication_rate }}%)</p>
                 </div>
                 <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.conversions }}</p>
-                  <p class="text-[10px] text-n-slate-10">viraram cirurgia</p>
+                  <p class="text-[10px] text-n-slate-10">{{ frase('dash.viraram_venda_min', 'viraram cirurgia') }}</p>
                 </div>
                 <div class="cv-stat">
                   <p class="text-base font-bold text-n-slate-12">{{ row.surgeries_done }}</p>
-                  <p class="text-[10px] text-n-slate-10">cirurgias realizadas</p>
+                  <p class="text-[10px] text-n-slate-10">{{ frase('dash.vendas_realizadas_min', 'cirurgias realizadas') }}</p>
                 </div>
                 <div class="cv-stat">
                   <p class="text-base font-bold" :style="{ color: npsColor(row.nps_avg) }">
@@ -497,12 +498,12 @@ onMounted(() => {
         <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('clinicas')">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
             <span class="cv-icon"><span class="i-lucide-building-2 text-base" /></span>
-            <h2 class="text-sm font-bold text-n-slate-12">Volume de cirurgias por clínica</h2>
+            <h2 class="text-sm font-bold text-n-slate-12">{{ frase('dash.volume_vendas_por_clinica', 'Volume de cirurgias por clínica') }}</h2>
           </div>
-          <p class="text-xs text-n-slate-10 mb-5">IOP (geralmente PRK) · Ocular Surgery (geralmente Lasik) — no período selecionado</p>
+          <p class="text-xs text-n-slate-10 mb-5">{{ frase('dash.sub_vendas_por_clinica', 'IOP (geralmente PRK) · Ocular Surgery (geralmente Lasik) — no período selecionado') }}</p>
 
           <div v-if="!data.surgeries_by_clinic?.length" class="text-center py-8 text-n-slate-10 text-sm">
-            Nenhuma cirurgia agendada no período.
+            {{ frase('dash.vazio_vendas_agendadas', 'Nenhuma cirurgia agendada no período.') }}
           </div>
           <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <div
@@ -523,7 +524,7 @@ onMounted(() => {
           </div>
           <p class="text-[10px] text-n-slate-9 mt-4 flex items-center gap-1.5">
             <span class="i-lucide-info text-xs" />
-            A ocupação da sala cirúrgica (dia/semana/mês) fica na Agenda → trilho Cirurgias, seguindo as janelas configuradas.
+            {{ frase('dash.nota_ocupacao_sala', 'A ocupação da sala cirúrgica (dia/semana/mês) fica na Agenda → trilho Cirurgias, seguindo as janelas configuradas.') }}
           </p>
         </div>
 
@@ -531,12 +532,12 @@ onMounted(() => {
         <div class="cv-block p-5 sm:p-6 mb-6" :style="blockVars('unidades')">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
             <span class="cv-icon"><span class="i-lucide-map-pin text-base" /></span>
-            <h2 class="text-sm font-bold text-n-slate-12">Consultas por unidade</h2>
+            <h2 class="text-sm font-bold text-n-slate-12">{{ frase('dash.atendimentos_por_unidade', 'Consultas por unidade') }}</h2>
           </div>
-          <p class="text-xs text-n-slate-10 mb-5">volume e taxa de comparecimento em cada unidade da clínica</p>
+          <p class="text-xs text-n-slate-10 mb-5">{{ frase('dash.sub_atendimentos_por_unidade', 'volume e taxa de comparecimento em cada unidade da clínica') }}</p>
 
           <div v-if="!data.consultations_by_unit?.length" class="text-center py-6 text-n-slate-10 text-sm">
-            Nenhuma consulta no período.
+            {{ frase('dash.vazio_atendimentos_periodo', 'Nenhuma consulta no período.') }}
           </div>
           <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div
@@ -547,7 +548,7 @@ onMounted(() => {
               <div class="flex items-center gap-2 mb-2">
                 <p class="text-sm font-bold text-n-slate-12 flex-1">{{ u.label }}</p>
                 <span class="text-xl font-bold text-n-slate-12">{{ u.count }}</span>
-                <span class="text-[10px] text-n-slate-9">consultas</span>
+                <span class="text-[10px] text-n-slate-9">{{ termo('atendimentos') }}</span>
               </div>
               <div class="flex items-center justify-between text-xs mb-1">
                 <span class="text-n-slate-11">Comparecimento</span>

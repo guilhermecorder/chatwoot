@@ -55,7 +55,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Rodada 2: ler o domínio público = nó "Domínio público" da árvore (só admin)
   before_action -> { require_access('configuracoes.dominio', :view) }, only: [:public_domain]
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
-  before_action :require_administrator!, only: %i[update_agent_grants update_agent_access update_access_roles access_admin update_company]
+  before_action :require_administrator!, only: %i[update_agent_grants update_agent_access update_access_roles access_admin update_company update_company_image]
 
   # 🔐 Rodada 2 (achados #295/#337): a MESMA rota serve admin e equipe, mas
   # quem não tem a área "settings" recebe o JSON enxuto — sem Roteiro, prompts,
@@ -199,6 +199,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def update_company
     company = Cevico::Company.save!(Current.account, params.fetch(:company, {}).permit!.to_h)
     render json: { company: company.to_h, access: Cevico::Access.for(Current.account, Current.user, account_user: Current.account_user).to_h }
+  end
+
+  # POST update_company_image — 🎨 Personalização (28/10): logo, logo escuro,
+  # ícone ou imagem do cabeçalho da EMPRESA (multipart: kind + file | remove)
+  def update_company_image
+    company = Cevico::Company.save_image!(
+      Current.account, params[:kind].to_s,
+      file: params[:file], remove: ActiveModel::Type::Boolean.new.cast(params[:remove]) == true
+    )
+    render json: { company: company.to_h }
+  rescue ArgumentError => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   def update

@@ -32,6 +32,11 @@ import BugReportDrawer from 'dashboard/components-next/radar/BugReportDrawer.vue
 import CevicoContextMenu from 'dashboard/components-next/cevico/CevicoContextMenu.vue';
 import PatientChatHost from 'dashboard/components-next/cevico/PatientChatHost.vue';
 import { useCallsStore } from 'dashboard/stores/calls';
+// 🎨 Personalização por conta: dicionário global + ícone da aba
+import {
+  aplicarDicionarioGlobal,
+  pararDicionarioGlobal,
+} from 'dashboard/helper/dicionarioGlobal';
 
 export default {
   components: {
@@ -93,6 +98,10 @@ export default {
       if (company?.configured && company.name) return company.name;
       return this.baseTabTitle;
     },
+    // 🎨 Personalização por conta: a empresa da conta aberta
+    cevicoCompany() {
+      return this.$store.getters['crm/getCompany'] || null;
+    },
     showUpgradePage() {
       return this.upgradePageRef?.shouldShowUpgradePage;
     },
@@ -122,6 +131,18 @@ export default {
       },
       immediate: true,
     },
+    // 🎨 Personalização por conta: (re)liga o dicionário global e troca o
+    // ícone da aba quando a empresa muda (troca de conta, salvar na tela)
+    cevicoCompany: {
+      handler(company) {
+        this.$nextTick(() => {
+          aplicarDicionarioGlobal(company, this.$el?.ownerDocument?.getElementById('app'));
+          this.aplicarIconeDaEmpresa(company);
+        });
+      },
+      immediate: true,
+      deep: true,
+    },
     isSmallScreen: {
       handler() {
         const { LAYOUT_TYPES } = wootConstants;
@@ -138,7 +159,19 @@ export default {
       immediate: true,
     },
   },
+  beforeUnmount() {
+    pararDicionarioGlobal();
+  },
   methods: {
+    // 🎨 ícone da aba: o da EMPRESA quando existe; senão volta ao da instalação
+    aplicarIconeDaEmpresa(company) {
+      const icone = company?.images?.icon || '';
+      const links = document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"]');
+      links.forEach(link => {
+        if (!link.dataset.hrefOriginal) link.dataset.hrefOriginal = link.getAttribute('href') || '';
+        link.setAttribute('href', icone || link.dataset.hrefOriginal);
+      });
+    },
     toggleMobileSidebar() {
       this.isMobileSidebarOpen = !this.isMobileSidebarOpen;
     },

@@ -29,6 +29,66 @@ feat/hub-saude → push (--no-verify) → docker-build por workflow_dispatch
 migration). Falta ele colar no EasyPanel (web + sidekiq) e Implantar;
 depois: Treinar → Etapas → "Concluir Treino 1 e ir pra Treino 2".
 
+## RODADA 46 — 28/10 🔧 PERSONALIZAÇÃO POR CONTA — o sistema vira coringa POR DENTRO (branch `feat/personalizacao`, base 079ab65 = a imagem da Life; NÃO commitada, aguarda "pode subir")
+Ele (28/10): "identificar os elementos que conduzem à medicina (médico, consulta,
+agendamento…) e ter nas Configurações um ambiente de personalização para trocar
+imagens, títulos, nomes, por dentro do sistema, para a Life, a ótica ou qualquer
+negócio — sem depender de IA"; depois: "vamos avançar para a solução mais completa".
+Inventário + proposta: ~/Desktop/CLAUDE CODE/HUB/PERSONALIZACAO_POR_DENTRO_2026-10-28.md.
+Manual no repo: docs/PERSONALIZACAO.md. Resolução em TODO lugar: conta > segmento > clínica.
+- **Servidor** — `Cevico::Company` ganhou `phrases` (frases inteiras), `labels`
+  (nomes dos ambientes), `dictionary` (dicionário global: enabled explícito ou
+  automático = ligado fora da clínica; pares próprios ou derivados do vocabulário),
+  `visual` (nome do sistema, paleta, marca d'água, acento), `images` (URLs dos
+  anexos) + `save!` sanitizando tudo e `save_image!` (image/*, ≤5 MB).
+  `CrmSetting` com `has_one_attached :brand_{logo,logo_dark,icon,hero}`.
+  `POST crm/settings/update_company_image` (multipart kind + file | remove).
+  Sem migration. Spec nova `spec/services/cevico/company_personalizacao_spec.rb`
+  (7 verdes). O lint `setting_merge_lint_spec` acusa `health_controller.rb:79`
+  — pré-existente na feat/hub-saude (rodada 44), não é desta rodada.
+- **Motor (frontend)** — `helper/segmento.js`: `EMPRESA` (reativo) +
+  `definirEmpresa` (o store do CRM chama ao receber `settings.company`);
+  `termo`/`frase` consultam a conta antes do `window.SEGMENTO`; novos
+  `nomeAmbiente`, `imagemEmpresa`, `visualEmpresa`, `marcaDaguaLigada`;
+  `nomeSistemaHero` usa o nome do sistema da conta.
+  `helper/dicionarioGlobal.js`: troca de palavras em TODAS as telas (nós de
+  texto + title/placeholder/aria-label, MutationObserver, idempotente, preserva
+  caixa, fronteira de palavra com acento) — NUNCA em conversas/mensagens/campos/
+  `[data-sem-dicionario]`. Ligado/religado pelo `Dashboard.vue` (watch da empresa),
+  que também troca o ícone da aba. `helper/ambientesCatalogo.js` (45 ambientes,
+  rota → chave) — Sidebar: 89 rótulos do menu passam por `nomeAmbiente`;
+  `CevicoHero` renomeia o título pela rota e mostra a imagem do cabeçalho da
+  conta (ou nada, sem marca d'água); `Logo.vue` usa o ícone da conta;
+  `useCevicoPalette`: paleta padrão da empresa antes da cor do dia;
+  `InicioPage` idem no cabeçalho. CSS `.cevico-hero-eye--propria`.
+- **Tela** — Configurações → **Personalização** (`settings/empresa`, era
+  "Identidade da empresa"; ícone paleta): Quem somos · **Identidade visual**
+  (4 uploads com prévia, nome do sistema, paleta padrão, marca d'água) ·
+  **Palavras** (as 11 + **Dicionário global** Automático/Ligado/Desligado com
+  pares em uso e pares próprios) · **Frases das telas** (busca, por tela,
+  padrão em cinza; 44 do segmento + 525 das telas adaptadas) · **Nomes dos
+  ambientes** (45, por grupo) · Unidades · **Equipe, listas e meta** (a tela
+  do coringa embutida com prop `embutido`, salva sozinha) · Assistente ·
+  Módulos · Site público. Um "Salvar personalização" para tudo (menos o bloco
+  embutido).
+- **Telas adaptadas ao motor** (4 agentes em paralelo, `frase('tela.chave',
+  'Texto de hoje')` + catálogos em `helper/frases/*.js`; padrão byte a byte =
+  clínica idêntica): Meu Painel (213 chamadas / 184 chaves; consts →
+  computed), Agenda + Ajustes + cevicoAgenda.js (149 / 105 + 9 reusadas do
+  segmento), Agendamentos + Notificações (88 / 61), Espaço do Paciente +
+  PatientNoteForm (73 / 44), Visão geral (51 / 33), Dashboard dos Médicos +
+  Agenda + CRM + Financeiro & CAC (117 / 98). ≈ 690 textos trocados.
+  Deixados de propósito: constantes de módulo do cevicoAgenda.js (KINDS/TYPES/
+  ORIGINS — o dicionário global cobre), listas de DADOS (procedimentos,
+  problemas, exames), chaves/comparações, nomes de médicos, 3 textos >300 chars.
+- **Ambiente local**: ~/hub puxado de 6e8d049 → 079ab65 (fast-forward); gems
+  reinstaladas no container rails (`bundle install` + restart); pnpm do vite
+  reinstalado (faltava @chatwoot/pico-search).
+- Fora desta rodada (fase seguinte): ficha clínica do Espaço do Cliente por
+  ramo, etapas do funil renomeáveis nos KPIs/robôs, páginas públicas CEVICO,
+  Copywriter/Páginas com prompt CEVICO, demais ~130 telas menores (cobertas
+  pelo dicionário global).
+
 ## RODADA 44 — 16/10 ✅ ETAPAS (CONCLUIR E IR PRA PRÓXIMA) + TREINO EXTRA (subida — ver SUBIDA 16/10)
 Ele (16/10): "concluí as primeiras 8 semanas, mas no treino não tem as
 próximas 8 pra gente periodizar — preciso concluir e já passar pro

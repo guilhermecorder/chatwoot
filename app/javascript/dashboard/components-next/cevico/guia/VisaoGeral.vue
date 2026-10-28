@@ -14,6 +14,7 @@ import { useRouter } from 'vue-router';
 import { useAccount } from 'dashboard/composables/useAccount';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
+import { frase, termo, termoCap } from 'dashboard/helper/segmento';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import FunnelSteps from 'dashboard/components-next/cevico/FunnelSteps.vue';
@@ -184,7 +185,7 @@ const ctxOcupacao = computed(() => {
   const m = agenda.value.mix;
   const aval = m.tipos.find(t => t.key === 'avaliacao');
   const exa = m.tipos.find(t => t.key === 'exames');
-  return `${n(o.ocupadas)} de ${n(o.vagas)} horários. Avaliação ${pctTxt(aval?.pct)} · exames ${pctTxt(exa?.pct)} · particular ${pctTxt(m.particular.pct)} · Oftalmofácil ${pctTxt(m.oftalmofacil.pct)}.`;
+  return `${n(o.ocupadas)} de ${n(o.vagas)} horários. ${frase('visao.ctx_avaliacao', 'Avaliação')} ${pctTxt(aval?.pct)} · ${frase('visao.ctx_exames', 'exames')} ${pctTxt(exa?.pct)} · particular ${pctTxt(m.particular.pct)} · ${frase('visao.oftalmofacil', 'Oftalmofácil')} ${pctTxt(m.oftalmofacil.pct)}.`;
 });
 const ctxConfirmacao = computed(() => {
   const a = agenda.value;
@@ -199,19 +200,19 @@ const ctxComparecimento = computed(() => {
 const ctxIndicacao = computed(() => {
   const c = cirurgia.value;
   if (!c) return '';
-  return `${n(c.sem_indicacao)} saíram sem indicação. ${n(c.fecharam)} fecharam (${pctTxt(c.taxa_fechamento)}), ${n(c.aguardando)} ainda não.`;
+  return `${n(c.sem_indicacao)} ${frase('visao.sairam_sem_indicacao', 'saíram sem indicação')}. ${n(c.fecharam)} fecharam (${pctTxt(c.taxa_fechamento)}), ${n(c.aguardando)} ainda não.`;
 });
 const ctxJornada = computed(() => {
   const j = cirurgia.value?.jornada;
-  if (!j?.ate_cirurgia) return 'Ainda sem cirurgia realizada nesta turma.';
-  return `Da chegada à cirurgia: média de ${dias(j.ate_cirurgia.media_dias)} (mediana ${dias(j.ate_cirurgia.mediana_dias)}), ${n(j.ate_cirurgia.amostra)} pacientes. ${n(j.pos_op)} retornos de pós-op no período.`;
+  if (!j?.ate_cirurgia) return frase('visao.sem_venda_turma', 'Ainda sem cirurgia realizada nesta turma.');
+  return `${frase('visao.da_chegada_venda', 'Da chegada à cirurgia')}: média de ${dias(j.ate_cirurgia.media_dias)} (mediana ${dias(j.ate_cirurgia.mediana_dias)}), ${n(j.ate_cirurgia.amostra)} ${termo('clientes')}. ${n(j.pos_op)} ${frase('visao.retornos_pos_op', 'retornos de pós-op no período')}.`;
 });
 const ctxCac = computed(() => {
   const d = dinheiro.value;
   if (!d) return '';
   const g = d.canais.find(c => c.key === 'google');
   const m = d.canais.find(c => c.key === 'meta');
-  return `Google ${g?.cac ? brl(g.cac) : '—'} · Meta ${m?.cac ? brl(m.cac) : '—'} por paciente. Ticket médio ${brl(d.ticket_medio)}.`;
+  return `Google ${g?.cac ? brl(g.cac) : '—'} · Meta ${m?.cac ? brl(m.cac) : '—'} por ${termo('cliente')}. Ticket médio ${brl(d.ticket_medio)}.`;
 });
 const ctxGastos = computed(() => {
   const g = dinheiro.value?.gastos;
@@ -221,7 +222,7 @@ const ctxGastos = computed(() => {
 const ctxConversoes = computed(() => {
   const c = dinheiro.value?.conversoes;
   if (!c) return '';
-  return `Por agendamento ${pctTxt(c.por_agendamento)} · por comparecimento ${pctTxt(c.por_comparecimento)} · por indicação ${pctTxt(c.por_indicacao)}.`;
+  return `Por agendamento ${pctTxt(c.por_agendamento)} · por comparecimento ${pctTxt(c.por_comparecimento)} · ${frase('visao.por_indicacao', 'por indicação')} ${pctTxt(c.por_indicacao)}.`;
 });
 
 // ── gráficos ──
@@ -307,7 +308,7 @@ const ctxVolume = v => {
   if (v.key === 'agendamentos')
     return `${n(v.novos)} leads novos · ${n(v.base)} da base`;
   if (v.key === 'cirurgias_realizadas' && v.sem_coluna)
-    return 'Nenhum funil tem a coluna "Cirurgia Realizada".';
+    return frase('visao.sem_coluna_venda_realizada', 'Nenhum funil tem a coluna "Cirurgia Realizada".');
   if (v.pessoas_distintas !== undefined && v.pessoas_distintas !== v.valor)
     return `${n(v.valor)} ${v.medida} de ${n(v.pessoas_distintas)} pessoa(s)`;
   return '';
@@ -330,7 +331,7 @@ const areaAgenda = computed(() => {
   return [
     {
       key: 'consultas',
-      label: 'Consultas',
+      label: termoCap('atendimentos'),
       color: cor.value,
       values: s.consultas,
     },
@@ -352,13 +353,13 @@ const barrasMix = computed(() => {
     color: corGrad2.value,
   }));
   rows.push({
-    label: 'Particular',
+    label: frase('visao.particular', 'Particular'),
     values: [m.particular.count],
     sub: pctTxt(m.particular.pct),
     color: corGrad3.value,
   });
   rows.push({
-    label: 'Oftalmofácil',
+    label: frase('visao.oftalmofacil', 'Oftalmofácil'),
     values: [m.oftalmofacil.count],
     sub: pctTxt(m.oftalmofacil.pct),
     color: corGrad3.value,
@@ -408,13 +409,13 @@ const funilCirurgia = computed(() => {
   return [
     {
       key: 'realizadas',
-      label: 'Consultas',
+      label: termoCap('atendimentos'),
       value: c.consultas_realizadas,
       color: corDeep.value,
     },
     {
       key: 'indicadas',
-      label: 'Indicação',
+      label: frase('visao.indicacao', 'Indicação'),
       value: c.indicadas,
       color: cor.value,
     },
@@ -464,8 +465,8 @@ const barrasCanais = computed(() =>
     label: c.label.replace(' / indicação', ''),
     values: [c.spend, c.revenue],
     sub: c.cac
-      ? `CAC ${brl(c.cac)} · ${n(c.patients)} pacientes`
-      : `${n(c.patients)} pacientes`,
+      ? `CAC ${brl(c.cac)} · ${n(c.patients)} ${termo('clientes')}`
+      : `${n(c.patients)} ${termo('clientes')}`,
   }))
 );
 const historico = computed(() => dinheiro.value?.historico || []);
@@ -478,7 +479,7 @@ const barrasMedicos = computed(() =>
   medicos.value.map(m => ({
     label: nomeCurto(m.doctor),
     values: [m.ocupacao ?? 0, m.show_rate],
-    sub: `${n(m.consultations)} consultas`,
+    sub: `${n(m.consultations)} ${termo('atendimentos')}`,
   }))
 );
 const barrasMedicosCirurgia = computed(() =>
@@ -585,7 +586,7 @@ const pessoaSub = p => {
       <!-- ══ 1–5 · ENTRADA ══ -->
       <CvBloco
         titulo="Quanto entrou e quanto virou"
-        subtitulo="Contatos novos pelas portas de entrada, até o orçamento e até a consulta marcada"
+        :subtitulo="frase('visao.sub_entrada', 'Contatos novos pelas portas de entrada, até o orçamento e até a consulta marcada')"
         tom="dia"
         icon="i-lucide-door-open"
       >
@@ -629,7 +630,7 @@ const pessoaSub = p => {
               "
             />
             <CvIndicador
-              rotulo="Agendaram consulta (novos)"
+              :rotulo="frase('visao.agendaram_atendimento_novos', 'Agendaram consulta (novos)')"
               :valor="n(entrada.agendaram_novos.valor)"
               :comparacao="
                 cmp(
@@ -642,7 +643,7 @@ const pessoaSub = p => {
               @abrir="
                 abrir(
                   'agendaram',
-                  'Agendaram consulta (leads novos)',
+                  frase('visao.agendaram_atendimento_leads_novos', 'Agendaram consulta (leads novos)'),
                   n(entrada.agendaram_novos.valor),
                   cmp(
                     entrada.agendaram_novos.valor,
@@ -652,7 +653,7 @@ const pessoaSub = p => {
               "
             />
             <CvIndicador
-              rotulo="Taxa novo → consulta"
+              :rotulo="frase('visao.taxa_novo_atendimento', 'Taxa novo → consulta')"
               :valor="pctTxt(entrada.taxa_agendamento)"
               :comparacao="
                 cmpPct(
@@ -677,7 +678,7 @@ const pessoaSub = p => {
               <span class="cvg-grafico-titulo">
                 <span>Funil do período</span>
                 <span
-                  >{{ pctTxt(entrada.taxa_agendamento) }} viram consulta</span
+                  >{{ pctTxt(entrada.taxa_agendamento) }} {{ frase('visao.viram_atendimento', 'viram consulta') }}</span
                 >
               </span>
               <div class="cvg-grafico-corpo">
@@ -849,7 +850,7 @@ const pessoaSub = p => {
               rotulo="Agenda ocupada"
               :valor="pctTxt(agenda.ocupacao.pct)"
               :comparacao="{
-                texto: `${n(agenda.ativas)} consultas no período`,
+                texto: `${n(agenda.ativas)} ${termo('atendimentos')} no período`,
                 estado: 'neutro',
               }"
               :contexto="ctxOcupacao"
@@ -864,7 +865,7 @@ const pessoaSub = p => {
               rotulo="Confirmaram"
               :valor="n(agenda.confirmaram)"
               :comparacao="{
-                texto: `${pctTxt(agenda.taxa_confirmacao)} das consultas`,
+                texto: `${pctTxt(agenda.taxa_confirmacao)} das ${termo('atendimentos')}`,
                 estado: estadoTaxa(agenda.taxa_confirmacao, 70, 50),
               }"
               :contexto="ctxConfirmacao"
@@ -887,7 +888,7 @@ const pessoaSub = p => {
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
                 <span>Ocupação e mix</span>
-                <span>{{ n(agenda.mix.total) }} consultas</span>
+                <span>{{ n(agenda.mix.total) }} {{ termo('atendimentos') }}</span>
               </span>
               <div class="cvg-grafico-corpo">
                 <div class="cvg-anel">
@@ -925,7 +926,7 @@ const pessoaSub = p => {
             </div>
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
-                <span>Consultas × compareceram</span>
+                <span>{{ frase('visao.atendimentos_x_compareceram', 'Consultas × compareceram') }}</span>
                 <span>{{ rotuloBalde }}</span>
               </span>
               <div class="cvg-grafico-corpo">
@@ -933,7 +934,7 @@ const pessoaSub = p => {
                   :series="areaAgenda"
                   :labels="series?.rotulos || []"
                   :height="150"
-                  unit="consultas"
+                  :unit="termo('atendimentos')"
                 />
               </div>
             </div>
@@ -956,41 +957,41 @@ const pessoaSub = p => {
 
       <!-- ══ 9–10 · CIRURGIA E JORNADA ══ -->
       <CvBloco
-        titulo="Cirurgia e jornada"
-        subtitulo="Das consultas realizadas, quem saiu com indicação, quem fechou e quanto tempo leva"
+        :titulo="frase('visao.bloco_venda_jornada', 'Cirurgia e jornada')"
+        :subtitulo="frase('visao.sub_venda_jornada', 'Das consultas realizadas, quem saiu com indicação, quem fechou e quanto tempo leva')"
         icon="i-lucide-stethoscope"
       >
         <div class="cvg-bloco-pilha">
           <div class="cvg-fila cvg-fila--3">
             <CvIndicador
-              rotulo="Indicações de cirurgia"
+              :rotulo="frase('indicacoes_venda', 'Indicações de cirurgia')"
               :valor="n(cirurgia.indicadas)"
               :comparacao="{
-                texto: `${pctTxt(cirurgia.taxa_indicacao)} das ${n(cirurgia.consultas_realizadas)} consultas realizadas`,
+                texto: `${pctTxt(cirurgia.taxa_indicacao)} das ${n(cirurgia.consultas_realizadas)} ${frase('visao.atendimentos_realizados_min', 'consultas realizadas')}`,
                 estado: 'neutro',
               }"
               :contexto="ctxIndicacao"
               heroi
-              pe="quem foi indicado"
+              :pe="frase('visao.quem_foi_indicado', 'quem foi indicado')"
               @abrir="
                 abrir(
                   'indicadas',
-                  'Indicações de cirurgia',
+                  frase('indicacoes_venda', 'Indicações de cirurgia'),
                   n(cirurgia.indicadas)
                 )
               "
             />
             <CvIndicador
-              rotulo="Fecharam cirurgia"
+              :rotulo="frase('visao.fecharam_venda', 'Fecharam cirurgia')"
               :valor="n(cirurgia.fecharam)"
               :comparacao="{
                 texto: `${pctTxt(cirurgia.taxa_fechamento)} das indicações`,
                 estado: estadoTaxa(cirurgia.taxa_fechamento, 40, 20),
               }"
-              :contexto="`${n(cirurgia.cirurgias_marcadas)} cirurgias marcadas e ${n(cirurgia.cirurgias_realizadas)} realizadas no período.`"
+              :contexto="`${n(cirurgia.cirurgias_marcadas)} ${frase('visao.vendas_marcadas', 'cirurgias marcadas')} e ${n(cirurgia.cirurgias_realizadas)} realizadas no período.`"
               pe="quem fechou"
               @abrir="
-                abrir('fecharam', 'Fecharam cirurgia', n(cirurgia.fecharam))
+                abrir('fecharam', frase('visao.fecharam_venda', 'Fecharam cirurgia'), n(cirurgia.fecharam))
               "
             />
             <CvIndicador
@@ -1003,7 +1004,7 @@ const pessoaSub = p => {
               :comparacao="
                 cirurgia.jornada?.ate_cirurgia
                   ? {
-                      texto: 'da chegada à cirurgia realizada',
+                      texto: frase('visao.da_chegada_venda_realizada', 'da chegada à cirurgia realizada'),
                       estado: 'neutro',
                     }
                   : null
@@ -1024,14 +1025,14 @@ const pessoaSub = p => {
           <div class="cvg-graficos">
             <div class="cvg-grafico">
               <span class="cvg-grafico-titulo">
-                <span>Da consulta à cirurgia</span>
+                <span>{{ frase('visao.do_atendimento_a_venda', 'Da consulta à cirurgia') }}</span>
                 <span>{{ pctTxt(cirurgia.taxa_fechamento) }} fecham</span>
               </span>
               <div class="cvg-grafico-corpo">
                 <FunnelSteps
                   :steps="funilCirurgia"
                   :height="130"
-                  start-text="das consultas"
+                  :start-text="`das ${termo('atendimentos')}`"
                 />
               </div>
             </div>
@@ -1062,10 +1063,10 @@ const pessoaSub = p => {
                     </text>
                   </svg>
                   <p class="cvg-corpo">
-                    <b>indicação</b><br />
+                    <b>{{ frase('visao.indicacao_min', 'indicação') }}</b><br />
                     <span class="cvg-legenda"
                       >{{ n(cirurgia.indicadas) }} de
-                      {{ n(cirurgia.consultas_realizadas) }} consultas</span
+                      {{ n(cirurgia.consultas_realizadas) }} {{ termo('atendimentos') }}</span
                     >
                   </p>
                 </div>
@@ -1094,7 +1095,7 @@ const pessoaSub = p => {
                     <b>fechamento</b><br />
                     <span class="cvg-legenda"
                       >{{ n(cirurgia.fecharam) }} de
-                      {{ n(cirurgia.indicadas) }} indicações</span
+                      {{ n(cirurgia.indicadas) }} {{ frase('visao.indicacoes_min', 'indicações') }}</span
                     >
                   </p>
                 </div>
@@ -1135,7 +1136,7 @@ const pessoaSub = p => {
       <CvBloco
         v-if="dinheiro"
         titulo="Quanto gasto e quanto ganho"
-        subtitulo="Custo por paciente, ticket médio, gastos do período e as conversões de cirurgia. Só administradores veem."
+        :subtitulo="frase('visao.sub_dinheiro', 'Custo por paciente, ticket médio, gastos do período e as conversões de cirurgia. Só administradores veem.')"
         icon="i-lucide-wallet"
       >
         <div class="cvg-bloco-pilha">
@@ -1144,12 +1145,12 @@ const pessoaSub = p => {
               rotulo="CAC total"
               :valor="dinheiro.cac_total ? brl(dinheiro.cac_total) : '—'"
               :comparacao="{
-                texto: `${n(dinheiro.pacientes)} pacientes · faturamento ${brl(dinheiro.faturamento)}`,
+                texto: `${n(dinheiro.pacientes)} ${termo('clientes')} · faturamento ${brl(dinheiro.faturamento)}`,
                 estado: 'neutro',
               }"
               :contexto="ctxCac"
               heroi
-              pe="por canal · por médico"
+              :pe="`por canal · por ${termo('profissional')}`"
               @abrir="
                 abrir(
                   'cac',
@@ -1172,10 +1173,10 @@ const pessoaSub = p => {
               "
             />
             <CvIndicador
-              rotulo="Cirurgia por lead"
+              :rotulo="frase('visao.venda_por_lead', 'Cirurgia por lead')"
               :valor="pctTxt(dinheiro.conversoes.por_lead)"
               :comparacao="{
-                texto: `${n(dinheiro.conversoes.cirurgias_realizadas)} cirurgias realizadas`,
+                texto: `${n(dinheiro.conversoes.cirurgias_realizadas)} ${frase('visao.vendas_realizadas_min', 'cirurgias realizadas')}`,
                 estado: 'neutro',
               }"
               :contexto="ctxConversoes"
@@ -1234,12 +1235,12 @@ const pessoaSub = p => {
       <!-- ══ 14 · MÉDICOS (só admin) ══ -->
       <CvBloco
         v-if="dinheiro"
-        titulo="Médicos"
-        subtitulo="Agenda mais cheia e mais vazia, presença e conversão de cada médico no período"
+        :titulo="termoCap('profissionais')"
+        :subtitulo="frase('visao.sub_profissionais', 'Agenda mais cheia e mais vazia, presença e conversão de cada médico no período')"
         icon="i-lucide-user-round"
       >
         <div v-if="!medicos.length" class="cvg-vazio">
-          Nenhuma consulta com médico no período.
+          {{ frase('visao.vazio_atendimentos_profissional', 'Nenhuma consulta com médico no período.') }}
         </div>
         <div v-else class="cvg-graficos cvg-graficos--2">
           <div class="cvg-grafico">
@@ -1262,14 +1263,14 @@ const pessoaSub = p => {
           </div>
           <div class="cvg-grafico">
             <span class="cvg-grafico-titulo">
-              <span>Indicações × cirurgias</span>
+              <span>{{ frase('visao.indicacoes_x_vendas', 'Indicações × cirurgias') }}</span>
             </span>
             <div class="cvg-grafico-corpo">
               <HBars
                 :rows="barrasMedicosCirurgia"
                 :series="[
-                  { label: 'indicações', color: corGrad2 },
-                  { label: 'cirurgias', color: corGrad },
+                  { label: frase('visao.indicacoes_min', 'indicações'), color: corGrad2 },
+                  { label: termo('vendas'), color: corGrad },
                 ]"
                 :label-width="10"
                 :highlight-max="false"
@@ -1455,13 +1456,13 @@ const pessoaSub = p => {
             </div>
           </div>
           <p class="cvg-corpo cvg-texto-2 mt-3">
-            Particular {{ n(agenda.mix.particular.count) }} ({{
+            {{ frase('visao.particular', 'Particular') }} {{ n(agenda.mix.particular.count) }} ({{
               pctTxt(agenda.mix.particular.pct)
-            }}) · Oftalmofácil
+            }}) · {{ frase('visao.oftalmofacil', 'Oftalmofácil') }}
             {{ n(agenda.mix.oftalmofacil.count) }}
             ({{ pctTxt(agenda.mix.oftalmofacil.pct) }}).
           </p>
-          <h3 class="mt-4">Ocupação por médico</h3>
+          <h3 class="mt-4">Ocupação por {{ termo('profissional') }}</h3>
           <div
             v-for="m in agenda.ocupacao.por_medico"
             :key="m.medico"
@@ -1551,7 +1552,7 @@ const pessoaSub = p => {
             <span>
               {{ c.label }}<br />
               <span class="cvg-legenda"
-                >{{ n(c.patients) }} pacientes · {{ n(c.leads) }} leads · gasto
+                >{{ n(c.patients) }} {{ termo('clientes') }} · {{ n(c.leads) }} leads · gasto
                 {{ brl(c.spend) }}</span
               >
             </span>
@@ -1560,7 +1561,7 @@ const pessoaSub = p => {
               <span class="cvg-legenda">ticket {{ brl(c.ticket_medio) }}</span>
             </b>
           </div>
-          <h3 class="mt-4">Ticket médio por médico</h3>
+          <h3 class="mt-4">Ticket médio por {{ termo('profissional') }}</h3>
           <div
             v-for="m in dinheiro.ticket_por_medico"
             :key="m.medico"

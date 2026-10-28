@@ -14,6 +14,7 @@ import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
+import { frase } from 'dashboard/helper/segmento';
 
 const route = useRoute();
 const router = useRouter();
@@ -37,7 +38,7 @@ const filter = ref('todos');
 const view = ref('cards');
 
 // 4 grupos do resumo (o que cada um quer dizer, por extenso)
-const GROUPS = [
+const GROUPS = computed(() => [
   {
     key: 'duplicado',
     label: 'Possível duplicado',
@@ -56,25 +57,35 @@ const GROUPS = [
   },
   {
     key: 'outro',
-    label: 'Consulta no cadastro de outra pessoa',
-    hint: 'o nome da consulta não é o do paciente ligado a ela',
+    label: frase(
+      'agendamentos.alerta_atendimento_outra_pessoa',
+      'Consulta no cadastro de outra pessoa'
+    ),
+    hint: frase(
+      'agendamentos.alerta_atendimento_outra_pessoa_dica',
+      'o nome da consulta não é o do paciente ligado a ela'
+    ),
     icon: 'i-lucide-calendar-x',
     color: '#DC2626',
     kinds: ['consulta_outro_nome'],
   },
   {
     key: 'sem',
-    label: 'Consulta sem cadastro',
-    hint: 'consulta que não está ligada a nenhum paciente',
+    label: frase('agendamentos.alerta_atendimento_sem_cadastro', 'Consulta sem cadastro'),
+    hint: frase(
+      'agendamentos.alerta_atendimento_sem_cadastro_dica',
+      'consulta que não está ligada a nenhum paciente'
+    ),
     icon: 'i-lucide-user-round-x',
     color: '#0F5FA6',
     kinds: ['consulta_sem_cadastro'],
   },
-];
-const groupOf = item => GROUPS.find(g => g.kinds.includes(item.kind));
+]);
+const groupOf = item =>
+  GROUPS.value.find(g => g.kinds.includes(item.kind));
 const counts = computed(() =>
   Object.fromEntries(
-    GROUPS.map(g => [
+    GROUPS.value.map(g => [
       g.key,
       items.value.filter(i => g.kinds.includes(i.kind)).length,
     ])
@@ -82,7 +93,7 @@ const counts = computed(() =>
 );
 const shown = computed(() => {
   if (filter.value === 'todos') return items.value;
-  const group = GROUPS.find(g => g.key === filter.value);
+  const group = GROUPS.value.find(g => g.key === filter.value);
   return items.value.filter(i => group.kinds.includes(i.kind));
 });
 
@@ -120,7 +131,7 @@ const openPatient = id =>
 const merge = (item, keep, drop) => {
   // eslint-disable-next-line no-alert
   const ok = window.confirm(
-    `Juntar os dois cadastros?\n\nFica: ${keep.name} (${keep.phone_number || 'sem telefone'})\nSai: ${drop.name} (${drop.phone_number || 'sem telefone'})\n\nConsultas, card e conversas do que sai passam para o que fica. Não dá para desfazer.`
+    `Juntar os dois cadastros?\n\nFica: ${keep.name} (${keep.phone_number || 'sem telefone'})\nSai: ${drop.name} (${drop.phone_number || 'sem telefone'})\n\n${frase('agendamentos.juntar_cadastros_aviso', 'Consultas, card e conversas do que sai passam para o que fica. Não dá para desfazer.')}`
   );
   if (!ok) return;
   run(
@@ -197,7 +208,7 @@ const moveTo = (item, patient) =>
     item,
     'move_task',
     { task_id: item.task.id, contact_id: patient.id },
-    `Consulta movida para ${patient.name} ✓`
+    `${frase('agendamentos.atendimento_movido_para', 'Consulta movida para')} ${patient.name} ✓`
   );
 const moveToNew = item => {
   const p = newPatient.value[item.key] || {};
@@ -205,7 +216,7 @@ const moveToNew = item => {
     item,
     'move_task',
     { task_id: item.task.id, name: p.name, phone: p.phone },
-    `Consulta movida para ${p.name} ✓`
+    `${frase('agendamentos.atendimento_movido_para', 'Consulta movida para')} ${p.name} ✓`
   );
 };
 
@@ -219,7 +230,9 @@ const personLine = p =>
     p.phone_number || 'sem telefone',
     p.stage,
     p.conversations ? `${p.conversations} conversa(s)` : 'sem conversa',
-    p.origin === 'oftalmofacil' ? 'veio do OftalmoFácil' : null,
+    p.origin === 'oftalmofacil'
+      ? frase('agendamentos.veio_do_oftalmofacil', 'veio do OftalmoFácil')
+      : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -234,7 +247,12 @@ const personLine = p =>
       <CevicoHero
         :pal="pal"
         title="Notificações sobre agendamentos"
-        subtitle="Cadastros e consultas com dados que não batem. Nada é corrigido sozinho: confira cada caso e ajuste aqui mesmo."
+        :subtitle="
+          frase(
+            'agendamentos.alertas_subtitulo',
+            'Cadastros e consultas com dados que não batem. Nada é corrigido sozinho: confira cada caso e ajuste aqui mesmo.'
+          )
+        "
         icon="i-lucide-bell-ring"
         :palette="false"
       >
@@ -395,7 +413,12 @@ const personLine = p =>
                 >
                   <button
                     class="text-left font-semibold text-[13px] text-n-slate-12 hover:underline"
-                    title="Abrir o Espaço do Paciente"
+                    :title="
+                      frase(
+                        'agendamentos.abrir_espaco_cliente',
+                        'Abrir o Espaço do Paciente'
+                      )
+                    "
                     @click="openPatient(p.id)"
                   >
                     {{ p.name || 'Sem nome' }}
@@ -446,8 +469,12 @@ const personLine = p =>
                 v-if="item.kind === 'duas_pessoas'"
                 class="text-[11px] text-n-slate-10"
               >
-                Dica: a consulta da outra pessoa aparece abaixo como "Consulta
-                com o nome de outra pessoa" — mova para o cadastro dela.
+                {{
+                  frase(
+                    'agendamentos.dica_duas_pessoas',
+                    'Dica: a consulta da outra pessoa aparece abaixo como "Consulta com o nome de outra pessoa" — mova para o cadastro dela.'
+                  )
+                }}
               </p>
 
               <!-- consulta: mover para o paciente certo -->
@@ -459,7 +486,12 @@ const personLine = p =>
                   <input
                     v-model="moveQuery[item.key]"
                     class="cv-input w-full !h-8 text-xs"
-                    placeholder="Nome ou telefone do paciente certo…"
+                    :placeholder="
+                      frase(
+                        'agendamentos.busca_cliente_certo',
+                        'Nome ou telefone do paciente certo…'
+                      )
+                    "
                     autocomplete="off"
                     @focus="moveFocus = item.key"
                     @blur="moveFocus = ''"
@@ -475,7 +507,12 @@ const personLine = p =>
                   />
                 </div>
                 <span class="cv-label block mt-3 mb-1">
-                  …ou criar o paciente (nome + telefone)
+                  {{
+                    frase(
+                      'agendamentos.ou_criar_cliente',
+                      '…ou criar o paciente (nome + telefone)'
+                    )
+                  }}
                 </span>
                 <div class="flex items-center gap-2 flex-wrap">
                   <input
@@ -508,8 +545,8 @@ const personLine = p =>
                   <span class="i-lucide-arrow-right-left text-xs" />
                   {{
                     item.kind === 'consulta_sem_cadastro'
-                      ? 'Ligar a um paciente'
-                      : 'Mover a consulta'
+                      ? frase('agendamentos.ligar_a_um_cliente', 'Ligar a um paciente')
+                      : frase('agendamentos.mover_o_atendimento', 'Mover a consulta')
                   }}
                 </button>
                 <button
@@ -525,7 +562,8 @@ const personLine = p =>
                   class="cv-btn cv-btn-ghost cv-btn-sm"
                   @click="openPatient(item.contact.id)"
                 >
-                  <span class="i-lucide-user-round text-xs" /> Abrir paciente
+                  <span class="i-lucide-user-round text-xs" />
+                  {{ frase('agendamentos.abrir_cliente', 'Abrir paciente') }}
                 </button>
                 <button
                   v-if="editable"

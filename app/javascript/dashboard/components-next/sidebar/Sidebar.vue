@@ -27,7 +27,7 @@ import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 import CrmAPI from 'dashboard/api/crm';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import { menuNodeFor, routeNodesFor } from 'dashboard/helper/cevicoAccess';
-import { segmentoId } from 'dashboard/helper/segmento';
+import { segmentoId, nomeAmbiente } from 'dashboard/helper/segmento';
 import {
   SIDEBAR_SORT_SECTIONS,
   getSidebarSortOptions,
@@ -1228,7 +1228,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Business',
-            label: 'Painel do empresário',
+            label: nomeAmbiente('Business', 'Painel do empresário'),
             icon: 'i-lucide-crown',
             to: accountScopedRoute('cevico_business'),
           },
@@ -1239,7 +1239,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Negocios',
-            label: 'Meus negócios',
+            label: nomeAmbiente('Negocios', 'Meus negócios'),
             icon: 'i-lucide-building-2',
             to: accountScopedRoute('negocios_home'),
           },
@@ -1249,7 +1249,7 @@ const menuItems = computed(() => {
     // (badge = pacientes quentes sem atendimento detectados pelo Radar)
     {
       name: 'Inicio',
-      label: 'Meu Painel',
+      label: nomeAmbiente('Inicio', 'Meu Painel'),
       icon: 'i-lucide-house',
       to: accountScopedRoute('inicio_home'),
       getterKeys: { count: 'crm/getRadarAlertCount' },
@@ -1258,13 +1258,13 @@ const menuItems = computed(() => {
     // CRM em primeiro — é o hub de atendimento
     {
       name: 'CRM',
-      label: t('SIDEBAR.CRM'),
+      label: nomeAmbiente('CRM', t('SIDEBAR.CRM')),
       icon: 'i-lucide-rocket',
       to: accountScopedRoute('crm_board'),
     },
     {
       name: 'Inbox',
-      label: t('SIDEBAR.INBOX'),
+      label: nomeAmbiente('Inbox', t('SIDEBAR.INBOX')),
       icon: 'i-lucide-inbox',
       to: accountScopedRoute('inbox_view'),
       activeOn: ['inbox_view', 'inbox_view_conversation'],
@@ -1274,7 +1274,7 @@ const menuItems = computed(() => {
     },
     {
       name: 'Conversation',
-      label: t('SIDEBAR.CONVERSATIONS'),
+      label: nomeAmbiente('Conversation', t('SIDEBAR.CONVERSATIONS')),
       icon: 'i-lucide-message-circle',
       // CEVICO 18/07: menu de conversas ENXUTO — só o principal.
       // Caixas viraram pílulas no topo e estágio/etiqueta viraram filtros
@@ -1293,12 +1293,12 @@ const menuItems = computed(() => {
     {
       name: 'Captain',
       icon: 'i-woot-captain',
-      label: t('SIDEBAR.CAPTAIN'),
+      label: nomeAmbiente('Captain', t('SIDEBAR.CAPTAIN')),
       activeOn: ['captain_assistants_create_index'],
       children: [
         {
           name: 'Overview',
-          label: t('SIDEBAR.CAPTAIN_OVERVIEW'),
+          label: nomeAmbiente('Overview', t('SIDEBAR.CAPTAIN_OVERVIEW')),
           activeOn: ['captain_assistants_overview_index'],
           to: accountScopedRoute('captain_assistants_index', {
             navigationPath: 'captain_assistants_overview_index',
@@ -1306,7 +1306,7 @@ const menuItems = computed(() => {
         },
         {
           name: 'FAQs',
-          label: t('SIDEBAR.CAPTAIN_RESPONSES'),
+          label: nomeAmbiente('FAQs', t('SIDEBAR.CAPTAIN_RESPONSES')),
           activeOn: [
             'captain_assistants_responses_index',
             'captain_assistants_faq_suggestions',
@@ -1317,7 +1317,7 @@ const menuItems = computed(() => {
         },
         {
           name: 'Documents',
-          label: t('SIDEBAR.CAPTAIN_DOCUMENTS'),
+          label: nomeAmbiente('Documents', t('SIDEBAR.CAPTAIN_DOCUMENTS')),
           activeOn: ['captain_assistants_documents_index'],
           to: accountScopedRoute('captain_assistants_index', {
             navigationPath: 'captain_assistants_documents_index',
@@ -1325,7 +1325,7 @@ const menuItems = computed(() => {
         },
         {
           name: 'Scenarios',
-          label: t('SIDEBAR.CAPTAIN_SCENARIOS'),
+          label: nomeAmbiente('Scenarios', t('SIDEBAR.CAPTAIN_SCENARIOS')),
           activeOn: ['captain_assistants_scenarios_index'],
           to: accountScopedRoute('captain_assistants_index', {
             navigationPath: 'captain_assistants_scenarios_index',
@@ -1333,7 +1333,7 @@ const menuItems = computed(() => {
         },
         {
           name: 'Playground',
-          label: t('SIDEBAR.CAPTAIN_PLAYGROUND'),
+          label: nomeAmbiente('Playground', t('SIDEBAR.CAPTAIN_PLAYGROUND')),
           activeOn: ['captain_assistants_playground_index'],
           to: accountScopedRoute('captain_assistants_index', {
             navigationPath: 'captain_assistants_playground_index',
@@ -1341,7 +1341,7 @@ const menuItems = computed(() => {
         },
         {
           name: 'Inboxes',
-          label: t('SIDEBAR.CAPTAIN_INBOXES'),
+          label: nomeAmbiente('Inboxes', t('SIDEBAR.CAPTAIN_INBOXES')),
           activeOn: ['captain_assistants_inboxes_index'],
           to: accountScopedRoute('captain_assistants_index', {
             navigationPath: 'captain_assistants_inboxes_index',
@@ -1349,7 +1349,7 @@ const menuItems = computed(() => {
         },
         {
           name: 'Tools',
-          label: t('SIDEBAR.CAPTAIN_TOOLS'),
+          label: nomeAmbiente('Tools', t('SIDEBAR.CAPTAIN_TOOLS')),
           activeOn: ['captain_tools_index'],
           to: accountScopedRoute('captain_assistants_index', {
             navigationPath: 'captain_tools_index',
@@ -1357,7 +1357,7 @@ const menuItems = computed(() => {
         },
         {
           name: 'Settings',
-          label: t('SIDEBAR.CAPTAIN_SETTINGS'),
+          label: nomeAmbiente('Settings', t('SIDEBAR.CAPTAIN_SETTINGS')),
           activeOn: [
             'captain_assistants_settings_index',
             'captain_assistants_settings_system_index',
@@ -1376,7 +1376,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Calls',
-            label: t('SIDEBAR.CALLS'),
+            label: nomeAmbiente('Calls', t('SIDEBAR.CALLS')),
             icon: 'i-lucide-phone',
             to: accountScopedRoute('calls_dashboard_index'),
             activeOn: ['calls_dashboard_index'],
@@ -1385,12 +1385,12 @@ const menuItems = computed(() => {
       : []),
     {
       name: 'Companies',
-      label: t('SIDEBAR.COMPANIES'),
+      label: nomeAmbiente('Companies', t('SIDEBAR.COMPANIES')),
       icon: 'i-lucide-building-2',
       children: [
         {
           name: 'All Companies',
-          label: t('SIDEBAR.ALL_COMPANIES'),
+          label: nomeAmbiente('All Companies', t('SIDEBAR.ALL_COMPANIES')),
           to: accountScopedRoute(
             'companies_dashboard_index',
             {},
@@ -1405,7 +1405,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Creatives Center',
-            label: 'Central de Criativos',
+            label: nomeAmbiente('Creatives Center', 'Central de Criativos'),
             icon: 'i-lucide-clapperboard',
             to: accountScopedRoute('creatives_reports'),
           },
@@ -1413,7 +1413,7 @@ const menuItems = computed(() => {
       : []),
     {
       name: 'Reports',
-      label: t('SIDEBAR.REPORTS'),
+      label: nomeAmbiente('Reports', t('SIDEBAR.REPORTS')),
       icon: 'i-lucide-chart-spline',
       children: [
         // dashboards CEVICO — cada um com o seu nó em relatorios.* (rodada
@@ -1422,82 +1422,82 @@ const menuItems = computed(() => {
           {
             name: 'CRM Dashboard',
             icon: 'i-lucide-kanban',
-            label: 'Dashboard CRM',
+            label: nomeAmbiente('CRM Dashboard', 'Dashboard CRM'),
             route: 'crm_dashboard_reports',
           },
           {
             name: 'Campaigns Dashboard',
             icon: 'i-lucide-send',
-            label: 'Dashboard Campanhas',
+            label: nomeAmbiente('Campaigns Dashboard', 'Dashboard Campanhas'),
             route: 'crm_campaigns_dashboard',
           },
           {
             name: 'Traffic Funnel',
             icon: 'i-lucide-filter',
-            label: 'Funil de Tráfego',
+            label: nomeAmbiente('Traffic Funnel', 'Funil de Tráfego'),
             route: 'traffic_funnel_reports',
           },
           {
             name: 'Doctors Dashboard',
             icon: 'i-lucide-stethoscope',
-            label: 'Dashboard dos Médicos',
+            label: nomeAmbiente('Doctors Dashboard', 'Dashboard dos Médicos'),
             route: 'doctors_reports',
           },
           {
             name: 'Agents Dashboard',
             icon: 'i-lucide-headset',
-            label: 'Dashboard dos Agentes',
+            label: nomeAmbiente('Agents Dashboard', 'Dashboard dos Agentes'),
             route: 'agents_dashboard_reports',
           },
           {
             name: 'Agenda Dashboard',
             icon: 'i-lucide-calendar-days',
-            label: 'Dashboard da Agenda',
+            label: nomeAmbiente('Agenda Dashboard', 'Dashboard da Agenda'),
             route: 'agenda_dashboard_reports',
           },
           {
             name: 'Calls Dashboard',
             icon: 'i-lucide-phone',
-            label: 'Dashboard de Ligações',
+            label: nomeAmbiente('Calls Dashboard', 'Dashboard de Ligações'),
             route: 'calls_dashboard_reports',
           },
           {
             name: 'Ads Report',
             icon: 'i-lucide-megaphone',
-            label: 'Anúncios (Meta)',
+            label: nomeAmbiente('Ads Report', 'Anúncios (Meta)'),
             route: 'ads_reports',
           },
           {
             name: 'Google Dashboard',
             icon: 'i-lucide-search',
-            label: 'Google (Ads + GA4)',
+            label: nomeAmbiente('Google Dashboard', 'Google (Ads + GA4)'),
             route: 'google_dashboard_reports',
           },
           {
             name: 'WhatsApp Health',
             icon: 'i-lucide-heart-pulse',
-            label: 'Saúde do WhatsApp',
+            label: nomeAmbiente('WhatsApp Health', 'Saúde do WhatsApp'),
             route: 'whatsapp_health_reports',
           },
           {
             // 💸 item 303: dinheiro — nó só de admin
             name: 'WhatsApp Spend',
             icon: 'i-lucide-receipt',
-            label: 'Gasto do WhatsApp',
+            label: nomeAmbiente('WhatsApp Spend', 'Gasto do WhatsApp'),
             route: 'whatsapp_spend_reports',
           },
           {
             // 💰 item 318: CAC e retorno — nó financeiro.cac
             name: 'Acquisition Cost',
             icon: 'i-lucide-piggy-bank',
-            label: 'Financeiro & CAC',
+            label: nomeAmbiente('Acquisition Cost', 'Financeiro & CAC'),
             route: 'acquisition_cost_reports',
           },
           {
             // 🎯 item 352: Agente de Campanhas — nó marketing.campanhas
             name: 'Campaign Agent',
             icon: 'i-lucide-target',
-            label: 'Campanhas (agente)',
+            label: nomeAmbiente('Campaign Agent', 'Campanhas (agente)'),
             route: 'campaign_agent_reports',
           },
         ]
@@ -1514,38 +1514,38 @@ const menuItems = computed(() => {
           ? [
               {
                 name: 'Label Dashboard',
-                label: t('SIDEBAR.LABEL_DASHBOARD'),
+                label: nomeAmbiente('Label Dashboard', t('SIDEBAR.LABEL_DASHBOARD')),
                 to: accountScopedRoute('label_dashboard'),
               },
               {
                 name: 'Report Overview',
-                label: t('SIDEBAR.REPORTS_OVERVIEW'),
+                label: nomeAmbiente('Report Overview', t('SIDEBAR.REPORTS_OVERVIEW')),
                 to: accountScopedRoute('account_overview_reports'),
               },
               {
                 name: 'Report Conversation',
-                label: t('SIDEBAR.REPORTS_CONVERSATION'),
+                label: nomeAmbiente('Report Conversation', t('SIDEBAR.REPORTS_CONVERSATION')),
                 to: accountScopedRoute('conversation_reports'),
               },
               ...reportRoutes.value,
               {
                 name: 'Reports CSAT',
-                label: t('SIDEBAR.CSAT'),
+                label: nomeAmbiente('Reports CSAT', t('SIDEBAR.CSAT')),
                 to: accountScopedRoute('csat_reports'),
               },
               {
                 name: 'Reports SLA',
-                label: t('SIDEBAR.REPORTS_SLA'),
+                label: nomeAmbiente('Reports SLA', t('SIDEBAR.REPORTS_SLA')),
                 to: accountScopedRoute('sla_reports'),
               },
               {
                 name: 'Reports Bot',
-                label: t('SIDEBAR.REPORTS_BOT'),
+                label: nomeAmbiente('Reports Bot', t('SIDEBAR.REPORTS_BOT')),
                 to: accountScopedRoute('bot_reports'),
               },
               {
                 name: 'All Contacts',
-                label: t('SIDEBAR.CONTACTS'),
+                label: nomeAmbiente('All Contacts', t('SIDEBAR.CONTACTS')),
                 to: accountScopedRoute(
                   'contacts_dashboard_index',
                   {},
@@ -1560,20 +1560,20 @@ const menuItems = computed(() => {
     // 📞 ambiente Chamadas (item 176): ao vivo para todo mundo + histórico
     {
       name: 'Cevico Calls',
-      label: 'Chamadas',
+      label: nomeAmbiente('Cevico Calls', 'Chamadas'),
       icon: 'i-lucide-phone-call',
       to: accountScopedRoute('crm_calls'),
     },
     {
       name: 'Campanha WhatsApp',
-      label: 'Campanha WhatsApp',
+      label: nomeAmbiente('Campanha WhatsApp', 'Campanha WhatsApp'),
       icon: 'i-lucide-megaphone',
       to: accountScopedRoute('crm_campaigns'),
     },
     // 🗺️ Mensagens da jornada (item 168) — rótulo no vocabulário da empresa
     {
       name: 'Jornada do paciente',
-      label: jornadaLabel.value,
+      label: nomeAmbiente('Jornada do paciente', jornadaLabel.value),
       icon: 'i-lucide-route',
       to: accountScopedRoute('crm_journey'),
     },
@@ -1582,7 +1582,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Forms',
-            label: 'Formulários',
+            label: nomeAmbiente('Forms', 'Formulários'),
             icon: 'i-lucide-clipboard-list',
             to: accountScopedRoute('crm_forms'),
           },
@@ -1593,7 +1593,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Strategy',
-            label: 'Estratégia',
+            label: nomeAmbiente('Strategy', 'Estratégia'),
             icon: 'i-lucide-compass',
             to: accountScopedRoute('cevico_strategy'),
           },
@@ -1604,7 +1604,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Finance',
-            label: 'Financeiro',
+            label: nomeAmbiente('Finance', 'Financeiro'),
             icon: 'i-lucide-wallet',
             to: accountScopedRoute('cevico_finance'),
           },
@@ -1617,14 +1617,14 @@ const menuItems = computed(() => {
       : [
           {
             name: 'Canned',
-            label: 'Respostas prontas',
+            label: nomeAmbiente('Canned', 'Respostas prontas'),
             icon: 'i-lucide-message-square-quote',
             to: accountScopedRoute('canned_list'),
           },
         ]),
     {
       name: 'Tasks',
-      label: 'Tarefas',
+      label: nomeAmbiente('Tasks', 'Tarefas'),
       icon: 'i-lucide-list-checks',
       to: accountScopedRoute('tasks_board'),
       getterKeys: { count: 'tasks/getAlertCount' },
@@ -1632,14 +1632,14 @@ const menuItems = computed(() => {
     },
     {
       name: 'Agenda',
-      label: 'Agenda',
+      label: nomeAmbiente('Agenda', 'Agenda'),
       icon: 'i-lucide-calendar-days',
       to: accountScopedRoute('agenda_board'),
     },
     // 📅 ambiente Agendamentos (item 200): monitorar marcadas/remarcadas/canceladas
     {
       name: 'Cevico Appointments',
-      label: 'Agendamentos',
+      label: nomeAmbiente('Cevico Appointments', 'Agendamentos'),
       icon: 'i-lucide-calendar-check',
       to: accountScopedRoute('crm_appointments'),
     },
@@ -1647,7 +1647,7 @@ const menuItems = computed(() => {
     // com dados que não batem (o número = quantos esperam conferência)
     {
       name: 'Cevico Appointment Alerts',
-      label: 'Notificações',
+      label: nomeAmbiente('Cevico Appointment Alerts', 'Notificações'),
       icon: 'i-lucide-bell-ring',
       to: accountScopedRoute('crm_appointment_alerts'),
       getterKeys: { count: 'crm/getAppointmentAlertsCount' },
@@ -1655,24 +1655,24 @@ const menuItems = computed(() => {
     // 🏥 ambiente Oftalmofácil (item 229): o hub de parceiros dentro do sistema
     {
       name: 'Cevico Oftalmofacil',
-      label: 'Oftalmofácil',
+      label: nomeAmbiente('Cevico Oftalmofacil', 'Oftalmofácil'),
       icon: 'i-lucide-hospital',
       to: accountScopedRoute('crm_oftalmofacil'),
     },
     {
       name: 'Cevico Pages',
-      label: 'Conteúdos',
+      label: nomeAmbiente('Cevico Pages', 'Conteúdos'),
       icon: 'i-lucide-panels-top-left',
       children: [
         {
           name: 'Pages List',
-          label: 'Páginas',
+          label: nomeAmbiente('Pages List', 'Páginas'),
           icon: 'i-lucide-panels-top-left',
           to: accountScopedRoute('cevico_pages_home'),
         },
         {
           name: 'Content Planner',
-          label: 'Planejamento',
+          label: nomeAmbiente('Content Planner', 'Planejamento'),
           icon: 'i-lucide-kanban',
           to: accountScopedRoute('cevico_content_board'),
         },
@@ -1682,26 +1682,26 @@ const menuItems = computed(() => {
           {
             // 📈 origem (Google Ads/SEO/Meta) → leads → cirurgias
             name: 'Pages Results',
-            label: 'Resultados de tráfego',
+            label: nomeAmbiente('Pages Results', 'Resultados de tráfego'),
             icon: 'i-lucide-trending-up',
             to: accountScopedRoute('cevico_pages_results'),
           },
           {
             name: 'Pages Analytics',
-            label: 'Análise de funis',
+            label: nomeAmbiente('Pages Analytics', 'Análise de funis'),
             icon: 'i-lucide-chart-line',
             to: accountScopedRoute('cevico_pages_analytics'),
           },
           {
             // 🌪 item 60: fontes de captação → páginas → WhatsApp
             name: 'Funnel Builder',
-            label: 'Montador de Funis',
+            label: nomeAmbiente('Funnel Builder', 'Montador de Funis'),
             icon: 'i-lucide-tornado',
             to: accountScopedRoute('cevico_funnel_builder'),
           },
           {
             name: 'AB Center',
-            label: 'Testes A/B',
+            label: nomeAmbiente('AB Center', 'Testes A/B'),
             icon: 'i-lucide-flask-conical',
             to: accountScopedRoute('cevico_ab_center'),
           },
@@ -1711,27 +1711,27 @@ const menuItems = computed(() => {
     // Pessoas: DISC, desenvolvimento e feedbacks (cada um vê o seu)
     {
       name: 'People',
-      label: 'Pessoas',
+      label: nomeAmbiente('People', 'Pessoas'),
       icon: 'i-lucide-heart-handshake',
       to: accountScopedRoute('cevico_people'),
     },
     // Painel de Metas: admin define, time acompanha
     {
       name: 'Goals',
-      label: 'Metas',
+      label: nomeAmbiente('Goals', 'Metas'),
       icon: 'i-lucide-target',
       to: accountScopedRoute('cevico_goals'),
     },
     {
       // 🧲 painel personalizado por pessoa (item 57)
       name: 'Builder',
-      label: 'Construtor',
+      label: nomeAmbiente('Builder', 'Construtor'),
       icon: 'i-lucide-magnet',
       to: accountScopedRoute('cevico_builder'),
     },
     {
       name: 'Academy',
-      label: academiaLabel.value,
+      label: nomeAmbiente('Academy', academiaLabel.value),
       icon: 'i-lucide-graduation-cap',
       to: accountScopedRoute('academy_home'),
     },
@@ -1741,7 +1741,7 @@ const menuItems = computed(() => {
       ? [
           {
             name: 'Automations Hub',
-            label: 'Automações',
+            label: nomeAmbiente('Automations Hub', 'Automações'),
             icon: 'i-lucide-workflow',
             children: automationChildren.value,
           },
@@ -1749,7 +1749,7 @@ const menuItems = computed(() => {
       : []),
     {
       name: 'Settings',
-      label: t('SIDEBAR.SETTINGS'),
+      label: nomeAmbiente('Settings', t('SIDEBAR.SETTINGS')),
       icon: 'i-lucide-settings',
       children: [
         // Integrações UNIFICADAS dentro de Configurações (item 78):
@@ -1758,7 +1758,7 @@ const menuItems = computed(() => {
           ? [
               {
                 name: 'Integrations Hub',
-                label: 'Integrações',
+                label: nomeAmbiente('Integrations Hub', 'Integrações'),
                 icon: 'i-lucide-plug',
                 to: accountScopedRoute('crm_integrations'),
               },
@@ -1766,7 +1766,7 @@ const menuItems = computed(() => {
           : []),
         {
           name: 'Settings Account Settings',
-          label: t('SIDEBAR.ACCOUNT_SETTINGS'),
+          label: nomeAmbiente('Settings Account Settings', t('SIDEBAR.ACCOUNT_SETTINGS')),
           icon: 'i-lucide-briefcase',
           to: accountScopedRoute('general_settings_index'),
         },
@@ -1775,8 +1775,8 @@ const menuItems = computed(() => {
           ? [
               {
                 name: 'Settings Company',
-                label: 'Identidade da empresa',
-                icon: 'i-lucide-building-2',
+                label: nomeAmbiente('Settings Company', 'Personalização'),
+                icon: 'i-lucide-palette',
                 to: accountScopedRoute('empresa_settings_index'),
               },
               // HUB (segmento saude): recursos ligáveis do sistema pessoal
@@ -1784,7 +1784,7 @@ const menuItems = computed(() => {
                 ? [
                     {
                       name: 'Settings Hub',
-                      label: 'HUB',
+                      label: nomeAmbiente('Settings Hub', 'HUB'),
                       icon: 'i-lucide-layout-grid',
                       to: accountScopedRoute('hub_settings_index'),
                     },
@@ -1798,21 +1798,21 @@ const menuItems = computed(() => {
           {
             // Domínio público das páginas/formulários
             name: 'Settings Domain',
-            label: 'Domínio',
+            label: nomeAmbiente('Settings Domain', 'Domínio'),
             icon: 'i-lucide-globe',
             route: 'dominio_settings_index',
           },
           {
             // Responsável por painel do Meu Painel (pedido 20/08)
             name: 'Settings Panels',
-            label: 'Painéis',
+            label: nomeAmbiente('Settings Panels', 'Painéis'),
             icon: 'i-lucide-layout-dashboard',
             route: 'paineis_settings_index',
           },
           {
             // Tabela de preços oficial (Espaço do Paciente + agentes IA)
             name: 'Settings Prices',
-            label: 'Tabela de preços',
+            label: nomeAmbiente('Settings Prices', 'Tabela de preços'),
             icon: 'i-lucide-badge-dollar-sign',
             route: 'precos_settings_index',
           },
@@ -1832,7 +1832,7 @@ const menuItems = computed(() => {
         // },
         {
           name: 'Settings Agents',
-          label: t('SIDEBAR.AGENTS'),
+          label: nomeAmbiente('Settings Agents', t('SIDEBAR.AGENTS')),
           icon: 'i-lucide-square-user',
           to: accountScopedRoute('agent_list'),
         },
@@ -1841,7 +1841,7 @@ const menuItems = computed(() => {
           ? [
               {
                 name: 'Settings Access',
-                label: 'Acessos e papéis',
+                label: nomeAmbiente('Settings Access', 'Acessos e papéis'),
                 icon: 'i-lucide-shield-check',
                 to: accountScopedRoute('acessos_settings_index'),
               },
@@ -1849,7 +1849,7 @@ const menuItems = computed(() => {
           : []),
         {
           name: 'Settings Teams',
-          label: t('SIDEBAR.TEAMS'),
+          label: nomeAmbiente('Settings Teams', t('SIDEBAR.TEAMS')),
           icon: 'i-lucide-users',
           activeOn: [
             'settings_teams_list',
@@ -1867,7 +1867,7 @@ const menuItems = computed(() => {
           ? [
               {
                 name: 'Settings Agent Assignment',
-                label: t('SIDEBAR.AGENT_ASSIGNMENT'),
+                label: nomeAmbiente('Settings Agent Assignment', t('SIDEBAR.AGENT_ASSIGNMENT')),
                 icon: 'i-lucide-user-cog',
                 activeOn: [
                   'assignment_policy_index',
@@ -1884,7 +1884,7 @@ const menuItems = computed(() => {
           : []),
         {
           name: 'Settings Inboxes',
-          label: t('SIDEBAR.INBOXES'),
+          label: nomeAmbiente('Settings Inboxes', t('SIDEBAR.INBOXES')),
           icon: 'i-lucide-inbox',
           activeOn: [
             'settings_inbox_list',
@@ -1898,73 +1898,73 @@ const menuItems = computed(() => {
         },
         {
           name: 'Settings Templates',
-          label: t('SIDEBAR.WHATSAPP_TEMPLATES'),
+          label: nomeAmbiente('Settings Templates', t('SIDEBAR.WHATSAPP_TEMPLATES')),
           icon: 'i-lucide-layout-template',
           to: accountScopedRoute('settings_templates'),
         },
         {
           name: 'Settings Labels',
-          label: t('SIDEBAR.LABELS'),
+          label: nomeAmbiente('Settings Labels', t('SIDEBAR.LABELS')),
           icon: 'i-lucide-tags',
           to: accountScopedRoute('labels_list'),
         },
         {
           name: 'Settings Custom Attributes',
-          label: t('SIDEBAR.CUSTOM_ATTRIBUTES'),
+          label: nomeAmbiente('Settings Custom Attributes', t('SIDEBAR.CUSTOM_ATTRIBUTES')),
           icon: 'i-lucide-code',
           to: accountScopedRoute('attributes_list'),
         },
         {
           name: 'Settings Agent Bots',
-          label: t('SIDEBAR.AGENT_BOTS'),
+          label: nomeAmbiente('Settings Agent Bots', t('SIDEBAR.AGENT_BOTS')),
           icon: 'i-lucide-bot',
           to: accountScopedRoute('agent_bots'),
         },
         {
           name: 'Settings Macros',
-          label: t('SIDEBAR.MACROS'),
+          label: nomeAmbiente('Settings Macros', t('SIDEBAR.MACROS')),
           icon: 'i-lucide-toy-brick',
           to: accountScopedRoute('macros_wrapper'),
         },
         {
           name: 'Settings Canned Responses',
-          label: t('SIDEBAR.CANNED_RESPONSES'),
+          label: nomeAmbiente('Settings Canned Responses', t('SIDEBAR.CANNED_RESPONSES')),
           icon: 'i-lucide-message-square-quote',
           to: accountScopedRoute('canned_list'),
         },
         {
           name: 'Settings Audit Logs',
-          label: t('SIDEBAR.AUDIT_LOGS'),
+          label: nomeAmbiente('Settings Audit Logs', t('SIDEBAR.AUDIT_LOGS')),
           icon: 'i-lucide-scroll-text',
           to: accountScopedRoute('auditlogs_list'),
         },
         {
           name: 'Settings Custom Roles',
-          label: t('SIDEBAR.CUSTOM_ROLES'),
+          label: nomeAmbiente('Settings Custom Roles', t('SIDEBAR.CUSTOM_ROLES')),
           icon: 'i-lucide-shield-plus',
           to: accountScopedRoute('custom_roles_list'),
         },
         {
           name: 'Settings Sla',
-          label: t('SIDEBAR.SLA'),
+          label: nomeAmbiente('Settings Sla', t('SIDEBAR.SLA')),
           icon: 'i-lucide-clock-alert',
           to: accountScopedRoute('sla_list'),
         },
         {
           name: 'Conversation Workflow',
-          label: t('SIDEBAR.CONVERSATION_WORKFLOW'),
+          label: nomeAmbiente('Conversation Workflow', t('SIDEBAR.CONVERSATION_WORKFLOW')),
           icon: 'i-lucide-workflow',
           to: accountScopedRoute('conversation_workflow_index'),
         },
         {
           name: 'Settings Security',
-          label: t('SIDEBAR.SECURITY'),
+          label: nomeAmbiente('Settings Security', t('SIDEBAR.SECURITY')),
           icon: 'i-lucide-shield',
           to: accountScopedRoute('security_settings_index'),
         },
         {
           name: 'Settings Billing',
-          label: t('SIDEBAR.BILLING'),
+          label: nomeAmbiente('Settings Billing', t('SIDEBAR.BILLING')),
           icon: 'i-lucide-credit-card',
           to: accountScopedRoute('billing_settings_index'),
         },

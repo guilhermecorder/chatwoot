@@ -1,17 +1,18 @@
 <script setup>
-import { useAttrs } from 'vue';
+import { useAttrs, computed } from 'vue';
 import { useMapGetter } from 'dashboard/composables/store';
+import { EMPRESA } from 'dashboard/helper/segmento';
 
 const attrs = useAttrs();
 const globalConfig = useMapGetter('globalConfig/get');
+// 🎨 Personalização por conta: o ícone da EMPRESA vence o da instalação
+const logoSrc = computed(
+  () => EMPRESA.atual?.images?.icon || globalConfig.value?.logoThumbnail || ''
+);
 </script>
 
 <template>
-  <img
-    v-if="globalConfig.logoThumbnail"
-    v-bind="attrs"
-    :src="globalConfig.logoThumbnail"
-  />
+  <img v-if="logoSrc" v-bind="attrs" :src="logoSrc" />
   <svg
     v-else
     v-once

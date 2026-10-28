@@ -12,6 +12,7 @@ import {
   DOCTORS, MODALITIES, resolveWindows, resolveBlocked, resolveBlockedDays,
   resolveSurgeryWindows, blockKey, scanAgenda,
 } from 'dashboard/helper/cevicoAgenda';
+import { frase } from 'dashboard/helper/segmento';
 
 // Recebe o período de FORA (Meu Painel ou página de Relatórios)
 const props = defineProps({
@@ -137,7 +138,7 @@ onMounted(() => {
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6" :style="secVars('kpis')">
           <DashKpi
             compact
-            label="Consultas no período"
+            :label="frase('atendimentos_periodo', 'Consultas no período')"
             :value="data.consultas?.total ?? 0"
             :sub="`${data.consultas?.canceled ?? 0} cancelada(s)`"
             from="#0F5FA6"
@@ -161,7 +162,7 @@ onMounted(() => {
           />
           <DashKpi
             compact
-            label="Indicações de cirurgia"
+            :label="frase('indicacoes_venda', 'Indicações de cirurgia')"
             :value="data.consultas?.indications ?? 0"
             :sub="`${data.consultas?.indication_rate ?? 0}% de quem compareceu`"
             from="#B8860B"
@@ -184,9 +185,9 @@ onMounted(() => {
           <div :class="card" :style="secVars('tipos')">
             <h2 class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2">
               <span :class="iconWrap"><span class="i-lucide-tags text-base" :style="{ color: iconColor('#7C3AED') }" /></span>
-              Consultas por tipo
+              {{ frase('dash.atendimentos_por_tipo', 'Consultas por tipo') }}
             </h2>
-            <div v-if="!data.by_modality?.length" class="text-xs text-n-slate-10 py-4 text-center">Nenhuma consulta no período.</div>
+            <div v-if="!data.by_modality?.length" class="text-xs text-n-slate-10 py-4 text-center">{{ frase('dash.vazio_atendimentos_periodo', 'Nenhuma consulta no período.') }}</div>
             <div v-else class="space-y-3">
               <div v-for="m in data.by_modality" :key="m.key">
                 <div class="flex items-center justify-between text-xs mb-1">
@@ -212,7 +213,7 @@ onMounted(() => {
                 v-for="w in data.by_weekday"
                 :key="w.dow"
                 class="flex-1 flex flex-col items-center gap-1 h-full justify-end"
-                :title="`${w.label}: ${w.count} consulta(s)`"
+                :title="`${w.label}: ${w.count} ${frase('dash.atendimento_s', 'consulta(s)')}`"
               >
                 <span class="text-xs font-bold" :class="w.count === maxWeekday && w.count > 0 ? 'text-n-slate-12' : 'text-n-slate-10'">{{ w.count }}</span>
                 <div
@@ -235,9 +236,9 @@ onMounted(() => {
           <div :class="card" :style="secVars('medicos')">
             <h2 class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2">
               <span :class="iconWrap"><span class="i-lucide-stethoscope text-base" :style="{ color: iconColor('#0369A1') }" /></span>
-              Por médico
+              {{ frase('dash.por_profissional', 'Por médico') }}
             </h2>
-            <div v-if="!data.by_doctor?.length" class="text-xs text-n-slate-10 py-4 text-center">Nenhuma consulta com médico no período.</div>
+            <div v-if="!data.by_doctor?.length" class="text-xs text-n-slate-10 py-4 text-center">{{ frase('dash.vazio_atendimentos_profissional', 'Nenhuma consulta com médico no período.') }}</div>
             <div v-else class="space-y-2">
               <div
                 v-for="d in data.by_doctor"
@@ -247,9 +248,9 @@ onMounted(() => {
               >
                 <span class="w-2 h-2 rounded-full flex-shrink-0" :style="{ background: doctorColor(d.doctor) }" />
                 <span class="font-medium text-n-slate-12 flex-1 min-w-[130px]">{{ d.doctor }}</span>
-                <span class="text-n-slate-10">{{ d.count }} consulta(s)</span>
+                <span class="text-n-slate-10">{{ d.count }} {{ frase('dash.atendimento_s', 'consulta(s)') }}</span>
                 <span class="font-bold" :style="{ color: rateColor(d.show_rate) }">{{ d.show_rate }}% presença</span>
-                <span class="text-n-slate-10">🎯 {{ d.indications }} indicação(ões)</span>
+                <span class="text-n-slate-10">🎯 {{ d.indications }} {{ frase('dash.indicacao_oes', 'indicação(ões)') }}</span>
               </div>
             </div>
           </div>
@@ -257,9 +258,9 @@ onMounted(() => {
           <div :class="card" :style="secVars('unidades')">
             <h2 class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2">
               <span :class="iconWrap"><span class="i-lucide-map-pin text-base" :style="{ color: iconColor('#EA580C') }" /></span>
-              Por unidade
+              {{ frase('dash.por_unidade', 'Por unidade') }}
             </h2>
-            <div v-if="!data.by_unit?.length" class="text-xs text-n-slate-10 py-4 text-center">Nenhuma consulta no período.</div>
+            <div v-if="!data.by_unit?.length" class="text-xs text-n-slate-10 py-4 text-center">{{ frase('dash.vazio_atendimentos_periodo', 'Nenhuma consulta no período.') }}</div>
             <div v-else class="space-y-3">
               <div v-for="u in data.by_unit" :key="u.key">
                 <div class="flex items-center justify-between text-xs mb-1">
@@ -279,7 +280,7 @@ onMounted(() => {
         <div :class="card" class="mb-6" :style="secVars('cirurgias')">
           <h2 class="text-sm font-bold text-n-slate-12 mb-4 flex items-center gap-2">
             <span :class="iconWrap"><span class="i-lucide-slice text-base" :style="{ color: iconColor('#0284C7') }" /></span>
-            Agenda de Cirurgias
+            {{ frase('agenda_vendas', 'Agenda de Cirurgias') }}
           </h2>
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
             <DashKpi
@@ -306,14 +307,14 @@ onMounted(() => {
             />
             <DashKpi
               compact
-              label="Não veio"
+              :label="frase('dash.nao_veio', 'Não veio')"
               :value="data.cirurgias?.missed ?? 0"
               value-color="#EF4444"
               :glass="glass"
             />
             <DashKpi
               compact
-              label="Veio e não fez"
+              :label="frase('dash.veio_nao_fez', 'Veio e não fez')"
               :value="data.cirurgias?.attended_not_done ?? 0"
               value-color="#F59E0B"
               :glass="glass"
@@ -336,7 +337,7 @@ onMounted(() => {
             <span :class="iconWrap"><span class="i-lucide-gauge text-base" :style="{ color: iconColor('#D4A017') }" /></span>
             Ocupação e o que vem pela frente
           </h2>
-          <p class="text-xs text-n-slate-10 mb-4">pelas janelas dos médicos e da sala cirúrgica (cadeados fora da conta) — independente do período acima</p>
+          <p class="text-xs text-n-slate-10 mb-4">{{ frase('dash.sub_ocupacao', 'pelas janelas dos médicos e da sala cirúrgica (cadeados fora da conta) — independente do período acima') }}</p>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
@@ -356,22 +357,22 @@ onMounted(() => {
               <div :class="track">
                 <div class="h-full rounded-full" :class="glass ? 'cv-fill' : ''" :style="{ width: Math.max(usageLast7.pct, 3) + '%', background: barGrad('linear-gradient(90deg, #B8860B, #D4A017)') }" />
               </div>
-              <p class="text-[10px] text-n-slate-9 mt-0.5">blocos que viraram consulta</p>
+              <p class="text-[10px] text-n-slate-9 mt-0.5">{{ frase('dash.blocos_viraram_atendimento', 'blocos que viraram consulta') }}</p>
             </div>
             <div>
               <div class="flex items-center justify-between text-xs mb-1">
-                <span class="text-n-slate-11">Sala cirúrgica cheia <span class="text-n-slate-9">(próx. 7 dias)</span></span>
+                <span class="text-n-slate-11">{{ frase('dash.sala_execucao_cheia', 'Sala cirúrgica cheia') }} <span class="text-n-slate-9">(próx. 7 dias)</span></span>
                 <span class="font-bold text-n-slate-12">{{ surgFillNext7.total ? surgFillNext7.pct + '%' : '—' }}</span>
               </div>
               <div :class="track">
                 <div class="h-full rounded-full" :class="glass ? 'cv-fill' : ''" :style="{ width: Math.max(surgFillNext7.pct, 3) + '%', background: barGrad('linear-gradient(90deg, #0284C7, #7DD3FC)') }" />
               </div>
-              <p class="text-[10px] text-n-slate-9 mt-0.5">{{ surgFillNext7.total ? `${surgFillNext7.filled} de ${surgFillNext7.total} blocos` : 'sem janelas da sala' }}</p>
+              <p class="text-[10px] text-n-slate-9 mt-0.5">{{ surgFillNext7.total ? `${surgFillNext7.filled} de ${surgFillNext7.total} blocos` : frase('dash.sem_janelas_sala', 'sem janelas da sala') }}</p>
             </div>
           </div>
           <div class="flex flex-wrap gap-2">
             <span :class="chip">
-              Próximos 7 dias: <b class="text-n-slate-12">{{ data.upcoming?.consultas_next7 ?? 0 }}</b> consulta(s) · <b class="text-n-slate-12">{{ data.upcoming?.cirurgias_next7 ?? 0 }}</b> cirurgia(s)
+              Próximos 7 dias: <b class="text-n-slate-12">{{ data.upcoming?.consultas_next7 ?? 0 }}</b> {{ frase('dash.atendimento_s', 'consulta(s)') }} · <b class="text-n-slate-12">{{ data.upcoming?.cirurgias_next7 ?? 0 }}</b> {{ frase('dash.venda_s', 'cirurgia(s)') }}
             </span>
             <span
               :class="[chip, (data.upcoming?.unconfirmed_past ?? 0) > 0 ? (glass ? 'cv-red' : 'text-xs px-3 py-1.5 rounded-full bg-red-500/10 text-red-500 font-medium') : '']"

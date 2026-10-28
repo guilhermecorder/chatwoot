@@ -85,7 +85,10 @@ export function useCevicoPalette({
     const p = panelPalette.value;
     if (p.mode === 'salad') return SALAD;
     if (p.mode === 'fixed' && paletteFor(p.key)) return paletteFor(p.key);
-    return unref(themePalette) || dayFlavor.value;
+    // 🎨 Personalização por conta: a paleta padrão da EMPRESA vale antes da
+    // cor do dia (quando a conta escolheu uma em Configurações → Personalização)
+    const daEmpresa = paletteFor(crmSettings.value?.company?.visual?.palette);
+    return unref(themePalette) || daEmpresa || dayFlavor.value;
   });
   // a paleta de UM BLOCO: própria > salada (uma fruta por posição) > página
   const blockPalette = blockId => {

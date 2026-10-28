@@ -213,6 +213,7 @@ namespace :crm do
     post :update_agent_access
     post :update_access_roles
     post :update_company
+    post :update_company_image # 🎨 Personalização: imagens da empresa
     # tabela de preços oficial (Espaço do Paciente + prompts da IA)
     post :update_price_table
     # investimento mensal por caixa (ROI/CAC do Dashboard CRM)

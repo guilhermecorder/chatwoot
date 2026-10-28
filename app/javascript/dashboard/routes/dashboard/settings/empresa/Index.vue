@@ -1,14 +1,21 @@
 <script setup>
-// 🏢 Configurações → Identidade da empresa (rodada 334, só admin).
-// O que o sistema sabe sobre a empresa dona desta conta: quem ela é, as
-// palavras que usa, as unidades (lojas), o assistente virtual, os módulos
-// ligados e o site público dela. Lê `crm/getCompany` (GET settings) e grava
-// com `crm/updateCompany` — manda só o que esta tela edita.
+// 🎨 Configurações → PERSONALIZAÇÃO (28/10; nasceu como "Identidade da
+// empresa" na rodada 334, só admin). Tudo que a conta pode trocar POR DENTRO
+// do sistema, sem código: quem é a empresa, identidade visual (imagens,
+// paleta, marca d'água), as palavras e o dicionário global, as frases das
+// telas, os nomes dos ambientes, unidades, equipe e listas (coringa),
+// assistente virtual, módulos e site público. Lê `crm/getCompany` e grava
+// com `crm/updateCompany` — manda só o que esta tela edita. Sem nada salvo,
+// a conta é a CEVICO de hoje, byte a byte.
 import { ref, computed, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { PALETTES } from 'dashboard/helper/cevicoPalettes';
+import { AMBIENTES_POR_GRUPO } from 'dashboard/helper/ambientesCatalogo';
+import { FRASES_DAS_TELAS } from 'dashboard/helper/frases';
+import PersonalizacaoEquipe from 'dashboard/routes/dashboard/settings/personalizacao/Index.vue';
 
 const store = useStore();
 const company = useMapGetter('crm/getCompany');
@@ -20,8 +27,12 @@ const pal = useCevicoPalette({
   scope: 'settings:empresa',
   blocks: [
     { id: 'quem', label: 'Quem somos', icon: 'i-lucide-building-2' },
-    { id: 'vocab', label: 'Vocabulário', icon: 'i-lucide-spell-check' },
+    { id: 'visual', label: 'Identidade visual', icon: 'i-lucide-palette' },
+    { id: 'vocab', label: 'Palavras', icon: 'i-lucide-spell-check' },
+    { id: 'frases', label: 'Frases das telas', icon: 'i-lucide-text-quote' },
+    { id: 'nomes', label: 'Nomes dos ambientes', icon: 'i-lucide-signpost' },
     { id: 'unidades', label: 'Unidades', icon: 'i-lucide-store' },
+    { id: 'equipe', label: 'Equipe e listas', icon: 'i-lucide-users' },
     { id: 'assistente', label: 'Assistente virtual', icon: 'i-lucide-bot' },
     { id: 'modulos', label: 'Módulos', icon: 'i-lucide-toggle-right' },
     { id: 'site', label: 'Site público', icon: 'i-lucide-globe' },
@@ -140,7 +151,101 @@ const form = ref({
   public_host: '',
   hub: { whatsapp: '', tagline: '', cta_text: '' },
   tracking: { meta_pixel_id: '', ga4_measurement_id: '' },
+  // 🎨 Personalização (28/10)
+  visual: { system_name: '', palette: '', watermark: true, accent: '' },
+  dictionary: { mode: 'auto', pairs: [] }, // mode: auto | on | off
+  phrases: {},
+  labels: {},
 });
+
+// ── 🎨 identidade visual: imagens ───────────────────────────────────────
+const IMAGENS = [
+  { kind: 'icon', label: 'Ícone', hint: 'barra lateral e aba do navegador (quadrado, PNG/SVG)' },
+  { kind: 'hero', label: 'Imagem do cabeçalho', hint: 'no lugar do olho CEVICO, no canto dos cabeçalhos' },
+  { kind: 'logo', label: 'Logo (fundo claro)', hint: 'documentos, impressões e páginas' },
+  { kind: 'logo_dark', label: 'Logo (fundo escuro)', hint: 'versão para fundo escuro' },
+];
+const imagemEnviando = ref('');
+const imagens = computed(() => company.value?.images || {});
+const enviarImagem = async (kind, event) => {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  imagemEnviando.value = kind;
+  try {
+    await store.dispatch('crm/updateCompanyImage', { kind, file });
+    useAlert('Imagem salva. Já aparece para quem recarregar a tela.');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui enviar a imagem.');
+  } finally {
+    imagemEnviando.value = '';
+    if (event?.target) event.target.value = '';
+  }
+};
+const removerImagem = async kind => {
+  imagemEnviando.value = kind;
+  try {
+    await store.dispatch('crm/updateCompanyImage', { kind, remove: true });
+    useAlert('Imagem removida — volta a valer a da instalação.');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui remover a imagem.');
+  } finally {
+    imagemEnviando.value = '';
+  }
+};
+const paletas = PALETTES.filter(p => p.group !== 'salad');
+
+// ── 🎨 dicionário global ────────────────────────────────────────────────
+const dicionarioPadroes = computed(() => company.value?.dictionary?.defaults || []);
+const dicionarioAtivoAgora = computed(() => {
+  if (form.value.dictionary.mode === 'on') return true;
+  if (form.value.dictionary.mode === 'off') return false;
+  return form.value.segment !== 'clinica';
+});
+const addPar = () => form.value.dictionary.pairs.push({ de: '', para: '' });
+const removePar = i => form.value.dictionary.pairs.splice(i, 1);
+const usarParesDoVocabulario = () => {
+  form.value.dictionary.pairs = dicionarioPadroes.value.map(p => ({ ...p }));
+};
+
+// ── 🎨 frases das telas (segmento + telas adaptadas) ────────────────────
+const fraseBusca = ref('');
+const todasAsFrases = computed(() => {
+  const doSegmento = Object.entries(company.value?.phrase_defaults || {}).map(
+    ([chave, padrao]) => ({ chave, padrao, tela: 'Agenda e painéis (segmento)' })
+  );
+  const vistas = new Set(doSegmento.map(f => f.chave));
+  const dasTelas = FRASES_DAS_TELAS.filter(f => !vistas.has(f.chave));
+  return [...doSegmento, ...dasTelas];
+});
+const frasesFiltradas = computed(() => {
+  const q = fraseBusca.value.trim().toLowerCase();
+  const lista = q
+    ? todasAsFrases.value.filter(
+        f =>
+          f.padrao.toLowerCase().includes(q) ||
+          (form.value.phrases[f.chave] || '').toLowerCase().includes(q) ||
+          f.tela.toLowerCase().includes(q)
+      )
+    : todasAsFrases.value;
+  return lista.reduce((acc, f) => {
+    (acc[f.tela] ||= []).push(f);
+    return acc;
+  }, {});
+});
+const frasesPersonalizadas = computed(
+  () => Object.values(form.value.phrases).filter(v => String(v || '').trim()).length
+);
+const limparFrases = () => {
+  form.value.phrases = {};
+};
+
+// ── 🎨 nomes dos ambientes ───────────────────────────────────────────────
+const nomesPersonalizados = computed(
+  () => Object.values(form.value.labels).filter(v => String(v || '').trim()).length
+);
+const limparNomes = () => {
+  form.value.labels = {};
+};
 
 // chave da unidade a partir do nome ("Loja Moema" → "loja_moema"), igual ao
 // parameterize(separator: '_') do servidor
@@ -195,6 +300,24 @@ const hydrate = () => {
       meta_pixel_id: c.tracking?.meta_pixel_id || '',
       ga4_measurement_id: c.tracking?.ga4_measurement_id || '',
     },
+    // 🎨 Personalização (28/10)
+    visual: {
+      system_name: c.visual?.system_name || '',
+      palette: c.visual?.palette || '',
+      watermark: c.visual?.watermark !== false,
+      accent: c.visual?.accent || '',
+    },
+    dictionary: {
+      mode: c.dictionary?.explicit ? (c.dictionary.enabled ? 'on' : 'off') : 'auto',
+      // na tela só os pares PRÓPRIOS; vazio = os pares do vocabulário
+      pairs: (c.dictionary?.pairs || []).some(
+        p => !(c.dictionary?.defaults || []).some(d => d.de === p.de && d.para === p.para)
+      )
+        ? (c.dictionary?.pairs || []).map(p => ({ ...p }))
+        : [],
+    },
+    phrases: { ...(c.phrases || {}) },
+    labels: { ...(c.labels || {}) },
   };
 };
 
@@ -286,6 +409,29 @@ const payload = () => {
       meta_pixel_id: f.tracking.meta_pixel_id.trim(),
       ga4_measurement_id: f.tracking.ga4_measurement_id.trim(),
     },
+    // 🎨 Personalização (28/10)
+    visual: {
+      system_name: f.visual.system_name.trim(),
+      palette: f.visual.palette,
+      watermark: f.visual.watermark,
+      accent: f.visual.accent.trim(),
+    },
+    dictionary: {
+      enabled: f.dictionary.mode === 'auto' ? '' : f.dictionary.mode === 'on',
+      pairs: f.dictionary.pairs
+        .map(p => ({ de: String(p.de || '').trim(), para: String(p.para || '').trim() }))
+        .filter(p => p.de && p.para),
+    },
+    phrases: Object.fromEntries(
+      Object.entries(f.phrases)
+        .map(([k, v]) => [k, String(v || '').trim()])
+        .filter(([, v]) => v)
+    ),
+    labels: Object.fromEntries(
+      Object.entries(f.labels)
+        .map(([k, v]) => [k, String(v || '').trim()])
+        .filter(([, v]) => v)
+    ),
   };
 };
 
@@ -299,7 +445,7 @@ const save = async () => {
     await store.dispatch('crm/updateCompany', payload());
     hydrate();
     useAlert(
-      `Identidade da ${form.value.name} salva! Vocabulário, agentes e páginas já usam o novo.`
+      `Personalização da ${form.value.name} salva! Telas, menu, agentes e páginas já usam o novo.`
     );
   } catch (e) {
     useAlert(
@@ -321,13 +467,17 @@ const unitWord = computed(() =>
 </script>
 
 <template>
-  <div class="cv-page cv-overlay flex-1 overflow-y-auto" :style="cvVars">
+  <div
+    class="cv-page cv-overlay flex-1 overflow-y-auto"
+    :style="cvVars"
+    data-sem-dicionario
+  >
     <div class="max-w-[980px] mx-auto px-4 sm:px-6 py-5 sm:py-8">
       <CevicoHero
         :pal="pal"
-        title="Identidade da empresa"
-        subtitle="quem é a empresa desta conta · as palavras que ela usa · lojas e unidades · assistente virtual · módulos · site público"
-        icon="i-lucide-building-2"
+        title="Personalização"
+        subtitle="quem é a empresa · imagens e cores · palavras e frases · nomes dos ambientes · unidades e equipe · assistente · módulos · site público — tudo por dentro do sistema"
+        icon="i-lucide-palette"
       >
         <template #actions>
           <button
@@ -451,6 +601,127 @@ const unitWord = computed(() =>
           </div>
         </section>
 
+        <!-- ══ IDENTIDADE VISUAL (28/10) ══ -->
+        <section class="cv-block p-5 sm:p-6 mb-4" :style="blockVars('visual')">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="cv-icon">
+              <span class="i-lucide-palette text-base" />
+            </span>
+            <h2 class="text-base sm:text-lg font-bold text-n-slate-12">
+              Identidade visual
+            </h2>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-4">
+            As imagens e cores desta empresa dentro do sistema. Sem nada aqui,
+            valem as da instalação (a marca que veste o sistema na subida).
+          </p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+            <div
+              v-for="img in IMAGENS"
+              :key="img.kind"
+              class="cv-sub p-3 flex items-center gap-3"
+            >
+              <div
+                class="w-16 h-16 rounded-xl border border-n-weak bg-n-alpha-1 flex items-center justify-center overflow-hidden flex-shrink-0"
+                :class="img.kind === 'logo_dark' ? 'bg-slate-900' : ''"
+              >
+                <img
+                  v-if="imagens[img.kind]"
+                  :src="imagens[img.kind]"
+                  alt=""
+                  class="max-w-full max-h-full object-contain"
+                />
+                <span
+                  v-else
+                  class="i-lucide-image text-xl text-n-slate-9"
+                />
+              </div>
+              <div class="min-w-0 flex-1">
+                <span class="text-sm font-semibold text-n-slate-12 block">
+                  {{ img.label }}
+                </span>
+                <span class="text-[11px] text-n-slate-10 block leading-snug">
+                  {{ img.hint }}
+                </span>
+                <div class="flex items-center gap-2 mt-2 flex-wrap">
+                  <label class="cv-btn cv-btn-ghost cv-btn-sm cursor-pointer">
+                    <span
+                      :class="
+                        imagemEnviando === img.kind
+                          ? 'i-lucide-loader-circle animate-spin'
+                          : 'i-lucide-upload'
+                      "
+                      class="text-xs"
+                    />
+                    {{ imagens[img.kind] ? 'Trocar' : 'Enviar' }}
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                      class="hidden"
+                      :disabled="Boolean(imagemEnviando)"
+                      @change="enviarImagem(img.kind, $event)"
+                    />
+                  </label>
+                  <button
+                    v-if="imagens[img.kind]"
+                    type="button"
+                    class="cv-btn cv-btn-ghost cv-btn-danger cv-btn-sm"
+                    :disabled="Boolean(imagemEnviando)"
+                    @click="removerImagem(img.kind)"
+                  >
+                    <span class="i-lucide-trash-2 text-xs" />
+                    Remover
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label class="cv-sub p-3 block">
+              <span class="cv-label block mb-1">Nome do sistema</span>
+              <input
+                v-model="form.visual.system_name"
+                class="cv-input w-full text-sm"
+                placeholder="Ex.: Sistema LIFE"
+                maxlength="40"
+              />
+              <span class="text-[10px] text-n-slate-9 block mt-1">
+                Aparece na saudação do Meu Painel. Vazio = nome da empresa.
+              </span>
+            </label>
+            <label class="cv-sub p-3 block">
+              <span class="cv-label block mb-1">Paleta padrão</span>
+              <select v-model="form.visual.palette" class="cv-input w-full text-sm">
+                <option value="">Cor do dia (muda sozinha)</option>
+                <option v-for="p in paletas" :key="p.key" :value="p.key">
+                  {{ p.emoji ? `${p.emoji} ` : '' }}{{ p.label }}
+                </option>
+              </select>
+              <span class="text-[10px] text-n-slate-9 block mt-1">
+                Vale onde ninguém escolheu uma paleta própria.
+              </span>
+            </label>
+            <div class="cv-sub p-3 flex items-center gap-3">
+              <div class="min-w-0 flex-1">
+                <span class="cv-label block mb-1">Marca d'água nos cabeçalhos</span>
+                <span class="text-[11px] text-n-slate-10 block leading-snug">
+                  O olho CEVICO (ou a imagem do cabeçalho) no canto dos painéis.
+                </span>
+              </div>
+              <button
+                type="button"
+                class="cv-switch cv-switch-lg flex-shrink-0"
+                :class="form.visual.watermark ? 'cv-switch-on' : ''"
+                :aria-pressed="form.visual.watermark"
+                :title="form.visual.watermark ? 'Esconder' : 'Mostrar'"
+                @click="form.visual.watermark = !form.visual.watermark"
+              />
+            </div>
+          </div>
+        </section>
+
         <!-- ══ VOCABULÁRIO ══ -->
         <section class="cv-block p-5 sm:p-6 mb-4" :style="blockVars('vocab')">
           <div class="flex items-center gap-2 mb-1 flex-wrap">
@@ -458,7 +729,7 @@ const unitWord = computed(() =>
               <span class="i-lucide-spell-check text-base" />
             </span>
             <h2 class="text-base sm:text-lg font-bold text-n-slate-12">
-              Vocabulário
+              Palavras
             </h2>
             <span class="cv-chip ml-auto">{{ segmentLabel }}</span>
           </div>
@@ -514,6 +785,234 @@ const unitWord = computed(() =>
               }}
             </span>
           </div>
+          <!-- 🎨 dicionário global (28/10) -->
+          <div class="cv-sub p-3 mt-4">
+            <div class="flex items-center gap-2 flex-wrap mb-1">
+              <span class="i-lucide-replace text-sm text-n-slate-11" />
+              <span class="text-sm font-semibold text-n-slate-12">
+                Dicionário global das telas
+              </span>
+              <span
+                class="cv-chip ml-auto"
+                :class="dicionarioAtivoAgora ? '' : 'opacity-60'"
+              >
+                {{ dicionarioAtivoAgora ? 'ligado' : 'desligado' }}
+              </span>
+            </div>
+            <p class="text-[11px] text-n-slate-10 leading-snug mb-3">
+              Troca as palavras da clínica em TODAS as telas do painel —
+              inclusive as que ainda escrevem o texto à mão. Nunca mexe no
+              conteúdo das conversas, mensagens e campos de texto. Em branco,
+              usa as palavras acima.
+            </p>
+            <div class="cv-seg grid grid-cols-3 w-full mb-3">
+              <button
+                type="button"
+                class="cv-seg-item"
+                :class="form.dictionary.mode === 'auto' ? 'cv-seg-on' : ''"
+                @click="form.dictionary.mode = 'auto'"
+              >
+                Automático
+              </button>
+              <button
+                type="button"
+                class="cv-seg-item"
+                :class="form.dictionary.mode === 'on' ? 'cv-seg-on' : ''"
+                @click="form.dictionary.mode = 'on'"
+              >
+                Ligado
+              </button>
+              <button
+                type="button"
+                class="cv-seg-item"
+                :class="form.dictionary.mode === 'off' ? 'cv-seg-on' : ''"
+                @click="form.dictionary.mode = 'off'"
+              >
+                Desligado
+              </button>
+            </div>
+            <p class="text-[10px] text-n-slate-9 mb-3">
+              Automático = ligado fora da clínica, desligado na clínica.
+            </p>
+            <div v-if="!form.dictionary.pairs.length" class="text-[11px] text-n-slate-10 mb-2">
+              <template v-if="dicionarioPadroes.length">
+                Pares em uso (das palavras acima):
+                <span v-for="p in dicionarioPadroes" :key="p.de" class="cv-chip mr-1 mb-1">
+                  {{ p.de }} → {{ p.para }}
+                </span>
+              </template>
+              <template v-else>
+                Nenhuma palavra muda com o ramo atual — defina as palavras acima ou
+                adicione pares próprios.
+              </template>
+            </div>
+            <div
+              v-for="(p, i) in form.dictionary.pairs"
+              :key="`par-${i}`"
+              class="grid grid-cols-[1fr_auto_1fr_auto] gap-2 items-center mb-2"
+            >
+              <input
+                v-model="p.de"
+                class="cv-input w-full text-sm"
+                placeholder="palavra da clínica"
+                maxlength="40"
+              />
+              <span class="i-lucide-arrow-right text-xs text-n-slate-9" />
+              <input
+                v-model="p.para"
+                class="cv-input w-full text-sm"
+                placeholder="palavra da empresa"
+                maxlength="40"
+              />
+              <button
+                type="button"
+                class="cv-btn cv-btn-ghost cv-btn-danger cv-btn-sm px-2"
+                title="Remover par"
+                @click="removePar(i)"
+              >
+                <span class="i-lucide-trash-2 text-xs" />
+              </button>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                class="cv-btn cv-btn-ghost cv-btn-sm"
+                @click="addPar"
+              >
+                <span class="i-lucide-plus text-xs" />
+                Adicionar par
+              </button>
+              <button
+                v-if="!form.dictionary.pairs.length && dicionarioPadroes.length"
+                type="button"
+                class="cv-btn cv-btn-ghost cv-btn-sm"
+                @click="usarParesDoVocabulario"
+              >
+                <span class="i-lucide-list-plus text-xs" />
+                Editar os pares em uso
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- ══ FRASES DAS TELAS (28/10) ══ -->
+        <section class="cv-block p-5 sm:p-6 mb-4" :style="blockVars('frases')">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon">
+              <span class="i-lucide-text-quote text-base" />
+            </span>
+            <h2 class="text-base sm:text-lg font-bold text-n-slate-12">
+              Frases das telas
+            </h2>
+            <span class="cv-chip ml-auto">
+              {{ frasesPersonalizadas }} de {{ todasAsFrases.length }}
+            </span>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-3">
+            Títulos e rótulos inteiros ("Consultas marcadas hoje", "Agenda de
+            Cirurgias"…), para acertar gênero e concordância. Em branco vale o
+            padrão em cinza. Palavras soltas o dicionário acima já resolve.
+          </p>
+          <div class="flex items-center gap-2 mb-3 flex-wrap">
+            <input
+              v-model="fraseBusca"
+              class="cv-input flex-1 min-w-[200px] text-sm"
+              placeholder="Buscar frase, tela ou texto…"
+            />
+            <button
+              type="button"
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              :disabled="!frasesPersonalizadas"
+              @click="limparFrases"
+            >
+              <span class="i-lucide-rotate-ccw text-xs" />
+              Voltar tudo ao padrão
+            </button>
+          </div>
+          <div class="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+            <div
+              v-for="(lista, tela) in frasesFiltradas"
+              :key="tela"
+              class="cv-sub overflow-hidden"
+            >
+              <div class="px-3 py-2 border-b border-n-weak flex items-center gap-2">
+                <span class="text-xs font-semibold text-n-slate-12">{{ tela }}</span>
+                <span class="text-[10px] text-n-slate-9">{{ lista.length }}</span>
+              </div>
+              <div
+                v-for="f in lista"
+                :key="f.chave"
+                class="grid grid-cols-1 sm:grid-cols-[1fr_1.2fr] gap-1 sm:gap-2 px-3 py-1.5 items-center border-b border-n-weak last:border-b-0"
+              >
+                <span class="text-xs text-n-slate-11 truncate" :title="f.chave">
+                  {{ f.padrao }}
+                </span>
+                <input
+                  v-model="form.phrases[f.chave]"
+                  class="cv-input w-full text-sm"
+                  :placeholder="f.padrao"
+                  maxlength="300"
+                />
+              </div>
+            </div>
+            <div
+              v-if="!Object.keys(frasesFiltradas).length"
+              class="cv-sub p-4 text-sm text-n-slate-10 text-center"
+            >
+              Nenhuma frase com esse texto.
+            </div>
+          </div>
+        </section>
+
+        <!-- ══ NOMES DOS AMBIENTES (28/10) ══ -->
+        <section class="cv-block p-5 sm:p-6 mb-4" :style="blockVars('nomes')">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="cv-icon">
+              <span class="i-lucide-signpost text-base" />
+            </span>
+            <h2 class="text-base sm:text-lg font-bold text-n-slate-12">
+              Nomes dos ambientes
+            </h2>
+            <span class="cv-chip ml-auto">{{ nomesPersonalizados }} renomeado(s)</span>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-3">
+            Como cada ambiente se chama no menu e no título da tela (Agenda →
+            "Vistorias", Espaço do Paciente → "Espaço do Cliente"…). Em branco
+            vale o nome de hoje.
+          </p>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div
+              v-for="(lista, grupo) in AMBIENTES_POR_GRUPO"
+              :key="grupo"
+              class="cv-sub overflow-hidden"
+            >
+              <div class="px-3 py-2 border-b border-n-weak">
+                <span class="text-xs font-semibold text-n-slate-12">{{ grupo }}</span>
+              </div>
+              <div
+                v-for="a in lista"
+                :key="a.chave"
+                class="grid grid-cols-[1fr_1.2fr] gap-2 px-3 py-1.5 items-center border-b border-n-weak last:border-b-0"
+              >
+                <span class="text-xs text-n-slate-11 truncate">{{ a.padrao }}</span>
+                <input
+                  v-model="form.labels[a.chave]"
+                  class="cv-input w-full text-sm"
+                  :placeholder="a.padrao"
+                  maxlength="60"
+                />
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="cv-btn cv-btn-ghost cv-btn-sm mt-3"
+            :disabled="!nomesPersonalizados"
+            @click="limparNomes"
+          >
+            <span class="i-lucide-rotate-ccw text-xs" />
+            Voltar aos nomes de hoje
+          </button>
         </section>
 
         <!-- ══ UNIDADES (LOJAS) ══ -->
@@ -629,6 +1128,24 @@ const unitWord = computed(() =>
             <span class="i-lucide-plus text-xs" />
             Adicionar unidade
           </button>
+        </section>
+
+        <!-- ══ EQUIPE E LISTAS (coringa, embutido 28/10) ══ -->
+        <section class="cv-block p-5 sm:p-6 mb-4" :style="blockVars('equipe')">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="cv-icon">
+              <span class="i-lucide-users text-base" />
+            </span>
+            <h2 class="text-base sm:text-lg font-bold text-n-slate-12">
+              Equipe, listas e meta
+            </h2>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-4">
+            Quem atende (os "médicos" do sistema), as agendas paralelas, os
+            motivos e as opções da Agenda, a meta do mês e o contexto que os
+            robôs usam. Este bloco salva sozinho, com o próprio botão.
+          </p>
+          <PersonalizacaoEquipe embutido />
         </section>
 
         <!-- ══ ASSISTENTE VIRTUAL ══ -->
@@ -823,7 +1340,7 @@ const unitWord = computed(() =>
               "
               class="text-sm"
             />
-            {{ isSaving ? 'Salvando…' : 'Salvar identidade da empresa' }}
+            {{ isSaving ? 'Salvando…' : 'Salvar personalização' }}
           </button>
         </div>
       </template>

@@ -30,6 +30,15 @@ class Cevico::Company
   # módulos que só fazem sentido numa clínica (desligados nos outros ramos)
   CLINIC_MODULES = %w[cirurgias medicos oftalmofacil notas_clinicas pos_operatorio].freeze
 
+  # 🎨 Personalização (28/10): imagens que a conta pode trocar na tela
+  IMAGE_KINDS = %w[logo logo_dark icon hero].freeze
+  # pares padrão do dicionário global: palavra da clínica → chave do vocabulário
+  DICTIONARY_SEEDS = [
+    %w[paciente paciente], %w[pacientes paciente_plural], %w[consulta consulta], %w[consultas consulta_plural],
+    %w[cirurgia cirurgia], %w[cirurgias cirurgia_plural], %w[médico medico], %w[médicos medico_plural],
+    %w[clínica empresa]
+  ].freeze
+
   attr_reader :account, :raw
 
   def self.for(account)
@@ -94,6 +103,89 @@ class Cevico::Company
 
         token[0] == token[0].upcase ? value.sub(/\A\p{L}/, &:upcase) : value
       end
+    end
+  end
+
+  # ── frases prontas (conta > segmento > clínica) ────────────────────────
+  # Rótulos compostos onde gênero/concordância mudam ("Consultas marcadas
+  # hoje"). As chaves são as do `frases:` dos segmentos + as que as telas
+  # registram em helper/frases/*.js. Vazio = vale o segmento da instalação.
+  def phrases
+    (raw['phrases'] || {}).to_h.transform_keys(&:to_s).compact_blank
+  end
+
+  def phrase(key, default = nil)
+    phrases[key.to_s].presence || Segmento.frase(key, default)
+  end
+
+  # padrões que a tela mostra ao lado de cada frase: clínica (o texto de
+  # sempre) coberto pelo segmento da instalação
+  def phrase_defaults
+    base = (Segmento.load_yml(Segmento::FALLBACK_ID) || {})['frases'] || {}
+    base.merge(Segmento.config['frases'] || {})
+  end
+
+  # ── nomes dos ambientes (menu + título das telas) ──────────────────────
+  def labels
+    (raw['labels'] || {}).to_h.transform_keys(&:to_s).compact_blank
+  end
+
+  def label(key, default = nil)
+    labels[key.to_s].presence || default || key.to_s
+  end
+
+  # ── dicionário global (troca de palavras nas telas não adaptadas) ──────
+  # { 'enabled' => true/false/nil, 'pairs' => [{ 'de' => 'consulta', 'para' => 'vistoria' }] }
+  # Sem decisão explícita: ligado fora da clínica, desligado na clínica.
+  def dictionary_raw = (raw['dictionary'] || {}).to_h.transform_keys(&:to_s)
+
+  def dictionary_enabled?
+    v = dictionary_raw['enabled']
+    return ActiveModel::Type::Boolean.new.cast(v) == true unless v.nil?
+
+    !clinic?
+  end
+
+  # pares padrão: só as palavras que o vocabulário da conta realmente troca
+  def dictionary_defaults
+    DICTIONARY_SEEDS.filter_map do |from, token|
+      to = vocabulary[token].to_s
+      next if to.blank? || to.casecmp?(from)
+
+      { 'de' => from, 'para' => to }
+    end
+  end
+
+  def dictionary_pairs
+    own = Array(dictionary_raw['pairs']).filter_map do |p|
+      p = p.to_h.transform_keys(&:to_s)
+      next if p['de'].to_s.strip.blank? || p['para'].to_s.strip.blank?
+
+      { 'de' => p['de'].to_s.strip, 'para' => p['para'].to_s.strip }
+    end
+    own.any? ? own : dictionary_defaults
+  end
+
+  def dictionary
+    { 'enabled' => dictionary_enabled?, 'pairs' => dictionary_pairs, 'defaults' => dictionary_defaults,
+      'explicit' => !dictionary_raw['enabled'].nil? }
+  end
+
+  # ── identidade visual (nome do sistema, paleta, marca d'água) ──────────
+  # { 'system_name' => 'Sistema LIFE', 'palette' => 'tangerine', 'watermark' => false, 'accent' => '#D2990B' }
+  def visual
+    v = (raw['visual'] || {}).to_h.transform_keys(&:to_s)
+    { 'system_name' => v['system_name'].to_s.strip, 'palette' => v['palette'].to_s.strip,
+      'watermark' => v['watermark'].nil? ? true : ActiveModel::Type::Boolean.new.cast(v['watermark']) == true,
+      'accent' => v['accent'].to_s.strip }
+  end
+
+  # URLs das imagens anexadas à conta (nil = usa a da instalação / o olho)
+  def images
+    settings = account && CrmSetting.find_by(account: account)
+    IMAGE_KINDS.index_with do |kind|
+      att = settings&.public_send("brand_#{kind}")
+      att&.attached? ? Rails.application.routes.url_helpers.rails_blob_path(att, only_path: true) : nil
     end
   end
 
@@ -170,7 +262,14 @@ class Cevico::Company
       modules: modules,
       public_host: public_host,
       hub: hub,
-      tracking: tracking.slice('meta_pixel_id', 'ga4_measurement_id')
+      tracking: tracking.slice('meta_pixel_id', 'ga4_measurement_id'),
+      # 🎨 Personalização (28/10)
+      phrases: phrases,
+      phrase_defaults: phrase_defaults,
+      labels: labels,
+      dictionary: dictionary,
+      visual: visual,
+      images: images
     }
   end
 
@@ -223,7 +322,63 @@ class Cevico::Company
                               'ga4_measurement_id' => t['ga4_measurement_id'].to_s.strip[0, 30] }.compact_blank
     end
 
+    # 🎨 Personalização (28/10): frases, nomes dos ambientes, dicionário, visual
+    if attrs.key?('phrases')
+      current['phrases'] = attrs['phrases'].to_h.transform_keys(&:to_s).first(400).to_h
+                                           .select { |k, _| k.match?(/\A[\w.:-]{1,80}\z/) }
+                                           .transform_values { |v| v.to_s.strip[0, 300] }
+                                           .compact_blank
+    end
+    if attrs.key?('labels')
+      current['labels'] = attrs['labels'].to_h.transform_keys(&:to_s).first(200).to_h
+                                         .select { |k, _| k.match?(/\A[\w .:&()>\/-]{1,80}\z/) }
+                                         .transform_values { |v| v.to_s.strip[0, 60] }
+                                         .compact_blank
+    end
+    if attrs.key?('dictionary')
+      d = attrs['dictionary'].to_h.transform_keys(&:to_s)
+      dict = {}
+      dict['enabled'] = ActiveModel::Type::Boolean.new.cast(d['enabled']) == true unless d['enabled'].nil? || d['enabled'].to_s == ''
+      if d.key?('pairs')
+        dict['pairs'] = Array(d['pairs']).first(100).filter_map do |p|
+          p = p.to_h.transform_keys(&:to_s)
+          from = p['de'].to_s.strip[0, 40]
+          to = p['para'].to_s.strip[0, 40]
+          next if from.blank? || to.blank? || from.casecmp?(to)
+
+          { 'de' => from, 'para' => to }
+        end
+      end
+      current['dictionary'] = dict
+    end
+    if attrs.key?('visual')
+      v = attrs['visual'].to_h.transform_keys(&:to_s)
+      current['visual'] = {
+        'system_name' => v['system_name'].to_s.strip[0, 40],
+        'palette' => v['palette'].to_s.strip[0, 30],
+        'watermark' => v['watermark'].nil? ? true : ActiveModel::Type::Boolean.new.cast(v['watermark']) == true,
+        'accent' => v['accent'].to_s.strip[0, 9]
+      }
+    end
+
     Cevico::SettingMerge.merge_key!(account, :agenda_config, KEY) { |saved| saved.to_h.merge(current) }
+    new(account)
+  end
+
+  # 🎨 imagem da identidade visual: anexa (file) ou remove (remove: true)
+  def self.save_image!(account, kind, file: nil, remove: false)
+    raise ArgumentError, 'imagem desconhecida' unless IMAGE_KINDS.include?(kind.to_s)
+
+    settings = CrmSetting.find_or_create_by!(account: account)
+    att = settings.public_send("brand_#{kind}")
+    if remove
+      att.purge_later if att.attached?
+    elsif file
+      raise ArgumentError, 'só imagens (PNG, JPG, SVG, WEBP)' unless file.content_type.to_s.start_with?('image/')
+      raise ArgumentError, 'imagem muito grande (máx. 5 MB)' if file.size.to_i > 5.megabytes
+
+      att.attach(file)
+    end
     new(account)
   end
 end

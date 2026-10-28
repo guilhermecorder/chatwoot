@@ -23,6 +23,7 @@ import {
   reservedFor, windowAccepts, windowAt, sameBlock, dateKey, patientNameOf, hexToRgbSpaced,
   PRICE_TYPE_LABELS, priceLabel,
 } from 'dashboard/helper/cevicoAgenda';
+import { frase, termo, termoCap } from 'dashboard/helper/segmento';
 
 const props = defineProps({
   units: { type: Object, required: true }, // { tatuape: { label, color }, … }
@@ -87,7 +88,7 @@ const toggleDoctor = async name => {
     await refresh();
     useAlert(wasClosed ? `Agenda de ${name} reaberta!` : `Agenda de ${name} fechada — some da grade e a IA para de oferecer.`);
   } catch {
-    useAlert('Não consegui atualizar a agenda do médico.');
+    useAlert(frase('agenda.erro_agenda_profissional', 'Não consegui atualizar a agenda do médico.'));
   } finally {
     busy.value = '';
   }
@@ -106,7 +107,7 @@ const futureClosings = computed(() =>
     .sort((a, b) => dayOf(a).localeCompare(dayOf(b)))
 );
 const closeScopes = computed(() => [
-  { key: 'all', label: 'Dia inteiro (clínica toda)' },
+  { key: 'all', label: frase('agenda.dia_inteiro_empresa_toda', 'Dia inteiro (clínica toda)') },
   ...Object.keys(props.units).map(u => ({ key: `u:${u}`, label: `Só ${unitLabel(u)}` })),
   ...DOCTORS.map(d => ({ key: `d:${d.name}`, label: `Só ${d.name}` })),
 ]);
@@ -181,7 +182,7 @@ const conflicts = computed(() => {
       let reason = '';
       if (whole.has(key)) reason = 'o dia foi fechado';
       else if (parts.some(b => b.date === key && ((b.unit && b.unit === t.unit) || (b.doctor && b.doctor === t.doctor)))) {
-        reason = 'a unidade ou o médico está fechado neste dia';
+        reason = frase('agenda.motivo_unidade_profissional_fechado', 'a unidade ou o médico está fechado neste dia');
       } else if (t.doctor && closed.includes(t.doctor)) reason = `a agenda de ${doctorShort(t.doctor)} está fechada`;
       else {
         const spot = { dow: at.getDay(), unit: t.unit, minutes: at.getHours() * 60 + at.getMinutes() };
@@ -261,7 +262,7 @@ const rowError = w => {
   const clash = draft.value.find(
     x => x.uid !== w.uid && Number(x.dow) === Number(w.dow) && x.doctor === w.doctor && x.start < w.end && x.end > w.start
   );
-  return clash ? `sobrepõe a faixa ${clash.start}–${clash.end} do mesmo médico` : '';
+  return clash ? `sobrepõe a faixa ${clash.start}–${clash.end} do mesmo ${termo('profissional')}` : '';
 };
 const hasErrors = computed(() => draft.value.some(w => rowError(w)));
 
@@ -385,7 +386,7 @@ onMounted(loadPreview);
           <button class="w-full flex items-center gap-2 text-left" @click="showConflicts = !showConflicts">
             <span class="i-lucide-calendar-clock text-base" style="color: #b45309" />
             <span class="text-sm font-bold text-n-slate-12 flex-1">Precisa reagendar · {{ conflicts.length }}</span>
-            <span class="text-[11px] text-n-slate-10">paciente já marcado que ficou fora da regra</span>
+            <span class="text-[11px] text-n-slate-10">{{ frase('agenda.cliente_fora_da_regra', 'paciente já marcado que ficou fora da regra') }}</span>
             <span :class="showConflicts ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="text-sm text-n-slate-10" />
           </button>
           <div v-if="showConflicts" class="mt-2.5 space-y-1.5">
@@ -402,8 +403,8 @@ onMounted(loadPreview);
         <!-- 1. ABRIR E FECHAR -->
         <template v-if="tab === 'abrir'">
           <section class="space-y-2">
-            <p class="cv-ag-block-title">Médicos</p>
-            <p class="text-[11px] text-n-slate-10">Fechar tira o médico da grade inteira na hora, e a IA para de oferecer os horários dele. Reabrir devolve tudo como estava.</p>
+            <p class="cv-ag-block-title">{{ termoCap('profissionais') }}</p>
+            <p class="text-[11px] text-n-slate-10">{{ frase('agenda.explica_fechar_profissional', 'Fechar tira o médico da grade inteira na hora, e a IA para de oferecer os horários dele. Reabrir devolve tudo como estava.') }}</p>
             <div v-for="d in DOCTORS" :key="d.name" class="cv-sub flex items-center gap-3 flex-wrap px-3.5 py-3">
               <span class="w-3 h-3 rounded-full flex-shrink-0" :style="{ backgroundColor: d.color }" />
               <div class="flex-1 min-w-[180px]">
@@ -422,7 +423,7 @@ onMounted(loadPreview);
 
           <section class="space-y-2">
             <p class="cv-ag-block-title">Dias fechados</p>
-            <p class="text-[11px] text-n-slate-10">Feriado, congresso, folga: o dia some da grade e a IA não oferece. Pode ser a clínica toda, só uma unidade ou só um médico.</p>
+            <p class="text-[11px] text-n-slate-10">{{ frase('agenda.explica_fechar_dia', 'Feriado, congresso, folga: o dia some da grade e a IA não oferece. Pode ser a clínica toda, só uma unidade ou só um médico.') }}</p>
             <div class="cv-sub flex items-end gap-2 flex-wrap p-3">
               <label class="flex-1 min-w-[130px]">
                 <span class="cv-label block mb-0.5">Dia</span>
@@ -447,7 +448,7 @@ onMounted(loadPreview);
 
           <section class="space-y-2">
             <p class="cv-ag-block-title">Horários com cadeado</p>
-            <p class="text-[11px] text-n-slate-10">Um horário só (almoço, atraso do médico). Para fechar, use o cadeado no canto do horário, na visão Dia.</p>
+            <p class="text-[11px] text-n-slate-10">{{ frase('agenda.explica_fechar_horario', 'Um horário só (almoço, atraso do médico). Para fechar, use o cadeado no canto do horário, na visão Dia.') }}</p>
             <div v-for="(s, i) in lockedSlots" :key="i" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2">
               <span class="i-lucide-lock text-sm text-n-slate-10" />
               <span class="text-xs font-semibold text-n-slate-12 tabular-nums">{{ fmtDay(parseKey(s.date)) }} · {{ s.time }}</span>
@@ -462,9 +463,9 @@ onMounted(loadPreview);
         <!-- 2. FAIXAS DE HORÁRIO -->
         <template v-else-if="tab === 'faixas'">
           <p class="text-[11px] text-n-slate-10 leading-relaxed">
-            Cada faixa diz quando o médico atende e <b>para que ela serve</b>. Faixa "Tudo" aceita qualquer atendimento.
-            Faixa reservada (ex.: só Pós-operatório) fica marcada na grade, a equipe é avisada ao marcar outro tipo ali e
-            <b>a IA só oferece consulta nova nas faixas que aceitam Avaliação</b>.
+            {{ frase('agenda.faixa_diz_quando_atende', 'Cada faixa diz quando o médico atende e') }} <b>para que ela serve</b>. Faixa "Tudo" aceita qualquer atendimento.
+            {{ frase('agenda.faixa_reservada_explica', 'Faixa reservada (ex.: só Pós-operatório) fica marcada na grade, a equipe é avisada ao marcar outro tipo ali e') }}
+            <b>{{ frase('agenda.ia_so_oferece_avaliacao', 'a IA só oferece consulta nova nas faixas que aceitam Avaliação') }}</b>.
           </p>
           <section v-for="dow in [1, 2, 3, 4, 5]" :key="dow" class="space-y-1.5">
             <div class="flex items-center gap-2">
@@ -485,7 +486,7 @@ onMounted(loadPreview);
                   <input v-model="w.start" type="time" class="cv-input !h-8 text-xs !w-auto" />
                   <span class="text-xs text-n-slate-10">às</span>
                   <input v-model="w.end" type="time" class="cv-input !h-8 text-xs !w-auto" />
-                  <select v-model.number="w.block" class="cv-input !h-8 text-xs !w-auto" title="De quanto em quanto tempo entra um paciente">
+                  <select v-model.number="w.block" class="cv-input !h-8 text-xs !w-auto" :title="frase('agenda.dica_bloco_minutos', 'De quanto em quanto tempo entra um paciente')">
                     <option v-for="b in [5, 10, 15, 20, 30]" :key="b" :value="b">a cada {{ b }} min</option>
                   </select>
                   <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" title="Dividir esta faixa em duas num horário" @click="startSplit(w)"><span class="i-lucide-scissors text-xs" /> Dividir</button>
@@ -520,7 +521,7 @@ onMounted(loadPreview);
                 </button>
                 <span class="text-[11px] ml-auto flex items-center gap-1" :style="{ color: aiOffers(w) ? '#047857' : '#b45309' }">
                   <span :class="aiOffers(w) ? 'i-lucide-sparkles' : 'i-lucide-ban'" class="text-xs" />
-                  {{ aiOffers(w) ? 'a IA oferece consulta nova aqui' : 'a IA não oferece — só a equipe marca' }}
+                  {{ aiOffers(w) ? frase('agenda.ia_oferece_aqui', 'a IA oferece consulta nova aqui') : 'a IA não oferece — só a equipe marca' }}
                 </span>
               </div>
               <p v-if="rowError(w)" class="text-[11px] font-semibold" style="color: #dc2626">⚠ {{ rowError(w) }}</p>
@@ -531,9 +532,9 @@ onMounted(loadPreview);
             <span class="i-lucide-lock text-sm" /> Sábado e domingo: sem agenda em nenhuma unidade.
           </div>
           <div class="cv-sub flex items-center gap-2 flex-wrap px-3 py-2.5">
-            <span class="text-xs text-n-slate-11 flex-1 min-w-[160px]">Exames e sala cirúrgica têm faixas próprias:</span>
-            <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="emit('openExamWindows')"><span class="i-lucide-scan-eye text-xs" /> Janela de exames</button>
-            <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="emit('openSurgeryWindows')"><span class="i-lucide-slice text-xs" /> Sala cirúrgica</button>
+            <span class="text-xs text-n-slate-11 flex-1 min-w-[160px]">{{ frase('agenda.exames_sala_faixas_proprias', 'Exames e sala cirúrgica têm faixas próprias:') }}</span>
+            <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="emit('openExamWindows')"><span class="i-lucide-scan-eye text-xs" /> {{ frase('agenda.janela_exames', 'Janela de exames') }}</button>
+            <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="emit('openSurgeryWindows')"><span class="i-lucide-slice text-xs" /> {{ frase('sala_execucao', 'Sala cirúrgica') }}</button>
           </div>
         </template>
 
@@ -542,12 +543,11 @@ onMounted(loadPreview);
           <section class="space-y-2">
             <p class="cv-ag-block-title">O que a IA segue sozinha</p>
             <p class="text-[11px] text-n-slate-10 leading-relaxed">
-              Os horários que ela oferece saem direto desta agenda: só faixa aberta, que aceita consulta nova, sem paciente marcado
-              e sem cadeado. Fechou um médico, um dia ou reservou uma faixa — ela para de oferecer na mensagem seguinte, sem mexer no roteiro.
+              {{ frase('agenda.explica_ia_segue', 'Os horários que ela oferece saem direto desta agenda: só faixa aberta, que aceita consulta nova, sem paciente marcado e sem cadeado. Fechou um médico, um dia ou reservou uma faixa — ela para de oferecer na mensagem seguinte, sem mexer no roteiro.') }}
             </p>
           </section>
           <section class="space-y-2">
-            <p class="cv-ag-block-title">Regras da clínica</p>
+            <p class="cv-ag-block-title">{{ frase('agenda.regras_empresa', 'Regras da clínica') }}</p>
             <p class="text-[11px] text-n-slate-10">Escreva aqui o que a IA precisa saber sobre a agenda e que não cabe nas faixas. Este texto entra num bloco próprio do roteiro dos atendentes, só sobre agenda.</p>
             <textarea
               v-model="aiRules"
@@ -555,7 +555,7 @@ onMounted(loadPreview);
               maxlength="2000"
               :disabled="!isAdmin"
               class="cv-input w-full text-xs !h-auto py-2 leading-relaxed"
-              placeholder="Ex.: Retorno de pós-operatório é sempre às quartas, das 13h às 14h, com o Dr. Henrique — quem marca é a equipe. Não ofereça encaixe para o mesmo dia."
+              :placeholder="frase('agenda.placeholder_regras', 'Ex.: Retorno de pós-operatório é sempre às quartas, das 13h às 14h, com o Dr. Henrique — quem marca é a equipe. Não ofereça encaixe para o mesmo dia.')"
             />
             <div class="flex items-center gap-2">
               <span class="text-[10px] text-n-slate-9 flex-1">{{ aiRules.length }}/2000</span>
@@ -588,7 +588,7 @@ onMounted(loadPreview);
             <p class="cv-ag-block-title">Por tipo de atendimento</p>
             <p class="text-[11px] text-n-slate-10 leading-relaxed">
               É o valor que vai na mensagem de confirmação quando ninguém lançou um valor à mão no card do agendamento. Pode ser um número
-              (150,00) ou um texto (sem custo). Em branco: a avaliação usa o valor padrão do lembrete; retorno e pós-operatório saem "sem custo".
+              (150,00) ou um texto (sem custo). {{ frase('agenda.explica_valor_em_branco', 'Em branco: a avaliação usa o valor padrão do lembrete; retorno e pós-operatório saem "sem custo".') }}
             </p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div v-for="(label, key) in PRICE_TYPE_LABELS" :key="key" class="cv-sub p-3">
@@ -598,8 +598,8 @@ onMounted(loadPreview);
             </div>
           </section>
           <section class="space-y-2">
-            <p class="cv-ag-block-title">Consulta particular, por médico</p>
-            <p class="text-[11px] text-n-slate-10">Vale quando o card do agendamento está marcado como "Particular". Médico sem valor aqui usa o valor do tipo.</p>
+            <p class="cv-ag-block-title">{{ frase('agenda.particular_por_profissional', 'Consulta particular, por médico') }}</p>
+            <p class="text-[11px] text-n-slate-10">{{ frase('agenda.explica_particular', 'Vale quando o card do agendamento está marcado como "Particular". Médico sem valor aqui usa o valor do tipo.') }}</p>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div v-for="d in DOCTORS" :key="d.name" class="cv-sub p-3" :style="{ borderColor: d.color }">
                 <span class="cv-label block mb-1">{{ d.name }}</span>
@@ -609,13 +609,13 @@ onMounted(loadPreview);
           </section>
           <section class="space-y-2">
             <div class="flex items-center gap-2">
-              <p class="cv-ag-block-title flex-1">Exames</p>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addExamPrice"><span class="i-lucide-plus text-xs" /> Exame</button>
+              <p class="cv-ag-block-title flex-1">{{ frase('agenda.exames', 'Exames') }}</p>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addExamPrice"><span class="i-lucide-plus text-xs" /> {{ frase('agenda.motivo_exame', 'Exame') }}</button>
             </div>
-            <p class="text-[11px] text-n-slate-10">Cada exame com o seu valor. No agendamento de exame, o sistema soma os que estiverem escritos no campo "Exame" (ex.: Pentacam + Topografia).</p>
-            <p v-if="!prices.exames.length" class="text-xs text-n-slate-9">Nenhum exame com valor ainda.</p>
+            <p class="text-[11px] text-n-slate-10">{{ frase('agenda.explica_valor_exames', 'Cada exame com o seu valor. No agendamento de exame, o sistema soma os que estiverem escritos no campo "Exame" (ex.: Pentacam + Topografia).') }}</p>
+            <p v-if="!prices.exames.length" class="text-xs text-n-slate-9">{{ frase('agenda.nenhum_exame_valor', 'Nenhum exame com valor ainda.') }}</p>
             <div v-for="(e, idx) in prices.exames" :key="'ex' + idx" class="cv-row flex items-center gap-2 px-3 py-2">
-              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" placeholder="Nome do exame (Pentacam, OCT…)" />
+              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" :placeholder="frase('agenda.placeholder_nome_exame', 'Nome do exame (Pentacam, OCT…)')" />
               <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
               <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
               <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removeExamPrice(idx)"><span class="i-lucide-x" /></button>
@@ -623,7 +623,7 @@ onMounted(loadPreview);
           </section>
           <section class="cv-sub p-3">
             <p class="cv-label mb-1">Como o valor é escolhido</p>
-            <p class="text-[11px] text-n-slate-11 leading-relaxed">1º o valor lançado à mão no card (fica registrado quem lançou) · 2º "Valor: X" escrito na observação · 3º o pré-configurado desta tela · 4º o valor padrão do lembrete. Cirurgia usa só o valor lançado à mão (a tabela de preços das cirurgias continua em Preços).</p>
+            <p class="text-[11px] text-n-slate-11 leading-relaxed">1º o valor lançado à mão no card (fica registrado quem lançou) · 2º "Valor: X" escrito na observação · 3º o pré-configurado desta tela · 4º o valor padrão do lembrete. {{ frase('agenda.venda_so_valor_mao_tabela', 'Cirurgia usa só o valor lançado à mão (a tabela de preços das cirurgias continua em Preços).') }}</p>
           </section>
         </template>
 

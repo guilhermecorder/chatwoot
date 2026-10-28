@@ -1,4 +1,5 @@
 import CrmAPI from 'dashboard/api/crm';
+import { definirEmpresa } from 'dashboard/helper/segmento';
 
 const state = {
   // 🔔 item 346: contador do menu "Notificações" (alertas para conferir)
@@ -404,6 +405,12 @@ const actions = {
     await dispatch('fetchSettings');
     return data;
   },
+  // 🎨 Personalização: imagem da identidade visual (logo, ícone, cabeçalho)
+  async updateCompanyImage({ commit }, { kind, file = null, remove = false }) {
+    const { data } = await CrmAPI.updateCompanyImage(kind, file, remove);
+    if (data?.company) commit('setSettings', { company: data.company });
+    return data;
+  },
 
   async testN8n() {
     const { data } = await CrmAPI.testN8n();
@@ -603,6 +610,10 @@ const mutations = {
   },
   setSettings(s, data) {
     s.settings = { ...s.settings, ...data };
+    // 🎨 Personalização por conta: vocabulário/frases/nomes/imagens da empresa
+    if (data && Object.prototype.hasOwnProperty.call(data, 'company')) {
+      definirEmpresa(s.settings.company);
+    }
   },
   setN8nWorkflows(s, workflows) {
     s.settings.n8n_workflows = workflows;

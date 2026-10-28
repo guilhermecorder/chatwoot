@@ -5,8 +5,11 @@
 // tela). Slots: chips (ao lado da paleta), actions (canto direito), default
 // (linha abaixo do título — filtros) e pulse (vidros de números).
 import { computed } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 import CevicoPalettePicker from 'dashboard/components-next/cevico/CevicoPalettePicker.vue';
+import { EMPRESA } from 'dashboard/helper/segmento';
+import { chaveDaRota } from 'dashboard/helper/ambientesCatalogo';
 
 const props = defineProps({
   pal: { type: Object, required: true }, // retorno do useCevicoPalette
@@ -31,6 +34,23 @@ const {
 } = props.pal;
 // :src dinâmico de propósito: src fixo em /brand-assets vira import no Vite
 const HERO_EYE = '/brand-assets/cevico-eye.svg';
+// 🎨 Personalização por conta: a imagem do cabeçalho da EMPRESA no lugar do
+// olho (ou nada, se a marca d'água estiver desligada); o título segue o nome
+// que a conta deu a este ambiente (Configurações → Personalização → Nomes)
+const route = useRoute();
+const heroImagem = computed(() => {
+  const empresa = EMPRESA.atual;
+  if (empresa?.visual?.watermark === false) return '';
+  return empresa?.images?.hero || HERO_EYE;
+});
+const heroImagemPropria = computed(
+  () => Boolean(heroImagem.value) && heroImagem.value !== HERO_EYE
+);
+const tituloExibido = computed(() => {
+  const chave = chaveDaRota(route?.name);
+  const proprio = chave ? EMPRESA.atual?.labels?.[chave] : '';
+  return proprio || props.title;
+});
 const todayLabel = computed(() => {
   const label = new Date().toLocaleDateString('pt-BR', {
     weekday: 'long',
@@ -52,11 +72,12 @@ const onPaletteChip = () => openPalettePicker('panel');
     <span class="cevico-hero-glow cevico-hero-glow-a" aria-hidden="true" />
     <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
     <img
-      v-if="eye"
-      :src="HERO_EYE"
+      v-if="eye && heroImagem"
+      :src="heroImagem"
       alt=""
       aria-hidden="true"
       class="cevico-hero-eye"
+      :class="{ 'cevico-hero-eye--propria': heroImagemPropria }"
     />
     <div class="relative z-10 flex flex-col gap-3" style="color: #fff">
       <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -110,7 +131,7 @@ const onPaletteChip = () => openPalettePicker('panel');
             class="text-2xl sm:text-[28px] font-bold leading-none tracking-tight"
             style="color: #fff"
           >
-            {{ title }}
+            {{ tituloExibido }}
           </h1>
           <p
             v-if="subtitle"

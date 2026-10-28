@@ -7,6 +7,7 @@ import { ref, computed, nextTick, onMounted } from 'vue';
 import CrmAPI from 'dashboard/api/crm';
 import { useAlert } from 'dashboard/composables';
 import { createContactSearcher } from 'dashboard/components-next/NewConversation/helpers/composeConversationHelper';
+import { frase, termoCap } from 'dashboard/helper/segmento';
 
 const props = defineProps({
   // paciente já escolhido (ex.: vindo de um cartão) — pula a busca
@@ -87,14 +88,14 @@ onMounted(() => {
   <div class="flex flex-col gap-2.5">
     <!-- 1) quem é o paciente -->
     <div v-if="!chosen" class="relative">
-      <span class="cv-label block mb-1">Paciente</span>
+      <span class="cv-label block mb-1">{{ termoCap('cliente') }}</span>
       <div class="relative">
         <span class="i-lucide-search absolute left-3 top-1/2 -translate-y-1/2 text-sm text-n-slate-9" />
         <input
           ref="searchEl"
           v-model="q"
           class="cv-input w-full !pl-9"
-          placeholder="Nome ou telefone do paciente…"
+          :placeholder="frase('espaco.busca_cliente_nota', 'Nome ou telefone do paciente…')"
           @input="onType"
           @keydown.enter.prevent="results.length && pick(results[0])"
         />
@@ -123,7 +124,7 @@ onMounted(() => {
       </div>
     </div>
     <div v-else class="flex items-center gap-2 flex-wrap">
-      <span class="cv-label">Paciente</span>
+      <span class="cv-label">{{ termoCap('cliente') }}</span>
       <span class="cv-chip cv-chip-lg">
         <span class="i-lucide-user-round text-xs" />
         {{ chosen.name }}
@@ -156,7 +157,7 @@ onMounted(() => {
       <button v-if="$attrs.onCancel" type="button" class="cv-btn cv-btn-ghost" :class="compact ? 'cv-btn-sm' : ''" @click="emit('cancel')">
         Cancelar
       </button>
-      <span class="text-[10px] text-n-slate-9 ml-auto hidden sm:inline">a nota vai para a ficha e o Espaço do Paciente</span>
+      <span class="text-[10px] text-n-slate-9 ml-auto hidden sm:inline">{{ frase('espaco.nota_vai_para_ficha', 'a nota vai para a ficha e o Espaço do Paciente') }}</span>
     </div>
   </div>
 </template>

@@ -1,5 +1,6 @@
 // Dados e helpers da agenda da CEVICO — usados pela Agenda, pelo painel de
 // Agendamentos e pelos indicadores do Meu Painel.
+import { frase } from 'dashboard/helper/segmento';
 
 export const DOCTORS = [
   { name: 'Dr. Gustavo Bittar', short: 'Gustavo', color: '#0F5FA6' },
@@ -374,10 +375,10 @@ export const isDeclined = task =>
   !task?.canceled_at && !isConfirmed(task) && Boolean(task?.declined_at);
 export const confirmationTitle = task => {
   if (!isConfirmed(task)) return '';
-  if (!task.confirmed_at) return 'Paciente confirmou (marcado pela equipe)';
+  if (!task.confirmed_at) return frase('agenda.cliente_confirmou_equipe', 'Paciente confirmou (marcado pela equipe)');
   const at = new Date(task.confirmed_at);
   const when = `${at.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
-  return `Paciente confirmou a consulta em ${when}`;
+  return `${frase('agenda.cliente_confirmou_em', 'Paciente confirmou a consulta em')} ${when}`;
 };
 // 🏥 item 300: de quem é o paciente (escolha obrigatória no formulário)
 export const ORIGINS = [
@@ -600,7 +601,7 @@ export const effectiveAppointmentPrice = (prices, appt) => {
     return {
       text: sumPrices([written[1]]),
       source: 'procedimento',
-      label: 'escrito no tipo de consulta',
+      label: frase('agenda.valor_escrito_tipo_atendimento', 'escrito no tipo de consulta'),
     };
   const surgery = appt.kind === 'cirurgias';
   const preset = surgery ? null : presetAppointmentPrice(prices, appt);

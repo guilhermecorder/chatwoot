@@ -1,5 +1,6 @@
 <script setup>
 import { useAlert } from 'dashboard/composables';
+import { EMPRESA, frase, nomeSistemaHero } from 'dashboard/helper/segmento';
 // Meu Painel (tela inicial) — visível para admin E atendentes.
 // Boas-vindas, avisos do Radar, indicadores por período (régua padrão:
 // hoje/ontem/últimos 7/mês/ano/personalizado) e a saúde da agenda —
@@ -130,7 +131,7 @@ const setEstiloPainel = key => {
 const sourceParams = () => ({ source: sourceLens.value });
 
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
-const BASE_PANELS = [
+const BASE_PANELS = computed(() => [
   {
     key: 'agendamento',
     label: 'Agendamento',
@@ -144,23 +145,23 @@ const BASE_PANELS = [
     label: 'Condução',
     who: '',
     icon: 'i-lucide-route',
-    desc: 'do agendamento à indicação',
+    desc: frase('inicio.do_agendamento_a_indicacao', 'do agendamento à indicação'),
     grad: 'linear-gradient(135deg, #0F766E 0%, #2DD4BF 100%)',
   },
   {
     key: 'cirurgia',
-    label: 'Cirurgias',
+    label: frase('inicio.painel_cirurgias', 'Cirurgias'),
     who: '',
     icon: 'i-lucide-heart-pulse',
-    desc: 'fechamento e pós-operatório',
+    desc: frase('inicio.fechamento_e_pos_operatorio', 'fechamento e pós-operatório'),
     grad: 'linear-gradient(135deg, #9D174D 0%, #F472B6 100%)',
   },
   {
     key: 'medico',
-    label: 'Médicos',
+    label: frase('inicio.painel_medicos', 'Médicos'),
     who: '',
     icon: 'i-lucide-stethoscope',
-    desc: 'a agenda de cada médico',
+    desc: frase('inicio.a_agenda_de_cada_medico', 'a agenda de cada médico'),
     grad: 'linear-gradient(135deg, #0369A1 0%, #38BDF8 100%)',
   },
   {
@@ -171,7 +172,7 @@ const BASE_PANELS = [
     desc: 'indicadores-chave do processo inteiro',
     grad: 'linear-gradient(135deg, #111827 0%, #475569 60%, #94A3B8 100%)',
   },
-];
+]);
 
 // RESPONSÁVEL por painel (Configurações → Painéis): o 1º nome aparece na
 // pílula — "Cirurgias · Elizangela". Sem responsável = só o tema.
@@ -182,11 +183,15 @@ const ownerFirstName = key =>
 // painéis do CONSTRUTOR salvos pela conta viram pílulas junto dos fixos
 // (key 'custom:<id>' — o backend do home já entende esse formato)
 const allPanels = computed(() => [
-  ...BASE_PANELS.map(p => ({ ...p, who: ownerFirstName(p.key) || p.who })),
+  ...BASE_PANELS.value.map(p => ({
+    ...p,
+    who: ownerFirstName(p.key) || p.who,
+  })),
   // 🧑‍🤝‍🧑 painéis POR PESSOA (rodada 160): versão de um painel-base com
   // layout próprio — mesma cor/ícone do base, nome escolhido pelo admin
   ...(crmSettings.value?.panel_variants || []).map(v => {
-    const base = BASE_PANELS.find(b => b.key === v.base) || BASE_PANELS[0];
+    const base =
+      BASE_PANELS.value.find(b => b.key === v.base) || BASE_PANELS.value[0];
     return {
       key: `variant:${v.id}`,
       label: v.name,
@@ -266,7 +271,8 @@ const selectedDoctor = ref(
 );
 const currentPanel = computed(
   () =>
-    allPanels.value.find(p => p.key === selectedPanel.value) || BASE_PANELS[0]
+    allPanels.value.find(p => p.key === selectedPanel.value) ||
+    BASE_PANELS.value[0]
 );
 // chave-BASE do painel escolhido: a variante por pessoa herda tudo do base
 // (cards, metas, cores semânticas, blocos) — só o layout é dela
@@ -430,7 +436,7 @@ const pickClinic = c =>
     'porta_dentro',
     c.key,
     'reached',
-    `${c.label} · consultas do período`,
+    `${c.label} · ${frase('inicio.consultas_do_periodo', 'consultas do período')}`,
     c.hint
   );
 const stoppedChips = bag =>
@@ -446,7 +452,7 @@ const openSideList = (key, title) => {
   const list = clinicFunnel.value?.lists?.[key] || [];
   funnelPopup.value = {
     title,
-    subtitle: 'consultas com data no período',
+    subtitle: frase('inicio.consultas_com_data_no_periodo', 'consultas com data no período'),
     people: list.map(funnelPerson),
     grad: funnelGrad('porta_dentro'),
     icon: 'i-lucide-calendar-x',
@@ -658,10 +664,10 @@ watch(bdayTodayText, text => {
 // frase que entra no "sobre" dos indicadores: de quem são os números
 const lensScope = computed(() => {
   if (activeLens.value === 'all')
-    return 'Chavinha de fonte em TUDO: todas as fontes de pacientes juntas.';
+    return frase('inicio.chavinha_todas_as_fontes_de_pacientes', 'Chavinha de fonte em TUDO: todas as fontes de pacientes juntas.');
   if (activeLens.value === 'cevico')
-    return 'Só pacientes da CEVICO — as outras fontes (Oftalmofácil) ficam fora; para ver, mude a chavinha de fonte no topo.';
-  return `Só pacientes da fonte ${activeLensLabel.value} (chavinha de fonte no topo).`;
+    return frase('inicio.so_pacientes_da_cevico', 'Só pacientes da CEVICO — as outras fontes (Oftalmofácil) ficam fora; para ver, mude a chavinha de fonte no topo.');
+  return `${frase('inicio.so_pacientes_da_fonte', 'Só pacientes da fonte')} ${activeLensLabel.value} (chavinha de fonte no topo).`;
 });
 
 const setPanel = key => {
@@ -685,7 +691,7 @@ const rawPanelTiles = computed(() => {
   if (panelBase.value === 'conducao') {
     return [
       {
-        label: 'Consultas no período',
+        label: frase('inicio.consultas_no_periodo', 'Consultas no período'),
         icon: 'i-lucide-calendar-days',
         value: d.consultations ?? 0,
         gk: 'consultations',
@@ -698,7 +704,7 @@ const rawPanelTiles = computed(() => {
           { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` },
         ],
         about:
-          'Consultas marcadas na Agenda com data dentro do período (canceladas ficam fora). O gráfico mostra quantas caíram em cada dia/semana/mês.',
+          frase('inicio.sobre_consultas_marcadas_na_agenda', 'Consultas marcadas na Agenda com data dentro do período (canceladas ficam fora). O gráfico mostra quantas caíram em cada dia/semana/mês.'),
       },
       {
         label: 'Compareceram',
@@ -712,7 +718,7 @@ const rawPanelTiles = computed(() => {
           { label: 'Taxa de comparecimento', value: `${d.show_rate ?? 0}%` },
         ],
         about:
-          'Marcadas como "Compareceu" na conferência do dia da Agenda — a base da taxa de comparecimento e do funil de indicações.',
+          frase('inicio.sobre_compareceram', 'Marcadas como "Compareceu" na conferência do dia da Agenda — a base da taxa de comparecimento e do funil de indicações.'),
       },
       {
         label: 'Comparecimento',
@@ -734,46 +740,46 @@ const rawPanelTiles = computed(() => {
           },
         ],
         about:
-          'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).',
+          frase('inicio.sobre_comparecimento', 'Quem confirmou consulta e veio. Referência de clínica boa: acima de 80%. É o indicador de quem cuida da confirmação (lembrete, reconfirmação, remarcação).'),
       },
       {
-        label: 'Indicações de cirurgia',
+        label: frase('inicio.indicacoes_de_cirurgia', 'Indicações de cirurgia'),
         icon: 'i-lucide-stethoscope',
         value: d.indications ?? 0,
         gk: 'indications',
         chartKey: 'indications',
-        sub: 'saíram da consulta indicados',
+        sub: frase('inicio.sairam_da_consulta_indicados', 'saíram da consulta indicados'),
         details: [
           {
-            label: 'Indicados ÷ compareceram',
+            label: frase('inicio.indicados_dividido_compareceram', 'Indicados ÷ compareceram'),
             value: `${d.indications ?? 0} de ${d.attended ?? 0}`,
           },
         ],
         about:
-          'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.',
+          frase('inicio.sobre_indicacoes_de_cirurgia', 'Consultas do período em que o médico registrou indicação de cirurgia (botão 🎯 na Agenda ou conduta no Espaço do Paciente). Começa aqui o funil de fechamento.'),
       },
     ];
   }
   if (panelBase.value === 'cirurgia') {
     return [
       {
-        label: 'Indicações de cirurgia',
+        label: frase('inicio.indicacoes_de_cirurgia', 'Indicações de cirurgia'),
         icon: 'i-lucide-stethoscope',
         value: d.indications ?? 0,
         gk: 'indications',
         chartKey: 'indications',
-        sub: 'pacientes indicados no período',
+        sub: frase('inicio.pacientes_indicados_no_periodo', 'pacientes indicados no período'),
         details: [
           {
-            label: 'Viraram cirurgia agendada',
+            label: frase('inicio.viraram_cirurgia_agendada', 'Viraram cirurgia agendada'),
             value: `${d.surgeries_booked ?? 0} · ${d.closing_rate ?? 0}%`,
           },
         ],
         about:
-          'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.',
+          frase('inicio.sobre_indicacoes_materia_prima', 'Pacientes que saíram da consulta com indicação de cirurgia no período — é a matéria-prima do fechamento.'),
       },
       {
-        label: 'Cirurgias agendadas',
+        label: frase('inicio.cirurgias_agendadas', 'Cirurgias agendadas'),
         icon: 'i-lucide-calendar-plus',
         value: d.surgeries_booked ?? 0,
         gk: 'surgeries_booked',
@@ -784,7 +790,7 @@ const rawPanelTiles = computed(() => {
           { label: 'Não vieram', value: `${d.surgeries_missed ?? 0}` },
         ],
         about:
-          'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.',
+          frase('inicio.sobre_cirurgias_agendadas', 'Cirurgias registradas na Agenda de Cirurgias no período (o fechamento de fato). O gráfico mostra o ritmo de fechamento ao longo do período.'),
       },
       {
         label: 'Taxa de fechamento',
@@ -792,24 +798,24 @@ const rawPanelTiles = computed(() => {
         value: `${d.closing_rate ?? 0}%`,
         gk: 'closing_rate',
         pct: true,
-        sub: 'agendadas ÷ indicações',
+        sub: frase('inicio.agendadas_dividido_indicacoes', 'agendadas ÷ indicações'),
         components: ['indications', 'surgeries_booked'],
         compare: [
-          { label: 'indicações', value: d.indications ?? 0 },
+          { label: frase('inicio.indicacoes', 'indicações'), value: d.indications ?? 0 },
           { label: 'agendadas', value: d.surgeries_booked ?? 0 },
           { label: 'realizadas', value: d.surgeries_done ?? 0 },
         ],
         details: [
           {
-            label: 'Agendadas ÷ indicações',
+            label: frase('inicio.agendadas_dividido_indicacoes_maiusc', 'Agendadas ÷ indicações'),
             value: `${d.surgeries_booked ?? 0} ÷ ${d.indications ?? 0} = ${d.closing_rate ?? 0}%`,
           },
         ],
         about:
-          'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).',
+          frase('inicio.sobre_taxa_de_fechamento', 'De cada 100 pacientes indicados, quantos fecharam cirurgia. É o indicador do trabalho de fechamento (orçamento ancorado, quebra de objeção, ligação em 48h).'),
       },
       {
-        label: 'Cirurgias realizadas',
+        label: frase('inicio.cirurgias_realizadas', 'Cirurgias realizadas'),
         icon: 'i-lucide-heart-pulse',
         value: d.surgeries_done ?? 0,
         gk: 'surgeries_done',
@@ -820,16 +826,16 @@ const rawPanelTiles = computed(() => {
           { label: 'não vieram', value: d.surgeries_missed ?? 0 },
         ],
         about:
-          'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.',
+          frase('inicio.sobre_cirurgias_realizadas', 'Cirurgias marcadas como realizadas na Agenda de Cirurgias. "Não vieram" = agendou e não apareceu; "veio e não fez" entra separado no Dashboard da Agenda.'),
       },
     ];
   }
   if (panelBase.value === 'medico') {
     const docNote =
-      'O número é do médico escolhido; o gráfico mostra a clínica inteira no período (a série por médico fica no Dashboard dos Médicos).';
+      frase('inicio.nota_numero_do_medico_escolhido', 'O número é do médico escolhido; o gráfico mostra a clínica inteira no período (a série por médico fica no Dashboard dos Médicos).');
     return [
       {
-        label: 'Consultas no período',
+        label: frase('inicio.consultas_no_periodo', 'Consultas no período'),
         icon: 'i-lucide-calendar-days',
         value: d.consultations ?? 0,
         gk: 'consultations',
@@ -839,52 +845,52 @@ const rawPanelTiles = computed(() => {
           { label: 'Faltas', value: `${d.missed ?? 0}` },
           { label: 'Comparecimento', value: `${d.show_rate ?? 0}%` },
         ],
-        about: `Consultas deste médico com data no período. ${docNote}`,
+        about: `${frase('inicio.consultas_deste_medico_com_data_no_periodo', 'Consultas deste médico com data no período.')} ${docNote}`,
       },
       {
-        label: 'Com indicação de cirurgia',
+        label: frase('inicio.com_indicacao_de_cirurgia', 'Com indicação de cirurgia'),
         icon: 'i-lucide-stethoscope',
         value: d.indications ?? 0,
         gk: 'indications',
         chartKey: 'indications',
         sub: `${d.indication_rate ?? 0}% de quem compareceu`,
         compare: [
-          { label: 'com indicação', value: d.indications ?? 0 },
-          { label: 'sem indicação', value: d.no_indication ?? 0 },
+          { label: frase('inicio.com_indicacao', 'com indicação'), value: d.indications ?? 0 },
+          { label: frase('inicio.sem_indicacao', 'sem indicação'), value: d.no_indication ?? 0 },
         ],
-        about: `Consultas em que o médico indicou cirurgia. ${docNote}`,
+        about: `${frase('inicio.consultas_em_que_o_medico_indicou_cirurgia', 'Consultas em que o médico indicou cirurgia.')} ${docNote}`,
       },
       {
-        label: 'Sem indicação',
+        label: frase('inicio.sem_indicacao_maiusc', 'Sem indicação'),
         icon: 'i-lucide-user-minus',
         value: d.no_indication ?? 0,
         sub: `${d.no_indication_rate ?? 0}% de quem compareceu`,
         compare: [
-          { label: 'com indicação', value: d.indications ?? 0 },
-          { label: 'sem indicação', value: d.no_indication ?? 0 },
+          { label: frase('inicio.com_indicacao', 'com indicação'), value: d.indications ?? 0 },
+          { label: frase('inicio.sem_indicacao', 'sem indicação'), value: d.no_indication ?? 0 },
         ],
         about:
-          'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).',
+          frase('inicio.sobre_sem_indicacao', 'Consultas que não resultaram em indicação — não é perda: vira plano de cuidado, retorno e indicação futura (catarata inicial hoje é cirurgia daqui a um ano).'),
       },
       {
-        label: 'Conversão em cirurgia',
+        label: frase('inicio.conversao_em_cirurgia', 'Conversão em cirurgia'),
         icon: 'i-lucide-percent',
         value: `${d.conversion_rate ?? 0}%`,
         gk: 'conversion_rate',
         pct: true,
-        sub: `${d.conversions ?? 0} viraram cirurgia · NPS ${d.nps_avg ?? '—'}`,
+        sub: `${d.conversions ?? 0} ${frase('inicio.viraram_cirurgia', 'viraram cirurgia')} · NPS ${d.nps_avg ?? '—'}`,
         compare: [
-          { label: 'indicados', value: d.indications ?? 0 },
-          { label: 'viraram cirurgia', value: d.conversions ?? 0 },
+          { label: frase('inicio.indicados', 'indicados'), value: d.indications ?? 0 },
+          { label: frase('inicio.viraram_cirurgia', 'viraram cirurgia'), value: d.conversions ?? 0 },
         ],
         details: [
           {
-            label: 'NPS médio dos pacientes deste médico',
+            label: frase('inicio.nps_medio_dos_pacientes_deste_medico', 'NPS médio dos pacientes deste médico'),
             value: `${d.nps_avg ?? '—'}`,
           },
         ],
         about:
-          'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).',
+          frase('inicio.sobre_conversao_em_cirurgia', 'Dos pacientes que este médico atendeu no período, quantos chegaram à cirurgia (pelo telefone do contato no CRM).'),
       },
     ];
   }
@@ -929,7 +935,7 @@ const rawPanelTiles = computed(() => {
             value: d.appointments_created ?? 0,
           },
         ],
-        about: `Taxa oficial (item 233): pacientes que MUDARAM DE COLUNA para "Agendamento de Consulta" no CRM no período ÷ leads do período. Só a mudança de coluna conta — exame, pós-operatório e teleconsulta ficam fora. ${lensScope.value}`,
+        about: `${frase('inicio.sobre_taxa_oficial_de_agendamento', 'Taxa oficial (item 233): pacientes que MUDARAM DE COLUNA para "Agendamento de Consulta" no CRM no período ÷ leads do período. Só a mudança de coluna conta — exame, pós-operatório e teleconsulta ficam fora.')} ${lensScope.value}`,
       },
       ...cutsTiles(d.booking_cuts),
       {
@@ -939,34 +945,34 @@ const rawPanelTiles = computed(() => {
         gk: 'show_rate',
         pct: true,
         chartKey: 'appointments_attended',
-        sub: `${d.indications ?? 0} indicação(ões) de cirurgia`,
+        sub: `${d.indications ?? 0} ${frase('inicio.indicacao_oes_de_cirurgia', 'indicação(ões) de cirurgia')}`,
         units: d.by_unit,
         details: [
           {
-            label: 'Indicações de cirurgia no período',
+            label: frase('inicio.indicacoes_de_cirurgia_no_periodo', 'Indicações de cirurgia no período'),
             value: `${d.indications ?? 0}`,
           },
         ],
         about:
-          'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.',
+          frase('inicio.sobre_comparecimento_gestor', 'Quem confirmou consulta e veio (conferência do dia). O gráfico mostra as presenças ao longo do período; referência boa: acima de 80%.'),
       },
       {
-        label: 'Fechamento de cirurgias (indicação → marcada)',
+        label: frase('inicio.fechamento_de_cirurgias_indicacao_marcada', 'Fechamento de cirurgias (indicação → marcada)'),
         icon: 'i-lucide-heart-pulse',
         value: `${d.closing_rate ?? 0}%`,
         gk: 'closing_rate',
         pct: true,
         chartKey: 'surgeries_done',
-        sub: `${d.surgeries_booked ?? 0} marcadas após indicação ÷ ${d.indications ?? 0} indicações · ${d.surgeries_booked_all ?? 0} marcadas no total`,
+        sub: `${d.surgeries_booked ?? 0} ${frase('inicio.marcadas_apos_indicacao', 'marcadas após indicação')} ÷ ${d.indications ?? 0} ${frase('inicio.indicacoes', 'indicações')} · ${d.surgeries_booked_all ?? 0} marcadas no total`,
         components: ['indications', 'surgeries_booked_indicated'],
         compare: [
-          { label: 'indicações', value: d.indications ?? 0 },
-          { label: 'marcadas após indicação', value: d.surgeries_booked ?? 0 },
+          { label: frase('inicio.indicacoes', 'indicações'), value: d.indications ?? 0 },
+          { label: frase('inicio.marcadas_apos_indicacao', 'marcadas após indicação'), value: d.surgeries_booked ?? 0 },
           { label: 'realizadas', value: d.surgeries_done ?? 0 },
         ],
         breakdowns: surgerySections(d.surgery_breakdown),
         about:
-          'Item 267: só conta cirurgia marcada de paciente que teve INDICAÇÃO em consulta (antes entravam todas as cirurgias, inclusive da base e do Oftalmofácil, e a taxa passava de 100%). "Marcadas no total" mostra o número cheio, para comparar.',
+          frase('inicio.sobre_fechamento_so_com_indicacao', 'Item 267: só conta cirurgia marcada de paciente que teve INDICAÇÃO em consulta (antes entravam todas as cirurgias, inclusive da base e do Oftalmofácil, e a taxa passava de 100%). "Marcadas no total" mostra o número cheio, para comparar.'),
       },
     ];
   }
@@ -992,7 +998,7 @@ const rawPanelTiles = computed(() => {
         value: i.count,
       })),
       about:
-        'Contatos novos do período que chegaram pelas caixas de captação (Google, Instagram…). A conversão de cada caixa é: dos que chegaram por ela, quantos já avançaram até "Agendamento de Consulta" no CRM.',
+        frase('inicio.sobre_novos_contatos_caixas', 'Contatos novos do período que chegaram pelas caixas de captação (Google, Instagram…). A conversão de cada caixa é: dos que chegaram por ela, quantos já avançaram até "Agendamento de Consulta" no CRM.'),
     },
     {
       // 🌟 % de agendamento em EVIDÊNCIA (item 143): o indicador da linha
@@ -1024,7 +1030,7 @@ const rawPanelTiles = computed(() => {
       // item 267: "não podemos chamar tudo de agendamento" — o card diz quantas
       // são de LEAD NOVO e quantas de PACIENTE DA BASE; o popup abre caixa de
       // origem, unidade, procedimento, médico e robô × equipe
-      label: 'Consultas marcadas',
+      label: frase('inicio.consultas_marcadas', 'Consultas marcadas'),
       icon: 'i-lucide-calendar-check',
       value: d.appointments_booked ?? 0,
       gk: 'appointments_booked',
@@ -1035,7 +1041,7 @@ const rawPanelTiles = computed(() => {
         : bookedInboxSub.value,
       breakdowns: bdSections(
         d.booked_breakdown,
-        'Consultas marcadas no período'
+        frase('inicio.consultas_marcadas_no_periodo', 'Consultas marcadas no período')
       ),
       details: [
         {
@@ -1046,7 +1052,7 @@ const rawPanelTiles = computed(() => {
           ? [
               {
                 label: '🤔 Tempo médio de decisão (chegar → agendar)',
-                value: `${String(dt.avg_days).replace('.', ',')} dia(s) · ${dt.count} consulta(s)`,
+                value: `${String(dt.avg_days).replace('.', ',')} dia(s) · ${dt.count} ${frase('inicio.consulta_s', 'consulta(s)')}`,
               },
               { label: 'Decidiram no mesmo dia', value: `${dt.same_day}` },
               { label: 'Em 1 dia', value: `${dt.next_day}` },
@@ -1059,7 +1065,7 @@ const rawPanelTiles = computed(() => {
     },
     ...cutsTiles(d.booking_cuts),
     {
-      label: 'Consultas marcadas hoje',
+      label: frase('inicio.consultas_marcadas_hoje', 'Consultas marcadas hoje'),
       icon: 'i-lucide-calendar-plus',
       value: d.booked_today ?? 0,
       chip: bookingDayVerdict.value,
@@ -1069,7 +1075,7 @@ const rawPanelTiles = computed(() => {
       // item 267: primeiro o que importa (caixa, unidade, procedimento, robô × equipe)
       breakdowns: bdSections(
         d.booked_today_breakdown,
-        'Consultas marcadas hoje'
+        frase('inicio.consultas_marcadas_hoje', 'Consultas marcadas hoje')
       ),
       compare: [
         {
@@ -1100,18 +1106,18 @@ const rawPanelTiles = computed(() => {
         },
       ],
       about:
-        'Consultas registradas HOJE na Agenda (leads novos + pacientes da base), julgado contra a fatia diária da meta do mês. Em cima, de onde vieram e quem marcou; embaixo, as taxas de quem chegou hoje/ontem (a de ontem é a justa para avaliar o atendimento).',
+        frase('inicio.sobre_consultas_marcadas_hoje', 'Consultas registradas HOJE na Agenda (leads novos + pacientes da base), julgado contra a fatia diária da meta do mês. Em cima, de onde vieram e quem marcou; embaixo, as taxas de quem chegou hoje/ontem (a de ontem é a justa para avaliar o atendimento).'),
     },
     {
-      label: 'Cirurgias marcadas · leads do período',
+      label: frase('inicio.cirurgias_marcadas_leads_do_periodo', 'Cirurgias marcadas · leads do período'),
       icon: 'i-lucide-heart-pulse',
       value: d.surgeries_closed ?? 0,
       gk: 'surgeries_closed',
       chartKey: 'auto',
       chartMatch: /cirurgia agendada/i,
-      sub: 'leads que chegaram no período e já estão em Cirurgia Agendada',
+      sub: frase('inicio.leads_ja_em_cirurgia_agendada', 'leads que chegaram no período e já estão em Cirurgia Agendada'),
       breakdowns: surgerySections(d.surgery_breakdown),
-      about: `Só LEADS DO PERÍODO: contatos que chegaram neste período e já alcançaram a coluna "Cirurgia Agendada" no CRM. Pacientes da base não entram aqui (estão em "Cirurgias marcadas"). ${lensScope.value}`,
+      about: `${frase('inicio.sobre_cirurgias_marcadas_leads_do_periodo', 'Só LEADS DO PERÍODO: contatos que chegaram neste período e já alcançaram a coluna "Cirurgia Agendada" no CRM. Pacientes da base não entram aqui (estão em "Cirurgias marcadas").')} ${lensScope.value}`,
     },
   ];
 });
@@ -1120,18 +1126,18 @@ const rawPanelTiles = computed(() => {
 // (avaliação, retorno, pós-op… × só mudança de coluna), de onde veio (fonte,
 // caixa por onde o paciente chegou, particular) e quem fez (paciente, robô,
 // equipe, sincronização). Cada fatia abre a lista de pacientes. ──
-const CUT_WHAT_SHORT = {
+const CUT_WHAT_SHORT = () => ({
   avaliacao: ['avaliação', 'avaliações'],
-  retorno: ['retorno', 'retornos'],
-  pos_op: ['pós-op', 'pós-op'],
-  exames: ['exame', 'exames'],
-  teleconsulta: ['teleconsulta', 'teleconsultas'],
-  cirurgia: ['cirurgia', 'cirurgias'],
-  consulta: ['consulta sem tipo', 'consultas sem tipo'],
+  retorno: [frase('inicio.retorno', 'retorno'), frase('inicio.retornos', 'retornos')],
+  pos_op: [frase('inicio.pos_op', 'pós-op'), frase('inicio.pos_op', 'pós-op')],
+  exames: [frase('inicio.exame', 'exame'), frase('inicio.exames', 'exames')],
+  teleconsulta: [frase('inicio.teleconsulta', 'teleconsulta'), frase('inicio.teleconsultas', 'teleconsultas')],
+  cirurgia: [frase('inicio.cirurgia', 'cirurgia'), frase('inicio.cirurgias', 'cirurgias')],
+  consulta: [frase('inicio.consulta_sem_tipo', 'consulta sem tipo'), frase('inicio.consultas_sem_tipo', 'consultas sem tipo')],
   coluna: ['só mudança de coluna', 'só mudança de coluna'],
-};
+});
 const cutShort = sl => {
-  const names = CUT_WHAT_SHORT[sl.key];
+  const names = CUT_WHAT_SHORT()[sl.key];
   if (!names) return `${sl.count} ${sl.label}`;
   return `${sl.count} ${sl.count === 1 ? names[0] : names[1]}`;
 };
@@ -1178,7 +1184,7 @@ const cutGroups = cuts => {
     ? [
         {
           field: 'particular',
-          title: 'Consulta particular',
+          title: frase('inicio.consulta_particular', 'Consulta particular'),
           items: [
             {
               key: true,
@@ -1188,7 +1194,7 @@ const cutGroups = cuts => {
             },
             {
               key: false,
-              label: 'Demais consultas e cirurgias',
+              label: frase('inicio.demais_consultas_e_cirurgias', 'Demais consultas e cirurgias'),
               value: cuts.particular.no,
               color: '#94A3B8',
             },
@@ -1200,22 +1206,22 @@ const cutGroups = cuts => {
     {
       n: 1,
       title: 'O que foi',
-      hint: 'Agendamento novo na Agenda, por tipo. "Só mudança de coluna" = o card entrou na coluna de agendamento do CRM sem consulta na Agenda naqueles dias.',
+      hint: frase('inicio.dica_o_que_foi', 'Agendamento novo na Agenda, por tipo. "Só mudança de coluna" = o card entrou na coluna de agendamento do CRM sem consulta na Agenda naqueles dias.'),
       bars: [{ field: 'what', title: '', items: cutItems(cuts.what) }],
     },
     {
       n: 2,
       title: 'De onde veio',
-      hint: 'A fonte é o carimbo de origem; a caixa é a da PRIMEIRA conversa do paciente (por onde ele chegou).',
+      hint: frase('inicio.dica_de_onde_veio', 'A fonte é o carimbo de origem; a caixa é a da PRIMEIRA conversa do paciente (por onde ele chegou).'),
       bars: [
         {
           field: 'source',
-          title: 'Fonte de pacientes',
+          title: frase('inicio.fonte_de_pacientes', 'Fonte de pacientes'),
           items: cutItems(cuts.sources),
         },
         {
           field: 'inbox',
-          title: 'Caixa por onde o paciente chegou',
+          title: frase('inicio.caixa_por_onde_o_paciente_chegou', 'Caixa por onde o paciente chegou'),
           items: cutItems(cuts.inboxes),
         },
         ...particular,
@@ -1225,7 +1231,7 @@ const cutGroups = cuts => {
       n: 3,
       title: 'Quem fez',
       hint: cuts.deduced
-        ? `O carimbo de "quem fez" existe desde 05/10/2026. Em ${cuts.deduced} agendamento(s) anteriores, robô × equipe foi deduzido pela marca do Atendente de IA na consulta.`
+        ? `O carimbo de "quem fez" existe desde 05/10/2026. Em ${cuts.deduced} ${frase('inicio.agendamentos_anteriores_deduzidos_na_consulta', 'agendamento(s) anteriores, robô × equipe foi deduzido pela marca do Atendente de IA na consulta.')}`
         : 'Pelo carimbo gravado na hora em que o agendamento nasceu.',
       bars: [{ field: 'via', title: '', items: cutItems(cuts.who) }],
     },
@@ -1252,11 +1258,11 @@ const cutsTiles = cuts => {
       cuts,
       details: [
         {
-          label: 'Agendamentos novos na Agenda (consultas e cirurgias)',
+          label: frase('inicio.agendamentos_novos_na_agenda_consultas_e_cirurgias', 'Agendamentos novos na Agenda (consultas e cirurgias)'),
           value: `${cuts.agenda ?? 0}`,
         },
         {
-          label: 'Só mudança de coluna no CRM (sem consulta na Agenda)',
+          label: frase('inicio.so_mudanca_de_coluna_sem_consulta', 'Só mudança de coluna no CRM (sem consulta na Agenda)'),
           value: `${cuts.column_only ?? 0}`,
         },
         ...(outside.length
@@ -1322,7 +1328,7 @@ const peopleSections = bp => {
       title: `Quem entrou na coluna de agendamento: ${bp.total} pessoa(s)`,
       items: [
         { label: 'Lead novo (chegou no período)', value: bp.new_leads },
-        { label: 'Paciente da base (chegou antes)', value: bp.base },
+        { label: frase('inicio.paciente_da_base_chegou_antes', 'Paciente da base (chegou antes)'), value: bp.base },
       ],
     },
     {
@@ -1331,19 +1337,19 @@ const peopleSections = bp => {
     },
   ].filter(sec => sec.items.some(i => Number(i.value) > 0));
 };
-const bdSections = (bd, title = 'Consultas marcadas') => {
+const bdSections = (bd, title = frase('inicio.consultas_marcadas', 'Consultas marcadas')) => {
   if (!bd || !bd.total) return [];
   // item 342: o total é de CONSULTAS — diz quantas pessoas são
   const quantas = bd.people
-    ? ` (${bd.total} consulta(s) de ${bd.people} pessoa(s))`
-    : ` (${bd.total} consulta(s))`;
+    ? ` (${bd.total} ${frase('inicio.consulta_s', 'consulta(s)')} de ${bd.people} pessoa(s))`
+    : ` (${bd.total} ${frase('inicio.consulta_s', 'consulta(s)')})`;
   return [
     {
-      title: `${title}${quantas}: quem é o paciente`,
+      title: `${title}${quantas}: ${frase('inicio.quem_e_o_paciente', 'quem é o paciente')}`,
       items: [
         { label: 'Leads novos (chegaram há até 30 dias)', value: bd.new_leads },
         {
-          label: 'Pacientes da base (há mais de 30 dias ou sem cadastro)',
+          label: frase('inicio.pacientes_da_base_mais_de_30_dias', 'Pacientes da base (há mais de 30 dias ou sem cadastro)'),
           value: bd.base,
         },
       ],
@@ -1352,20 +1358,20 @@ const bdSections = (bd, title = 'Consultas marcadas') => {
       // item 332: a FONTE pelo carimbo de origem (CEVICO × Oftalmofácil…)
       // item 342: contada SEM a chavinha de fonte — com ela dava 100% da fonte escolhida
       title: bd.by_stamp_all_sources
-        ? 'Fonte de pacientes (todas as fontes, para comparar)'
-        : 'Fonte de pacientes (carimbo de origem)',
+        ? frase('inicio.fonte_de_pacientes_todas_para_comparar', 'Fonte de pacientes (todas as fontes, para comparar)')
+        : frase('inicio.fonte_de_pacientes_carimbo_de_origem', 'Fonte de pacientes (carimbo de origem)'),
       items: bdRows(bd.by_stamp),
     },
     {
-      title: 'De qual caixa de entrada o paciente chegou',
+      title: frase('inicio.de_qual_caixa_o_paciente_chegou', 'De qual caixa de entrada o paciente chegou'),
       items: bdRows(bd.by_origin_inbox),
     },
     { title: 'Unidade', items: bdRows(bd.by_unit) },
     {
-      title: 'Procedimento / tipo de consulta',
+      title: frase('inicio.procedimento_tipo_de_consulta', 'Procedimento / tipo de consulta'),
       items: bdRows(bd.by_procedure),
     },
-    { title: 'Médico', items: bdRows(bd.by_doctor) },
+    { title: frase('inicio.medico', 'Médico'), items: bdRows(bd.by_doctor) },
     {
       // item 332: quem fez pelo carimbo (paciente, robô, equipe, sincronização);
       // sem carimbo (antes de 05/10) cai na regra antiga Atendente de IA × equipe
@@ -1387,7 +1393,7 @@ const bdSections = (bd, title = 'Consultas marcadas') => {
           value: bd.by_channel?.cevico ?? 0,
         },
         {
-          label: 'No Oftalmofácil (equipe, via Agenda unificada)',
+          label: frase('inicio.no_oftalmofacil_equipe', 'No Oftalmofácil (equipe, via Agenda unificada)'),
           value: bd.by_channel?.oftalmofacil ?? 0,
         },
       ],
@@ -1398,7 +1404,7 @@ const surgerySections = sb => {
   if (!sb || !sb.total) return [];
   return [
     {
-      title: 'Cirurgias do período: como terminaram',
+      title: frase('inicio.cirurgias_do_periodo_como_terminaram', 'Cirurgias do período: como terminaram'),
       items: [
         { label: 'Realizadas', value: sb.done },
         { label: 'Faltaram', value: sb.missed },
@@ -1409,13 +1415,13 @@ const surgerySections = sb => {
     {
       title: 'De onde vêm',
       items: [
-        { label: 'Oftalmofácil (parceiros)', value: sb.from_oftalmofacil },
-        { label: 'Agenda da clínica', value: sb.total - sb.from_oftalmofacil },
+        { label: frase('inicio.oftalmofacil_parceiros', 'Oftalmofácil (parceiros)'), value: sb.from_oftalmofacil },
+        { label: frase('inicio.agenda_da_clinica', 'Agenda da clínica'), value: sb.total - sb.from_oftalmofacil },
       ],
     },
     { title: 'Procedimentos realizados', items: bdRows(sb.by_procedure) },
     { title: 'Unidade (realizadas)', items: bdRows(sb.by_unit) },
-    { title: 'Médico (realizadas)', items: bdRows(sb.by_doctor) },
+    { title: frase('inicio.medico_realizadas', 'Médico (realizadas)'), items: bdRows(sb.by_doctor) },
   ].filter(sec => sec.items.some(i => Number(i.value) > 0));
 };
 // funil de leads novos (30 dias): chegaram → orçamento → agendamento
@@ -1435,7 +1441,7 @@ const funnel30Steps = computed(() => {
       color: '#7c3aed',
     },
     {
-      label: f.booking_stage || 'Agendamento de consulta',
+      label: f.booking_stage || frase('inicio.agendamento_de_consulta', 'Agendamento de consulta'),
       value: f.booked ?? 0,
       color: '#059669',
     },
@@ -1463,7 +1469,7 @@ const modalBreakdowns = computed(() => {
   const label = String(m.label || '');
   if (/cirurgia/i.test(label)) return surgerySections(pd.surgery_breakdown);
   if (/consultas marcadas/i.test(label))
-    return bdSections(pd.booked_breakdown, 'Consultas marcadas no período');
+    return bdSections(pd.booked_breakdown, frase('inicio.consultas_marcadas_no_periodo', 'Consultas marcadas no período'));
   // item 342: "Entrou em Agendamento" = pessoas; a Agenda vem depois, como outra régua
   if (/agendamento/i.test(label))
     return [
@@ -2090,7 +2096,7 @@ const kpiCatalog = computed(() =>
 );
 // ── 📚 INDICADORES JÁ FORMULADOS (item 143): taxas e contas importantes
 // prontas pra virar card com 1 clique, separadas por categoria ──
-const READY_FORMULAS = [
+const READY_FORMULAS = computed(() => [
   {
     cat: '🎯 Taxas do funil',
     items: [
@@ -2099,35 +2105,35 @@ const READY_FORMULAS = [
         expr: 'appointments_created / new_leads * 100',
         format: 'percent',
         icon: 'i-lucide-percent',
-        note: 'entradas em Agendamento de Consulta (mudança de coluna no CRM) ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco',
+        note: frase('inicio.nota_taxa_de_agendamento', 'entradas em Agendamento de Consulta (mudança de coluna no CRM) ÷ leads · referência: 15% muito bom · 10% bom · 5% fraco'),
       },
       {
         label: 'Comparecimento',
         expr: 'appointments_attended / (appointments_attended + appointments_missed) * 100',
         format: 'percent',
         icon: 'i-lucide-user-check',
-        note: 'quem confirmou e veio · referência de clínica boa: acima de 80%',
+        note: frase('inicio.nota_comparecimento', 'quem confirmou e veio · referência de clínica boa: acima de 80%'),
       },
       {
-        label: 'Taxa de indicação',
+        label: frase('inicio.taxa_de_indicacao', 'Taxa de indicação'),
         expr: 'indications / appointments_attended * 100',
         format: 'percent',
         icon: 'i-lucide-stethoscope',
-        note: 'de quem compareceu, quantos saíram da consulta indicados pra cirurgia',
+        note: frase('inicio.nota_taxa_de_indicacao', 'de quem compareceu, quantos saíram da consulta indicados pra cirurgia'),
       },
       {
-        label: 'Fechamento de cirurgias',
+        label: frase('inicio.fechamento_de_cirurgias', 'Fechamento de cirurgias'),
         expr: 'surgeries_booked_indicated / indications * 100',
         format: 'percent',
         icon: 'i-lucide-heart-pulse',
-        note: 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento',
+        note: frase('inicio.nota_fechamento_de_cirurgias', 'dos indicados, quantos fecharam cirurgia — o trabalho de fechamento'),
       },
       {
-        label: 'Lead → cirurgia',
+        label: frase('inicio.lead_para_cirurgia', 'Lead → cirurgia'),
         expr: 'surgeries_booked / new_leads * 100',
         format: 'percent',
         icon: 'i-lucide-trending-up',
-        note: 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram cirurgia',
+        note: frase('inicio.nota_lead_para_cirurgia', 'o funil inteiro numa taxa só: de cada 100 leads, quantos viram cirurgia'),
       },
     ],
   },
@@ -2135,11 +2141,11 @@ const READY_FORMULAS = [
     cat: '💰 Financeiro',
     items: [
       {
-        label: 'Ticket médio por cirurgia',
+        label: frase('inicio.ticket_medio_por_cirurgia', 'Ticket médio por cirurgia'),
         expr: 'revenue / surgeries_done',
         format: 'currency',
         icon: 'i-lucide-badge-dollar-sign',
-        note: 'faturamento fechado ÷ cirurgias realizadas no período',
+        note: frase('inicio.nota_ticket_medio_por_cirurgia', 'faturamento fechado ÷ cirurgias realizadas no período'),
       },
       {
         label: 'Faturamento por lead',
@@ -2149,11 +2155,11 @@ const READY_FORMULAS = [
         note: 'quanto cada contato que chega vale em faturamento — norteia quanto pagar por lead',
       },
       {
-        label: 'Faturamento por consulta',
+        label: frase('inicio.faturamento_por_consulta', 'Faturamento por consulta'),
         expr: 'revenue / appointments_attended',
         format: 'currency',
         icon: 'i-lucide-wallet',
-        note: 'faturamento fechado ÷ consultas com presença',
+        note: frase('inicio.nota_faturamento_por_consulta', 'faturamento fechado ÷ consultas com presença'),
       },
     ],
   },
@@ -2161,21 +2167,21 @@ const READY_FORMULAS = [
     cat: '📅 Agenda',
     items: [
       {
-        label: 'Faltas em consultas (%)',
+        label: frase('inicio.faltas_em_consultas_pct', 'Faltas em consultas (%)'),
         expr: 'appointments_missed / (appointments_attended + appointments_missed) * 100',
         format: 'percent',
         icon: 'i-lucide-user-minus',
         note: 'o inverso do comparecimento: acima de 20% é hora de reforçar a confirmação',
       },
       {
-        label: 'Realização de cirurgias',
+        label: frase('inicio.realizacao_de_cirurgias', 'Realização de cirurgias'),
         expr: 'surgeries_done / surgeries_booked * 100',
         format: 'percent',
         icon: 'i-lucide-check-circle-2',
-        note: 'das cirurgias agendadas, quantas aconteceram de fato',
+        note: frase('inicio.nota_realizacao_de_cirurgias', 'das cirurgias agendadas, quantas aconteceram de fato'),
       },
       {
-        label: 'Cirurgias perdidas (%)',
+        label: frase('inicio.cirurgias_perdidas_pct', 'Cirurgias perdidas (%)'),
         expr: 'surgeries_missed / (surgeries_done + surgeries_missed) * 100',
         format: 'percent',
         icon: 'i-lucide-alert-triangle',
@@ -2205,10 +2211,10 @@ const READY_FORMULAS = [
       },
     ],
   },
-];
+]);
 // valor ao vivo de cada fórmula pronta (mesmo cesto/período da régua)
 const readyFormulaSections = computed(() =>
-  READY_FORMULAS.map(sec => ({
+  READY_FORMULAS.value.map(sec => ({
     cat: sec.cat,
     items: sec.items.map(f => ({
       ...f,
@@ -2262,16 +2268,16 @@ const applyReadyFormula = f => {
 const KPI_CAT = key => {
   if (key.startsWith('stage_')) return '🧭 Funil (entrou na coluna)';
   if (key === 'revenue') return '💰 Financeiro';
-  if (key.startsWith('surgeries_')) return '🔪 Cirurgias';
+  if (key.startsWith('surgeries_')) return frase('inicio.categoria_cirurgias', '🔪 Cirurgias');
   if (key.startsWith('appointments_') || key === 'indications')
-    return '📅 Consultas';
+    return frase('inicio.categoria_consultas', '📅 Consultas');
   return '👥 Chegada';
 };
 const kpiCatalogSections = computed(() => {
   const order = [
     '👥 Chegada',
-    '📅 Consultas',
-    '🔪 Cirurgias',
+    frase('inicio.categoria_consultas', '📅 Consultas'),
+    frase('inicio.categoria_cirurgias', '🔪 Cirurgias'),
     '🧭 Funil (entrou na coluna)',
     '💰 Financeiro',
   ];
@@ -3644,37 +3650,37 @@ const tileVisual = tile => {
 const showGoalsModal = ref(false);
 const goalsDraft = ref({});
 const isSavingGoals = ref(false);
-const GOAL_FIELDS = {
+const GOAL_FIELDS = computed(() => ({
   agendamento: [
     { gk: 'new_leads', label: 'Novos contatos no mês' },
     { gk: 'appointments_booked', label: 'Marcadas na Agenda no mês' },
     { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
-    { gk: 'surgeries_closed', label: 'Cirurgias fechadas no mês' },
+    { gk: 'surgeries_closed', label: frase('inicio.cirurgias_fechadas_no_mes', 'Cirurgias fechadas no mês') },
   ],
   conducao: [
-    { gk: 'consultations', label: 'Consultas no mês' },
+    { gk: 'consultations', label: frase('inicio.consultas_no_mes', 'Consultas no mês') },
     { gk: 'attended', label: 'Comparecimentos no mês' },
     { gk: 'show_rate', label: 'Comparecimento (%)', pct: true },
-    { gk: 'indications', label: 'Indicações no mês' },
+    { gk: 'indications', label: frase('inicio.indicacoes_no_mes', 'Indicações no mês') },
   ],
   cirurgia: [
-    { gk: 'indications', label: 'Indicações no mês' },
-    { gk: 'surgeries_booked', label: 'Cirurgias agendadas no mês' },
+    { gk: 'indications', label: frase('inicio.indicacoes_no_mes', 'Indicações no mês') },
+    { gk: 'surgeries_booked', label: frase('inicio.cirurgias_agendadas_no_mes', 'Cirurgias agendadas no mês') },
     { gk: 'closing_rate', label: 'Taxa de fechamento (%)', pct: true },
-    { gk: 'surgeries_done', label: 'Cirurgias realizadas no mês' },
+    { gk: 'surgeries_done', label: frase('inicio.cirurgias_realizadas_no_mes', 'Cirurgias realizadas no mês') },
   ],
   medico: [
-    { gk: 'consultations', label: 'Consultas no mês' },
-    { gk: 'indications', label: 'Indicações no mês' },
-    { gk: 'conversion_rate', label: 'Conversão em cirurgia (%)', pct: true },
+    { gk: 'consultations', label: frase('inicio.consultas_no_mes', 'Consultas no mês') },
+    { gk: 'indications', label: frase('inicio.indicacoes_no_mes', 'Indicações no mês') },
+    { gk: 'conversion_rate', label: frase('inicio.conversao_em_cirurgia_pct', 'Conversão em cirurgia (%)'), pct: true },
   ],
   gestor: [
     { gk: 'new_leads', label: 'Novos contatos no mês' },
     { gk: 'booking_conversion', label: 'Taxa de agendamento (%)', pct: true },
     { gk: 'show_rate', label: 'Comparecimento (%)', pct: true },
-    { gk: 'closing_rate', label: 'Fechamento de cirurgias (%)', pct: true },
+    { gk: 'closing_rate', label: frase('inicio.fechamento_de_cirurgias_pct', 'Fechamento de cirurgias (%)'), pct: true },
   ],
-};
+}));
 const openGoalsModal = () => {
   const all = crmSettings.value?.panel_goals || {};
   goalsDraft.value = JSON.parse(JSON.stringify(all));
@@ -3730,7 +3736,7 @@ const gestorSignals = computed(() => {
     sigs.push({
       level: 'red',
       icon: 'i-lucide-radar',
-      text: `${alerts} paciente(s) quente(s) sem atendimento (Radar)`,
+      text: `${alerts} ${frase('inicio.pacientes_quentes_sem_atendimento_radar', 'paciente(s) quente(s) sem atendimento (Radar)')}`,
     });
   const waiting = data.value.unanswered ?? 0;
   if (waiting > 8)
@@ -3744,7 +3750,7 @@ const gestorSignals = computed(() => {
     sigs.push({
       level: 'amber',
       icon: 'i-lucide-clipboard-alert',
-      text: `${unconfirmed} consulta(s) sem conferência na Agenda`,
+      text: `${unconfirmed} ${frase('inicio.consultas_sem_conferencia_na_agenda', 'consulta(s) sem conferência na Agenda')}`,
     });
   const bugs = data.value.my_tasks?.count ?? 0;
   if (bugs > 0)
@@ -3827,7 +3833,7 @@ const panelHighlight = computed(() => {
       icon: 'i-lucide-clipboard-alert',
       color: '#D97706',
       value: d.unconfirmed ?? 0,
-      label: 'Consultas sem conferência',
+      label: frase('inicio.consultas_sem_conferencia', 'Consultas sem conferência'),
       sub: 'já passaram e ninguém marcou Compareceu/Faltou — confira na Agenda',
     };
   }
@@ -3836,8 +3842,8 @@ const panelHighlight = computed(() => {
       icon: 'i-lucide-hourglass',
       color: '#BE185D',
       value: d.awaiting_closing ?? 0,
-      label: 'Indicados aguardando fechamento',
-      sub: `indicações do período ainda sem cirurgia marcada · ${d.upcoming_surgeries ?? 0} cirurgia(s) futura(s) na agenda`,
+      label: frase('inicio.indicados_aguardando_fechamento', 'Indicados aguardando fechamento'),
+      sub: `${frase('inicio.indicacoes_ainda_sem_cirurgia_marcada', 'indicações do período ainda sem cirurgia marcada')} · ${d.upcoming_surgeries ?? 0} ${frase('inicio.cirurgias_futuras_na_agenda', 'cirurgia(s) futura(s) na agenda')}`,
     };
   }
   if (panelBase.value === 'medico') {
@@ -3845,10 +3851,10 @@ const panelHighlight = computed(() => {
       icon: 'i-lucide-slice',
       color: '#0369A1',
       value: d.surgeries ?? 0,
-      label: 'Cirurgias no período',
+      label: frase('inicio.cirurgias_no_periodo', 'Cirurgias no período'),
       sub: d.doctor
         ? `realizadas/agendadas por ${d.doctor}`
-        : 'todos os médicos',
+        : frase('inicio.todos_os_medicos', 'todos os médicos'),
     };
   }
   if (panelBase.value === 'gestor') {
@@ -3870,8 +3876,8 @@ const panelHighlight = computed(() => {
     icon: 'i-lucide-stethoscope',
     color: '#EA580C',
     value: d.surgery_indications ?? 0,
-    label: 'Indicações de cirurgia',
-    sub: 'leads do período que chegaram à coluna "Indicação de Cirurgia"',
+    label: frase('inicio.indicacoes_de_cirurgia', 'Indicações de cirurgia'),
+    sub: frase('inicio.leads_na_coluna_indicacao_de_cirurgia', 'leads do período que chegaram à coluna "Indicação de Cirurgia"'),
   };
 });
 
@@ -4133,7 +4139,7 @@ const waitingLabel = alert => {
 // 🔧 rodada 192: avisos que não vêm do Radar de IA têm rótulo próprio —
 // ligação perdida (167), "não vou" da jornada (168) e as ações do Atendente
 // Pós-agendamento ao vivo (remarcou / cancelou na Agenda)
-const ALERT_KIND_META = {
+const ALERT_KIND_META = computed(() => ({
   missed_call: {
     icon: 'i-lucide-phone-missed',
     label: 'Ligação perdida',
@@ -4146,24 +4152,24 @@ const ALERT_KIND_META = {
   },
   agente_remarcou: {
     icon: 'i-lucide-calendar-clock',
-    label: 'Agente remarcou a consulta',
+    label: frase('inicio.agente_remarcou_a_consulta', 'Agente remarcou a consulta'),
     color: '#0f5fa6',
   },
   agente_cancelou: {
     icon: 'i-lucide-calendar-off',
-    label: 'Agente cancelou a consulta',
+    label: frase('inicio.agente_cancelou_a_consulta', 'Agente cancelou a consulta'),
     color: '#b91c1c',
   },
   // item 217: paciente respondeu NÃO ao lembrete da véspera (consulta segue na Agenda)
   nao_confirmou: {
     icon: 'i-lucide-message-circle-x',
-    label: 'Respondeu NÃO ao lembrete da consulta',
+    label: frase('inicio.respondeu_nao_ao_lembrete_da_consulta', 'Respondeu NÃO ao lembrete da consulta'),
     color: '#db2777',
   },
   // item 251: sintoma de alerta no pós-operatório (tarefa urgente aberta pelo Atendente de Pós-operatório)
   pos_op_atencao: {
     icon: 'i-lucide-heart-pulse',
-    label: 'Pós-operatório: atenção agora',
+    label: frase('inicio.pos_operatorio_atencao_agora', 'Pós-operatório: atenção agora'),
     color: '#be123c',
   },
   // auditoria 10/2026 (#458): Atendente de Agendamento / Pós-agendamento chamou a equipe (o agente fica pausado)
@@ -4178,8 +4184,8 @@ const ALERT_KIND_META = {
     label: 'Robô parado — avise quem cuida do sistema',
     color: '#b91c1c',
   },
-};
-const alertKindMeta = alert => ALERT_KIND_META[alert?.kind] || null;
+}));
+const alertKindMeta = alert => ALERT_KIND_META.value[alert?.kind] || null;
 const isAgentAlert = alert =>
   String(alert?.kind || '').startsWith('agente_') ||
   alert?.kind === 'nao_confirmou' ||
@@ -4286,7 +4292,7 @@ const leadsInboxSub = computed(() => {
   if (!list.length)
     return activeLens.value === 'cevico'
       ? 'caixas Google + Instagram'
-      : `pacientes novos · ${activeLensLabel.value}`;
+      : `${frase('inicio.pacientes_novos', 'pacientes novos')} · ${activeLensLabel.value}`;
   return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
 });
 // item 238: "Marcadas na Agenda" por caixa de entrada (linha de baixo do card)
@@ -4295,7 +4301,7 @@ const bookedInboxSub = computed(() => {
     i => i.count > 0
   );
   if (!list.length)
-    return 'consultas novas no período (sem exame, tele ou cancelada)';
+    return frase('inicio.consultas_novas_no_periodo_sem_exame', 'consultas novas no período (sem exame, tele ou cancelada)');
   return list.map(i => `${shortInboxName(i.name)} ${i.count}`).join(' · ');
 });
 const pctOf = (part, total) =>
@@ -4456,14 +4462,14 @@ const perfTilesFor = col => {
         return {
           key,
           display: r.appointments_created ?? 0,
-          label: 'consultas agendadas',
+          label: frase('inicio.consultas_agendadas', 'consultas agendadas'),
           delta: perfDelta(r.appointments_created, prev.appointments_created),
         };
       case 'surgeries_created':
         return {
           key,
           display: r.surgeries_created ?? 0,
-          label: 'cirurgias agendadas',
+          label: frase('inicio.cirurgias_agendadas_min', 'cirurgias agendadas'),
         };
       case 'surgeries_closed':
         return {
@@ -4473,14 +4479,14 @@ const perfTilesFor = col => {
           // dinheiro; sem ele, a linha fica só com a contagem
           label:
             r.surgeries?.revenue === undefined || r.surgeries?.revenue === null
-              ? 'cirurgias fechadas'
-              : `cirurgias fechadas · ${perfBrl(r.surgeries.revenue)}`,
+              ? frase('inicio.cirurgias_fechadas', 'cirurgias fechadas')
+              : `${frase('inicio.cirurgias_fechadas', 'cirurgias fechadas')} · ${perfBrl(r.surgeries.revenue)}`,
         };
       case 'attendance':
         return {
           key,
           display: `${clinic.rate ?? 0}%`,
-          label: `comparecimento (clínica) · ${clinic.attended ?? 0} vieram · ${clinic.missed ?? 0} faltaram`,
+          label: `${frase('inicio.comparecimento_clinica', 'comparecimento (clínica)')} · ${clinic.attended ?? 0} vieram · ${clinic.missed ?? 0} faltaram`,
           color:
             (clinic.rate ?? 0) >= 80
               ? '#059669'
@@ -4737,7 +4743,7 @@ const openVariantModal = (existing = null) => {
     : {
         id: '',
         name: '',
-        base: BASE_PANELS.some(b => b.key === panelBase.value)
+        base: BASE_PANELS.value.some(b => b.key === panelBase.value)
           ? panelBase.value
           : 'agendamento',
         user_ids: [],
@@ -4745,7 +4751,7 @@ const openVariantModal = (existing = null) => {
   showVariantModal.value = true;
 };
 const variantBaseLabel = key =>
-  BASE_PANELS.find(b => b.key === key)?.label || key;
+  BASE_PANELS.value.find(b => b.key === key)?.label || key;
 // nome sugerido = primeiros nomes de quem vai ver ("Natália · Elizangela")
 const suggestedVariantName = () =>
   variantDraft.value.user_ids
@@ -4814,27 +4820,34 @@ const deleteVariant = async () => {
 // o olho CEVICO (public/brand-assets) como marca d'água — binding dinâmico
 // de propósito: src fixo com barra inicial vira import de módulo no Vite
 const HERO_EYE = '/brand-assets/cevico-eye.svg';
+// 🎨 Personalização por conta: a imagem do cabeçalho da EMPRESA no lugar do
+// olho (ou nenhuma, se a marca d'água estiver desligada)
+const heroImagem = computed(() => {
+  const empresa = EMPRESA.atual;
+  if (empresa?.visual?.watermark === false) return '';
+  return empresa?.images?.hero || HERO_EYE;
+});
 // o que este painel acompanha, em uma frase
-const HERO_LEADS = {
+const HERO_LEADS = computed(() => ({
   agendamento:
     'Do lead ao agendamento: quem chegou, quem marcou e o que ainda espera resposta.',
   conducao:
-    'Do agendamento à indicação: consultas do período, comparecimento e indicações de cirurgia.',
+    frase('inicio.lead_conducao', 'Do agendamento à indicação: consultas do período, comparecimento e indicações de cirurgia.'),
   cirurgia:
-    'Fechamento e pós-operatório: indicações, cirurgias agendadas e realizadas.',
+    frase('inicio.lead_cirurgia', 'Fechamento e pós-operatório: indicações, cirurgias agendadas e realizadas.'),
   medico:
-    'A agenda de cada médico: consultas, indicações e conversão em cirurgia.',
+    frase('inicio.lead_medico', 'A agenda de cada médico: consultas, indicações e conversão em cirurgia.'),
   gestor:
     'O processo inteiro num olhar: chegada, agendamento, comparecimento e fechamento.',
-};
+}));
 const heroLead = computed(() => {
   const p = currentPanel.value || {};
   if (p.custom)
     return 'Painel montado no Construtor — os seus indicadores, do seu jeito.';
   // variante por pessoa herda a frase do painel-base
   return (
-    HERO_LEADS[p.base || p.key] ||
-    `Boas-vindas ao CEVICO S.I — ${p.desc || ''}.`
+    HERO_LEADS.value[p.base || p.key] ||
+    `Boas-vindas ao ${nomeSistemaHero()} — ${p.desc || ''}.`
   );
 });
 // 🌡️ o PULSO do momento no cabeçalho: responde "como está agora?" antes de
@@ -4861,13 +4874,13 @@ const heroPulse = computed(() => {
       label: 'aguardando resposta',
       route: 'home',
       alert: waiting > 0,
-      title: 'Conversas em que o paciente falou por último',
+      title: frase('inicio.conversas_em_que_o_paciente_falou_por_ultimo', 'Conversas em que o paciente falou por último'),
     },
     {
       key: 'today',
       icon: 'i-lucide-calendar-check',
       value: d.appointments_today ?? 0,
-      label: 'consultas hoje',
+      label: frase('inicio.consultas_hoje', 'consultas hoje'),
       route: 'agenda_board',
       title: 'Abrir a Agenda',
     },
@@ -4877,10 +4890,13 @@ const heroPulse = computed(() => {
       key: 'radar',
       icon: 'i-lucide-radar',
       value: hot,
-      label: hot === 1 ? 'paciente quente' : 'pacientes quentes',
+      label:
+        hot === 1
+          ? frase('inicio.paciente_quente', 'paciente quente')
+          : frase('inicio.pacientes_quentes', 'pacientes quentes'),
       route: 'crm_board',
       alert: true,
-      title: 'Radar de Oportunidades: pacientes quentes sem atendimento',
+      title: frase('inicio.radar_pacientes_quentes_sem_atendimento', 'Radar de Oportunidades: pacientes quentes sem atendimento'),
     });
   return items;
 });
@@ -5150,10 +5166,12 @@ onUnmounted(() => {
           <span class="cevico-hero-glow cevico-hero-glow-b" aria-hidden="true" />
         </template>
         <img
-          :src="HERO_EYE"
+          v-if="heroImagem"
+          :src="heroImagem"
           alt=""
           aria-hidden="true"
           class="cevico-hero-eye"
+          :class="{ 'cevico-hero-eye--propria': heroImagem !== HERO_EYE }"
         />
         <div class="relative z-10 flex flex-col gap-4" style="color: #fff">
           <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -5376,7 +5394,7 @@ onUnmounted(() => {
           <button
             class="cv-btn cv-btn-sm"
             :class="autoPalette ? '' : 'cv-btn-ghost'"
-            title="Paleta dos indicadores: cada família (captação, agendamento, presença, cirurgia, financeiro, satisfação) tem a sua cor; resultado principal em cor cheia, volume em cor média, apoio em cor clara; o card enche ao longo do dia (07h → 19h). Desligada, valem as cores do dia e as escolhidas por card."
+            :title="frase('inicio.dica_paleta_dos_indicadores', 'Paleta dos indicadores: cada família (captação, agendamento, presença, cirurgia, financeiro, satisfação) tem a sua cor; resultado principal em cor cheia, volume em cor média, apoio em cor clara; o card enche ao longo do dia (07h → 19h). Desligada, valem as cores do dia e as escolhidas por card.')"
             @click="toggleAutoPalette"
           >
             <span class="i-lucide-swatch-book text-xs" />
@@ -6025,7 +6043,7 @@ onUnmounted(() => {
                           <b>{{ campaignMoney(campaignSummary.spend) }}</b> ·
                           leads <b>{{ campaignSummary.leads ?? '—' }}</b> ·
                           agendamentos
-                          <b>{{ campaignSummary.booked ?? '—' }}</b> · cirurgias
+                          <b>{{ campaignSummary.booked ?? '—' }}</b> · {{ frase('inicio.cirurgias', 'cirurgias') }}
                           <b>{{ campaignSummary.surgeries ?? '—' }}</b>
                         </div>
                       </div>
@@ -6285,20 +6303,20 @@ onUnmounted(() => {
                         <h2 class="text-sm font-bold text-n-slate-12">
                           {{
                             radarQueue.length === 1
-                              ? '1 paciente quente sem atendimento'
-                              : `${radarQueue.length} pacientes quentes sem atendimento`
+                              ? frase('inicio.um_paciente_quente_sem_atendimento', '1 paciente quente sem atendimento')
+                              : `${radarQueue.length} ${frase('inicio.pacientes_quentes_sem_atendimento', 'pacientes quentes sem atendimento')}`
                           }}
                         </h2>
                         <!-- 📈 eficácia (item 83): o Radar gerando consulta de verdade -->
                         <span
                           v-if="radarEfficacy"
                           class="cv-chip cv-green"
-                          :title="`Dos ${radarEfficacy.attended_30d} avisos atendidos nos últimos 30 dias, ${radarEfficacy.converted_30d} paciente(s) agendaram consulta depois do aviso`"
+                          :title="`Dos ${radarEfficacy.attended_30d} avisos atendidos nos últimos 30 dias, ${radarEfficacy.converted_30d} ${frase('inicio.pacientes_agendaram_consulta_depois_do_aviso', 'paciente(s) agendaram consulta depois do aviso')}`"
                         >
                           <span class="i-lucide-trending-up text-xs" />{{
                             radarEfficacy.converted_30d
                           }}
-                          consulta(s) geradas · {{ radarEfficacy.rate }}%
+                          {{ frase('inicio.consultas_geradas', 'consulta(s) geradas') }} · {{ radarEfficacy.rate }}%
                         </span>
                         <span
                           v-if="radarLastRun"
@@ -6485,7 +6503,7 @@ onUnmounted(() => {
                               <button
                                 v-if="radarFront.contact_id"
                                 class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
-                                title="Espaço do Paciente"
+                                :title="frase('inicio.espaco_do_paciente', 'Espaço do Paciente')"
                                 @click.stop="openPatientSpace(radarFront)"
                               >
                                 <PatientSpaceIcon :size="24" />
@@ -6519,7 +6537,7 @@ onUnmounted(() => {
                                 v-if="isAgentAlert(radarFront)"
                                 class="text-[11px] font-semibold px-2.5 py-1.5 rounded-full border transition-colors hover:bg-slate-50"
                                 style="border-color: #bfdbfe; color: #1d4ed8"
-                                title="Conferir a consulta na Agenda"
+                                :title="frase('inicio.conferir_a_consulta_na_agenda', 'Conferir a consulta na Agenda')"
                                 @click.stop="openAgendaFromAlert(radarFront)"
                               >
                                 📅 Agenda
@@ -6591,7 +6609,7 @@ onUnmounted(() => {
                         <div class="ml-auto flex items-center gap-1.5">
                           <button
                             class="cv-btn cv-btn-ghost cv-btn-sm"
-                            title="Escrever um recado sobre um paciente"
+                            :title="frase('inicio.escrever_um_recado_sobre_um_paciente', 'Escrever um recado sobre um paciente')"
                             @click="showNoteForm = !showNoteForm"
                           >
                             <span class="i-lucide-plus text-xs" />
@@ -6638,7 +6656,7 @@ onUnmounted(() => {
                           @click="pickTasksTab('notas')"
                         >
                           <span class="i-lucide-sticky-note text-[11px]" />
-                          Notas dos pacientes
+                          {{ frase('inicio.notas_dos_pacientes', 'Notas dos pacientes') }}
                           <span class="tabular-nums opacity-70">{{
                             patientNotes.length
                           }}</span>
@@ -6733,7 +6751,7 @@ onUnmounted(() => {
                           >
                             <button
                               class="cv-avatar flex-shrink-0"
-                              title="Abrir o Espaço do Paciente"
+                              :title="frase('inicio.abrir_o_espaco_do_paciente', 'Abrir o Espaço do Paciente')"
                               @click="openPatientFromNote(note)"
                             >
                               {{ noteInitials(note.contact?.name) }}
@@ -6742,10 +6760,10 @@ onUnmounted(() => {
                               <div class="flex items-baseline gap-2 min-w-0">
                                 <button
                                   class="text-[13px] font-semibold text-n-slate-12 truncate hover:underline text-left"
-                                  title="Abrir o Espaço do Paciente"
+                                  :title="frase('inicio.abrir_o_espaco_do_paciente', 'Abrir o Espaço do Paciente')"
                                   @click="openPatientFromNote(note)"
                                 >
-                                  {{ note.contact?.name || 'Paciente' }}
+                                  {{ note.contact?.name || frase('inicio.paciente', 'Paciente') }}
                                 </button>
                                 <span
                                   class="text-[10px] text-n-slate-9 whitespace-nowrap tabular-nums"
@@ -6974,7 +6992,7 @@ onUnmounted(() => {
           <div
             v-if="lensOptions.length"
             class="cv-seg inline-flex items-center gap-0.5 max-w-full flex-nowrap overflow-x-auto"
-            title="De qual fonte de pacientes são os números do painel"
+            :title="frase('inicio.de_qual_fonte_de_pacientes_sao_os_numeros', 'De qual fonte de pacientes são os números do painel')"
           >
             <span
               class="i-lucide-split text-sm ml-2 mr-0.5 flex-shrink-0"
@@ -6999,12 +7017,13 @@ onUnmounted(() => {
           <b class="text-n-slate-12">Vendo: {{ activeLensLabel }}.</b>
           {{
             activeLens === 'all'
-              ? 'Os indicadores somam todas as fontes de pacientes.'
-              : `Os indicadores mostram só o que é da fonte ${activeLensLabel}: pacientes, agendamentos e colunas do funil dela.`
+              ? frase('inicio.indicadores_somam_todas_as_fontes_de_pacientes', 'Os indicadores somam todas as fontes de pacientes.')
+              : `Os indicadores mostram só o que é da fonte ${activeLensLabel}: ${frase('inicio.pacientes_agendamentos_e_colunas_do_funil_dela', 'pacientes, agendamentos e colunas do funil dela.')}`
           }}
           Metas e recordes são da CEVICO e não julgam os cards nesta visão.
-          Tarefas, próximas consultas, Radar e desempenho das pessoas não mudam
-          com a chavinha.
+          {{
+            frase('inicio.tarefas_proximas_consultas_radar_nao_mudam', 'Tarefas, próximas consultas, Radar e desempenho das pessoas não mudam com a chavinha.')
+          }}
         </p>
 
         <!-- ✈️ GESTOR: o indicador de decisão — posso viajar ou é ação imediata? -->
@@ -7931,7 +7950,7 @@ onUnmounted(() => {
                             class="i-lucide-stethoscope text-sm"
                             style="color: var(--cv)"
                           />
-                          Agenda de Consultas
+                          {{ frase('inicio.agenda_de_consultas', 'Agenda de Consultas') }}
                         </p>
                         <div>
                           <div
@@ -7983,7 +8002,7 @@ onUnmounted(() => {
                             />
                           </div>
                           <p class="text-[10px] text-n-slate-9 mt-1">
-                            blocos que viraram consulta
+                            {{ frase('inicio.blocos_que_viraram_consulta', 'blocos que viraram consulta') }}
                           </p>
                         </div>
                         <div>
@@ -8009,7 +8028,7 @@ onUnmounted(() => {
                             />
                           </div>
                           <p class="text-[10px] text-n-slate-9 mt-1">
-                            consultas concluídas ÷ realizadas
+                            {{ frase('inicio.consultas_concluidas_dividido_realizadas', 'consultas concluídas ÷ realizadas') }}
                           </p>
                         </div>
                         <!-- vagas livres, junto da agenda de consultas -->
@@ -8047,7 +8066,7 @@ onUnmounted(() => {
                             class="text-[11px] text-n-slate-10 flex items-center gap-1.5 mt-2"
                           >
                             <span class="i-lucide-clock text-xs" />
-                            Próxima consulta:
+                            {{ frase('inicio.proxima_consulta', 'Próxima consulta:') }}
                             <b class="text-n-slate-12">{{
                               nextAppointment.title
                             }}</b>
@@ -8068,9 +8087,9 @@ onUnmounted(() => {
                             class="i-lucide-slice text-sm"
                             style="color: var(--cv)"
                           />
-                          Agenda de Cirurgias
+                          {{ frase('inicio.agenda_de_cirurgias', 'Agenda de Cirurgias') }}
                           <span class="text-[10px] font-normal text-n-slate-9"
-                            >sala cirúrgica (IOP, Ocular Surgery...)</span
+                            >{{ frase('inicio.sala_cirurgica_iop', 'sala cirúrgica (IOP, Ocular Surgery...)') }}</span
                           >
                         </p>
                         <div>
@@ -8130,7 +8149,7 @@ onUnmounted(() => {
                             />
                           </div>
                           <p class="text-[10px] text-n-slate-9 mt-1">
-                            blocos da sala que viraram cirurgia
+                            {{ frase('inicio.blocos_da_sala_que_viraram_cirurgia', 'blocos da sala que viraram cirurgia') }}
                           </p>
                         </div>
                         <!-- 🎯 META: 100 cirurgias -->
@@ -8145,7 +8164,7 @@ onUnmounted(() => {
                                 style="color: var(--cv)"
                               />Meta do mês
                               <span class="text-n-slate-9"
-                                >({{ surgeryGoalTarget }} cirurgias)</span
+                                >({{ surgeryGoalTarget }} {{ frase('inicio.cirurgias', 'cirurgias') }})</span
                               ></span
                             >
                             <span class="font-bold text-base text-n-slate-12"
@@ -8161,7 +8180,7 @@ onUnmounted(() => {
                             />
                           </div>
                           <p class="text-[10px] text-n-slate-9 mt-1">
-                            {{ goalPct }}% da meta · cirurgias realizadas no mês
+                            {{ goalPct }}% {{ frase('inicio.da_meta_cirurgias_realizadas_no_mes', 'da meta · cirurgias realizadas no mês') }}
                           </p>
                         </div>
                         <div
@@ -8175,14 +8194,14 @@ onUnmounted(() => {
                             class="text-[11px] text-n-slate-10 flex items-center gap-1.5 mt-2"
                           >
                             <span class="i-lucide-clock text-xs" />
-                            Próxima cirurgia:
+                            {{ frase('inicio.proxima_cirurgia', 'Próxima cirurgia:') }}
                             <b class="text-n-slate-12">{{
                               nextSurgery.title.replace(/^Consulta:\s*/i, '')
                             }}</b>
                             — {{ apptTime(nextSurgery.due_at) }}
                           </p>
                           <p v-else class="text-[11px] text-n-slate-10 mt-2">
-                            Nenhuma cirurgia futura na agenda.
+                            {{ frase('inicio.nenhuma_cirurgia_futura_na_agenda', 'Nenhuma cirurgia futura na agenda.') }}
                           </p>
                         </div>
                       </div>
@@ -8362,7 +8381,7 @@ onUnmounted(() => {
                       ><span class="i-lucide-calendar-check text-xs" />{{
                         data.appointments_today ?? 0
                       }}
-                      consultas hoje</span
+                      {{ frase('inicio.consultas_hoje', 'consultas hoje') }}</span
                     >
                   </div>
                 </template>
@@ -8444,7 +8463,7 @@ onUnmounted(() => {
                         <span
                           v-if="acqFunnel.by_source"
                           class="cv-chip ml-auto"
-                          title="das consultas marcadas da turma, quem marcou"
+                          :title="frase('inicio.das_consultas_marcadas_da_turma_quem_marcou', 'das consultas marcadas da turma, quem marcou')"
                         >
                           <span class="i-lucide-bot text-xs" /> robô
                           <b class="tabular-nums">{{
@@ -8527,17 +8546,18 @@ onUnmounted(() => {
                       </h2>
                     </div>
                     <p class="text-[11px] text-n-slate-10 mb-4">
-                      quem tinha <b>consulta com data</b> no período (sem
-                      exame/tele) e o que aconteceu depois: presença, indicação,
-                      cirurgia marcada, realizada e pesquisa respondida · clique
-                      numa etapa para ver os nomes
+                      quem tinha
+                      <b>{{ frase('inicio.consulta_com_data', 'consulta com data') }}</b>
+                      {{
+                        frase('inicio.porta_dentro_explicacao', 'no período (sem exame/tele) e o que aconteceu depois: presença, indicação, cirurgia marcada, realizada e pesquisa respondida · clique numa etapa para ver os nomes')
+                      }}
                     </p>
                     <div
                       v-if="funnelLoading && !clinicFunnel"
                       class="text-xs text-n-slate-10 py-6 text-center"
                     >
                       <span class="i-lucide-loader-circle animate-spin" />
-                      conferindo as consultas…
+                      {{ frase('inicio.conferindo_as_consultas', 'conferindo as consultas…') }}
                     </div>
                     <template v-else-if="clinicFunnel && clinicFunnel.total">
                       <FunnelSteps
@@ -8550,7 +8570,7 @@ onUnmounted(() => {
                         <button
                           class="cv-chip cv-red"
                           title="não vieram (falta registrada) · clique para ver"
-                          @click="openSideList('missed', 'Faltas em consultas')"
+                          @click="openSideList('missed', frase('inicio.faltas_em_consultas', 'Faltas em consultas'))"
                         >
                           <span class="i-lucide-user-x text-xs" /> faltas
                           <b class="tabular-nums">{{
@@ -8570,7 +8590,7 @@ onUnmounted(() => {
                           class="cv-chip"
                           title="desmarcadas · clique para ver"
                           @click="
-                            openSideList('canceled', 'Consultas canceladas')
+                            openSideList('canceled', frase('inicio.consultas_canceladas', 'Consultas canceladas'))
                           "
                         >
                           <span class="i-lucide-calendar-x text-xs" />
@@ -8583,7 +8603,7 @@ onUnmounted(() => {
                           class="cv-chip"
                           title="mudaram de dia ou hora · clique para ver"
                           @click="
-                            openSideList('rescheduled', 'Consultas remarcadas')
+                            openSideList('rescheduled', frase('inicio.consultas_remarcadas', 'Consultas remarcadas'))
                           "
                         >
                           <span class="i-lucide-refresh-cw text-xs" />
@@ -8595,7 +8615,7 @@ onUnmounted(() => {
                         <span
                           v-if="clinicFunnel.side.pending"
                           class="cv-chip cv-amber"
-                          title="consulta já passou e ninguém marcou se o paciente veio — o funil fica cego aqui"
+                          :title="frase('inicio.consulta_passou_sem_registro_de_presenca', 'consulta já passou e ninguém marcou se o paciente veio — o funil fica cego aqui')"
                         >
                           <span class="i-lucide-circle-help text-xs" /> sem
                           registro de presença
@@ -8606,7 +8626,7 @@ onUnmounted(() => {
                         <span
                           v-if="clinicFunnel.side.future"
                           class="cv-chip"
-                          title="consultas do período que ainda vão acontecer"
+                          :title="frase('inicio.consultas_do_periodo_que_ainda_vao_acontecer', 'consultas do período que ainda vão acontecer')"
                         >
                           <span class="i-lucide-clock text-xs" /> ainda vão
                           acontecer
@@ -8618,7 +8638,7 @@ onUnmounted(() => {
                       <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
                         <div
                           v-for="grp in [
-                            ['por médico', clinicFunnel.by_doctor],
+                            [frase('inicio.por_medico', 'por médico'), clinicFunnel.by_doctor],
                             ['por unidade', clinicFunnel.by_unit],
                           ]"
                           :key="grp[0]"
@@ -8632,16 +8652,16 @@ onUnmounted(() => {
                               <tr class="text-n-slate-9 text-left">
                                 <th class="font-semibold pb-1">&nbsp;</th>
                                 <th class="font-semibold pb-1 text-right">
-                                  consultas
+                                  {{ frase('inicio.consultas', 'consultas') }}
                                 </th>
                                 <th class="font-semibold pb-1 text-right">
                                   vieram
                                 </th>
                                 <th class="font-semibold pb-1 text-right">
-                                  indicação
+                                  {{ frase('inicio.indicacao', 'indicação') }}
                                 </th>
                                 <th class="font-semibold pb-1 text-right">
-                                  cirurgia
+                                  {{ frase('inicio.cirurgia', 'cirurgia') }}
                                 </th>
                               </tr>
                             </thead>
@@ -8699,7 +8719,7 @@ onUnmounted(() => {
                       </div>
                     </template>
                     <p v-else class="text-xs text-n-slate-10 py-6 text-center">
-                      nenhuma consulta com data no período
+                      {{ frase('inicio.nenhuma_consulta_com_data_no_periodo', 'nenhuma consulta com data no período') }}
                     </p>
                   </div>
                 </template>
@@ -9267,7 +9287,7 @@ onUnmounted(() => {
               <p class="text-[11px] font-medium text-n-slate-11">
                 🏥 Por unidade
                 <span class="font-normal text-n-slate-9"
-                  >· consultas e comparecimento do período</span
+                  >{{ frase('inicio.consultas_e_comparecimento_do_periodo', '· consultas e comparecimento do período') }}</span
                 >
               </p>
               <div
@@ -9296,7 +9316,7 @@ onUnmounted(() => {
                 <div
                   class="flex items-center gap-3 text-[10px] text-n-slate-10 flex-wrap"
                 >
-                  <span>{{ u.consultations }} consulta(s)</span>
+                  <span>{{ u.consultations }} {{ frase('inicio.consulta_s', 'consulta(s)') }}</span>
                   <span style="color: #059669">✓ {{ u.attended }} vieram</span>
                   <span style="color: #dc2626">✗ {{ u.missed }} faltaram</span>
                   <span
@@ -9765,8 +9785,8 @@ onUnmounted(() => {
                     ['all', 'Todos os painéis'],
                     ['agendamento', 'Agendamento'],
                     ['conducao', 'Condução'],
-                    ['cirurgia', 'Cirurgias'],
-                    ['medico', 'Médicos'],
+                    ['cirurgia', frase('inicio.painel_cirurgias', 'Cirurgias')],
+                    ['medico', frase('inicio.painel_medicos', 'Médicos')],
                     ['gestor', 'Gestor'],
                   ]"
                   :key="pp[0]"
@@ -9833,7 +9853,7 @@ onUnmounted(() => {
               v-model="kpiBuilder.note"
               type="text"
               maxlength="200"
-              placeholder="ex.: meta da clínica é 15%"
+              :placeholder="frase('inicio.ex_meta_da_clinica_e_15', 'ex.: meta da clínica é 15%')"
               class="cv-input w-full text-n-slate-12"
             />
           </div>

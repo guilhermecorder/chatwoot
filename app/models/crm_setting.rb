@@ -29,6 +29,14 @@
 class CrmSetting < ApplicationRecord
   belongs_to :account
 
+  # 🎨 Personalização por conta (28/10): imagens da identidade visual da
+  # EMPRESA (não da instalação) — logo claro/escuro, ícone e imagem do
+  # cabeçalho. Entram no plano de backup como todo o storage.
+  has_one_attached :brand_logo
+  has_one_attached :brand_logo_dark
+  has_one_attached :brand_icon
+  has_one_attached :brand_hero
+
   def n8n_configured?
     n8n_base_url.present? && n8n_api_key.present?
   end

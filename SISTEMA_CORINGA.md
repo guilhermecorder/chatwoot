@@ -87,6 +87,15 @@ metas, jornada). Sem `MARCA`/`SEGMENTO` no ambiente, tudo cai nesse
 preset — comportamento idêntico ao de antes, incluindo testes (fallbacks
 chumbados permanecem nos helpers para contexto sem pacote).
 
+## 28/10/2026 — Personalização POR CONTA (fase C feita)
+
+A terminologia por conta entrou, e mais: imagens, paleta, marca d'água,
+dicionário global das telas, frases inteiras, nomes dos ambientes — tudo em
+Configurações → Personalização (a antiga Identidade da empresa + a tela do
+coringa, embutida). Manual: `docs/PERSONALIZACAO.md`. Resolução em todo lugar:
+**conta > segmento > clínica** (`helper/segmento.js` consulta `EMPRESA.atual`
+antes do `window.SEGMENTO`).
+
 ## O que ainda é clínico (pendências — fase B/C)
 
 - **Copywriter / Construtor de Páginas / Editor**: prompts continuam os da
@@ -99,7 +108,6 @@ chumbados permanecem nos helpers para contexto sem pacote).
 - **Textos secundários** de telas menores (Academy, AutomationsHub,
   questionário pré-consulta do CrmForms, placeholders do Estoque/Financeiro,
   descrições dos agentes em telas de automação).
-- **Terminologia por conta** (paciente→cliente é por segmento/yml; por
-  conta exigiria reatividade em todas as telas — fase C se precisar).
+- ~~**Terminologia por conta**~~ — feita em 28/10 (ver acima).
 - Schemas de saída dos robôs mantêm descrições com vocabulário clínico
   (as CHAVES são neutras; só texto de orientação ao modelo).

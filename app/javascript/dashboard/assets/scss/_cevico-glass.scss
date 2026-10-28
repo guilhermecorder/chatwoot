@@ -693,6 +693,17 @@
   z-index: 0;
   filter: drop-shadow(0 0 28px rgba(255, 255, 255, 0.35));
 }
+// 🎨 Personalização por conta: imagem do cabeçalho enviada pela EMPRESA
+// (logo/arte própria) — inteira, mais presente que a marca d'água do olho
+.cevico-hero-eye--propria {
+  right: 18px;
+  bottom: 12px;
+  width: 150px;
+  max-height: 110px;
+  object-fit: contain;
+  opacity: 0.92;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.25));
+}
 .cevico-hero-chip {
   display: inline-flex;
   align-items: center;

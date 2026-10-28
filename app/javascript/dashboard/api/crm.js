@@ -604,6 +604,17 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_company`, { company });
   }
 
+  // 🎨 Personalização: logo / logo_dark / icon / hero da empresa (multipart)
+  updateCompanyImage(kind, file = null, remove = false) {
+    const form = new FormData();
+    form.append('kind', kind);
+    if (file) form.append('file', file);
+    if (remove) form.append('remove', 'true');
+    return axios.post(`${this.url}/settings/update_company_image`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  }
+
   // tabela de preços oficial (Espaço do Paciente + prompts da IA) — admin
   updatePriceTable(items) {
     return axios.post(`${this.url}/settings/update_price_table`, { items });
