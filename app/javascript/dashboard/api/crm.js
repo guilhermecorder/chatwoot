@@ -556,6 +556,14 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 📅 item 375: aberturas pontuais (um dia/turno a mais numa data só) —
+  // mesma porta e mesmo nó da equipe do fechar dia
+  updateAgendaOpenDays(openDays) {
+    return axios.post(`${this.url}/settings/update_blocked_days`, {
+      open_days: openDays,
+    });
+  }
+
   // locais de cirurgia (clínicas parceiras — IOP etc.) do trilho de cirurgias
   updateSurgeryLocations(surgeryLocations) {
     return axios.post(`${this.url}/settings/update_agenda`, {

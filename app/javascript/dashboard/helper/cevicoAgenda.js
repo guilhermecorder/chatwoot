@@ -225,6 +225,38 @@ export const resolveWindows = settings => {
   return closed.length ? list.filter(w => !closed.includes(w.doctor)) : list;
 };
 
+// 📅 ABERTURA PONTUAL (item 375, 28/10 — "a Dra. Roberta pediu para abrir a
+// agenda em alguns dias específicos"): um dia (ou um turno a mais) numa DATA
+// só, sem mexer na rotina da semana. Mesmo formato da faixa, com `date` no
+// lugar do `dow` (o `dow` vem da data, para quem só olha o dia da semana).
+// Espelho de Crm::AgendaSlots.open_days — a grade, a ocupação e os robôs leem
+// a mesma lista. Cadeados (dia, unidade, médico, horário) valem em cima dela.
+const dowOfKey = key => new Date(`${key}T12:00:00`).getDay();
+export const resolveOpenDays = settings =>
+  Array.isArray(settings?.agenda_open_days)
+    ? settings.agenda_open_days
+        .filter(
+          o =>
+            o &&
+            /^\d{4}-\d{2}-\d{2}$/.test(o.date) &&
+            o.doctor &&
+            o.start &&
+            o.end
+        )
+        .map(o => ({
+          ...o,
+          dow: dowOfKey(o.date),
+          block: Number(o.block) || 15,
+          open: true,
+        }))
+    : [];
+// aberturas em vigor — sem os médicos com a agenda fechada
+export const resolveOpenWindows = settings => {
+  const closed = resolveClosedDoctors(settings);
+  const list = resolveOpenDays(settings);
+  return closed.length ? list.filter(w => !closed.includes(w.doctor)) : list;
+};
+
 // 🗂️ item 307 (01/10, "todas as quartas, das 13h às 14h, só retornos de
 // pós-operatório"): FAIXA RESERVADA. Cada janela pode aceitar só alguns tipos
 // de atendimento (`only`); sem `only` aceita tudo. A IA marca consulta nova
@@ -244,12 +276,13 @@ const hmToMin = hm => {
     .map(Number);
   return h * 60 + (m || 0);
 };
-// a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade)
-export const windowAt = (windows, { dow, unit, minutes, doctor }) =>
+// a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade;
+// item 375: abertura pontual só na data dela — quem passa `date` enxerga as duas)
+export const windowAt = (windows, { dow, unit, minutes, doctor, date }) =>
   windows.find(
     w =>
       w.doctor &&
-      w.dow === dow &&
+      (w.date ? w.date === date : w.dow === dow) &&
       w.unit === unit &&
       (!doctor || w.doctor === doctor) &&
       minutes >= hmToMin(w.start) &&
@@ -334,6 +367,11 @@ export const dateKey = d => {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
+
+// item 375: a faixa vale neste dia? abertura pontual = só na data dela;
+// faixa da semana = no dia da semana dela
+export const windowOnDay = (win, day) =>
+  win.date ? win.date === dateKey(day) : win.dow === day.getDay();
 
 export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 
@@ -740,11 +778,12 @@ export const scanAgenda = ({
     const day = new Date(from);
     day.setDate(day.getDate() + i);
     const dow = day.getDay();
-    if (dow === 0 || dow === 6) continue; // fim de semana bloqueado
+    // fim de semana bloqueado — salvo abertura pontual naquela data (item 375)
+    if ((dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day))) continue;
     if (blockedDays.has(dateKey(day))) continue; // dia fechado inteiro
 
     windows
-      .filter(w => w.dow === dow)
+      .filter(w => windowOnDay(w, day))
       .forEach(win => {
         slotsFor(win).forEach(slot => {
           const key = blockKey(dateKey(day), slot, win.unit);

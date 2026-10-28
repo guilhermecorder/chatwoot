@@ -28,7 +28,7 @@ import {
   DOCTORS, MODALITIES, ONLINE_UNIT,
   TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
   kindFor, kindOf, kindVars, hexToRgbSpaced, isAppointmentTask as isAppointment,
-  resolveWindows, resolveBlocked, resolveBlockedDays, resolveExamWindows,
+  resolveWindows, resolveOpenWindows, windowOnDay, resolveBlocked, resolveBlockedDays, resolveExamWindows,
   wholeBlockedDays, partialBlocksOn, isWindowBlocked, sameBlock,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
   TASK_COLORS, taskColorOf, attendanceMarkOf,
@@ -214,7 +214,7 @@ const taskDuration = task => {
   const mins = d.getHours() * 60 + d.getMinutes();
   const list = isSurgeryTask(task) ? surgeryWindows.value : kindOf(task) === 'exames' ? examWindows.value : windows.value;
   const win = list.find(w => {
-    if (w.dow !== d.getDay()) return false;
+    if (!windowOnDay(w, d)) return false;
     if (task.unit && w.unit !== task.unit) return false;
     const [sh, sm] = w.start.split(':').map(Number);
     const [eh, em] = w.end.split(':').map(Number);
@@ -318,7 +318,10 @@ const procedureLabel = computed(() => {
 // ── Médicos e janelas de avaliação da clínica ───────────────
 const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
 const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
-const windows = computed(() => resolveWindows(crmSettings.value).filter(w => unitAllowed(w.unit)));
+// item 375: as aberturas pontuais (data fixa) somam às faixas da semana
+const windows = computed(() =>
+  [...resolveWindows(crmSettings.value), ...resolveOpenWindows(crmSettings.value)].filter(w => unitAllowed(w.unit))
+);
 
 // horários fechados com o cadeado ({date, time, unit})
 const blockedList = computed(() => resolveBlocked(crmSettings.value));
@@ -371,7 +374,9 @@ const dayBlockSummary = day => {
   return parts.map(b => (b.unit ? (UNITS[b.unit]?.label || b.unit) : doctorShort(b.doctor))).join(', ') + ' fechado';
 };
 // teleconsulta pode acontecer em qualquer dia útil, mesmo sem janela
-const isDayOff = day => isWeekend(day) || isDayBlocked(day);
+// item 375: sábado/domingo com abertura pontual é dia de agenda
+const hasOpenWindow = day => windows.value.some(w => w.date === dateKey(day));
+const isDayOff = day => (isWeekend(day) && !hasOpenWindow(day)) || isDayBlocked(day);
 
 const toggleBlockDay = async (day, part = null) => {
   if (isSavingBlock.value) return;
@@ -404,7 +409,7 @@ const rawWindowsForDay = day => {
   const out = [];
   if (resources.value.has('doctor')) {
     out.push(...windows.value
-      .filter(w => w.dow === day.getDay())
+      .filter(w => windowOnDay(w, day))
       .filter(w => !activeUnit.value || w.unit === activeUnit.value)
       .filter(w => !activeDoctor.value || w.doctor === activeDoctor.value));
   }
@@ -917,7 +922,7 @@ const occCaption = scan => {
 };
 const dayOccupancy = day => {
   if (isDayOff(day) || !showOccupancy.value) return null;
-  if (!occWindows.value.some(w => w.dow === day.getDay())) return null;
+  if (!occWindows.value.some(w => windowOnDay(w, day))) return null;
   return occScan(day, 1);
 };
 
@@ -1230,6 +1235,7 @@ const hubConflicts = computed(() => formConflicts.value.filter(t => t.source ===
 const reservedMismatch = computed(() => {
   if (!showModal.value || form.value.kind !== 'consultas' || !form.value.date || !form.value.time) return null;
   const spot = { dow: new Date(`${form.value.date}T12:00:00`).getDay(), unit: form.value.unit, minutes: toMin(form.value.time) };
+  spot.date = form.value.date; // item 375: enxerga a abertura pontual do dia
   const win = windowAt(windows.value, { ...spot, doctor: form.value.doctor }) || windowAt(windows.value, spot);
   return win && !windowAccepts(win, form.value.modality || 'avaliacao') ? win : null;
 });
@@ -2605,7 +2611,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <!-- ══ DIA ══ -->
         <div v-else>
           <!-- avisos do dia -->
-          <div v-if="isWeekend(cursor)" class="cv-sub flex items-center gap-2 px-4 py-3 mb-4 text-sm text-n-slate-10">
+          <div v-if="isWeekend(cursor) && !hasOpenWindow(cursor)" class="cv-sub flex items-center gap-2 px-4 py-3 mb-4 text-sm text-n-slate-10">
             <span class="i-lucide-lock text-base" />
             {{ WEEKDAY_FULL[cursor.getDay()] }} — sem agenda em nenhuma unidade.
           </div>

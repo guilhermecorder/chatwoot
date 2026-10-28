@@ -1104,11 +1104,15 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # item 267 (28/09, "as meninas devem poder fechar as agendas de médicos"):
   # fechar/reabrir um dia (inteiro, uma unidade ou um médico) é da EQUIPE,
   # não só do admin — por isso fica fora de ADMIN_SETTINGS_ACTIONS
+  # 📅 item 375 (28/10): a ABERTURA PONTUAL (um dia/turno a mais numa data só)
+  # entra pela mesma porta — abrir e fechar dias é da equipe, com o mesmo nó.
   def update_blocked_days
-    # Rodada 4 (#413): grava só esta chave, sob trava — nunca a coluna inteira
-    days = sanitize_blocked_days(params[:blocked_days])
-    Cevico::SettingMerge.merge!(Current.account, :agenda_config) { |cfg| cfg.merge('blocked_days' => days) }
-    render json: { agenda_blocked_days: days }
+    # Rodada 4 (#413): grava só a chave enviada, sob trava — nunca a coluna inteira
+    keys = {}
+    keys['blocked_days'] = sanitize_blocked_days(params[:blocked_days]) if params.key?(:blocked_days)
+    keys['open_days'] = sanitize_open_days(params[:open_days]) if params.key?(:open_days)
+    Cevico::SettingMerge.merge!(Current.account, :agenda_config) { |cfg| cfg.merge(keys) } if keys.any?
+    render json: { agenda_blocked_days: keys['blocked_days'], agenda_open_days: keys['open_days'] }.compact
   end
 
   # item 366 (23/10, "as meninas precisam poder fazer isso ou aquilo na
@@ -1503,6 +1507,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_windows: cfg['windows'] || [],
       agenda_blocked: cfg['blocked'] || [],
       agenda_blocked_days: cfg['blocked_days'] || [],
+      agenda_open_days: cfg['open_days'] || [], # item 375
       agenda_closed_doctors: cfg['closed_doctors'] || [],
       agenda_ai_rules: cfg['ai_rules'].to_s,
       attendance_stages: cfg['attendance_stages'] || {},
@@ -2376,6 +2381,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_windows: (s.agenda_config || {})['windows'] || [],
       agenda_blocked: (s.agenda_config || {})['blocked'] || [],
       agenda_blocked_days: (s.agenda_config || {})['blocked_days'] || [],
+      agenda_open_days: (s.agenda_config || {})['open_days'] || [], # item 375: aberturas pontuais
       agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
       agenda_ai_rules: (s.agenda_config || {})['ai_rules'].to_s, # item 307
       agenda_hourly_evaluations: Crm::AgendaSlots.cap_from(s.agenda_config), # item 367
@@ -2813,6 +2819,26 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       part = { 'date' => date, 'unit' => h['unit'].to_s[0, 40].presence, 'doctor' => h['doctor'].to_s[0, 80].presence }.compact
       part.size == 1 ? date : part
     end.uniq
+  end
+
+  # 📅 item 375: abertura pontual = {date, doctor, unit, start, end, block};
+  # sem data, médico, unidade ou com "até" antes do "das", cai fora
+  HHMM = /\A([01]\d|2[0-3]):[0-5]\d\z/
+  def sanitize_open_days(list)
+    Array(list).filter_map do |o|
+      h = o.respond_to?(:permit) ? o.permit(:date, :doctor, :unit, :start, :end, :block, only: []).to_h : o.to_h
+      date = h['date'].to_s[/\A\d{4}-\d{2}-\d{2}\z/]
+      doctor = h['doctor'].to_s[0, 80].presence
+      unit = h['unit'].to_s[0, 40].presence
+      from = h['start'].to_s[HHMM]
+      to = h['end'].to_s[HHMM]
+      next if date.blank? || doctor.nil? || unit.nil? || from.nil? || to.nil? || from >= to
+
+      block = h['block'].to_i
+      only = Array(h['only']).map(&:to_s) & Crm::AgendaSlots::RESERVABLE
+      { 'date' => date, 'doctor' => doctor, 'unit' => unit, 'start' => from, 'end' => to,
+        'block' => block.between?(5, 120) ? block : 15 }.merge(only.any? ? { 'only' => only } : {})
+    end.uniq { |o| o.values_at('date', 'doctor', 'unit', 'start') }
   end
 
   # item 366: cadeado de UM horário ({date, time, unit, doctor}); lixo cai fora

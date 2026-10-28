@@ -45,6 +45,42 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     end
   end
 
+  # 📅 ABERTURA PONTUAL (item 375, 28/10 — Vaneide: "a Dra. Roberta pediu para
+  # abrir a agenda em alguns dias específicos: 30/10 das 13h às 17h30 e 06/11
+  # das 9h às 13h30"): um dia (ou um turno a mais) numa DATA só, sem mexer na
+  # rotina da semana. Mesmo formato das faixas, com 'date' no lugar do 'dow'.
+  # Entra na mesma régua das faixas: grade da Agenda, lista de vagas do prompt,
+  # horarios_do_dia, conferência do horário e médico da faixa — para TODO robô
+  # de uma vez. Cadeados (dia, unidade, médico, horário) valem em cima dela.
+  def open_days(account)
+    cfg = agenda_config(account)
+    closed = Array(cfg['closed_doctors']).map(&:to_s)
+    Array(cfg['open_days']).select { |win| open_day?(win) && closed.exclude?(win['doctor'].to_s) }.map { |win| normalize_open_day(win) }
+  end
+
+  # tem médico, das/até e uma data de verdade?
+  def open_day?(win)
+    win.is_a?(Hash) && win['doctor'].present? && win['start'].present? && win['end'].present? && iso_date(win['date']).present?
+  end
+
+  def normalize_open_day(win)
+    date = iso_date(win['date'])
+    win.merge('date' => date.to_s, 'dow' => date.wday, 'block' => win['block'].to_i.positive? ? win['block'].to_i : 15)
+  end
+
+  # "2026-10-30" → Date; qualquer outra coisa (inclusive 2026-13-45) → nil
+  def iso_date(value)
+    Date.iso8601(value.to_s)
+  rescue ArgumentError, TypeError
+    nil
+  end
+
+  # aberturas pontuais de hoje em diante (as passadas não interessam a ninguém)
+  def future_open_days(account)
+    today = TZ.now.to_date.to_s
+    open_days(account).select { |w| w['date'] >= today }.sort_by { |w| [w['date'], w['start'].to_s] }
+  end
+
   def reserved_for(win)
     Array(win['only']).map(&:to_s) & RESERVABLE
   end
@@ -67,7 +103,15 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # dedicadas — é o que mantém o pós-operatório fora do período das consultas.
   # Sem faixa dedicada, vale qualquer faixa que aceite o tipo.
   def windows_for(account, modality)
-    wins = windows(account)
+    by_modality(windows(account), modality)
+  end
+
+  # item 375: as aberturas pontuais seguem a mesma regra de tipo das faixas
+  def open_windows_for(account, modality)
+    by_modality(open_days(account), modality)
+  end
+
+  def by_modality(wins, modality)
     if modality.to_s != AI_MODALITY
       dedicated = wins.select { |w| reserved_for(w).include?(modality.to_s) }
       return dedicated if dedicated.any?
@@ -202,6 +246,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       now: TZ.now,
       # item 307: só as faixas deste tipo de atendimento
       wins: windows_for(account, modality),
+      # item 375: aberturas pontuais (com 'date') — somam às faixas da semana
+      open: open_windows_for(account, modality),
       blocked: Array(cfg['blocked']).to_set { |b| "#{b['date']}|#{b['time']}|#{b['unit']}" },
       blocked_days: Array(cfg['blocked_days']).select { |b| b.is_a?(String) }.to_set,
       # item 267: fechamentos de PARTE do dia (uma unidade ou um médico)
@@ -221,10 +267,17 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     }
   end
 
-  def day_slots(ctx, day, per_window:) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    return [] if day.saturday? || day.sunday? || ctx[:blocked_days].include?(day.to_s)
+  # faixas em vigor NESTE dia: as da semana (nunca no fim de semana) + as
+  # aberturas pontuais com esta data (item 375 — um sábado aberto de propósito vale)
+  def windows_on(ctx, day)
+    weekly = day.saturday? || day.sunday? ? [] : ctx[:wins].select { |w| w['dow'] == day.wday }
+    weekly + Array(ctx[:open]).select { |w| w['date'] == day.to_s }
+  end
 
-    ctx[:wins].select { |w| w['dow'] == day.wday && !window_blocked?(ctx, day, w) }.flat_map do |win|
+  def day_slots(ctx, day, per_window:)
+    return [] if ctx[:blocked_days].include?(day.to_s)
+
+    windows_on(ctx, day).reject { |w| window_blocked?(ctx, day, w) }.flat_map do |win|
       free = []
       each_slot(win) { |hm| free << hm if slot_free?(ctx, day, win, hm) }
       spread(ctx, day, win, free, per_window).map { |hm| { date: day, time: hm, unit: win['unit'], doctor: win['doctor'] } }
@@ -310,9 +363,15 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # Horário fora de qualquer faixa: a 1ª do dia, como era.
   def doctor_at(account, date, time, unit, modality: AI_MODALITY)
     minutes = hm_to_min(time.to_s)
-    wins = windows_for(account, modality).select { |w| w['dow'] == date.wday && w['unit'] == unit }
+    wins = unit_windows_on(account, date.to_date, unit, modality)
     covering = wins.find { |w| minutes >= hm_to_min(w['start']) && minutes < hm_to_min(w['end']) }
     (covering || wins.first)&.[]('doctor')
+  end
+
+  # faixas desta unidade neste dia: as da semana + a abertura pontual com a data (item 375)
+  def unit_windows_on(account, date, unit, modality)
+    windows_for(account, modality).select { |w| w['dow'] == date.wday && w['unit'] == unit } +
+      open_windows_for(account, modality).select { |w| w['date'] == date.to_s && w['unit'] == unit }
   end
 
   # 🗂️ item 307: REGRAS DA AGENDA para o prompt dos agentes — as faixas
@@ -320,7 +379,19 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # Agenda → Configurações → Regras para a IA. Vazio = nada entra no prompt.
   def rules_text(account)
     custom = agenda_config(account)['ai_rules'].to_s.strip
-    (reserved_rules(account) + [hourly_rule(account), custom.presence]).compact.join("\n")
+    (reserved_rules(account) + open_day_rules(account) + [hourly_rule(account), custom.presence]).compact.join("\n")
+  end
+
+  # 📅 item 375: a abertura pontual já entra na lista HORÁRIOS DISPONÍVEIS por
+  # conta própria; a regra escrita é para o robô SABER que aquele dia é uma
+  # exceção combinada — e não "estranhar" (nem negar) um dia fora da rotina
+  def open_day_rules(account)
+    future_open_days(account).map do |w|
+      date = Date.iso8601(w['date'])
+      "- ABERTURA EXTRA em #{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
+        "atende das #{w['start']} às #{w['end']} SÓ neste dia (fora da rotina da semana). Pode oferecer e marcar " \
+        'esses horários normalmente, como em qualquer dia de atendimento.'
+    end
   end
 
   def reserved_rules(account)
