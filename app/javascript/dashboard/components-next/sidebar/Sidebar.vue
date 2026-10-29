@@ -10,6 +10,7 @@ import { useStore } from 'vuex';
 import { useI18n } from 'vue-i18n';
 import { useSidebarKeyboardShortcuts } from './useSidebarKeyboardShortcuts';
 import { vOnClickOutside } from '@vueuse/components';
+import { useRoute } from 'vue-router';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 import { useWindowSize, useEventListener } from '@vueuse/core';
 
@@ -335,6 +336,11 @@ const closeMobileSidebar = () => {
   if (!props.isMobileSidebarOpen) return;
   emit('closeMobileSidebar');
 };
+// 📱 celular: a gaveta fecha sozinha depois de tocar num item do menu —
+// antes só fechava tocando fora, e um item que só troca a aba (?tab=) da
+// mesma tela (Painel dos agentes) parecia "não abrir" atrás da gaveta
+const route = useRoute();
+watch(() => route.fullPath, closeMobileSidebar);
 
 const newReportRoutes = () => [
   {

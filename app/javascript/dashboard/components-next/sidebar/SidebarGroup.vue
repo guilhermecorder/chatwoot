@@ -143,6 +143,14 @@ const isLastVisibleChild = child => {
   return lastChild === child;
 };
 
+// ?tab= do item do menu precisa bater com a URL atual (chave a chave)
+const hasQuery = to => Boolean(to?.query && Object.keys(to.query).length);
+const queryMatches = to =>
+  !hasQuery(to) ||
+  Object.keys(to.query).every(
+    key => String(route.query[key] ?? '') === String(to.query[key])
+  );
+
 const isActive = computed(() => {
   if (props.to) {
     if (route.path === resolvePath(props.to)) return true;
@@ -157,9 +165,15 @@ const isActive = computed(() => {
 // nested correctly, so we need to check the active state ourselves
 // TODO: Audit the routes and fix the nesting and remove this
 const activeChild = computed(() => {
-  const pathSame = navigableChildren.value.find(
+  // CEVICO: filhos que apontam para a MESMA tela com ?tab= diferente
+  // (Automações) — o ativo é o que bate também na query; sem isso o menu
+  // marcava sempre o 1º filho ("Robôs de follow-up") em qualquer aba
+  const samePath = navigableChildren.value.filter(
     child => child.to && route.path === resolvePath(child.to)
   );
+  const pathSame =
+    samePath.find(child => queryMatches(child.to)) ||
+    (samePath.some(child => hasQuery(child.to)) ? undefined : samePath[0]);
   if (pathSame) return pathSame;
 
   // Rank the activeOn Prop higher than the path match

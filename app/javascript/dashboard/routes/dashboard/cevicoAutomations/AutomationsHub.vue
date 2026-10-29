@@ -117,6 +117,12 @@ watch(
     if (TABS.includes(tab)) activeTab.value = tab;
   }
 );
+// trocar de aba volta ao topo da tela (a página não remonta, então o
+// rolamento da aba anterior ficava — no celular parecia que nada mudou)
+const pageRoot = ref(null);
+watch(activeTab, () => {
+  nextTick(() => pageRoot.value?.scrollTo?.({ top: 0 }));
+});
 
 // garante que atendente concedido nunca fica numa aba que não é dele
 watch(
@@ -3390,6 +3396,7 @@ onUnmounted(() => {
 
 <template>
   <div
+    ref="pageRoot"
     class="cv-page bg-n-surface-1 flex flex-col h-full w-full overflow-y-auto"
     :style="cvVars"
   >
