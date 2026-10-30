@@ -113,16 +113,15 @@
       background: linear-gradient(135deg, var(--c1), var(--c2)); color: #fff;
       box-shadow: inset 0 1px 0 rgba(255,255,255,.45), inset 0 -6px 12px rgba(0,0,0,.12), 0 6px 14px -6px var(--c2);
     }
-    .lt-ico svg, .lt-go svg, .lt-wa svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .lt-ico svg, .lt-go svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .lt-ico svg { width: 26px; height: 26px; }
     a.lt-btn strong { display: block; color: #1d1d1f; font-size: 1.08rem; font-weight: 700; letter-spacing: -.01em; }
     a.lt-btn span.txt { display: block; color: #6e6e73; font-size: .87rem; line-height: 1.35; margin-top: 2px; }
     .lt-go { color: #c7c7cc; display: inline-flex; }
     .lt-go svg { width: 20px; height: 20px; }
-    .lt a.whats { width: 100%; justify-content: center; }
-    .lt-wa { width: 30px; height: 30px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
-      background: linear-gradient(135deg, #4ade80, #16a34a); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.45); }
-    .lt-wa svg { width: 18px; height: 18px; }
+    /* WhatsApp: cartão BRANCO como os outros, com o ícone verde do WhatsApp (29/10: sem botão dourado) */
+    a.lt-btn.lt-wa-btn { margin-top: 0; }
+    a.lt-btn.lt-wa-btn strong { color: #16a34a; }
     .lt .foot { margin-top: 30px; font-size: .84rem; opacity: .8; line-height: 1.6; }
     .lt .foot a { color: var(--gold-soft); font-weight: 700; text-decoration: none; }
     .lt .foot a:hover { text-decoration: underline; }
@@ -212,7 +211,13 @@
       <% end %>
     </nav>
     <% if @hub_whatsapp %>
-      <a class="whats" href="<%= @hub_whatsapp %>" rel="noopener"><span class="lt-wa" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>Não sei qual é o meu caso — falar no WhatsApp</a>
+      <nav class="lt-links" aria-label="Falar no WhatsApp">
+        <a class="lt-btn lt-wa-btn" href="<%= @hub_whatsapp %>" rel="noopener">
+          <span class="lt-ico" style="--c1: #4ade80; --c2: #16a34a" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><g transform="translate(7.3 7.3) scale(.4)" stroke-width="4.5"><path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/></g></svg></span>
+          <span><strong>Falar no WhatsApp</strong><span class="txt">Não sei qual é o meu caso</span></span>
+          <span class="lt-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
+        </a>
+      </nav>
     <% end %>
     <p class="foot">Clínica oftalmológica em São Paulo · Paulista e Tatuapé<br>
       <a href="https://cevico.com.br" rel="noopener">Site institucional →</a></p>
