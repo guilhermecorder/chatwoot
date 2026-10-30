@@ -11,8 +11,14 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
                        custom_html: html, daily_stats: {}, sections: [], team_comments: [])
   end
 
+  # 29/10: a Biblioteca e os números dela moram no host do SISTEMA, com o login
+  # do painel (cookie cw_d_session_info com o token do devise_token_auth)
+  def login!(user)
+    cookies['cw_d_session_info'] = user.create_new_auth_token.to_json
+  end
+
   before do
-    allow(Cevico::PublicSite).to receive(:host).and_return('clinica.cevico.com.br')
+    allow(Cevico::PublicSite).to receive_messages(host: 'clinica.cevico.com.br', app_host: 'sistema.example.com')
     Cevico::Company.save!(otica, 'name' => 'Sua Ótica', 'segment' => 'otica', 'public_host' => 'www.suaotica.com.br')
   end
 
@@ -86,7 +92,8 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
     before do
       2.times { CevicoPageTraffic.bump!(page: guia, kind: 'view', source: 'seo') }
       CevicoPageTraffic.bump!(page: guia, kind: 'cta', source: 'seo')
-      host! 'clinica.cevico.com.br'
+      host! 'sistema.example.com'
+      login!(create(:user, account: cevico))
     end
 
     def numbers
@@ -181,12 +188,62 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
       expect(response).to have_http_status(:not_found)
     end
 
-    it 'fora do domínio das páginas não existe', :aggregate_failures do
-      host! 'sistema.example.com'
+    it 'só no host do sistema, com login, e só para quem é da conta', :aggregate_failures do
+      host! 'clinica.cevico.com.br' # domínio público: não existe
       get '/biblioteca/numeros.json', params: { de: library.slug }
       expect(response).to have_http_status(:not_found)
-      host! 'www.suaotica.com.br' # domínio de outra empresa: a biblioteca não é dela
+      host! 'www.suaotica.com.br'
       get '/biblioteca/numeros.json', params: { de: library.slug }
+      expect(response).to have_http_status(:not_found)
+      host! 'sistema.example.com'
+      cookies.delete('cw_d_session_info') # sem login
+      get '/biblioteca/numeros.json', params: { de: library.slug }
+      expect(response).to have_http_status(:unauthorized)
+      login!(create(:user, account: otica)) # gente de OUTRA empresa
+      get '/biblioteca/numeros.json', params: { de: library.slug }
+      expect(response).to have_http_status(:not_found)
+    end
+  end
+
+  describe 'Biblioteca de guias dentro do sistema (29/10)' do
+    before do
+      page!('biblioteca', html: '<html><body><main data-biblioteca="1"><h1>Biblioteca</h1></main></body></html>')
+      page!('guia-lasik', html: '<html><body><h1>Guia</h1></body></html>')
+    end
+
+    it 'no domínio público a Biblioteca não existe (404) e a raiz da clínica não lista página nenhuma', :aggregate_failures do
+      host! 'clinica.cevico.com.br'
+      get '/biblioteca'
+      expect(response).to have_http_status(:not_found)
+      get '/p/biblioteca'
+      expect(response).to have_http_status(:not_found)
+      get '/'
+      expect(response).to have_http_status(:ok)
+      expect(response.body).not_to include('/biblioteca')
+      expect(response.body).not_to include('class="card"')
+    end
+
+    it 'no sistema pede login; logado, abre a Biblioteca e o iframe limpo do Raio-X', :aggregate_failures do
+      host! 'sistema.example.com'
+      get '/biblioteca'
+      expect(response).to redirect_to('/app/login')
+      get '/guia-lasik', params: { raiox: '1' }
+      expect(response).to redirect_to('/app/login')
+
+      login!(create(:user, account: cevico))
+      get '/biblioteca'
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include('data-biblioteca="1"')
+      get '/guia-lasik', params: { raiox: '1' }
+      expect(response).to have_http_status(:ok)
+      expect(response.headers['X-Frame-Options']).to eq('SAMEORIGIN')
+      expect(response.body).to include('<h1>Guia</h1>')
+    end
+
+    it 'gente de outra empresa não vê a Biblioteca da CEVICO' do
+      host! 'sistema.example.com'
+      login!(create(:user, account: otica))
+      get '/biblioteca'
       expect(response).to have_http_status(:not_found)
     end
   end
@@ -202,7 +259,8 @@ RSpec.describe 'CEVICO sitemap.xml e robots.txt', type: :request do
     let(:today) { Date.current.iso8601 }
 
     before do
-      host! 'clinica.cevico.com.br'
+      host! 'sistema.example.com'
+      login!(create(:user, account: cevico))
       40.times { CevicoPageTraffic.bump!(page: guia, kind: 'view', source: 'seo') }
       CevicoPageTraffic.bump!(page: guia, kind: 'cta', source: 'seo')
       # 40 visitas medidas: todas viram o 1º título, 30 o investimento, 6 as dúvidas

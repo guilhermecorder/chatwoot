@@ -82,6 +82,18 @@ RSpec.describe 'CEVICO site público por empresa', type: :request do
       expect(response.body).to include('wa.me/5511988887777')
       expect(response.body).to include('999').and include('G-OTICA1')
     end
+
+    # 29/10: a raiz da CLÍNICA (domínio global) é institucional — portas e
+    # WhatsApp, sem o catálogo de páginas (guias, variações de anúncio, Biblioteca)
+    it 'no domínio da clínica a raiz é institucional e não lista as páginas', :aggregate_failures do
+      allow(Cevico::PublicSite).to receive(:host).and_return('clinica.example.com')
+      host! 'clinica.example.com'
+      get '/'
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to include('Miopia').and include('Site institucional').and include('href="/refrativa-x"')
+      expect(response.body).not_to include('class="card"')
+      expect(response.body).not_to include('Óculos de sol')
+    end
   end
 
   describe 'GET página' do

@@ -146,6 +146,16 @@ class CevicoPage < ApplicationRecord
 
   scope :published, -> { where(status: 'published') }
 
+  # 📚 29/10: a Biblioteca de guias (HTML anexado com data-biblioteca="1") é
+  # ferramenta da EQUIPE: nunca responde no domínio público, só dentro do
+  # sistema, com login (CevicoPagesController#library)
+  LIBRARY_MARK = /data-biblioteca\s*=\s*["']?1\b/
+  scope :libraries, -> { where('custom_html LIKE ?', '%data-biblioteca=%') }
+
+  def library?
+    custom_html.to_s.match?(LIBRARY_MARK)
+  end
+
   def published?
     status == 'published'
   end

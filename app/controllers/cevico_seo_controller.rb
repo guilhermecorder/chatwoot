@@ -10,9 +10,10 @@
 #   host do sistema continua o de sempre (era o public/robots.txt, que o
 #   servidor entregava antes de qualquer rota — por isso virou rota).
 # - /biblioteca/numeros.json: números por página (acessos, cliques, leads,
-#   agendou) para a Biblioteca de guias. A chave é o próprio endereço dela:
-#   só responde para uma página PUBLICADA deste domínio com o marcador
-#   data-biblioteca="1" no HTML. Só contagens — nenhum dado de pessoa.
+#   agendou) para a Biblioteca de guias. 29/10: a Biblioteca é da EQUIPE —
+#   os números só respondem no host do SISTEMA, com login do painel, e para
+#   uma página PUBLICADA com o marcador data-biblioteca="1" da conta da pessoa.
+#   Só contagens — nenhum dado de pessoa.
 # - /biblioteca/raio-x.json (23/10): o Raio-X de UMA página (?pagina=slug) no
 #   mesmo período — caminho, leitura por título, botões, origens, Google e o
 #   diagnóstico (Cevico::PageXray). Mesma chave e mesmas regras do numeros.json.
@@ -22,12 +23,13 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
   include Crm::ResolvesPeriod
 
   layout false
+  include Cevico::SystemLogin # 🔐 29/10: números da Biblioteca só com login
+  before_action :library_login!, only: %i[library_numbers library_xray library_heat]
 
   # variações de anúncio (Google, Meta, Google Demand Gen) — fora do orgânico
   AD_VARIANT_SLUG = /-(g|m|gd)\z/
   META_TAG = /<meta\b[^>]*>/i
   ROBOTS_META = /\bname\s*=\s*["']?(robots|googlebot)\b/i
-  LIBRARY_MARK = /data-biblioteca\s*=\s*["']?1\b/
   LIBRARY_DAYS = [7, 30, 90, 365].freeze
   LIBRARY_PRESETS = %w[today yesterday last7 last_week month last_month last90 year custom].freeze
   LIBRARY_MAX_DAYS = 731 # personalizado: no máximo 2 anos
@@ -100,9 +102,11 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
     return nil if slug.blank?
 
     page = CevicoPage.published.includes(:account).find_by(slug: slug)
-    return nil if page.nil? || !Cevico::PublicSite.host_for(page.account).to_s.casecmp?(request.host)
+    page if page&.library? && system_user_in?(page.account)
+  end
 
-    page.custom_html.to_s.match?(LIBRARY_MARK) ? page : nil
+  def library_login!
+    require_system_login! if system_user.nil?
   end
 
   # 22/10: a Biblioteca usa a RÉGUA PADRÃO do sistema (item 321 — Hoje, Ontem,
@@ -218,7 +222,7 @@ class CevicoSeoController < ActionController::Base # rubocop:disable Rails/Appli
     hosts = {}
     CevicoPage.published.includes(:account).order(:slug).select do |page|
       page_host = hosts[page.account_id] ||= Cevico::PublicSite.host_for(page.account).to_s
-      page_host.casecmp?(request.host) && !noindex?(page)
+      page_host.casecmp?(request.host) && !noindex?(page) && !page.library? # a Biblioteca é da equipe
     end
   end
 

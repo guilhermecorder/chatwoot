@@ -582,6 +582,17 @@ onMounted(() => {
         </template>
         <template #actions>
           <CevicoViewOnlyPill v-if="!canEditPages" />
+          <!-- 📚 29/10: a Biblioteca de guias mora dentro do sistema (login) -->
+          <a
+            class="cevico-hero-btn !h-9 !px-4 !text-xs font-bold"
+            href="/biblioteca"
+            target="_blank"
+            rel="noopener"
+            title="Biblioteca de guias: números, Raio-X e mapa de calor (só para a equipe)"
+          >
+            <span class="i-lucide-book-open text-sm" />
+            Biblioteca
+          </a>
           <button
             v-if="canEditPages"
             class="cevico-hero-btn cevico-hero-btn-on !h-9 !px-4 !text-xs font-bold"

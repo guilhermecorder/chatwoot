@@ -28,6 +28,7 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     pages = Current.account.cevico_pages
                    .select(CevicoPage.column_names - ['custom_html'])
                    .select('(custom_html IS NOT NULL) AS has_custom_html_flag')
+                   .select("(custom_html LIKE '%data-biblioteca=%') AS library_flag") # 📚 Biblioteca: link do sistema
                    .order(:category, :title)
     render json: { categories: CevicoPage::CATEGORIES, pages: pages.map { |p| page_json(p) } }
   end
@@ -281,7 +282,7 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       ab_variants: page.ab_variants || [],
       ab_results: page.ab_results,
       team_comments: page.team_comments || [],
-      public_url: Cevico::PublicSite.page_url(page.slug),
+      public_url: library?(page) ? Cevico::PublicSite.library_url : Cevico::PublicSite.page_url(page.slug),
       # prévia do rascunho: link secreto que mostra a página antes de publicar
       preview_url: "#{Cevico::PublicSite.base_url}/p/rascunho/#{page.preview_token}",
       # ambiente de montagem: prévia + token de RETOQUE (edição inline) —
@@ -302,6 +303,13 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     return page['has_custom_html_flag'] == true if page.attributes.key?('has_custom_html_flag')
 
     page.custom_html.present?
+  end
+
+  # 📚 29/10: a Biblioteca de guias abre DENTRO do sistema (com login), não no domínio público
+  def library?(page)
+    return page['library_flag'] == true if page.attributes.key?('library_flag')
+
+    page.library?
   end
 
   def page_stats_json(page)

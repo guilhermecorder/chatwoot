@@ -47,6 +47,12 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
     configured? && request_host.to_s.casecmp?(host)
   end
 
+  # host do PRÓPRIO sistema (FRONTEND_URL): onde mora o que é só da equipe,
+  # com login — a Biblioteca de guias e os números dela (29/10)
+  def system_host?(request_host)
+    app_host.present? && request_host.to_s.casecmp?(app_host)
+  end
+
   # host do sistema (FRONTEND_URL) — para saber se o domínio público é
   # dedicado ou o mesmo do app
   def app_host
@@ -74,6 +80,11 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
 
   def base_url
     configured? ? "https://#{host}" : ENV.fetch('FRONTEND_URL', '').chomp('/')
+  end
+
+  # 📚 29/10: a Biblioteca de guias mora DENTRO do sistema (host do FRONTEND_URL), com login
+  def library_url
+    "#{ENV.fetch('FRONTEND_URL', '').chomp('/')}/biblioteca"
   end
 
   # URL pública de uma página: raiz limpa no domínio oficial,

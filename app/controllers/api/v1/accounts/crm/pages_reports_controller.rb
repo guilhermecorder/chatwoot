@@ -122,7 +122,7 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
   def pages_json
     Current.account.cevico_pages.order(:title).map do |page|
       { id: page.id, title: page.title, slug: page.slug, emoji: page.emoji, status: page.status,
-        public_url: Cevico::PublicSite.page_url(page.slug),
+        public_url: page.library? ? Cevico::PublicSite.library_url : Cevico::PublicSite.page_url(page.slug),
         # token de RETOQUE só para quem EDITA páginas (quem só vê resultados fica sem)
         builder_url: builder_url_for(page) }
     end

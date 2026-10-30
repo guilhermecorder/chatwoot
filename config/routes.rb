@@ -807,4 +807,11 @@ Rails.application.routes.draw do
     get '/:slug', to: 'cevico_pages#show', as: :cevico_page_official,
                   constraints: { slug: /[a-z0-9\-]+/ }
   end
+
+  # 📚 29/10: "Ver na página" da Biblioteca, que agora mora dentro do sistema:
+  # a página abre LIMPA num iframe (?raiox=1) no host do sistema, só com login
+  constraints(->(req) { Cevico::PublicSite.system_host?(req.host) && req.query_parameters['raiox'] == '1' }) do
+    get '/:slug', to: 'cevico_pages#show', as: :cevico_page_xray_frame,
+                  constraints: { slug: /[a-z0-9\-]+/ }
+  end
 end
