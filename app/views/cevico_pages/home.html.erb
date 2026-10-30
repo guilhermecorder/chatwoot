@@ -194,7 +194,7 @@
   <main class="lt">
     <img src="/brand-assets/cevico-logo-dark-bg.png" alt="CEVICO — Cuidados Oculares">
     <% if @hub['tagline'].present? %><p class="brandline"><%= @hub['tagline'] %></p><% end %>
-    <p class="tag"><strong>O que você sente?</strong>Toque no seu caso e veja o caminho — ou fale direto com a gente.</p>
+    <p class="tag"><strong>O que você sente?</strong>Toque no seu caso e descubra o caminho mais seguro.<% if @hub_whatsapp %><br>Ou fale direto com a gente pelo WhatsApp, 24 horas por dia.<% end %></p>
     <nav class="lt-links" aria-label="Escolha o seu caso">
       <% @doors.each do |door| %>
         <% href = if door[:page_slug]
@@ -214,7 +214,7 @@
       <nav class="lt-links" aria-label="Falar no WhatsApp">
         <a class="lt-btn lt-wa-btn" href="<%= @hub_whatsapp %>" rel="noopener">
           <span class="lt-ico" style="--c1: #4ade80; --c2: #16a34a" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><g transform="translate(7.3 7.3) scale(.4)" stroke-width="4.5"><path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/></g></svg></span>
-          <span><strong>Falar no WhatsApp</strong><span class="txt">Não sei qual é o meu caso</span></span>
+          <span><strong>Falar no WhatsApp</strong><span class="txt">Não sei qual é o meu caso · atendimento 24h</span></span>
           <span class="lt-go" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg></span>
         </a>
       </nav>
