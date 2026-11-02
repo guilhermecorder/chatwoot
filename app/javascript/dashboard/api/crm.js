@@ -1912,6 +1912,24 @@ class CrmAPI extends ApiClient {
   }
 
   // 👓 Sua Ótica — fase 2 (estoque): visão, movimentações, inventário, compras
+  // 📊 análise da loja (02/11): versões da página do SavWin
+  getOticaReports() {
+    return axios.get(`${this.url}/otica/reports`);
+  }
+
+  getOticaReportHtml(id) {
+    return axios.get(`${this.url}/otica/reports/${id}/html`, {
+      responseType: 'text',
+      transformResponse: r => r,
+    });
+  }
+
+  uploadOticaReport(formData) {
+    return axios.post(`${this.url}/otica/reports`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  }
+
   getOticaStock(params = {}) {
     return axios.get(`${this.url}/otica/stock`, { params });
   }

@@ -109,6 +109,7 @@ export const MENU_NODES = {
   'Otica Produtos': 'otica.produtos',
   'Otica Estoque': 'otica.produtos',
   'Otica Producao': 'otica.producao',
+  'Otica Analise': 'otica.analise',
   // Conteúdos (pai) e filhos
   'Cevico Pages': 'marketing.paginas',
   'Pages List': 'marketing.paginas',

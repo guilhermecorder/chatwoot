@@ -317,6 +317,11 @@ namespace :crm do
       end
     end
     resources :lab_orders, only: [:update]
+    # 📊 análise da loja (02/11): versões da página do SavWin; latest/html servem o HTML
+    resources :reports, only: [:index, :create] do
+      collection { get :latest }
+      member { get :html }
+    end
     # 📦 fase 2: estoque (livro de movimentações, inventário, compras por XML da NF-e)
     resource :stock, only: [:show], controller: 'stock' do
       get :moves

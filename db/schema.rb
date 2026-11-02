@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_23_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_11_02_010000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2335,6 +2335,18 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_23_010000) do
     t.index ["supplier_id"], name: "index_otica_purchases_on_supplier_id"
   end
 
+  create_table "otica_reports", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "title", default: "", null: false
+    t.string "note", default: "", null: false
+    t.integer "size_bytes", default: 0, null: false
+    t.integer "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "created_at"], name: "index_otica_reports_on_account_id_and_created_at"
+    t.index ["account_id"], name: "index_otica_reports_on_account_id"
+  end
+
   create_table "otica_stock_moves", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "product_id", null: false
@@ -2799,6 +2811,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_23_010000) do
   add_foreign_key "otica_purchase_items", "otica_purchases", column: "purchase_id", on_delete: :cascade
   add_foreign_key "otica_purchases", "accounts"
   add_foreign_key "otica_purchases", "otica_suppliers", column: "supplier_id", on_delete: :nullify
+  add_foreign_key "otica_reports", "accounts"
   add_foreign_key "otica_stock_moves", "accounts"
   add_foreign_key "otica_stock_moves", "otica_products", column: "product_id", on_delete: :cascade
   add_foreign_key "otica_suppliers", "accounts"

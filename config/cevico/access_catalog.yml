@@ -336,6 +336,12 @@
       hint: "ver = o quadro; editar = recebe do laboratório, marca pronta e retirada"
       levels: [view, edit]
       default: inherit
+    - key: analise
+      label: Análise da loja
+      hint: "ver = lê a análise do SavWin (vendas, clientes, estoque); enviar versão nova é só de administrador"
+      levels: [view]
+      default: view
+      segment: otica # o filho não herda o ramo do pai: sem isto a clínica "veria" o nó
 
 - key: financeiro
   label: Financeiro

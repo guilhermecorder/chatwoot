@@ -3,6 +3,7 @@ import OticaVenda from './OticaVenda.vue';
 import OticaProdutos from './OticaProdutos.vue';
 import OticaProducao from './OticaProducao.vue';
 import OticaEstoque from './OticaEstoque.vue';
+import OticaAnalise from './OticaAnalise.vue';
 
 // 👓 Sua Ótica — fase 1 (22/10/2026): a loja dentro do sistema.
 // Venda (O.S.), Produtos e estoque, Estoque (fase 2), Produção e entregas. Quem entra é
@@ -32,6 +33,13 @@ export default {
       name: 'otica_producao',
       meta: { permissions: ['administrator', 'agent'] },
       component: OticaProducao,
+    },
+    {
+      // 📊 análise da loja (02/11): a página do SavWin dentro do sistema
+      path: frontendURL('accounts/:accountId/otica/analise'),
+      name: 'otica_analise',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: OticaAnalise,
     },
   ],
 };

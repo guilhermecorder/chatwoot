@@ -699,7 +699,13 @@ const MENU_LAYOUT = [
     color: '#30d158',
     label: 'Loja',
     icon: 'i-lucide-store',
-    items: ['Otica Venda', 'Otica Produtos', 'Otica Estoque', 'Otica Producao'],
+    items: [
+      'Otica Venda',
+      'Otica Produtos',
+      'Otica Estoque',
+      'Otica Producao',
+      'Otica Analise',
+    ],
   },
   {
     name: 'group:gestao', // para onde vai a clínica?
@@ -1492,6 +1498,17 @@ const menuItems = computed(() => {
             label: 'Produção e entregas',
             icon: 'i-lucide-package-check',
             to: accountScopedRoute('otica_producao'),
+          },
+        ]
+      : []),
+    // 📊 análise da loja (02/11): a página do SavWin, só para quem está logado
+    ...(isOtica.value && show('Otica Analise')
+      ? [
+          {
+            name: 'Otica Analise',
+            label: 'Análise',
+            icon: 'i-lucide-chart-column',
+            to: accountScopedRoute('otica_analise'),
           },
         ]
       : []),

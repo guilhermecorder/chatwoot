@@ -98,6 +98,7 @@ class Account < ApplicationRecord
   has_many :otica_stock_moves, class_name: 'Otica::StockMove', dependent: :destroy_async
   has_many :otica_purchases, class_name: 'Otica::Purchase', dependent: :destroy_async
   has_many :otica_purchase_items, class_name: 'Otica::PurchaseItem', dependent: :destroy_async
+  has_many :otica_reports, class_name: 'Otica::Report', dependent: :destroy_async
   has_many :cevico_tools, dependent: :destroy_async
   has_many :canned_responses, dependent: :destroy_async
   has_many :categories, dependent: :destroy_async, class_name: '::Category'
