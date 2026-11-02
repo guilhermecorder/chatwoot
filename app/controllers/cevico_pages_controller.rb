@@ -181,7 +181,19 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # beacon de rolagem + retoque inline + chat do construtor: sem
   # formulário Rails, a proteção de forgery não se aplica (a segurança é
   # o token assinado)
-  skip_forgery_protection only: [:track, :inline_update, :builder_chat, :builder_upload, :mint_ref, :hub_ref]
+  skip_forgery_protection only: [:track, :inline_update, :builder_chat, :builder_upload, :mint_ref, :hub_ref, :lead]
+
+  # 02/11: LEAD DA PÁGINA (pré-análise): nome + WhatsApp + respostas chegam
+  # ANTES de a pessoa abrir o WhatsApp — o paciente nasce no sistema mesmo
+  # que ela nunca aperte "enviar". Devolve o Protocolo para a página pôr na
+  # mensagem (o clique depois não conta duas vezes). Regras em Cevico::PageLead.
+  def lead
+    page = CevicoPage.published.find_by(slug: params[:slug])
+    return head :not_found if page.nil?
+
+    result = Cevico::PageLead.new(page: page, params: params, request: request).call
+    render json: result, status: result[:ok] ? :ok : :unprocessable_entity
+  end
 
   def track
     page = CevicoPage.published.find_by(slug: params[:slug])

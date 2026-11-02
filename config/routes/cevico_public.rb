@@ -42,6 +42,8 @@ get 'p/:slug/cta', to: 'cevico_pages#cta_click', as: :cevico_page_cta
 get 'p/:slug/next', to: 'cevico_pages#next_step', as: :cevico_page_next
 post 'p/:slug/track', to: 'cevico_pages#track', as: :cevico_page_track
 post 'p/:slug/ref', to: 'cevico_pages#mint_ref', as: :cevico_page_ref
+# 02/11: lead que a página manda ANTES do WhatsApp (pré-análise: nome + telefone + respostas)
+post 'p/:slug/lead', to: 'cevico_pages#lead', as: :cevico_page_lead
 # Protocolo do HUB (porta de entrada na raiz do domínio dedicado)
 post 'hub/ref', to: 'cevico_pages#hub_ref', as: :cevico_hub_ref
 # prévia do RASCUNHO (link secreto do admin — token assinado) +

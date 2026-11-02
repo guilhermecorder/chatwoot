@@ -13,10 +13,31 @@
 <% ab_variant = page&.serving_variant.to_s[/\A[a-z0-9]{1,3}\z/] %>
 <%# 24/10 Ver na página (raiox): dentro do iframe da Biblioteca nada é rastreado — só as marcas dos trechos, no fim %>
 <% raiox = local_assigns[:raiox] == true %>
+<%# 02/11: WhatsApp POR ORIGEM (Configurações → Domínio): números por canal; vazio = desligado %>
+<% routing = Cevico::PublicSite.whatsapp_routing(page&.account) || {} %>
 <% unless raiox %>
 <script nonce="<%= content_security_policy_nonce %>">
 (function () {
   var KEY = 'cevico_trk';
+  // 02/11: WhatsApp POR ORIGEM — anúncio do Google cai na caixa do Google,
+  // anúncio da Meta na da Meta e o resto (SEO, Instagram, direto, linktree)
+  // na caixa do orgânico. Mesma régua do servidor (Cevico::TrafficSource).
+  var ROUTE = <%= raw routing.to_json %>;
+  var PAID = ['cpc', 'ppc', 'paid', 'paid_social', 'paid_search', 'ads', 'ad'];
+  var GOOGLE = ['google', 'googleads', 'google-ads', 'adwords'];
+  var META = ['meta', 'facebook', 'fb', 'instagram', 'ig'];
+  function channelOf(t) {
+    var src = String(t.utm_source || '').toLowerCase(), paid = PAID.indexOf(String(t.utm_medium || '').toLowerCase()) >= 0;
+    if (t.gclid || t.gbraid || t.wbraid || (GOOGLE.indexOf(src) >= 0 && paid)) return 'google';
+    if (META.indexOf(src) >= 0 && paid) return 'meta';
+    if (t.fbclid && src) return 'meta';
+    return 'organico';
+  }
+  function routed(href, t) {
+    var num = ROUTE[channelOf(t)];
+    if (!num) return href;
+    return href.replace(/^(https?:\/\/(?:wa\.me\/|api\.whatsapp\.com\/send\/?\?phone=))\+?(\d{8,15})/i, function (m, base) { return base + num; });
+  }
   // utm_id = ID da campanha no Google Ads ({campaignid}) — liga o lead ao custo da campanha (ROI)
   var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_id', 'utm_content', 'utm_term', 'gclid', 'gbraid', 'wbraid', 'fbclid', 'ref_host'];
   // código de clique (Google/Meta) é comprido: cortado em 150 ele não serve mais
@@ -57,6 +78,7 @@
     if (/^(https?:\/\/(wa\.me|api\.whatsapp\.com)|whatsapp:)/i.test(href)) {
       if (a.dataset.cevicoRef) return; // já processado — segue o clique
       e.preventDefault();
+      href = routed(href, trk); // 02/11: o número certo para a origem desta visita
       var body = new URLSearchParams(trk);
 <% if ab_variant.present? %>
       body.set('v', '<%= ab_variant %>'); // teste A/B: o clique e o lead contam para esta headline

@@ -2084,7 +2084,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def update_public_hub
     return render json: { error: 'Apenas administradores podem alterar o hub.' }, status: :forbidden unless Current.account_user.administrator?
 
-    Cevico::PublicSite.save_hub!(params.permit(:whatsapp, :tagline, :cta_text).to_h)
+    Cevico::PublicSite.save_hub!(params.permit(:whatsapp, :whatsapp_google, :whatsapp_meta, :roteamento, :tagline, :cta_text).to_h)
     render json: public_domain_json
   end
 

@@ -150,7 +150,13 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
 
   def save_hub!(attrs)
     value = {
-      'whatsapp' => attrs['whatsapp'].to_s.gsub(/\D/, '')[0, 15],
+      'whatsapp' => digits(attrs['whatsapp']),
+      # 02/11: WhatsApp POR ORIGEM — anúncio do Google e anúncio da Meta têm
+      # a sua própria caixa; o resto (SEO, Instagram, direto, linktree) cai no
+      # número de cima, o do orgânico. Só vale com a chavinha ligada.
+      'whatsapp_google' => digits(attrs['whatsapp_google']),
+      'whatsapp_meta' => digits(attrs['whatsapp_meta']),
+      'roteamento' => (ActiveModel::Type::Boolean.new.cast(attrs['roteamento']) ? '1' : nil),
       'tagline' => attrs['tagline'].to_s.strip[0, 300],
       'cta_text' => attrs['cta_text'].to_s.strip[0, 300]
     }.compact_blank
@@ -159,6 +165,26 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
     config.save!
     GlobalConfig.clear_cache
     value
+  end
+
+  # só dígitos; número brasileiro digitado sem o 55 (DDD + 8 ou 9 dígitos) ganha o DDI,
+  # porque o wa.me só abre com o código do país
+  def digits(raw)
+    number = raw.to_s.gsub(/\D/, '')
+    number = "55#{number}" if number.length.between?(10, 11)
+    number[0, 15]
+  end
+
+  # 02/11: números por origem para o script da página trocar o DESTINO do
+  # clique no WhatsApp: anúncio do Google → caixa do Google; anúncio da Meta →
+  # caixa da Meta; o resto (SEO, Instagram, direto, linktree) → caixa do
+  # orgânico. nil = chavinha desligada (as páginas ficam como estão).
+  def whatsapp_routing(account = nil)
+    cfg = hub_config_for(account)
+    return nil unless cfg['roteamento'] == '1'
+
+    { 'organico' => cfg['whatsapp'].presence, 'google' => cfg['whatsapp_google'].presence,
+      'meta' => cfg['whatsapp_meta'].presence }.compact.presence
   end
 
   # link do botão do hub (sem protocolo — ele entra no clique). Com `account`,

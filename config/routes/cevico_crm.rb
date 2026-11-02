@@ -253,6 +253,8 @@ namespace :crm do
     post :ai_suggestions
     # 16/10: foto nova do Search Console agora (botão "Atualizar agora")
     post :search_console_refresh
+    # 02/11: QUEM SÃO os leads do período (nome, página, origem, caixa, conversa)
+    get :leads
   end
   # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
   resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do

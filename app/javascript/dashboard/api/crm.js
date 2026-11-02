@@ -1363,6 +1363,11 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/pages_report`, { params });
   }
 
+  // 02/11: quem são os leads do período (nome, página, origem, caixa, conversa)
+  getPagesReportLeads(params = {}) {
+    return axios.get(`${this.url}/pages_report/leads`, { params });
+  }
+
   // 💡 item 329: coleção de insights das páginas (guardar / mudar situação /
   // apagar) e sugestões da IA para uma página no período da régua
   savePageInsight(payload) {

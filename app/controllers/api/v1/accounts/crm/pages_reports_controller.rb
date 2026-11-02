@@ -59,6 +59,15 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
     render json: { queued: true }
   end
 
+  # GET /crm/pages_report/leads?preset=&source=&page_id= — QUEM SÃO os leads
+  # do período (02/11): nome, página, origem, data, caixa e a conversa, para
+  # a equipe achar quem veio do linktree, de um guia ou da busca do Google
+  def leads
+    roster = Cevico::LeadRoster.new(Current.account, since_date, until_date,
+                                    source: params[:source].to_s.presence, page_id: params[:page_id].to_i.nonzero?)
+    render json: { since: since_date, until: until_date, leads: roster.call }
+  end
+
   # POST /crm/pages_report/remove_insight
   def remove_insight
     render json: { collection: log.remove!(params[:id]) }
