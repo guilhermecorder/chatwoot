@@ -27,6 +27,11 @@ namespace :crm do
     post :activate
     post :pause
     post :run_now
+    # 🎛️ item 382: controle do lote
+    get :preview_next
+    post :send_batch
+    get :queue
+    get :batches
   end
   resources :message_automations, only: [:index, :create, :update, :destroy] do
     member { get :preview_eligible }

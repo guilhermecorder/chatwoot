@@ -23,7 +23,7 @@ RSpec.describe Crm::ReactivationPlan do
       'message_preview' => 'Oi {{1}}' }
   end
   let(:raw) do
-    { 'daily_cap' => 10, 'hour_from' => 9, 'hour_to' => 11, 'inbox_daily_cap' => 100, 'default_inbox_id' => google.id,
+    { 'daily_cap' => 10, 'hour_from' => 9, 'hour_to' => 11, 'inbox_daily_cap' => 100, 'default_inbox_id' => google.id, 'approval' => 'auto',
       'quiet_hours' => 0, 'min_age_days' => 0,
       'slices' => [{ 'key' => 'nao_fechou', 'stage_id' => nao_fechou.id, 'share' => 70, 'templates' => { 'padrao' => tpl } },
                    { 'key' => 'orcamento', 'stage_id' => orcamento.id, 'share' => 30,
@@ -40,7 +40,8 @@ RSpec.describe Crm::ReactivationPlan do
 
   def card!(name, phone, stage, procedure: nil, created_at: 10.days.ago)
     contact = create(:contact, account: account, name: name, phone_number: phone, created_at: created_at)
-    Crm::Contact.create!(pipeline: pipeline, stage: stage, contact: contact, procedure_of_interest: procedure, stage_moved_at: created_at)
+    card = Crm::Contact.create!(pipeline: pipeline, stage: stage, contact: contact, procedure_of_interest: procedure)
+    card.update_columns(stage_moved_at: created_at) # rubocop:disable Rails/SkipsModelValidations -- o callback põe "agora"
     contact
   end
 
@@ -140,7 +141,8 @@ RSpec.describe Crm::ReactivationPlan do
     it 'respeita o teto do dia e o teto por caixa' do
       6.times { |i| card!("P#{i}", "+551199999100#{i}", nao_fechou) }
       so_uma = [raw['slices'].first.merge('share' => 100)]
-      mother = described_class.upsert!(account, raw.merge('daily_cap' => 4, 'inbox_daily_cap' => 3, 'hour_from' => 9, 'hour_to' => 10, 'slices' => so_uma), user: admin)
+      teto = raw.merge('daily_cap' => 4, 'inbox_daily_cap' => 3, 'hour_from' => 9, 'hour_to' => 10, 'slices' => so_uma)
+      mother = described_class.upsert!(account, teto, user: admin)
       mother.update!(status: :processing)
       fake_sender
       travel_to tz.parse('2026-11-04 09:30') do

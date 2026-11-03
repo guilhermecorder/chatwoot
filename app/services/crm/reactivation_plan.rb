@@ -38,14 +38,16 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
   DEFAULTS = {
     'daily_cap' => 300, 'hour_from' => 9, 'hour_to' => 18, 'weekdays_only' => true, 'inbox_daily_cap' => 100,
     'route_by_origin' => true, 'default_inbox_id' => 0, 'max_open_conversations' => 0,
-    'quiet_hours' => 24, 'skip_future_appointment' => true, 'min_age_days' => 3, 'order' => 'recent'
+    'quiet_hours' => 24, 'skip_future_appointment' => true, 'min_age_days' => 3, 'order' => 'recent',
+    # 🎛️ item 382: controle — aprovação manual de cada lote (padrão), modo de teste com lista de números
+    'approval' => 'manual', 'test_mode' => false
   }.freeze
   LIMITS = { 'daily_cap' => 1..5000, 'hour_from' => 0..23, 'hour_to' => 1..24, 'inbox_daily_cap' => 1..5000,
              'default_inbox_id' => 0..999_999_999, 'max_open_conversations' => 0..100_000,
              'quiet_hours' => 0..720, 'min_age_days' => 0..365 }.freeze
 
   # ── configuração ─────────────────────────────────────────────────────────
-  def normalize(raw) # rubocop:disable Metrics/CyclomaticComplexity
+  def normalize(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     raw = raw.is_a?(Hash) ? raw.deep_stringify_keys : {}
     cfg = {}
     DEFAULTS.each do |key, default|
@@ -53,12 +55,19 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
       cfg[key] = case default
                  when true, false then ActiveModel::Type::Boolean.new.cast(value) == true
                  when Integer then clamp(value, default, LIMITS[key])
-                 else %w[recent oldest].include?(value.to_s) ? value.to_s : default
+                 else enum_value(key, value, default)
                  end
     end
     cfg['hour_to'] = cfg['hour_from'] + 1 if cfg['hour_to'] <= cfg['hour_from']
+    cfg['test_phones'] = Array(raw['test_phones']).map { |t| t.to_s.gsub(/\D/, '') }.select { |t| t.size >= 10 }.uniq.first(20)
     cfg['slices'] = normalize_slices(raw['slices'])
     cfg
+  end
+
+  ENUMS = { 'order' => %w[recent oldest], 'approval' => %w[manual auto] }.freeze
+
+  def enum_value(key, value, default)
+    ENUMS.fetch(key, []).include?(value.to_s) ? value.to_s : default
   end
 
   def normalize_slices(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
@@ -222,95 +231,29 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
     def auto_label = 'Campaign'
   end
 
-  def run!(mother, now: Time.current, force: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  # 🎛️ item 382: a rodada passa pelo CONTROLE DO LOTE (Crm::ReactivationBatch):
+  #   · aprovação manual (padrão): a hora só PREPARA o lote (pending_batch) e
+  #     espera o "Aprovar e enviar" na tela (approved_ids);
+  #   · aprovação automática: manda a fatia da hora sozinha;
+  #   · force = ignora janela/dia útil (botão "agora"); teto e regras valem sempre.
+  def run!(mother, now: Time.current, force: false, approved_ids: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return skip(mother, 'plano não está ativo') unless mother.processing?
 
-    cfg = config(mother)
-    local = now.in_time_zone(TZ)
-    today = local.to_date
-    unless force
-      return skip(mother, 'fim de semana') if cfg['weekdays_only'] && (local.saturday? || local.sunday?)
-      return skip(mother, 'fora do horário') unless local.hour >= cfg['hour_from'] && local.hour < cfg['hour_to']
-      if cfg['max_open_conversations'].positive? && open_conversations(mother.account) > cfg['max_open_conversations']
-        return skip(mother, "atendimento cheio (#{open_conversations(mother.account)} conversas abertas)")
-      end
+    batch = Crm::ReactivationBatch.plan(mother, now: now, force: force)
+    if batch[:skip]
+      finish_if_exhausted!(mother, batch[:pools]) if batch[:pools] && !batch[:cfg]['test_mode']
+      return skip(mother, batch[:skip])
+    end
+    if batch[:cfg]['approval'] == 'manual' && approved_ids.nil?
+      note!(mother, 'last_check_at' => now.iso8601, 'last_skip' => 'aguardando aprovação do lote',
+                    'pending_batch' => { 'at' => now.iso8601, 'quota' => batch[:quota], 'remaining_today' => batch[:remaining_today],
+                                         'warnings' => batch[:warnings], 'rows' => batch[:rows].first(500).map { |r| r.except(:tpl) } })
+      return 0
     end
 
-    done_today = sent_today(mother, today)
-    remaining_today = cfg['daily_cap'] - done_today
-    return skip(mother, 'teto do dia atingido') if remaining_today <= 0
-
-    hours_left = force ? 1 : [cfg['hour_to'] - local.hour, 1].max
-    quota = (remaining_today / hours_left.to_f).ceil
-    slices = cfg['slices'].select { |s| s['share'].positive? && s['templates'].any? }
-    return skip(mother, 'nenhuma fatia com porcentagem e modelo') if slices.empty?
-
-    pools = slices.to_h { |s| [s['key'], pool_rows(mother, cfg, s, now: now)] }
-    day = day_stats(mother, today)
-    deficits = slices.to_h do |s|
-      target = (cfg['daily_cap'] * s['share'] / 100.0).round
-      [s['key'], target - day.dig('slices', s['key']).to_i]
-    end
-    alloc = allocate(quota, deficits, pools.transform_values(&:size))
-    if alloc.values.sum.zero?
-      finish_if_exhausted!(mother, pools)
-      return skip(mother, pools.values.all?(&:empty?) ? 'ninguém mais para receber' : 'fatias do dia já completas')
-    end
-
-    sent = send_batch!(mother, cfg, slices, pools, alloc, today, now)
-    finish_if_exhausted!(mother, pools) if sent.zero?
-    sent
+    rows = approved_ids ? batch[:rows].select { |r| approved_ids.include?(r[:contact_id]) } : batch[:rows]
+    Crm::ReactivationBatch.send!(mother, batch, rows, now: now)
   end
-
-  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-  def send_batch!(mother, cfg, slices, pools, alloc, today, now)
-    account = mother.account
-    inboxes = whatsapp_inboxes(account)
-    default = default_inbox(account, cfg, mother)
-    origin = cfg['route_by_origin'] ? Crm::PatientKind.origin_inbox_by_contact(account, alloc.flat_map { |k, n| pools[k].first(n).map(&:first) }) : {}
-    by_inbox = sent_today_by_inbox(mother, today)
-    children = {}
-    sent = 0
-    warnings = []
-    slices.each do |slice|
-      pools[slice['key']].first(alloc[slice['key']]).each do |contact_id, procedure|
-        contact = account.contacts.find_by(id: contact_id)
-        next if contact.nil?
-
-        inbox = inboxes.find { |i| i.id == origin.dig(contact_id, :id) } || default
-        inbox = default if by_inbox[inbox.id].to_i >= cfg['inbox_daily_cap'] && inbox != default
-        if by_inbox[inbox.id].to_i >= cfg['inbox_daily_cap']
-          warnings << "teto da caixa #{inbox.name} atingido"
-          next
-        end
-        frente = frente_of(procedure)
-        tpl = template_for(slice, frente)
-        inbox, tpl = resolve_template(inbox, default, tpl, slice, frente, warnings)
-        next if tpl.nil?
-
-        child = children[inbox.id] ||= child_for!(mother, today, inbox, tpl)
-        conversation = deliver(child, inbox, tpl, contact)
-        next if conversation.nil?
-
-        record!(child, contact, conversation, slice['key'], frente, mother.id)
-        by_inbox[inbox.id] = by_inbox[inbox.id].to_i + 1
-        sent += 1
-        bump_stats!(mother, today, slice['key'], inbox, frente)
-        sleep THROTTLE_SECONDS
-      rescue StandardError => e
-        Rails.logger.error "[Crm::ReactivationPlan] plano #{mother.id} contato #{contact_id}: #{e.message}"
-        warnings << "falha com um contato: #{e.message.to_s.first(80)}"
-      end
-    end
-    children.each_value do |c|
-      c.update!(stats: { 'total' => c.campaign_contacts.count, 'sent' => c.campaign_contacts.count })
-      Crm::CampaignRunJob.set(wait: 10.minutes).perform_later(c.id, 'sweep')
-    end
-    note!(mother, 'last_run_at' => now.iso8601, 'last_run_sent' => sent, 'last_skip' => nil, 'warnings' => warnings.uniq.first(10))
-    sent
-  end
-
-  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # o modelo precisa existir na caixa de destino; senão vai pela caixa padrão
   def resolve_template(inbox, default, tpl, slice, frente, warnings) # rubocop:disable Metrics/ParameterLists
@@ -339,12 +282,13 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
     )
   end
 
-  def deliver(child, inbox, tpl, contact)
+  def deliver(child, inbox, tpl, contact, slice: nil, frente: nil) # rubocop:disable Metrics/ParameterLists
     source = Source.new(account: child.account, inbox: inbox, sender: child.sender, template_params: tpl['template_params'],
                         message_preview: tpl['message_preview'], name: child.name)
     sender = Crm::SendTemplateService.new(source: source, contact: contact)
     conversation = sender.perform
-    attrs = (sender.message&.additional_attributes || {}).merge('cevico_reactivation' => { 'plan_id' => child.parent_id })
+    meta = { 'plan_id' => child.parent_id, 'slice' => slice, 'frente' => frente, 'template' => tpl.dig('template_params', 'name') }
+    attrs = (sender.message&.additional_attributes || {}).merge('cevico_reactivation' => meta)
     sender.message&.update_columns(additional_attributes: attrs) # rubocop:disable Rails/SkipsModelValidations
     conversation
   end
@@ -386,7 +330,7 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
   end
 
   def finish_if_exhausted!(mother, pools)
-    return unless pools.values.all?(&:empty?)
+    return if pools.blank? || pools.values.any?(&:present?)
 
     mother.update!(status: :completed, finished_at: Time.current)
   end
@@ -428,7 +372,9 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
       exists: mother.present?, id: mother&.id, status: mother&.status, config: cfg, inboxes: inboxes,
       stats: mother&.stats || {}, sent_today: mother ? sent_today(mother, today) : 0,
       simulation: mother ? simulate(mother, cfg, now: now) : nil,
-      window_now: mother ? window_label(cfg, now) : nil
+      window_now: mother ? window_label(cfg, now) : nil,
+      # 🎛️ item 382: lote preparado esperando aprovação (modo manual)
+      pending_batch: mother&.stats&.dig('pending_batch')
     }
   end
 

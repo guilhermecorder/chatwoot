@@ -681,6 +681,35 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/reactivation_plan/run_now`);
   }
 
+  // 🎛️ item 382 — CONTROLE DO LOTE
+  // a próxima fatia, pessoa por pessoa, SEM mandar (force = ignora janela/fim de semana)
+  previewReactivationNext(force = true) {
+    return axios.get(`${this.url}/reactivation_plan/preview_next`, {
+      params: { force: force ? 1 : 0 },
+    });
+  }
+
+  // manda exatamente estas pessoas (ids de contato) agora
+  sendReactivationBatch(contactIds) {
+    return axios.post(`${this.url}/reactivation_plan/send_batch`, {
+      contact_ids: contactIds,
+    });
+  }
+
+  // a fila inteira projetada dia a dia (lote 1 = hoje, lote 2 = próximo dia…)
+  getReactivationQueue({ days = 30, detailDays = 3 } = {}) {
+    return axios.get(`${this.url}/reactivation_plan/queue`, {
+      params: { days, detail_days: detailDays },
+    });
+  }
+
+  // os lotes que já saíram, com o status de cada mensagem
+  getReactivationBatches({ days = 14 } = {}) {
+    return axios.get(`${this.url}/reactivation_plan/batches`, {
+      params: { days },
+    });
+  }
+
   // qual versão do Meu Painel cada agente vê — admin
   // 🧑‍🤝‍🧑 painéis por pessoa (rodada 160): [{id, name, base, user_ids}]
   updatePanelVariants(panelVariants) {

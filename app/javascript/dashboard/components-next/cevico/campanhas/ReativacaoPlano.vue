@@ -5,17 +5,26 @@
 // pessoa chegou, só no horário de atendimento, até a base inteira ter
 // recebido. Cada pessoa recebe uma vez. Quem edita campanhas configura,
 // ativa, pausa e manda a fatia da hora; o resto do time vê o progresso.
+// 🎛️ item 382: CONTROLE DO LOTE — aprovação manual de cada lote (padrão) ×
+// automático, modo de teste com lista de números, e três blocos: quem recebe
+// na próxima fatia, a fila inteira dia a dia, e os lotes que já saíram.
 import { ref, computed, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import CrmAPI from 'dashboard/api/crm';
+import ReativacaoProximaFatia from './ReativacaoProximaFatia.vue';
+import ReativacaoFila from './ReativacaoFila.vue';
+import ReativacaoLotes from './ReativacaoLotes.vue';
 
 defineProps({
   canEdit: { type: Boolean, default: false },
 });
 
 const store = useStore();
+const route = useRoute();
 const pipelines = useMapGetter('crm/getPipelines');
+const accountId = computed(() => route.params.accountId);
 
 const NAME_VAR = '{{contact.name}}';
 const FRENTES = [
@@ -51,6 +60,9 @@ const simulatedDirty = ref(false); // a simulação é do que está na tela?
 const isLoading = ref(true);
 const busy = ref(''); // 'simulate' | 'save' | 'activate' | 'pause' | 'run'
 const confirming = ref(''); // 'activate' | 'run'
+// 🎛️ item 382
+const testPhonesText = ref(''); // a lista de números de teste, um por linha, como digitada
+const batchesKey = ref(0); // sobe depois de um envio → "Lotes que já saíram" recarrega
 
 // ── carregar ────────────────────────────────────────────────────────────
 const clone = v => JSON.parse(JSON.stringify(v));
@@ -61,6 +73,10 @@ const applyPayload = res => {
   plan.value.slices.forEach(s => {
     if (!s.templates || typeof s.templates !== 'object') s.templates = {};
   });
+  if (!plan.value.approval) plan.value.approval = 'manual';
+  plan.value.test_mode = Boolean(plan.value.test_mode);
+  if (!Array.isArray(plan.value.test_phones)) plan.value.test_phones = [];
+  testPhonesText.value = plan.value.test_phones.join('\n');
   // caixa padrão 0 (ainda sem escolha) = a primeira caixa WhatsApp oficial
   const boxes = res.inboxes || [];
   if (!boxes.some(i => i.id === plan.value.default_inbox_id)) {
@@ -97,6 +113,35 @@ const inboxName = id => inboxes.value.find(i => String(i.id) === String(id))?.na
 const isDirty = computed(() => plan.value && JSON.stringify(plan.value) !== savedJson.value);
 const touch = () => {
   simulatedDirty.value = true;
+};
+
+// 🎛️ item 382: controle do lote
+const savedConfig = computed(() => payload.value?.config || {});
+const testModeSaved = computed(() => Boolean(savedConfig.value.test_mode));
+// a lista de teste: um número por linha, aceita (11) 99999-0000; guarda só dígitos
+const setTestPhones = text => {
+  testPhonesText.value = text;
+  plan.value.test_phones = text
+    .split(/[\n,;]+/)
+    .map(t => t.replace(/\D/g, ''))
+    .filter(t => t.length >= 10)
+    .filter((t, i, arr) => arr.indexOf(t) === i)
+    .slice(0, 20);
+  touch();
+};
+const testPhonesCount = computed(() => (plan.value?.test_phones || []).length);
+// nome de cada fatia pela chave (para a fila: "Não Fechou 90 · Orçamento 60")
+const sliceNames = computed(() => {
+  const out = { teste: 'lista de teste' };
+  (savedConfig.value.slices || []).forEach(s => {
+    const sim = (payload.value?.simulation?.slices || []).find(r => r.key === s.key);
+    out[s.key] = sim?.stage_name || SUGGESTED.find(x => x.key === s.key)?.label || s.key;
+  });
+  return out;
+});
+const onBatchSent = res => {
+  applyPayload(res);
+  batchesKey.value += 1;
 };
 
 // ── colunas do funil da casa (o que tem "Orçamento") ────────────────────
@@ -301,6 +346,8 @@ const ritmoSentence = computed(() => {
   const bits = [`${c.daily_cap} por dia`, `${c.hour_from}h–${c.hour_to}h`];
   bits.push(c.weekdays_only ? 'só dias úteis' : 'todos os dias');
   if (c.route_by_origin) bits.push('pela caixa de origem');
+  bits.push(c.approval === 'auto' ? 'automático' : 'eu aprovo cada lote');
+  if (c.test_mode) bits.push('modo de teste');
   return bits.join(' · ');
 });
 
@@ -387,6 +434,14 @@ const runNow = async () => {
           <span v-if="payload?.window_now" class="cv-chip">
             <span class="i-lucide-clock text-xs" />
             {{ payload.window_now }}
+          </span>
+          <span v-if="testModeSaved" class="cv-chip cv-amber" title="Só os números da lista de teste recebem">
+            <span class="i-lucide-flask-conical text-xs" />
+            MODO DE TESTE
+          </span>
+          <span v-if="exists" class="cv-chip" :title="savedConfig.approval === 'auto' ? 'O robô manda sozinho dentro do horário' : 'Cada lote espera a sua aprovação'">
+            <span :class="savedConfig.approval === 'auto' ? 'i-lucide-bot' : 'i-lucide-hand'" class="text-xs" />
+            {{ savedConfig.approval === 'auto' ? 'automático' : 'eu aprovo cada lote' }}
           </span>
           <span v-if="canEdit && isDirty" class="cv-chip cv-amber">
             <span class="i-lucide-pencil text-xs" />
@@ -504,9 +559,12 @@ const runNow = async () => {
                   <option v-for="h in HOURS_TO" :key="h" :value="h" :disabled="h <= plan.hour_from">{{ h }}h</option>
                 </select>
               </div>
-              <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer select-none mt-2">
-                <input v-model="plan.weekdays_only" type="checkbox" class="rounded border-n-weak" @change="touch" />
-                só dias úteis
+              <label class="flex items-start gap-2 text-xs text-n-slate-11 cursor-pointer select-none mt-2">
+                <input v-model="plan.weekdays_only" type="checkbox" class="rounded border-n-weak mt-0.5" @change="touch" />
+                <span>
+                  só dias úteis
+                  <span class="text-n-slate-10">— desmarque para mandar também no fim de semana (ex.: para um teste)</span>
+                </span>
               </label>
             </div>
             <div>
@@ -572,6 +630,55 @@ const runNow = async () => {
               <input v-model="plan.skip_future_appointment" type="checkbox" class="rounded border-n-weak" @change="touch" />
               quem já tem consulta ou cirurgia marcada
             </label>
+          </div>
+
+          <!-- 🎛️ item 382: como os lotes saem + modo de teste -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+            <div>
+              <p class="cv-label mb-2">Como os lotes saem</p>
+              <label class="plano-opt" :class="{ 'plano-opt-on': plan.approval !== 'auto' }">
+                <input v-model="plan.approval" type="radio" value="manual" class="mt-0.5" @change="touch" />
+                <span>
+                  <b>Eu aprovo cada lote</b>
+                  <span class="block text-n-slate-10">o robô prepara a fatia da hora e espera você clicar em Aprovar</span>
+                </span>
+              </label>
+              <label class="plano-opt mt-2" :class="{ 'plano-opt-on': plan.approval === 'auto' }">
+                <input v-model="plan.approval" type="radio" value="auto" class="mt-0.5" @change="touch" />
+                <span>
+                  <b>Automático</b>
+                  <span class="block text-n-slate-10">o robô manda sozinho dentro do horário</span>
+                </span>
+              </label>
+            </div>
+            <div>
+              <p class="cv-label mb-2">
+                Modo de teste
+                <span v-if="plan.test_mode" class="cv-chip cv-amber ml-1 normal-case tracking-normal">
+                  <span class="i-lucide-flask-conical text-xs" />
+                  ligado
+                </span>
+              </p>
+              <label class="flex items-start gap-2 text-xs text-n-slate-11 cursor-pointer select-none">
+                <input v-model="plan.test_mode" type="checkbox" class="rounded border-n-weak mt-0.5" @change="touch" />
+                <span>Modo de teste: mandar só para os números da lista</span>
+              </label>
+              <textarea
+                :value="testPhonesText"
+                rows="3"
+                class="cv-input w-full !h-auto mt-2 text-xs font-mono"
+                placeholder="um número por linha, ex.: (11) 99999-0000"
+                @input="setTestPhones($event.target.value)"
+              />
+              <p class="text-[11px] text-n-slate-10 mt-1">
+                {{ testPhonesCount }} {{ testPhonesCount === 1 ? 'número' : 'números' }} na lista (até 20)
+              </p>
+              <p class="plano-note plano-note-amber mt-2">
+                <span class="i-lucide-info text-sm flex-shrink-0" />
+                No modo de teste ninguém da base recebe; só estes números, e podem receber de novo a cada rodada.
+                Desligue para a campanha de verdade.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -851,6 +958,21 @@ const runNow = async () => {
           </div>
         </div>
       </div>
+
+      <!-- ═══ 🎛️ item 382: controle do lote (todo mundo vê; só quem edita aprova) ═══ -->
+      <div v-if="exists" class="space-y-6 mt-6">
+        <ReativacaoProximaFatia
+          :can-edit="canEdit"
+          :is-active="isActive"
+          :approval="savedConfig.approval || 'manual'"
+          :test-mode="testModeSaved"
+          :window-now="payload?.window_now || ''"
+          :pending-batch="payload?.pending_batch || null"
+          @sent="onBatchSent"
+        />
+        <ReativacaoFila :slice-names="sliceNames" />
+        <ReativacaoLotes :account-id="accountId" :refresh-key="batchesKey" />
+      </div>
     </template>
   </section>
 </template>
@@ -943,6 +1065,30 @@ const runNow = async () => {
   border-radius: 9999px;
   background: var(--cv-grad);
   transition: width 0.4s ease;
+}
+/* opção de rádio em cartão (como os lotes saem) */
+.plano-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgb(var(--cv-rgb) / 0.16);
+}
+.plano-opt-on {
+  border-color: rgb(var(--cv-rgb) / 0.5);
+  background: rgb(var(--cv-rgb) / 0.08);
+}
+.dark .plano-opt {
+  background: rgba(255, 255, 255, 0.03);
+}
+.dark .plano-opt-on {
+  background: rgb(var(--cv-rgb) / 0.16);
 }
 /* campo que precisa de atenção */
 .plano-input-warn {
