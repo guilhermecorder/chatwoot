@@ -68,9 +68,37 @@ class Crm::Campaign < ApplicationRecord
 
     Crm::Contact.joins(:pipeline)
                 .where(crm_pipelines: { account_id: account_id })
-                .where(contact_id: campaign_contacts.select(:contact_id))
+                .where(contact_id: recipients.select(:contact_id))
                 .where(stage_id: Array(conversion_stage_ids))
                 .includes(:contact, :stage)
+  end
+
+  # 🔁 item 379: campanha RECORRENTE (mãe) — regras em audience['recurrence'];
+  # cada rodada é uma campanha-filha (audience['parent_id']). Ver Crm::RecurringCampaign.
+  def recurrence_rules
+    Crm::RecurringCampaign.rules(audience)
+  end
+
+  def recurring?
+    Crm::RecurringCampaign.mother?(self)
+  end
+
+  def parent_id
+    id = Crm::RecurringCampaign.parent_id(self)
+    id.positive? ? id : nil
+  end
+
+  # 📣 item 381: plano de reativação em fatias (mãe com audience['reactivation_plan'])
+  def reactivation_plan?
+    Crm::ReactivationPlan.plan?(self)
+  end
+
+  # quem recebeu: a campanha comum olha os seus destinatários; a mãe (recorrente
+  # ou plano) soma as rodadas
+  def recipients
+    return campaign_contacts unless recurring? || reactivation_plan?
+
+    Crm::CampaignContact.where(campaign_id: Crm::RecurringCampaign.family_ids(self))
   end
 
   # audience (jsonb):
@@ -90,10 +118,22 @@ class Crm::Campaign < ApplicationRecord
     partner_ids = Crm::PartnerGuard.excluded_contact_ids(account)
     contacts = contacts.where.not(id: partner_ids) if partner_ids.any?
     contacts = apply_period_filter(contacts)
-    contacts.where.not(phone_number: [nil, '']).distinct
+    apply_recurrence(contacts.where.not(phone_number: [nil, '']).distinct)
   end
 
   private
+
+  # 🔁 item 379: as regras da cadência (quem recebeu há pouco, atendimento em
+  # andamento, consulta marcada, idade mínima, teto da rodada) valem para a
+  # mãe (prévia) e para cada rodada (filha)
+  def apply_recurrence(contacts)
+    rules = recurrence_rules
+    return contacts if rules.blank?
+
+    excluded = Crm::RecurringCampaign.excluded_ids(self, rules)
+    contacts = contacts.where.not(id: excluded) if excluded.any?
+    Crm::RecurringCampaign.shape(contacts, rules)
+  end
 
   # 🕐 R3 da auditoria (#411): "de 01/10 a 01/10" é o DIA de São Paulo
   # inteiro (00:00 até 23:59:59 no fuso da clínica), não o dia em UTC —

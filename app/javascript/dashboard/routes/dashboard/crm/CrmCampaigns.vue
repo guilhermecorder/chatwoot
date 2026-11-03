@@ -9,6 +9,8 @@ import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyP
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import ChipPicker from './components/ChipPicker.vue';
 import CallCampaignsTab from './components/CallCampaignsTab.vue';
+// 📣 item 380: mensagens prontas da Reativação de fim de ano (aba própria)
+import ReativacaoMensagens from 'dashboard/components-next/cevico/campanhas/ReativacaoMensagens.vue';
 import CrmAPI from 'dashboard/api/crm';
 import { relativeTime } from './helpers';
 
@@ -19,12 +21,12 @@ const canEditCampaigns = computed(() => canEdit('crm.campanhas'));
 const router = useRouter();
 
 // aba inicial pode vir da URL (?tab=automations | ?tab=calls) — usada pelo hub de Automações
-const initialTab = ['campaigns', 'automations', 'calls', 'panel'].includes(
+const initialTab = ['campaigns', 'automations', 'calls', 'panel', 'reativacao'].includes(
   new URLSearchParams(window.location.search).get('tab')
 )
   ? new URLSearchParams(window.location.search).get('tab')
   : 'campaigns';
-const activeTab = ref(initialTab); // campaigns | automations | calls | panel
+const activeTab = ref(initialTab); // campaigns | automations | calls | panel | reativacao
 
 // Tratamento de dados agora mora em Automações → Tratamento (item 70)
 const goToTreatmentHub = () =>
@@ -58,6 +60,43 @@ const periodFrom = ref('');
 const periodTo = ref('');
 const audiencePreview = ref(null);
 const isPreviewLoading = ref(false);
+// 🔁 item 379 (03/11): campanha RECORRENTE — a cadência e as regras de quem
+// fica de fora em cada rodada (o servidor guarda em audience.recurrence)
+const RECURRENCE_DEFAULT = {
+  enabled: false,
+  every_days: 15,
+  hour: 9,
+  weekdays_only: true,
+  resend_after_days: 30,
+  quiet_hours: 24,
+  skip_future_appointment: true,
+  min_age_days: 3,
+  max_per_run: 150,
+};
+const recurrence = ref({ ...RECURRENCE_DEFAULT });
+const isRecurring = computed(() => Boolean(recurrence.value.enabled));
+const HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+const EVERY_OPTIONS = [
+  { value: 7, label: 'a cada 7 dias' },
+  { value: 10, label: 'a cada 10 dias' },
+  { value: 15, label: 'a cada 15 dias' },
+  { value: 30, label: 'a cada 30 dias' },
+];
+const recurrenceSentence = computed(() => {
+  const r = recurrence.value;
+  if (!r.enabled) return '';
+  const partes = [
+    `Sai a cada ${r.every_days} dias às ${r.hour}h${r.weekdays_only ? ', só em dias úteis' : ''}`,
+    `no máximo ${r.max_per_run} pessoas por rodada (as mais antigas primeiro)`,
+  ];
+  const fora = [];
+  if (Number(r.resend_after_days) > 0) fora.push(`quem recebeu esta campanha há menos de ${r.resend_after_days} dias`);
+  if (Number(r.quiet_hours) > 0) fora.push(`quem conversou com a clínica nas últimas ${r.quiet_hours} h`);
+  if (r.skip_future_appointment) fora.push('quem já tem consulta ou cirurgia marcada');
+  if (Number(r.min_age_days) > 0) fora.push(`quem chegou há menos de ${r.min_age_days} dias`);
+  fora.push('quem pediu para parar, pacientes de parceiros');
+  return `${partes.join(', ')}. Fica de fora: ${fora.join('; ')}.`;
+});
 const isSubmitting = ref(false);
 // 🧾 revisão R3: o rascunho criado numa tentativa que falhou (ex.: data no
 // passado → 422) é REAPROVEITADO na próxima — antes cada clique criava outro
@@ -334,12 +373,35 @@ const openComposer = () => {
   periodField.value = '';
   periodFrom.value = '';
   periodTo.value = '';
+  recurrence.value = { ...RECURRENCE_DEFAULT };
   audiencePreview.value = null;
   scheduleMin.value = nowInSaoPauloInput();
   draftId.value = null;
   draftFingerprint.value = '';
   showComposer.value = true;
   if (form.value.inbox_id) loadTemplates(form.value.inbox_id);
+};
+
+// 🔁 item 379: o pacote pronto do Guilherme — "cirurgia ainda este ano" para
+// quem está em Envio de Orçamento e Novos Contatos; fora quem já agendou,
+// está confirmado, operou ou está no pós; conversão = entrou em Agendamento
+// só o funil da casa (o que tem a coluna de orçamento) — o do Oftalmofácil fica fora
+const stagesMatching = re => {
+  const home = allStages.value.find(s => /or[çc]amento/i.test(s.name))?.pipeline_name;
+  return allStages.value
+    .filter(s => (!home || s.pipeline_name === home) && re.test(s.name))
+    .map(s => s.id);
+};
+const applyCirurgiaPreset = () => {
+  if (!form.value.name.trim()) form.value.name = 'Cirurgia ainda este ano';
+  // (um card só está numa coluna: quem já agendou/operou não está mais em
+  // Orçamento/Novos — e a regra "consulta marcada" da recorrência segura o resto)
+  includeStageIds.value = stagesMatching(/novos contatos|or[çc]amento/i);
+  excludeStageIds.value = [];
+  conversionStageIds.value = stagesMatching(/agendamento de consulta|consulta agendada/i);
+  if (!form.value.apply_label) form.value.apply_label = 'cirurgia-este-ano';
+  recurrence.value = { ...RECURRENCE_DEFAULT, enabled: true };
+  audiencePreview.value = null;
 };
 
 const audiencePayload = () => ({
@@ -350,6 +412,7 @@ const audiencePayload = () => ({
   period_field: periodField.value,
   period_from: periodFrom.value,
   period_to: periodTo.value,
+  recurrence: { ...recurrence.value },
 });
 
 // categoria do modelo (MARKETING/UTILITY) → tarifa usada no custo estimado
@@ -363,7 +426,8 @@ const previewAudience = async () => {
   try {
     const { data } = await CrmAPI.previewAudience(
       audiencePayload(),
-      rateCategoryOf(selectedTemplate.value?.category)
+      rateCategoryOf(selectedTemplate.value?.category),
+      { inboxId: form.value.inbox_id }
     );
     audiencePreview.value = data;
   } catch {
@@ -469,6 +533,23 @@ const submit = async mode => {
   // 🕐 revisão R3: data no passado nem cria o rascunho (o servidor confere de novo)
   if (mode === 'publish' && scheduledAt.value && scheduledAt.value.slice(0, 16) <= nowInSaoPauloInput()) {
     useAlert('Escolha uma data futura (horário de São Paulo)');
+    return;
+  }
+  // 🔁 item 379: recorrente = cria e ATIVA (1ª rodada na data escolhida ou
+  // hoje/amanhã na hora da regra) — nada sai agora sem passar pelo agendador
+  if (mode === 'publish' && isRecurring.value) {
+    isSubmitting.value = true;
+    try {
+      const id = await ensureDraft();
+      const saved = await store.dispatch('crm/scheduleCampaign', { id, scheduledAt: scheduledAt.value || '' });
+      useAlert(`Campanha recorrente ativada! 1ª rodada em ${saved?.scheduled_at_label || '—'} (SP), depois ${saved?.recurrence_label || ''}.`);
+      closeComposer();
+      await loadCampaigns();
+    } catch (e) {
+      useAlert(e?.response?.data?.error || 'Erro ao ativar a campanha recorrente');
+    } finally {
+      isSubmitting.value = false;
+    }
     return;
   }
   // 🚦 R3 da auditoria (#415): "Publicar agora" só sai depois do modal
@@ -593,10 +674,13 @@ const sendDraft = async c => {
   try {
     const { data } = await CrmAPI.previewAudience(
       c.audience || {},
-      rateCategoryOf(c.template_params?.category)
+      rateCategoryOf(c.template_params?.category),
+      { campaignId: c.recurring ? c.id : undefined, inboxId: c.inbox_id }
     );
     if (!data?.count) {
-      useAlert('Esta campanha não tem ninguém no público (0 contatos com telefone).');
+      useAlert(c.recurring
+        ? 'Hoje ninguém entraria nesta rodada (quem está no público já recebeu há pouco, está conversando ou tem consulta marcada).'
+        : 'Esta campanha não tem ninguém no público (0 contatos com telefone).');
       return;
     }
     openSendConfirm({ campaign: c, preview: data });
@@ -617,7 +701,9 @@ const confirmSend = async () => {
     const id = campaign?.id || (await ensureDraft());
     sendingId.value = id;
     await CrmAPI.sendCampaign(id, { ignoreSchedule: campaign?.status === 'scheduled' });
-    useAlert('Campanha publicada! Acompanhe o progresso na lista.');
+    useAlert(campaign?.recurring
+      ? 'Rodada aberta! Ela aparece na lista como uma campanha própria; a recorrência segue na próxima data.'
+      : 'Campanha publicada! Acompanhe o progresso na lista.');
     closeSendConfirm();
     closeComposer();
     await loadCampaigns();
@@ -645,6 +731,36 @@ const pauseCampaign = async c => {
   }
 };
 
+// 🔁 item 379: ativar (rascunho) ou retomar (pausada) a recorrente = o
+// servidor marca a 1ª rodada hoje na hora da regra (ou no próximo dia útil)
+const activateRecurring = async c => {
+  if (pausingId.value) return;
+  pausingId.value = c.id;
+  try {
+    const saved = await store.dispatch('crm/scheduleCampaign', { id: c.id, scheduledAt: '' });
+    useAlert(`Recorrência ${c.status === 'paused' ? 'retomada' : 'ativada'}: próxima rodada em ${saved?.scheduled_at_label || '—'} (SP).`);
+    await loadCampaigns();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Erro ao ativar a recorrência');
+  } finally {
+    pausingId.value = null;
+  }
+};
+
+// o que o botão principal do cartão faz/diz (campanha comum × recorrente)
+const primaryLabel = c => {
+  if (c.recurring) {
+    if (c.status === 'paused') return 'Retomar';
+    if (c.status === 'draft') return 'Ativar';
+    return 'Rodar agora';
+  }
+  return c.status === 'paused' ? 'Retomar' : 'Enviar agora';
+};
+const primaryAction = c => {
+  if (c.recurring && (c.status === 'paused' || c.status === 'draft')) return activateRecurring(c);
+  return sendDraft(c);
+};
+
 const removeCampaign = async c => {
   try {
     await store.dispatch('crm/deleteCampaign', c.id);
@@ -664,8 +780,23 @@ const STATUS_META = {
   paused:     { label: 'Pausada',    cls: 'bg-amber-500/15 text-amber-700' },
 };
 
+// 🔁 item 379: a mãe mostra a cadência e as rodadas, não "enviadas"
+const statusLabel = c => {
+  if (c.recurring && c.status === 'scheduled') return 'Recorrente · ativa';
+  if (c.recurring && c.status === 'paused') return 'Recorrente · pausada';
+  if (c.recurring && c.status === 'draft') return 'Recorrente · rascunho';
+  return STATUS_META[c.status]?.label ?? c.status;
+};
+const runsLine = c => {
+  const runs = Number(c.stats?.runs || 0);
+  if (!runs) return 'Nenhuma rodada ainda';
+  const quando = c.stats?.last_run_at ? ` · última em ${formatDateTime(c.stats.last_run_at)}` : '';
+  return `${runs} rodada${runs > 1 ? 's' : ''}${quando}`;
+};
+
 const statsLine = c => {
   const s = c.stats ?? {};
+  if (c.recurring) return '';
   if (c.status === 'draft' || c.status === 'scheduled') return '';
   const parts = [`${s.sent ?? 0}/${s.total ?? 0} enviadas`];
   if (s.skipped) parts.push(`${s.skipped} puladas`);
@@ -698,8 +829,9 @@ const statsLine = c => {
         <CevicoViewOnlyPill v-if="!canEditCampaigns" />
       </h1>
 
-      <!-- Abas (cada uma com sua cor dopamine) -->
-      <div class="flex items-center gap-1 bg-n-solid-2 border border-n-weak rounded-xl p-1 ml-4">
+      <!-- Abas (cada uma com sua cor dopamine); item 380: 5 abas quebram
+           linha no celular em vez de sumir para a direita -->
+      <div class="flex items-center gap-1 flex-wrap bg-n-solid-2 border border-n-weak rounded-xl p-1 sm:ml-4">
         <button
           class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
           :class="activeTab === 'campaigns' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
@@ -734,6 +866,16 @@ const statsLine = c => {
         >
           <span class="i-lucide-phone-call" />
           Ligações
+        </button>
+        <button
+          class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+          :class="activeTab === 'reativacao' ? 'text-white font-bold shadow-sm' : 'text-n-slate-11 hover:bg-n-alpha-1'"
+          :style="activeTab === 'reativacao' ? 'background: linear-gradient(135deg, #155e75, #06b6d4)' : ''"
+          title="Mensagens prontas da Reativação de fim de ano, por público e por frente"
+          @click="activeTab = 'reativacao'"
+        >
+          <span class="i-lucide-message-circle" />
+          Reativação
         </button>
       </div>
 
@@ -779,9 +921,12 @@ const statsLine = c => {
             @click="openResults(c)"
           >
             <div class="flex items-center gap-2 flex-wrap">
+              <!-- 🔁 item 379: mãe recorrente × rodada (filha) -->
+              <span v-if="c.recurring" class="i-lucide-repeat text-sm flex-shrink-0" style="color: #B45309" title="Campanha recorrente" />
+              <span v-else-if="c.parent_id" class="i-lucide-corner-down-right text-sm flex-shrink-0 text-n-slate-9" title="Rodada de uma campanha recorrente" />
               <span class="text-sm font-semibold text-n-slate-12 flex-1 min-w-0 truncate">{{ c.name }}</span>
-              <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0" :class="STATUS_META[c.status]?.cls">
-                {{ STATUS_META[c.status]?.label ?? c.status }}
+              <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0" :class="c.recurring && c.status === 'scheduled' ? 'bg-amber-500/15 text-amber-700' : STATUS_META[c.status]?.cls">
+                {{ statusLabel(c) }}
               </span>
             </div>
 
@@ -789,7 +934,16 @@ const statsLine = c => {
               {{ c.inbox_name }} · <span class="font-mono">{{ c.template_params?.name }}</span>
             </p>
 
-            <p v-if="c.status === 'scheduled' && c.scheduled_at" class="text-xs text-n-gold flex items-center gap-1">
+            <template v-if="c.recurring">
+              <p class="text-xs text-n-slate-11 leading-relaxed">
+                <span class="i-lucide-repeat align-middle" style="color: #B45309" /> {{ c.recurrence_label }}<span v-if="c.recurrence?.max_per_run" class="text-n-slate-9"> · até {{ c.recurrence.max_per_run }} por rodada</span>
+              </p>
+              <p v-if="c.status === 'scheduled' && c.scheduled_at" class="text-xs text-n-gold flex items-center gap-1">
+                <span class="i-lucide-clock" /> Próxima rodada {{ c.scheduled_at_label || formatDateTime(c.scheduled_at) }} (SP)
+              </p>
+              <p class="text-xs text-n-slate-10">{{ runsLine(c) }}</p>
+            </template>
+            <p v-else-if="c.status === 'scheduled' && c.scheduled_at" class="text-xs text-n-gold flex items-center gap-1">
               <span class="i-lucide-clock" /> Envia em {{ c.scheduled_at_label || formatDateTime(c.scheduled_at) }} (horário de São Paulo)
             </p>
             <p v-if="statsLine(c)" class="text-xs text-n-slate-11">{{ statsLine(c) }}</p>
@@ -817,22 +971,22 @@ const statsLine = c => {
               <button
                 v-if="canEditCampaigns && (c.status === 'draft' || c.status === 'scheduled' || c.status === 'paused')"
                 class="text-xs px-3 py-1.5 rounded-lg bg-n-brand text-white hover:opacity-90 disabled:opacity-50"
-                :disabled="isPreparingSendId === c.id || sendingId === c.id"
-                @click="sendDraft(c)"
+                :disabled="isPreparingSendId === c.id || sendingId === c.id || pausingId === c.id"
+                @click="primaryAction(c)"
               >
                 <template v-if="isPreparingSendId === c.id">Calculando…</template>
                 <template v-else-if="sendingId === c.id">Enviando…</template>
-                <template v-else-if="c.status === 'paused'">Retomar</template>
-                <template v-else>Enviar agora</template>
+                <template v-else>{{ primaryLabel(c) }}</template>
               </button>
-              <!-- ⏸ pausar o envio / cancelar o agendamento -->
+              <!-- ⏸ pausar o envio / cancelar o agendamento / pausar a recorrência -->
               <button
                 v-if="canEditCampaigns && (c.status === 'processing' || c.status === 'scheduled')"
                 class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-amber-700 hover:bg-amber-500/10 disabled:opacity-50"
                 :disabled="pausingId === c.id"
                 @click="pauseCampaign(c)"
               >
-                {{ c.status === 'scheduled' ? 'Cancelar agendamento' : 'Pausar' }}
+                <template v-if="c.recurring">Pausar</template>
+                <template v-else>{{ c.status === 'scheduled' ? 'Cancelar agendamento' : 'Pausar' }}</template>
               </button>
 
               <div class="flex-1" />
@@ -946,6 +1100,11 @@ const statsLine = c => {
           :voice-enabled="voiceEnabled"
           :permission-template-set="permissionTemplateSet"
         />
+      </template>
+
+      <!-- ══ ABA REATIVAÇÃO: mensagens prontas da campanha de fim de ano (item 380) ══ -->
+      <template v-else-if="activeTab === 'reativacao'">
+        <ReativacaoMensagens :can-edit="canEditCampaigns" />
       </template>
 
       <!-- ══ ABA PAINEL: saúde dos números + visão geral ══ -->
@@ -1206,7 +1365,10 @@ const statsLine = c => {
                 {{ isPreviewLoading ? 'Calculando…' : 'Calcular público' }}
               </button>
               <span v-if="audiencePreview" class="text-sm text-n-slate-12 font-medium">
-                {{ audiencePreview.count }} contato(s) com telefone
+                {{ audiencePreview.count }} contato(s) com telefone<template v-if="isRecurring"> nesta rodada</template>
+                <span v-if="audiencePreview.inbox_sent_30d != null" class="text-xs font-normal" :class="audiencePreview.inbox_sent_30d >= 1000 ? 'text-red-500' : 'text-n-slate-10'">
+                  · esta caixa já mandou {{ audiencePreview.inbox_sent_30d }} de campanha em 30 dias
+                </span>
                 <!-- 💸 R3 (#415): cada balão é cobrado pela Meta (tabela do Gasto do WhatsApp) -->
                 <span class="text-xs text-n-slate-10 font-normal">
                   · ≈ {{ formatMoney(audiencePreview.estimated_cost) }}
@@ -1217,6 +1379,94 @@ const statsLine = c => {
                 Calcule o público antes de publicar.
               </span>
             </div>
+          </div>
+
+          <!-- 🔁 item 379: REPETIR de tempos em tempos -->
+          <div class="bg-n-alpha-1 border border-n-weak rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <p class="text-xs font-semibold text-n-slate-11 flex items-center gap-1.5">
+                <span
+                  class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                  style="background: linear-gradient(135deg, #B45309, #F59E0B)"
+                >↻</span>
+                <span class="i-lucide-repeat" style="color: #B45309" /> Repetir de tempos em tempos
+                <span class="text-n-slate-9 font-normal">(campanha recorrente)</span>
+              </p>
+              <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer select-none">
+                <input v-model="recurrence.enabled" type="checkbox" class="rounded border-n-weak" @change="audiencePreview = null" />
+                Ligar a recorrência
+              </label>
+            </div>
+
+            <button
+              type="button"
+              class="w-full text-left rounded-lg px-3 py-2 border border-dashed text-xs flex items-center gap-2 hover:bg-amber-500/10"
+              style="border-color: rgba(245, 158, 11, 0.6); color: #92400E"
+              @click="applyCirurgiaPreset"
+            >
+              <span class="i-lucide-wand-sparkles" />
+              <span>
+                <b>Usar o pacote “Cirurgia ainda este ano”</b> — público: Envio de Orçamento + Novos Contatos;
+                a cada 15 dias, fora quem já tem consulta marcada ou está conversando; conversão: entrou em Agendamento de Consulta.
+              </span>
+            </button>
+
+            <template v-if="recurrence.enabled">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label class="text-xs text-n-slate-10 block mb-1">Cadência</label>
+                  <select v-model.number="recurrence.every_days" class="w-full border border-n-weak rounded-lg px-2 py-2 text-xs bg-n-solid-2 text-n-slate-12">
+                    <option v-for="o in EVERY_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs text-n-slate-10 block mb-1">Hora da rodada (SP)</label>
+                  <select v-model.number="recurrence.hour" class="w-full border border-n-weak rounded-lg px-2 py-2 text-xs bg-n-solid-2 text-n-slate-12">
+                    <option v-for="h in HOURS" :key="h" :value="h">{{ h }}h</option>
+                  </select>
+                </div>
+                <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer select-none sm:mt-6">
+                  <input v-model="recurrence.weekdays_only" type="checkbox" class="rounded border-n-weak" />
+                  Só em dias úteis
+                </label>
+              </div>
+
+              <p class="text-xs font-semibold text-n-slate-11 pt-1">Em cada rodada, fica de fora:</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="flex items-center gap-2 text-xs text-n-slate-11">
+                  quem recebeu esta campanha há menos de
+                  <input v-model.number="recurrence.resend_after_days" type="number" min="0" max="365" class="w-16 border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-2 text-n-slate-12" @change="audiencePreview = null" />
+                  dias
+                </div>
+                <div class="flex items-center gap-2 text-xs text-n-slate-11">
+                  quem conversou com a clínica nas últimas
+                  <input v-model.number="recurrence.quiet_hours" type="number" min="0" max="720" class="w-16 border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-2 text-n-slate-12" @change="audiencePreview = null" />
+                  horas
+                </div>
+                <div class="flex items-center gap-2 text-xs text-n-slate-11">
+                  quem chegou há menos de
+                  <input v-model.number="recurrence.min_age_days" type="number" min="0" max="365" class="w-16 border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-2 text-n-slate-12" @change="audiencePreview = null" />
+                  dias
+                </div>
+                <label class="flex items-center gap-2 text-xs text-n-slate-11 cursor-pointer select-none">
+                  <input v-model="recurrence.skip_future_appointment" type="checkbox" class="rounded border-n-weak" @change="audiencePreview = null" />
+                  quem já tem consulta ou cirurgia marcada
+                </label>
+                <div class="flex items-center gap-2 text-xs text-n-slate-11">
+                  e no máximo
+                  <input v-model.number="recurrence.max_per_run" type="number" min="1" max="5000" class="w-20 border border-n-weak rounded-lg px-2 py-1 text-xs bg-n-solid-2 text-n-slate-12" @change="audiencePreview = null" />
+                  pessoas por rodada (as mais antigas primeiro)
+                </div>
+              </div>
+
+              <div class="rounded-lg px-3 py-2" style="background: rgba(245, 158, 11, 0.08); border: 1px dashed rgba(245, 158, 11, 0.5)">
+                <p class="text-xs leading-relaxed" style="color: #92400E">📖 {{ recurrenceSentence }}</p>
+                <p class="text-xs text-n-slate-10 mt-1">
+                  Regra da casa: cada número aguenta ~1000 contatos por mês — o “Calcular público” mostra quanto esta caixa já mandou em 30 dias.
+                  “Publicar em” vazio = 1ª rodada hoje na hora escolhida (ou no próximo dia útil).
+                </p>
+              </div>
+            </template>
           </div>
 
           <!-- Etiqueta pós-envio -->
@@ -1285,14 +1535,18 @@ const statsLine = c => {
           >Criar</button>
           <button
             class="text-sm font-bold px-4 py-2 rounded-xl text-white hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5 shadow-sm"
-            :style="scheduledAt
-              ? 'background: linear-gradient(135deg, #B8860B, #D4A017)'
-              : 'background: linear-gradient(135deg, #047857, #34D399)'"
+            :style="isRecurring
+              ? 'background: linear-gradient(135deg, #B45309, #F59E0B)'
+              : scheduledAt
+                ? 'background: linear-gradient(135deg, #B8860B, #D4A017)'
+                : 'background: linear-gradient(135deg, #047857, #34D399)'"
             :disabled="!canSubmit || isSubmitting"
             @click="submit('publish')"
           >
-            <span :class="scheduledAt ? 'i-lucide-clock' : 'i-lucide-send'" />
+            <span :class="isRecurring ? 'i-lucide-repeat' : scheduledAt ? 'i-lucide-clock' : 'i-lucide-send'" />
             <template v-if="isSubmitting">Publicando…</template>
+            <template v-else-if="isRecurring && scheduledAt">Ativar · 1ª rodada em {{ formatScheduleInput(scheduledAt) }} (SP)</template>
+            <template v-else-if="isRecurring">Ativar a recorrência</template>
             <template v-else-if="scheduledAt">Publicar em {{ formatScheduleInput(scheduledAt) }} (SP)</template>
             <template v-else>Publicar agora</template>
           </button>
@@ -1322,7 +1576,12 @@ const statsLine = c => {
           <p v-if="sendConfirm.resuming" class="text-xs text-n-slate-10">
             Quem já recebeu não recebe de novo: o envio continua de onde parou.
           </p>
-          <p v-if="sendConfirm.scheduledLabel" class="text-xs rounded-lg px-3 py-2 bg-amber-500/10 text-amber-800 border border-amber-500/30">
+          <!-- 🔁 item 379: na recorrente, "Rodar agora" abre uma rodada a mais; a cadência continua -->
+          <p v-if="sendConfirm.campaign?.recurring" class="text-xs rounded-lg px-3 py-2 bg-amber-500/10 text-amber-800 border border-amber-500/30">
+            Campanha recorrente: ao confirmar, abre uma <b>rodada agora</b> com as pessoas que entram hoje nas regras.
+            A próxima rodada automática fica para <b>{{ sendConfirm.scheduledLabel || 'a data da cadência' }}</b> (horário de São Paulo).
+          </p>
+          <p v-else-if="sendConfirm.scheduledLabel" class="text-xs rounded-lg px-3 py-2 bg-amber-500/10 text-amber-800 border border-amber-500/30">
             Esta campanha está agendada para <b>{{ sendConfirm.scheduledLabel }}</b> (horário de São Paulo).
             Ao confirmar, o agendamento é ignorado e a mensagem sai <b>agora</b>.
           </p>

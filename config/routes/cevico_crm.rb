@@ -21,6 +21,13 @@ namespace :crm do
       get :templates
     end
   end
+  # 📣 item 381: plano de reativação em fatias (uma mãe por conta)
+  resource :reactivation_plan, only: [:show, :update] do
+    post :simulate
+    post :activate
+    post :pause
+    post :run_now
+  end
   resources :message_automations, only: [:index, :create, :update, :destroy] do
     member { get :preview_eligible }
   end
@@ -214,6 +221,9 @@ namespace :crm do
     post :update_price_table
     # investimento mensal por caixa (ROI/CAC do Dashboard CRM)
     post :update_inbox_investments
+    # 📣 item 380: mensagens prontas da Reativação de fim de ano (ler = time; editar = campanhas)
+    get :reactivation_messages
+    post :update_reactivation_message
   end
   # ✍️ rodada 191: orientações dos atendentes de IA + histórico do Roteiro (só admin)
   resources :agent_guidances, only: %i[index create update destroy], controller: 'agent_guidances' do

@@ -428,6 +428,7 @@ const FEATURE_BY_ITEM_NAME = {
   Reports: 'reports',
   CRM: 'crm',
   'Campanha WhatsApp': 'crm_campaigns',
+  Reativação: 'crm_reativacao',
   'Jornada do paciente': 'crm_journey',
   Tasks: 'tasks',
   Agenda: 'agenda',
@@ -475,6 +476,7 @@ const DEFAULT_MENU_ORDER = [
   'Captain',
   'Companies',
   'Campanha WhatsApp',
+  'Reativação',
   'Forms',
   'Tasks',
   'Agenda',
@@ -504,6 +506,7 @@ const AGENT_MENU_ORDER = [
   'People',
   'Reports',
   'Campanha WhatsApp',
+  'Reativação',
   'Cevico Pages',
   'Strategy',
   'Finance',
@@ -645,6 +648,7 @@ const MENU_LAYOUT = [
       'Jornada do paciente',
       'Automations Hub > Automations Robos',
       'Campanha WhatsApp',
+      'Reativação', // 📣 item 380/381: mensagens + plano em fatias
       'Automations Hub > Automations AI Agents',
       'Automations Hub > Automations AI Panel',
       'Automations Hub > Automations Flows',
@@ -765,6 +769,7 @@ const TILE_COLORS = {
   CRM: '#af52de',
   'Jornada do paciente': '#ff2d55',
   'Campanha WhatsApp': '#25d366',
+  Reativação: '#ff9500',
   Forms: '#ffcc00',
   'Automations Hub': '#5856d6',
   Reports: '#0a84ff',
@@ -1420,6 +1425,13 @@ const menuItems = computed(() => {
       label: 'Campanha WhatsApp',
       icon: 'i-lucide-megaphone',
       to: accountScopedRoute('crm_campaigns'),
+    },
+    // 📣 item 380/381: Reativação (mensagens prontas + plano de envio em fatias)
+    {
+      name: 'Reativação',
+      label: 'Reativação',
+      icon: 'i-lucide-rotate-ccw',
+      to: accountScopedRoute('crm_reativacao'),
     },
     // 🗺️ Mensagens da jornada (item 168) — rótulo no vocabulário da empresa
     {

@@ -638,6 +638,49 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_inbox_investments`, payload);
   }
 
+  // 📣 item 380: mensagens prontas da Reativação de fim de ano (YAML + edições)
+  getReactivationMessages() {
+    return axios.get(`${this.url}/settings/reactivation_messages`);
+  }
+
+  // edita uma mensagem (titulo opcional); reset: 1 volta ao original
+  updateReactivationMessage({ id, texto, titulo, reset }) {
+    const payload = { id };
+    if (reset) payload.reset = 1;
+    else {
+      payload.texto = texto;
+      if (titulo !== undefined) payload.titulo = titulo;
+    }
+    return axios.post(`${this.url}/settings/update_reactivation_message`, payload);
+  }
+
+  // 📣 item 381: plano de reativação em fatias (uma mãe por conta)
+  getReactivationPlan() {
+    return axios.get(`${this.url}/reactivation_plan`);
+  }
+
+  saveReactivationPlan(plan) {
+    return axios.put(`${this.url}/reactivation_plan`, { plan });
+  }
+
+  // prévia sem salvar: tamanho de cada fatia e dias estimados
+  simulateReactivationPlan(plan) {
+    return axios.post(`${this.url}/reactivation_plan/simulate`, { plan });
+  }
+
+  activateReactivationPlan() {
+    return axios.post(`${this.url}/reactivation_plan/activate`);
+  }
+
+  pauseReactivationPlan() {
+    return axios.post(`${this.url}/reactivation_plan/pause`);
+  }
+
+  // manda a fatia de UMA hora agora (ignora janela e dia útil)
+  runReactivationPlanNow() {
+    return axios.post(`${this.url}/reactivation_plan/run_now`);
+  }
+
   // qual versão do Meu Painel cada agente vê — admin
   // 🧑‍🤝‍🧑 painéis por pessoa (rodada 160): [{id, name, base, user_ids}]
   updatePanelVariants(panelVariants) {
@@ -878,10 +921,14 @@ class CrmAPI extends ApiClient {
   }
 
   // category (marketing | utility | authentication) = tarifa usada no custo estimado
-  previewAudience(audience, category = 'marketing') {
+  // 🔁 item 379: campaignId = recorrente que já existe (desconta as rodadas
+  // anteriores); inboxId = quanto a caixa já mandou de campanha em 30 dias
+  previewAudience(audience, category = 'marketing', { campaignId, inboxId } = {}) {
     return axios.post(`${this.url}/campaigns/preview_audience`, {
       audience,
       category,
+      campaign_id: campaignId || undefined,
+      inbox_id: inboxId || undefined,
     });
   }
 

@@ -55,6 +55,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # item 366: fechar/reabrir dia, horário e médico = nó "Fechar e reabrir dias"
   before_action -> { require_access('agenda.bloqueios', :edit) }, only: %i[update_blocked_days update_agenda_locks]
   before_action -> { require_access('configuracoes.precos', :edit) }, only: [:update_price_table]
+  # 📣 item 380: editar as mensagens prontas da Reativação = quem cria/dispara campanhas
+  before_action -> { require_access('crm.campanhas', :edit) }, only: [:update_reactivation_message]
   # Rodada 2: ler o domínio público = nó "Domínio público" da árvore (só admin)
   before_action -> { require_access('configuracoes.dominio', :view) }, only: [:public_domain]
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
@@ -245,6 +247,42 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       fresh
     end
     render json: { inbox_investments: investments, capture_inbox_ids: cfg['capture_inbox_ids'] }
+  end
+
+  # 📣 item 380 (03/11): mensagens prontas da Reativação de fim de ano
+  # (config/cevico/reativacao_fim_de_ano.yml) já com as edições da conta por
+  # cima — leitura livre para o time; a tela mostra, copia e (quem edita
+  # campanhas) altera cada mensagem.
+  def reactivation_messages
+    render json: Cevico::ReactivationMessages.payload(Current.account)
+  end
+
+  # POST update_reactivation_message — params: id, texto, titulo (opcional);
+  # reset=1 apaga a edição e volta ao original do YAML
+  def update_reactivation_message
+    id = params[:id].to_s
+    return render json: { error: 'Mensagem não encontrada.' }, status: :not_found unless Cevico::ReactivationMessages.find_message(id)
+
+    error = reactivation_apply!(id)
+    return render json: { error: error }, status: :unprocessable_entity if error
+
+    render json: { message: Cevico::ReactivationMessages.message_payload(Current.account, id) }
+  end
+
+  # grava (ou restaura) e devolve a mensagem de erro — nil quando deu certo
+  def reactivation_apply!(id)
+    if ActiveModel::Type::Boolean.new.cast(params[:reset])
+      Cevico::ReactivationMessages.reset!(crm_settings, id: id)
+      return nil
+    end
+
+    texto = params[:texto].to_s.strip
+    max = Cevico::ReactivationMessages::TEXT_MAX
+    return "A mensagem precisa ter de 1 a #{max} caracteres." unless texto.length.between?(1, max)
+
+    titulo = params[:titulo].to_s.strip.first(Cevico::ReactivationMessages::TITLE_MAX)
+    Cevico::ReactivationMessages.save!(crm_settings, id: id, texto: texto, titulo: titulo, user: Current.user)
+    nil
   end
 
   def sanitized_investments
