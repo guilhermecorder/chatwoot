@@ -295,7 +295,7 @@ onMounted(load);
     <div class="max-w-[1600px] mx-auto w-full" :class="espacoso ? 'space-y-2' : ''">
       <CevicoHero
         :pal="pal"
-        title="Reativação de fim de ano"
+        :title="campanha.titulo || 'Reativação de fim de ano'"
         :subtitle="campanha.resumo || ''"
         icon="i-lucide-message-circle"
       >

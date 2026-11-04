@@ -7,32 +7,43 @@
 # payload(account) devolve o YAML já com as edições aplicadas, os públicos em
 # ordem de prioridade e, por público, a coluna do funil da casa que bate em
 # coluna_regex com a contagem de cards de hoje.
-module Cevico::ReactivationMessages
+module Cevico::ReactivationMessages # rubocop:disable Metrics/ModuleLength
   module_function
 
   PATH = Rails.root.join('config/cevico/reativacao_fim_de_ano.yml')
+  # 👓 03/11: cada ramo tem o seu arquivo; a ótica reativa a base do SavWin
+  PATHS = { 'otica' => Rails.root.join('config/otica/reativacao_base.yml') }.freeze
   SETTING_KEY = 'reactivation_messages'.freeze
   TEXT_MAX = 1500
   TITLE_MAX = 120
 
   # lê o YAML uma vez por mudança do arquivo (mtime): em development a edição
   # do arquivo aparece na hora; em produção o arquivo não muda sem deploy
-  def load
-    mtime = File.mtime(PATH)
-    return @cache[:data] if @cache && @cache[:mtime] == mtime
+  # o arquivo do ramo da empresa (clínica = o original; ótica = a base do SavWin)
+  def path_for(account)
+    return PATH if account.nil?
 
-    data = YAML.safe_load_file(PATH, aliases: false) || {}
-    @cache = { mtime: mtime, data: data }
+    PATHS[Cevico::Company.for(account).segment] || PATH
+  end
+
+  def load(path = PATH)
+    @cache ||= {}
+    mtime = File.mtime(path)
+    entry = @cache[path.to_s]
+    return entry[:data] if entry && entry[:mtime] == mtime
+
+    data = YAML.safe_load_file(path, aliases: false) || {}
+    @cache[path.to_s] = { mtime: mtime, data: data }
     data
   end
 
-  def publicos
-    Array(load['publicos']).sort_by { |p| p['prioridade'].to_i }
+  def publicos(account = nil)
+    Array(load(path_for(account))['publicos']).sort_by { |p| p['prioridade'].to_i }
   end
 
   # { id => { 'publico' => key, 'frente' => key, 'titulo' => …, 'texto' => … } }
-  def messages_index
-    publicos.each_with_object({}) do |publico, index|
+  def messages_index(account = nil)
+    publicos(account).each_with_object({}) do |publico, index|
       (publico['mensagens'] || {}).each do |frente, list|
         Array(list).each do |msg|
           index[msg['id'].to_s] = msg.merge('publico' => publico['key'], 'frente' => frente)
@@ -41,8 +52,8 @@ module Cevico::ReactivationMessages
     end
   end
 
-  def find_message(id)
-    messages_index[id.to_s]
+  def find_message(id, account = nil)
+    messages_index(account)[id.to_s]
   end
 
   def edits_for(account)
@@ -53,16 +64,17 @@ module Cevico::ReactivationMessages
   def payload(account)
     edits = edits_for(account)
     names = editor_names(account, edits)
-    stages = house_stages(account)
-    list = publicos.map { |publico| publico_payload(publico, edits, names, stages) }
+    data = load(path_for(account))
+    stages = house_stages(account, data.dig('campanha', 'funil_regex'))
+    list = publicos(account).map { |publico| publico_payload(publico, edits, names, stages) }
     all = list.flat_map { |p| p[:mensagens].values.flatten }
-    { campanha: load['campanha'] || {}, frentes: Array(load['frentes']), publicos: list,
+    { campanha: data['campanha'] || {}, frentes: Array(data['frentes']), publicos: list,
       totais: { publicos: list.size, mensagens: all.size, editadas: all.count { |m| m[:editado] } } }
   end
 
   # uma mensagem só, já com a edição aplicada (resposta do salvar/restaurar)
   def message_payload(account, id)
-    original = find_message(id)
+    original = find_message(id, account)
     return nil unless original
 
     edits = edits_for(account)
@@ -104,12 +116,14 @@ module Cevico::ReactivationMessages
       editado: edit.any?, editado_em: edit['em'], editado_por: names[edit['por'].to_i] }
   end
 
-  # colunas do funil da casa (o primeiro por position, nunca o do Oftalmofácil)
-  def house_stages(account)
+  # colunas do funil da casa (o primeiro por position, nunca o do Oftalmofácil;
+  # o arquivo do ramo pode apontar outro funil pelo nome em campanha.funil_regex)
+  def house_stages(account, funil_regex = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     partner_id = Crm::PartnerGuard.partner_pipeline_id(account)
     pipelines = Crm::Pipeline.where(account_id: account.id).order(:position, :id)
     pipelines = pipelines.where.not(id: partner_id) if partner_id
-    pipeline = pipelines.first
+    pipeline = funil_regex.present? ? pipelines.to_a.find { |p| p.name.to_s.match?(Regexp.new(funil_regex, Regexp::IGNORECASE)) } : nil
+    pipeline ||= pipelines.first
     return [] unless pipeline
 
     stages = pipeline.stages.to_a

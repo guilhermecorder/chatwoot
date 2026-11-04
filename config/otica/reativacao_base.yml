@@ -1,0 +1,98 @@
+# 👓 REATIVAÇÃO DA BASE DA SUA ÓTICA (03/11/2026)
+#
+# Mensagens PRONTAS de WhatsApp para chamar quem já comprou na loja, por
+# público (coluna do funil "Pós-venda e relacionamento", em ordem de
+# prioridade 1 → 3) e por frente (na ótica há uma só: padrao). Este arquivo é
+# o ORIGINAL; o que for editado na tela (Marketing → Campanhas → Reativação)
+# fica por cima, em agenda_config['reactivation_messages'] (por id), com
+# "Restaurar original". Quem escolhe este arquivo em vez do da clínica é o
+# ramo da empresa (Cevico::Company#segment == 'otica').
+#
+# Quem entra em cada público: o importador da base (Otica::BaseImport) lê a
+# exportação do SavWin e leva cada cliente para a coluna do seu segmento
+# (segmentação em campanhas/reativacao-base/PLANO.md da pasta OTICA):
+#   S3 multifocal há mais de 18 meses   → "Multifocal há mais de 18 meses"
+#   S2 última compra há 6 a 12 meses    → "6 meses (segundo óculos)"
+#   S1 última compra há 12 a 36 meses   → "1 ano ou parcelas acabaram (nova oferta)"
+#   S0 menos de 6 meses (não recebe)    → "Base: compra recente"
+#   S4 aniversário da semana            → etiqueta base_s4 (campanha semanal, fora deste plano)
+# Voz: a Val, da Sua Ótica; curta, simples, informa e convida; sem "promoção"
+# nem "desconto" (é "condição"); valores só os do roteiro. Variáveis:
+# {{nome}} = primeiro nome (no modelo da Meta vira {{1}}); o tempo desde a
+# compra ("há 2 anos") fica no texto do modelo quando a Meta aprovar {{2}}.
+campanha:
+  titulo: Reativação da base (SavWin)
+  funil_regex: "p[óo]s-venda"
+  resumo: >-
+    Chamar quem já comprou na Sua Ótica, do mais provável ao menos: quem usa
+    multifocal há mais de um ano e meio (lente digital nova + conferir o grau),
+    quem comprou há 6 a 12 meses (segundo óculos: sol com grau ou reserva) e
+    quem comprou há 1 a 3 anos (renovar com condição de cliente da casa).
+    Cada pessoa recebe uma mensagem só; quem responde cai com a Val no
+    WhatsApp e o agente segue o roteiro da campanha para a base.
+  variavel: "{{nome}}"
+  regras:
+    - "Cada mensagem é UMA ideia: a lente nova, o segundo óculos ou renovar o grau."
+    - "Valores só os do roteiro: óculos completo a partir de R$ 399 em até 10x; exame com a Fabi por R$ 30. Nada de 'promoção' ou 'desconto': é 'condição de cliente da casa'."
+    - "Nunca: melhor da região, grátis, garantia de adaptação, última vaga."
+    - "A mensagem sai como MODELO aprovado pela Meta (categoria Marketing), com a linha de opt-out: {{nome}} vira {{1}}."
+
+frentes:
+  - key: padrao
+    titulo: Óculos de grau
+    sub: Lentes e armações da loja
+    cor: "#1E7A4C"
+    icone: i-lucide-glasses
+
+publicos:
+  - key: multifocal
+    prioridade: 1
+    titulo: Multifocal há mais de 18 meses
+    sub: Comprou multifocal há 18 meses ou mais. Lente digital de campo amplo + conferir o grau.
+    coluna_regex: "multifocal"
+    mensagens:
+      padrao:
+        - id: otica_base_multifocal_a
+          titulo: Como está a adaptação hoje?
+          texto: |-
+            Oi, {{nome}}! Aqui é a Val, da Sua Ótica. Você fez o seu multifocal com a gente faz um tempo. Como está a adaptação hoje: a lateral embaça, cansa na tela? Chegou uma lente digital com o campo nítido bem maior, e depois desse tempo vale conferir o grau. Quer que eu te conte como funciona?
+            Se preferir não receber mensagens, responda SAIR.
+        - id: otica_base_multifocal_b
+          titulo: Ainda vira a cabeça pra achar o ponto nítido?
+          texto: |-
+            Oi, {{nome}}! Aqui é a Val, da Sua Ótica. A pergunta que a gente faz a todo cliente de multifocal: você ainda vira a cabeça pra achar o ponto nítido? A lente digital nova resolve isso, e cliente da casa tem condição pra trocar. Posso te explicar em duas mensagens?
+            Se preferir não receber mensagens, responda SAIR.
+  - key: segundo
+    prioridade: 2
+    titulo: Segundo óculos (6 a 12 meses)
+    sub: Grau em dia. Óculos de sol com grau ou um reserva, com condição no segundo par.
+    coluna_regex: "6 meses"
+    mensagens:
+      padrao:
+        - id: otica_base_segundo_a
+          titulo: Pensei em você pro segundo par
+          texto: |-
+            Oi, {{nome}}! Aqui é a Val, da Sua Ótica. Seu óculos é recente, então o grau está em dia. Pensei em você pro segundo par: um óculos de sol com o seu grau, ou um reserva pro trabalho. Pra quem já é cliente, tem condição no segundo óculos. Quer que eu te passe?
+            Se preferir não receber mensagens, responda SAIR.
+        - id: otica_base_segundo_b
+          titulo: O sol de verão está chegando
+          texto: |-
+            Oi, {{nome}}! Aqui é a Val, da Sua Ótica. O sol de verão está chegando e o seu grau está em dia com a gente. Que tal um óculos de sol com o seu grau, pra dirigir e sair sem trocar de óculos? Cliente da casa tem condição no segundo par. Posso te mostrar as opções?
+            Se preferir não receber mensagens, responda SAIR.
+  - key: renovar
+    prioridade: 3
+    titulo: Renovar (1 a 3 anos)
+    sub: Última compra há 12 a 36 meses. Conferir o grau com a Fabi e renovar com condição de cliente da casa.
+    coluna_regex: "1 ano"
+    mensagens:
+      padrao:
+        - id: otica_base_renovar_a
+          titulo: A loja mudou bastante
+          texto: |-
+            Oi, {{nome}}! Aqui é a Val, da Sua Ótica, do Jardim Cachoeira. Você fez o seu óculos com a gente faz mais de um ano. Depois desse tempo o grau costuma mudar um pouco, e a loja mudou bastante: reformamos tudo e o jeito de atender também. Cliente da casa tem condição pra renovar o óculos. Quer que eu te conte?
+            Se preferir não receber mensagens, responda SAIR.
+        - id: otica_base_renovar_b
+          titulo: Lente riscada, grau que mudou ou armação cansada?
+          texto: |-
+            Oi, {{nome}}! Aqui é a Val, da Sua Ótica. Seu óculos já tem mais de um ano. Lente riscada, grau que parece que mudou, ou armação cansada? Qualquer um dos três é sinal de renovar. A Fabi confere o seu grau aqui na loja por 30 reais e a gente te mostra a lente certa pro seu dia, com condição de cliente da casa. Quer que eu veja um horário?
+            Se preferir não receber mensagens, responda SAIR.

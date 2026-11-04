@@ -261,7 +261,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # reset=1 apaga a edição e volta ao original do YAML
   def update_reactivation_message
     id = params[:id].to_s
-    return render json: { error: 'Mensagem não encontrada.' }, status: :not_found unless Cevico::ReactivationMessages.find_message(id)
+    return render json: { error: 'Mensagem não encontrada.' }, status: :not_found unless Cevico::ReactivationMessages.find_message(id, Current.account)
 
     error = reactivation_apply!(id)
     return render json: { error: error }, status: :unprocessable_entity if error

@@ -19,14 +19,16 @@ funis:
       - ['Pedido fechado (1ª compra)', '#10B981']
       - ['Não fechou ainda', '#F97316']
   - nome: 'Pós-venda e relacionamento'
-    descricao: 'Cliente da base: do pedido fechado para sempre (NPS, ajuste, segundo óculos, nova oferta). Agente: Atendente Pós-compra.'
+    descricao: 'Cliente da base: do pedido fechado para sempre (NPS, ajuste, segundo óculos, nova oferta) e a base importada do SavWin por segmento. Agente: Atendente Pós-compra.'
     colunas:
       - ['Pedido em produção', '#64748B']
       - ['Pronto para retirar', '#2563EB']
       - ['Retirou o óculos', '#16A34A']
       - ['1 semana (NPS e Google)', '#0891B2']
       - ['30 dias (ajuste e limpeza)', '#06B6D4']
+      - ['Base: compra recente', '#94A3B8']
       - ['6 meses (segundo óculos)', '#D97706']
+      - ['Multifocal há mais de 18 meses', '#7C3AED']
       - ['1 ano ou parcelas acabaram (nova oferta)', '#D4A017']
       - ['Nova oferta em conversa', '#8B5CF6']
       - ['Comprou de novo', '#10B981']
@@ -53,7 +55,8 @@ agentes:
     colunas: ['Agendamento da visita', 'Visita confirmada', 'Desmarcou ou não veio']
   atendente_pos_op:
     colunas: ['Pedido fechado (1ª compra)', 'Pedido em produção', 'Pronto para retirar', 'Retirou o óculos', '1 semana (NPS e Google)',
-              '30 dias (ajuste e limpeza)', '6 meses (segundo óculos)', '1 ano ou parcelas acabaram (nova oferta)', 'Comprou de novo', 'Sem resposta']
+              '30 dias (ajuste e limpeza)', 'Base: compra recente', '6 meses (segundo óculos)', 'Multifocal há mais de 18 meses',
+              '1 ano ou parcelas acabaram (nova oferta)', 'Comprou de novo', 'Sem resposta']
     dias_pos_compra: 0
 
 etiquetas:

@@ -21,7 +21,7 @@ RSpec.describe Otica::Preparo do
     described_class.new(account, content: content).call
 
     expect(Crm::Pipeline.where(account_id: account.id).order(:position).pluck(:name)).to eq(['Aquisição', 'Pós-venda e relacionamento'])
-    expect(Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: account.id }).count).to eq(18)
+    expect(Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: account.id }).count).to eq(20)
     expect(Cevico::Company.for(account).segment).to eq('otica')
 
     setting = CrmSetting.find_by(account: account)

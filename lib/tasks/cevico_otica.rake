@@ -33,6 +33,18 @@ namespace :cevico do # rubocop:disable Metrics/BlockLength
            "#{data['journey'].size} texto(s) da Jornada."
     end
 
+    # 👓 base de clientes do SavWin → contatos + etiquetas + cards no funil
+    # "Pós-venda e relacionamento" (Otica::BaseImport). DRY=1 só mostra.
+    #   bundle exec rake "cevico:otica:base[1,/app/tmp/clientes.csv]"
+    desc 'Importa a base de clientes do SavWin (CSV) para a conta: contatos, etiquetas por segmento e cards no funil de pós-venda'
+    task :base, [:account_id, :arquivo] => :environment do |_t, args|
+      account = Account.find(args[:account_id].presence || ENV.fetch('ACCOUNT_ID'))
+      path = args[:arquivo].presence || ENV.fetch('ARQUIVO')
+      abort "Arquivo não encontrado: #{path}" unless File.exist?(path)
+      importer = Otica::BaseImport.new(account, File.binread(path), dry: ENV['DRY'] == '1').call
+      puts(importer.report_lines.map { |l| "- #{l}" })
+    end
+
     desc 'Dados de exemplo da fase 1 (produtos, laboratório, cliente, O.S.) na conta informada'
     task :exemplos, [:account_id] => :environment do |_t, args| # rubocop:disable Metrics/BlockLength
       account = Account.find(args[:account_id] || ENV.fetch('ACCOUNT_ID'))
