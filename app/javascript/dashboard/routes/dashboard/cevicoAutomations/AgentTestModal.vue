@@ -7,6 +7,7 @@
 import { ref, computed, nextTick, onMounted } from 'vue';
 import { useAlert } from 'dashboard/composables';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CrmAPI from 'dashboard/api/crm';
 import GuidanceModal from './GuidanceModal.vue';
 
@@ -27,6 +28,11 @@ const emit = defineEmits(['close', 'edit-script', 'guided']);
 // como `objective` no início (de onde a conversa parou: "orçamento enviado,
 // sem resposta há 2 dias"); vazio = o padrão do servidor.
 const isVoice = computed(() => props.agentKey === 'voice');
+// 👓 03/11: a empresa diz quem está do outro lado (paciente × cliente) e
+// quais falas prontas fazem sentido (clínica × ótica)
+const { company, word } = useCevicoAccess();
+const isOtica = computed(() => company.value?.segment === 'otica');
+const who = computed(() => word('paciente'));
 const objective = ref('');
 // 🧪 22/09: Roteiro atual × v2 paralelo — trocar recomeça a conversa, porque
 // a conversa de teste fica presa à versão em que nasceu (não mistura)
@@ -92,9 +98,23 @@ const VOICE_SUGGESTIONS = [
   'você é um robô?',
   'não tenho interesse, obrigado',
 ];
-const suggestions = computed(() =>
-  isVoice.value ? VOICE_SUGGESTIONS : SUGGESTIONS
-);
+// 👓 falas típicas de quem chama uma ótica de bairro pelo WhatsApp
+const OTICA_SUGGESTIONS = [
+  'oi, quanto custa um óculos de grau?',
+  'preciso ver um óculos novo, meu grau mudou',
+  'quanto fica o multifocal?',
+  'nunca usei óculos, tô com dor de cabeça na tela',
+  'quanto custa o exame de vista?',
+  'achei caro',
+  'pode ser sábado de manhã?',
+  'meu óculos já ficou pronto?',
+  'você é um robô?',
+  'peguei o óculos ontem e a lateral tá embaçando',
+];
+const suggestions = computed(() => {
+  if (isVoice.value) return VOICE_SUGGESTIONS;
+  return isOtica.value ? OTICA_SUGGESTIONS : SUGGESTIONS;
+});
 
 const scrollToEnd = async () => {
   await nextTick();
@@ -250,7 +270,7 @@ const guide = turn => {
               Caixa interna, sem ligação: ninguém recebe nada.
             </p>
             <p v-else class="text-[11px] opacity-80">
-              Você é o paciente. O agente responde com a IA de verdade e o
+              Você é o {{ who }}. O agente responde com a IA de verdade e o
               {{ isV2 ? 'Roteiro 2 · Otimizado pela análise (só existe neste teste)' : 'Roteiro 1 · Fiel ao N8N (o que os atendentes leem)' }}.
               Caixa interna, sem canal de envio: nada vai para telefone nenhum.
             </p>
@@ -324,7 +344,7 @@ const guide = turn => {
             {{ isVoice ? 'ligação de teste' : 'conversa de teste' }} #{{
               displayId
             }}
-            · {{ isVoice ? 'lead de teste' : 'paciente de teste' }} ·
+            · {{ isVoice ? 'lead de teste' : `${who} de teste` }} ·
             {{ new Date().toLocaleDateString('pt-BR') }}<template v-if="!isVoice">
               · {{ isV2 ? 'Roteiro 2 · Otimizado' : 'Roteiro 1 · Fiel ao N8N' }}</template>
           </p>
@@ -336,7 +356,7 @@ const guide = turn => {
                 <p class="whitespace-pre-wrap">{{ t.text }}</p>
                 <span class="cv-bubble-time">{{ fmtTime(t.at) }} ·
                   {{
-                    isVoice ? 'você (lead, ao telefone)' : 'você (paciente)'
+                    isVoice ? 'você (lead, ao telefone)' : `você (${who})`
                   }}</span>
               </div>
             </div>
@@ -451,7 +471,7 @@ class="cv-chip cv-slate"
               :placeholder="
                 isVoice
                   ? 'Escreva o que o lead diria ao telefone… (Enter envia, Shift+Enter quebra linha)'
-                  : 'Escreva como o paciente… (Enter envia, Shift+Enter quebra linha)'
+                  : `Escreva como o ${who}… (Enter envia, Shift+Enter quebra linha)`
               "
               :disabled="isSending || isStarting"
               @keydown.enter.exact.prevent="send()"
