@@ -39,7 +39,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     @page.track_hit!('view', source: origin_slug, variant: @page.serving_variant)
     # rastreio de ORIGEM (plano 100+ páginas): visita entra no balde
     # página/dia/origem/campanha — Google Ads, SEO, Meta, funil, direto
-    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer)
+    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer, account: @page.account)
     CevicoPageTraffic.bump!(page: @page, kind: 'view', source: trk[:source], campaign: trk[:campaign])
     return render_custom_page if @page.custom_html.present?
 
@@ -140,7 +140,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     return render plain: 'Página não encontrada.', status: :not_found if @page.nil? || @page.cta_url.blank?
 
     @page.track_hit!('cta', variant: requested_variant(@page))
-    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer)
+    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer, account: @page.account)
     CevicoPageTraffic.bump!(page: @page, kind: 'cta', source: trk[:source], campaign: trk[:campaign])
     redirect_to url_with_protocol(@page) || @page.cta_url, allow_other_host: true
   end
@@ -151,7 +151,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     page = CevicoPage.published.find_by(slug: params[:slug])
     return head :not_found if page.nil?
 
-    trk = Cevico::TrafficSource.classify(params, referer: request.referer)
+    trk = Cevico::TrafficSource.classify(params, referer: request.referer, account: page.account)
     CevicoPageTraffic.bump!(page: page, kind: 'cta', source: trk[:source], campaign: trk[:campaign])
     # item 306: o clique conta para a variação que o visitante viu, e a letra
     # viaja no Protocolo — é ela que diz qual headline trouxe o LEAD

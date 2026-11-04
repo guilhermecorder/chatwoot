@@ -24,6 +24,7 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
       since: since_date,
       until: until_date,
       sources: Cevico::TrafficSource::SOURCES,
+      source_rules: Cevico::TrafficSource.rules_for(Current.account), # 🧭 item 385
       rows: report.rows,
       protocol: report.protocol,
       totals: report.totals,

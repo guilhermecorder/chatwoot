@@ -67,13 +67,19 @@ class Cevico::LeadRoster
     Set.new
   end
 
+  def source_rules
+    @source_rules ||= Cevico::TrafficSource.rules_for(@account)
+  end
+
   def row(contact, conversation, pages, cards)
     ads = contact.additional_attributes['page_ads'] || {}
     page = pages[ads['page_id']] || { slug: 'hub', title: ads['title'].presence || 'Linktree (porta de entrada)' }
     {
       id: contact.id, nome: contact.name.presence || 'Sem nome', telefone: contact.phone_number,
       pagina: page[:title], slug: page[:slug],
-      origem: ads['source'].presence || 'direto', campanha: ads['campaign'].presence,
+      # 🧭 item 385: a origem com as regras de hoje + POR QUÊ foi classificada assim
+      origem: Cevico::TrafficSource.effective_source(ads, source_rules), campanha: ads['campaign'].presence,
+      motivo: Cevico::TrafficSource.reason(ads, source_rules),
       em: ads['captured_at'], via: ads['via'].presence || 'whatsapp',
       pre_analise: contact.additional_attributes.dig(ATTR_PRE, 'respostas'),
       conversa: conversation, agendou: cards.include?(contact.id)

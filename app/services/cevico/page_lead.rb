@@ -113,8 +113,8 @@ class Cevico::PageLead
   end
 
   def mint_ref
-    data = Cevico::TrafficSource.snapshot(origin_params, page: @page, cookies: @request.cookies)
-    data['source'] = Cevico::TrafficSource.classify(origin_params, referer: @request.referer)[:source] if origin_params.blank?
+    data = Cevico::TrafficSource.snapshot(origin_params, page: @page, cookies: @request.cookies, referer: @request.referer)
+    data['source'] = Cevico::TrafficSource.classify(origin_params, referer: @request.referer, account: @page.account)[:source] if origin_params.blank?
     CevicoPageRef.mint!(page: @page, source_data: data.merge('via' => 'pagina_lead'))
   end
 

@@ -717,7 +717,7 @@ const fechar = () => {
 const PAINEL_METRICA = {
   leads: {
     campo: 'leads',
-    como: 'Lead = paciente que chegou na caixa do WhatsApp com o Protocolo da página (o código que vai na mensagem pronta). Conta pela data em que chegou.',
+    como: 'Lead = paciente que chegou na caixa do WhatsApp com o Protocolo da página (o código que vai na mensagem pronta). Conta pela data em que chegou. A ORIGEM é a da visita que gerou o Protocolo (o link que a pessoa clicou), não o tipo da página: um guia de SEO aberto por um anúncio do Google conta como Google Ads. Abaixo, cada lead com o motivo da classificação, e as regras suas por cima das automáticas.',
   },
   booked: {
     campo: 'booked',
@@ -725,7 +725,7 @@ const PAINEL_METRICA = {
   },
   conversions: {
     campo: 'conversions',
-    como: 'Dos leads do período, quem chegou numa etapa de cirurgia do CRM (mesma régua do relatório de Anúncios).',
+    como: 'Dos leads do período, quem chegou numa coluna de CIRURGIA do CRM (Cirurgia Agendada ou Realizada; as de indicação não contam). Não usa a etapa escolhida para a Meta — "agendou consulta" nunca vira cirurgia aqui.',
   },
   revenue: {
     campo: 'revenue',
@@ -738,6 +738,64 @@ const PAINEL_METRICA = {
   },
 };
 const metricaAberta = computed(() => PAINEL_METRICA[painel.value?.key] || null);
+
+// ── 🧭 item 385: QUEM SÃO os leads (com o motivo da origem) + REGRAS DE ORIGEM ──
+const leadsLista = ref([]);
+const leadsLoading = ref(false);
+const loadLeadsLista = async () => {
+  leadsLoading.value = true;
+  try {
+    const params = periodParams();
+    if (filtering.value) params.page_ids = [...filteredIds.value];
+    const { data } = await CrmAPI.getPagesReportLeads(params);
+    leadsLista.value = data.leads || [];
+  } catch {
+    leadsLista.value = [];
+  } finally {
+    leadsLoading.value = false;
+  }
+};
+watch(
+  () => painel.value?.key,
+  key => {
+    if (key === 'leads') loadLeadsLista();
+  }
+);
+const origemLabel = key => report.value?.sources?.[key] || key || 'direto';
+const sourceRules = computed(() => report.value?.source_rules || []);
+const ORIGENS_REGRA = ['google_ads', 'meta_ads', 'google_organico', 'social', 'outros_ads', 'funil', 'direto'];
+const novaRegra = ref({ utm_source: '', utm_medium: '', host: '', origem: 'google_ads' });
+const regraTexto = r =>
+  Object.entries(r.quando || {})
+    .map(([k, v]) => `${k === 'host' ? 'veio do site' : k} = ${v}`)
+    .join(' e ');
+const salvandoRegras = ref(false);
+const salvarRegras = async rules => {
+  salvandoRegras.value = true;
+  try {
+    await CrmAPI.updateGoogleAds({ traffic_source_rules: rules });
+    useAlert('Regras de origem salvas. Os números foram recalculados.');
+    await loadReport();
+    if (painel.value?.key === 'leads') loadLeadsLista();
+  } catch {
+    useAlert('Não deu para salvar as regras.');
+  } finally {
+    salvandoRegras.value = false;
+  }
+};
+const addRegra = () => {
+  const q = {};
+  ['utm_source', 'utm_medium', 'host'].forEach(k => {
+    if (String(novaRegra.value[k] || '').trim()) q[k] = String(novaRegra.value[k]).trim().toLowerCase();
+  });
+  if (!Object.keys(q).length) {
+    useAlert('Preencha pelo menos um campo (utm_source, utm_medium ou site).');
+    return;
+  }
+  salvarRegras([...sourceRules.value, { quando: q, origem: novaRegra.value.origem }]);
+  novaRegra.value = { utm_source: '', utm_medium: '', host: '', origem: 'google_ads' };
+};
+const removeRegra = idx => salvarRegras(sourceRules.value.filter((_, i) => i !== idx));
 const porPagina = campo =>
   rows.value
     .filter(r => r[campo] > 0)
@@ -2552,6 +2610,43 @@ const goTo = key => {
               </div>
             </div>
           </section>
+          <!-- 🧭 item 385: cada lead com o POR QUÊ da origem -->
+          <section v-if="metricaAberta.campo === 'leads'" class="cvg-painel-sec">
+            <h3>Quem são ({{ leadsLista.length }})</h3>
+            <p v-if="leadsLoading" class="cvg-texto-3">Buscando…</p>
+            <div v-for="l in leadsLista" :key="l.id" class="cvg-lead-linha">
+              <div class="cvg-pa-barra-linha">
+                <span class="cvg-lead-nome">{{ l.nome }}<small v-if="l.agendou" title="tem consulta marcada"> · agendou</small></span>
+                <b>{{ origemLabel(l.origem) }}</b>
+              </div>
+              <small class="cvg-texto-3">{{ l.pagina }} · {{ l.motivo }}<template v-if="l.campanha"> · campanha {{ l.campanha }}</template></small>
+            </div>
+            <p v-if="!leadsLoading && !leadsLista.length" class="cvg-texto-3">Nenhum lead no período.</p>
+          </section>
+          <!-- 🧭 item 385: regras do Guilherme por cima das automáticas -->
+          <section v-if="metricaAberta.campo === 'leads'" class="cvg-painel-sec">
+            <h3>Regras de origem (suas)</h3>
+            <p class="cvg-corpo">
+              Quando um link vier com estes dados, conte como a origem escolhida. Vale nas visitas novas e nos leads já registrados.
+              Sem regra, valem as automáticas: gclid ou utm_source=google + utm_medium=cpc → Google Ads · utm_source=meta/facebook/instagram + cpc → Meta Ads ·
+              veio do google sem anúncio → SEO · fbclid ou redes → Redes sociais · outro utm pago → Outros anúncios · sem nada → Direto.
+            </p>
+            <div v-for="(r, i) in sourceRules" :key="i" class="cvg-lead-linha">
+              <div class="cvg-pa-barra-linha">
+                <span>{{ i + 1 }}. {{ regraTexto(r) }} → <b>{{ origemLabel(r.origem) }}</b></span>
+                <button class="cvg-link" :disabled="salvandoRegras" @click="removeRegra(i)">tirar</button>
+              </div>
+            </div>
+            <div class="cvg-regra-form">
+              <input v-model="novaRegra.utm_source" class="cv-input !h-8" placeholder="utm_source (ex.: newsletter)" />
+              <input v-model="novaRegra.utm_medium" class="cv-input !h-8" placeholder="utm_medium (ex.: email)" />
+              <input v-model="novaRegra.host" class="cv-input !h-8" placeholder="veio do site (ex.: bing.)" />
+              <select v-model="novaRegra.origem" class="cv-input !h-8">
+                <option v-for="k in ORIGENS_REGRA" :key="k" :value="k">{{ origemLabel(k) }}</option>
+              </select>
+              <button class="cv-btn cv-btn-sm" :disabled="salvandoRegras" @click="addRegra">{{ salvandoRegras ? 'Salvando…' : 'Adicionar regra' }}</button>
+            </div>
+          </section>
           <section
             v-if="sourcesBy(metricaAberta.campo).length"
             class="cvg-painel-sec"
@@ -3025,6 +3120,27 @@ const goTo = key => {
 /* barras do painel lateral (o mesmo desenho da Visão geral) */
 .cvg-pa-barra {
   margin-bottom: 10px;
+}
+.cvg-lead-linha {
+  padding: 6px 0;
+  border-bottom: 1px dashed rgb(var(--cv-rgb) / 0.14);
+}
+.cvg-lead-nome {
+  font-weight: 600;
+}
+.cvg-regra-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+.cvg-regra-form .cv-btn {
+  grid-column: 1 / -1;
+}
+.cvg-link {
+  font-size: 12px;
+  text-decoration: underline;
+  opacity: 0.8;
 }
 .cvg-pa-barra-linha {
   display: flex;

@@ -193,9 +193,15 @@ class Cevico::TrafficReport # rubocop:disable Metrics/ClassLength
             .where("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz <= ?", until_date.end_of_day)
             .pluck(:id,
                    Arel.sql("(additional_attributes -> 'page_ads' ->> 'page_id')::bigint"),
-                   Arel.sql("additional_attributes -> 'page_ads' ->> 'source'"),
+                   Arel.sql("additional_attributes -> 'page_ads'"),
                    Arel.sql("additional_attributes -> 'page_ads' ->> 'campaign'"),
                    Arel.sql("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz"))
+            .map { |id, page_id, ads, campaign, at| [id, page_id, Cevico::TrafficSource.effective_source(ads, source_rules), campaign, at] }
+  end
+
+  # 🧭 item 385: as regras de origem do Guilherme valem também para os leads já carimbados
+  def source_rules
+    @source_rules ||= Cevico::TrafficSource.rules_for(@account)
   end
 
   def add_leads(by_page)
@@ -220,27 +226,23 @@ class Cevico::TrafficReport # rubocop:disable Metrics/ClassLength
     booked_contact_ids.include?(contact_id)
   end
 
-  # contatos que AGENDARAM consulta (consulta da Agenda ligada ao contato)
+  # contatos que AGENDARAM consulta (consulta da Agenda ligada ao contato, não cancelada)
   def booked_contact_ids
     @booked_contact_ids ||= begin
       ids = attributed_leads.map(&:first)
-      ids.empty? ? Set.new : @account.tasks.where(task_type: 'consulta', contact_id: ids).distinct.pluck(:contact_id).to_set
+      ids.empty? ? Set.new : @account.tasks.where(task_type: 'consulta', contact_id: ids, canceled_at: nil).distinct.pluck(:contact_id).to_set
     end
   end
 
-  # mesma régua do relatório de Anúncios: etapas com "cirurgia" no nome
-  # (sem as de indicação), ou as escolhidas na config do Meta Ads
+  # 🩺 item 385 (04/11, "está dando 5 cirurgias — será que não está confundindo
+  # com consulta?"): CIRURGIA aqui é SÓ a coluna de cirurgia do CRM (Cirurgia
+  # Agendada / Realizada, sem as de indicação). A etapa de conversão escolhida
+  # para a Meta (que pode ser "agendou") não entra mais nesta conta.
   def conversion_stage_ids
     @conversion_stage_ids ||= begin
-      configured = Array(meta_config['conversion_stage_ids']).map(&:to_i).reject(&:zero?)
-      if configured.any?
-        configured
-      else
-        base = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: @account.id })
-                         .where('crm_stages.name ILIKE ?', '%cirurgia%')
-        strict = base.where.not('crm_stages.name ILIKE ?', '%indica%').pluck(:id)
-        strict.any? ? strict : base.pluck(:id)
-      end
+      base = Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: @account.id })
+                       .where('crm_stages.name ILIKE ?', '%cirurgia%')
+      base.where.not('crm_stages.name ILIKE ?', '%indica%').pluck(:id)
     end
   end
 

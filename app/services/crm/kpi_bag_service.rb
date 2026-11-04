@@ -101,7 +101,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     # quem é: consulta marcada de LEAD NOVO (chegou há até 30 dias) × de
     # paciente da BASE (mais antigo ou sem cadastro). "Entrou em Agendamento"
     # continua sendo a mudança de coluna no CRM (taxa oficial do item 233).
-    add.call('appointments_booked', 'Consultas marcadas (leads novos + base; sem exame/tele)', 'n',
+    add.call('appointments_booked', 'Consultas marcadas (primeira consulta; leads novos + base; sem exame/tele/retorno/pós-op)', 'n',
              booked(since, until_at), booked(prev_since, prev_until), 'tasks.created_at')
     add.call('appointments_booked_new', 'Consultas marcadas de LEADS NOVOS (chegaram há até 30 dias)', 'n',
              booked_new_leads(since, until_at), booked_new_leads(prev_since, prev_until), 'tasks.created_at')
@@ -226,7 +226,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     scope = tasks.bookings.where(task_type: 'consulta', created_at: since..until_at)
                  .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
                  .where(canceled_at: nil) # item 233: sem exame, tele ou cancelada
-                 .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
+                 .primeira_consulta # item 385: retorno e pós-op também ficam fora
     # sem lente: os parceiros ficam fora pela regra antiga; com lente, é ela quem separa
     @lens ? scope : scope.where(source_detail: nil).not_partner_origin
   end

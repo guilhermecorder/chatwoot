@@ -682,7 +682,7 @@ const pessoaSub = p => {
               :comparacao="cmpVolume(vol('marcadas'))"
               :contexto="ctxVolume(vol('marcadas'))"
               heroi
-              pe="volume total da Agenda"
+              pe="primeiras consultas · retorno e pós-op fora"
               @abrir="
                 abrir(
                   'vol:marcadas',

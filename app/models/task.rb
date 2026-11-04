@@ -167,6 +167,11 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   BOOKING_KINDS = %w[agendamento registro].freeze
   validates :booking_kind, inclusion: { in: BOOKING_KINDS }, allow_blank: true
   scope :bookings, -> { where("tasks.booking_kind IS NULL OR tasks.booking_kind <> 'registro'") }
+  # 📅 item 385 (04/11, "apontou 23 consultas marcadas, mas foram 10"): "consulta
+  # marcada" é a PRIMEIRA consulta (avaliação). Retorno e pós-op são marcados pela
+  # própria clínica depois da consulta — contam à parte. Exame e tele já ficavam fora.
+  scope :primeira_consulta, -> { where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames', 'retorno', 'pos_op')") }
+  scope :retorno_ou_pos_op, -> { where(modality: %w[retorno pos_op]) }
 
   def registered_only?
     booking_kind == 'registro'

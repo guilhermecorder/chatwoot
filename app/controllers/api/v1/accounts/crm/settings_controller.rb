@@ -499,6 +499,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # Google Ads API: developer token (Central de API) + ID da conta
     cfg['developer_token'] = params[:developer_token] if params[:developer_token].present?
     cfg['customer_id']     = params[:customer_id]     if params.key?(:customer_id)
+    # 🧭 item 385: regras de origem das visitas (utm/site → Google Ads, Meta, SEO…)
+    cfg['traffic_source_rules'] = Cevico::TrafficSource.sanitize_rules(params[:traffic_source_rules]) if params.key?(:traffic_source_rules)
     apply_google_cost_config(cfg)
     apply_google_ads_api_config(cfg)
     crm_settings.update!(google_ads_config: cfg)
@@ -2934,6 +2936,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg = s.google_ads_config || {}
     {
       measurement_id: cfg['measurement_id'],
+      traffic_source_rules: Cevico::TrafficSource.sanitize_rules(cfg['traffic_source_rules']),
       api_secret_set: cfg['api_secret'].present?,
       client_id: cfg['client_id'],
       developer_token_set: cfg['developer_token'].present?,
