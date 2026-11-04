@@ -40,7 +40,11 @@ class Otica::BaseImport # rubocop:disable Metrics/ClassLength
     'lente' => :lens, 'tipo_lente' => :lens, 'tipo_de_lente' => :lens, 'lentes' => :lens, 'produto' => :lens,
     'descricao' => :lens, 'grife' => :lens, 'linha' => :lens, 'produtos' => :lens,
     'vendedor' => :seller, 'vendedora' => :seller,
-    'email' => :email, 'e_mail' => :email
+    'email' => :email, 'e_mail' => :email,
+    'qtd_compras' => :purchases, 'compras' => :purchases, 'quantidade_compras' => :purchases,
+    'primeira_compra' => :first_purchase, 'data_primeira_compra' => :first_purchase,
+    'total_gasto' => :total_spent, 'total_compras' => :total_spent, 'valor_acumulado' => :total_spent,
+    'medico' => :doctor, 'medico_indicador' => :doctor, 'indicacao' => :doctor, 'oftalmologista' => :doctor
   }.freeze
   SEGMENTS = {
     's0' => 'Base: compra recente', 's2' => '6 meses', 's1' => '1 ano', 's3' => 'Multifocal'
@@ -60,7 +64,11 @@ class Otica::BaseImport # rubocop:disable Metrics/ClassLength
     ['vendedora', 'text', 'Vendedora'],
     ['nascimento', 'date', 'Data de nascimento'],
     ['origem_base', 'text', 'Origem da base'],
-    ['segmento_base', 'text', 'Segmento da base']
+    ['segmento_base', 'text', 'Segmento da base'],
+    ['qtd_compras', 'number', 'Quantidade de compras'],
+    ['primeira_compra', 'date', 'Primeira compra'],
+    ['total_gasto', 'currency', 'Total gasto na loja'],
+    ['medico_indicador', 'text', 'Médico que indicou']
   ].freeze
   # colunas "vivas": o card de quem está aqui não é mexido pela importação
   LIVE_STAGE = /em conversa|comprou de novo|pedido em produ|pronto para retirar/i
@@ -159,6 +167,9 @@ class Otica::BaseImport # rubocop:disable Metrics/ClassLength
       c[:last_purchase] = self.class.parse_date(c[:last_purchase])
       c[:birthdate] = self.class.parse_date(c[:birthdate])
       c[:amount] = self.class.parse_amount(c[:amount])
+      c[:first_purchase] = self.class.parse_date(c[:first_purchase])
+      c[:total_spent] = self.class.parse_amount(c[:total_spent])
+      c[:purchases] = c[:purchases].to_s[/\d+/]&.to_i
       if (prev = clients[phone])
         @report[:repetidas] += 1
         next if prev[:last_purchase] && c[:last_purchase] && c[:last_purchase] <= prev[:last_purchase]
@@ -237,7 +248,9 @@ class Otica::BaseImport # rubocop:disable Metrics/ClassLength
     contact = @account.contacts.find_by(phone_number: row[:phone])
     attrs = (contact&.custom_attributes || {}).merge(
       'ultima_compra' => row[:last_purchase]&.iso8601, 'valor_ultima_compra' => row[:amount], 'tipo_lente' => row[:lens].presence,
-      'vendedora' => row[:seller].presence, 'nascimento' => row[:birthdate]&.iso8601, 'origem_base' => 'savwin', 'segmento_base' => seg
+      'vendedora' => row[:seller].presence, 'nascimento' => row[:birthdate]&.iso8601, 'origem_base' => 'savwin', 'segmento_base' => seg,
+      'qtd_compras' => row[:purchases], 'primeira_compra' => row[:first_purchase]&.iso8601, 'total_gasto' => row[:total_spent],
+      'medico_indicador' => row[:doctor].presence
     ).compact
     if contact
       contact.name = row[:name] if row[:name].present? && (contact.name.blank? || contact.name.to_s.match?(/\A[\d\s+()-]+\z/))
