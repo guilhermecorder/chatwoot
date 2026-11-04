@@ -164,7 +164,13 @@ const testSheets = async () => {
 // ga4_property_id + service_account_json (item 155): a LEITURA (cliques,
 // custo, palavras-chave, investimento automático) usa a GA4 Data API —
 // esses 2 campos só existiam na tela antiga e o aviso apontava pra cá
-const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '', ga4_property_id: '', service_account_json: '', search_console_site: '' });
+const google = ref({ measurement_id: '', api_secret: '', client_id: '', developer_token: '', customer_id: '', ga4_property_id: '', service_account_json: '', search_console_site: '',
+  // 🎯 item 371: conversões direto no Google Ads (gclid)
+  login_customer_id: '', oauth_client_id: '', oauth_client_secret: '', oauth_refresh_token: '', ads_impersonate_email: '', conversions_via: 'ga4' });
+const isAdsPreparing = ref(false);
+const isAdsTesting = ref(false);
+const adsResult = ref(null);
+const showAdsHelp = ref(false);
 const isGoogleSaving = ref(false);
 const isGoogleTesting = ref(false);
 const googleTestResult = ref(null);
@@ -213,6 +219,12 @@ onMounted(async () => {
     ga4_property_id: g.ga4_property_id || '',
     service_account_json: '', // write-only, nunca volta do servidor
     search_console_site: g.search_console_site || 'sc-domain:cevico.com.br',
+    login_customer_id: g.login_customer_id || '',
+    oauth_client_id: g.oauth_client_id || '',
+    oauth_client_secret: '', // write-only
+    oauth_refresh_token: '', // write-only
+    ads_impersonate_email: g.ads_impersonate_email || '',
+    conversions_via: g.conversions_via || 'ga4',
   };
 
   sheets.value = { sheet_url: settings.value.sheets?.sheet_url || '' };
@@ -370,10 +382,19 @@ const saveGoogle = async () => {
     payload.ga4_property_id = google.value.ga4_property_id.trim();
     if (google.value.service_account_json.trim()) payload.service_account_json = google.value.service_account_json.trim();
     payload.search_console_site = google.value.search_console_site.trim();
+    // 🎯 item 371
+    payload.login_customer_id = google.value.login_customer_id.trim();
+    if (google.value.oauth_client_id.trim()) payload.oauth_client_id = google.value.oauth_client_id.trim();
+    if (google.value.oauth_client_secret.trim()) payload.oauth_client_secret = google.value.oauth_client_secret.trim();
+    if (google.value.oauth_refresh_token.trim()) payload.oauth_refresh_token = google.value.oauth_refresh_token.trim();
+    payload.ads_impersonate_email = google.value.ads_impersonate_email.trim();
+    payload.conversions_via = google.value.conversions_via;
     await store.dispatch('crm/updateGoogleAds', payload);
     google.value.api_secret = '';
     google.value.developer_token = '';
     google.value.service_account_json = '';
+    google.value.oauth_client_secret = '';
+    google.value.oauth_refresh_token = '';
     useAlert('Configurações do Google salvas');
   } catch {
     useAlert('Erro ao salvar configurações do Google.');
@@ -411,6 +432,40 @@ const testSearchConsole = async () => {
     isGscTesting.value = false;
   }
 };
+
+// 🎯 item 371: prepara o Google Ads (ações por etapa + variáveis) — salve antes
+const prepareGoogleAds = async () => {
+  isAdsPreparing.value = true;
+  adsResult.value = null;
+  try {
+    const data = await store.dispatch('crm/prepareGoogleAds');
+    const created = (data.created || []).length;
+    adsResult.value = data.success
+      ? { success: true, message: `Google Ads preparado: ${Object.keys(data.actions || {}).length} ações de conversão e ${Object.keys(data.variables || {}).length} variáveis.${created ? ` Criadas agora: ${data.created.join(', ')}.` : ' Já existiam — nada criado.'}` }
+      : { success: false, message: data.error || 'O Google Ads não respondeu.' };
+  } catch {
+    adsResult.value = { success: false, message: 'Erro inesperado ao preparar.' };
+  } finally {
+    isAdsPreparing.value = false;
+  }
+};
+
+const testGoogleAdsApi = async () => {
+  isAdsTesting.value = true;
+  adsResult.value = null;
+  try {
+    const data = await store.dispatch('crm/testGoogleAdsApi');
+    adsResult.value = data.success
+      ? { success: true, message: 'O Google Ads aceitou a conversão de teste (só validada, nada gravado). O envio direto está pronto.' }
+      : { success: false, message: data.error || 'O Google Ads não respondeu.' };
+  } catch {
+    adsResult.value = { success: false, message: 'Erro inesperado ao testar.' };
+  } finally {
+    isAdsTesting.value = false;
+  }
+};
+
+const adsActionsCount = computed(() => Object.keys(googleStatus.value.ads_actions || {}).length);
 
 const copyGscEmail = async () => {
   try {
@@ -817,7 +872,7 @@ const fetchWorkflows = async () => {
             </div>
             <div class="min-w-0">
               <h3 class="text-sm font-semibold text-n-slate-12">Google — GA4 e Google Ads</h3>
-              <p class="text-xs text-n-slate-10">Envia conversões (Measurement Protocol) e prepara os Insights do Google Ads</p>
+              <p class="text-xs text-n-slate-10">Envia conversões (GA4 ou direto no Google Ads pelo gclid) e lê o investimento</p>
             </div>
             <div class="ml-auto flex flex-col items-end gap-1 flex-shrink-0">
               <span
@@ -893,6 +948,100 @@ const fetchWorkflows = async () => {
                 placeholder="123-456-7890"
               />
             </div>
+          </div>
+
+          <!-- 🎯 item 371 (27/10): conversões DIRETO no Google Ads pelo código do
+               clique (gclid/gbraid/wbraid) guardado no Protocolo, com valor e
+               procedimento; sem clique, conversão aprimorada (telefone/e-mail). -->
+          <div class="mt-3 rounded-xl border border-n-weak bg-n-alpha-1 p-3 space-y-3">
+            <p class="text-xs font-medium text-n-slate-12">
+              🎯 Conversões direto no Google Ads (gclid)
+              <span v-if="googleStatus.conversions_via === 'ads_api' && googleStatus.ads_api_configured && adsActionsCount" class="text-green-600 font-normal">· ligado ✓ ({{ adsActionsCount }} ações)</span>
+              <span v-else-if="googleStatus.ads_api_configured" class="text-amber-600 font-normal">· acesso ok — falta preparar e ligar</span>
+              <span v-else class="text-amber-600 font-normal">· desligado — as conversões seguem pelo GA4</span>
+            </p>
+            <p class="text-[11px] text-n-slate-10 leading-relaxed">
+              Hoje a conversão vai ao GA4 e o Google Ads importa. Ligado, o sistema devolve cada etapa (agendou, compareceu,
+              fechou cirurgia) <b>direto no Google Ads</b>, amarrada ao clique do anúncio, com <b>valor</b> e <b>procedimento</b>.
+              Sem clique guardado, vai a conversão aprimorada (telefone e e-mail embaralhados).
+            </p>
+            <button class="flex items-center gap-2 text-xs text-n-brand" @click="showAdsHelp = !showAdsHelp">
+              <span :class="showAdsHelp ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'" />
+              Como ligar (uma vez)
+            </button>
+            <div v-if="showAdsHelp" class="text-[11px] text-n-slate-10 leading-relaxed space-y-0.5">
+              <p><b>1.</b> Developer Token e Customer ID acima (Google Ads → Ferramentas → Central de API). Conta gerenciada por uma MCC: informe o ID da MCC em "Conta de login".</p>
+              <p><b>2.</b> Acesso — um dos dois: <b>OAuth</b> (console.cloud.google.com → Credenciais → ID do cliente OAuth → gere o refresh token com a conta que acessa o Ads, escopo adwords) ou <b>conta de serviço</b> (a mesma do GA4, com delegação em todo o domínio no Workspace, representando um e-mail que acessa o Ads).</p>
+              <p><b>3.</b> Salvar → <b>Preparar no Google Ads</b> (cria as 5 ações "CEVICO · …" e as variáveis procedimento/pagina) → <b>Testar envio</b> → escolha "Direto no Google Ads" e salve.</p>
+              <p><b>4.</b> No Google Ads: deixe as ações "CEVICO · …" como <b>principais</b> e as importadas do GA4 como secundárias (senão conta duas vezes). Para a conversão aprimorada, ative "conversões aprimoradas para leads" em cada ação.</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Conta de login (MCC) <span class="text-n-slate-9 font-normal">(opcional)</span></label>
+                <input v-model="google.login_customer_id" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="123-456-7890" />
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Envio das conversões</label>
+                <select v-model="google.conversions_via" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12">
+                  <option value="ga4">Pelo GA4 (como hoje)</option>
+                  <option value="ads_api" :disabled="!googleStatus.ads_api_configured || !adsActionsCount">Direto no Google Ads (gclid)</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">OAuth — ID do cliente</label>
+                <input v-model="google.oauth_client_id" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="xxxx.apps.googleusercontent.com" />
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                  OAuth — chave secreta
+                  <span v-if="googleStatus.oauth_secret_set" class="text-green-600 font-normal">(já configurada)</span>
+                </label>
+                <input v-model="google.oauth_client_secret" type="password" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" :placeholder="googleStatus.oauth_secret_set ? 'Digite para substituir' : 'GOCSPX-…'" />
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+                  OAuth — refresh token
+                  <span v-if="googleStatus.oauth_refresh_token_set" class="text-green-600 font-normal">(já configurado)</span>
+                </label>
+                <input v-model="google.oauth_refresh_token" type="password" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" :placeholder="googleStatus.oauth_refresh_token_set ? 'Digite para substituir' : '1//0…'" />
+              </div>
+              <div>
+                <label class="text-xs font-medium text-n-slate-11 block mb-1.5">ou: e-mail que a conta de serviço representa</label>
+                <input v-model="google.ads_impersonate_email" class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono" placeholder="ads@cevico.com.br" />
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button
+                class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+                :disabled="isAdsPreparing || !googleStatus.ads_api_configured"
+                :title="googleStatus.ads_api_configured ? 'Cria (uma vez) as ações de conversão e as variáveis na conta do Google Ads — salve antes' : 'Salve o developer token, o Customer ID e o acesso primeiro'"
+                @click="prepareGoogleAds"
+              >
+                <span :class="isAdsPreparing ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-wand-2'" class="text-sm" />
+                {{ isAdsPreparing ? 'Preparando...' : 'Preparar no Google Ads' }}
+              </button>
+              <button
+                class="px-4 py-2 border border-n-weak rounded-lg text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+                :disabled="isAdsTesting || !googleStatus.ads_api_configured || !adsActionsCount"
+                title="Manda uma conversão de teste só para o Google validar (nada é gravado)"
+                @click="testGoogleAdsApi"
+              >
+                <span :class="isAdsTesting ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-send'" class="text-sm" />
+                {{ isAdsTesting ? 'Testando...' : 'Testar envio' }}
+              </button>
+              <span v-if="googleStatus.ads_prepared_at" class="text-[11px] text-n-slate-10">preparado em {{ new Date(googleStatus.ads_prepared_at).toLocaleString('pt-BR') }}</span>
+            </div>
+            <div
+              v-if="adsResult"
+              class="flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs"
+              :class="adsResult.success ? 'bg-green-500/10 text-green-700 border border-green-500/20' : 'bg-red-500/10 text-red-700 border border-red-500/20'"
+            >
+              <span class="text-sm flex-shrink-0 mt-0.5" :class="adsResult.success ? 'i-lucide-check-circle' : 'i-lucide-alert-circle'" />
+              {{ adsResult.message }}
+            </div>
+            <p v-else-if="googleStatus.ads_last_error" class="text-[11px] text-red-600">
+              Última recusa do Google Ads ({{ new Date(googleStatus.ads_last_error.at).toLocaleString('pt-BR') }}, {{ googleStatus.ads_last_error.event }}): {{ googleStatus.ads_last_error.message }}
+            </p>
           </div>
 
           <!-- 📖 LEITURA automática via GA4 Data API (item 155): cliques, custo

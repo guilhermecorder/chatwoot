@@ -21,6 +21,10 @@ module Cevico::ConversionEvents
   # eventos de FECHAMENTO: sem valor digitado, vai o valor do card
   CLOSING_GA4 = %w[fechou_cirurgia close_convert_lead purchase].freeze
   CLOSING_META = %w[Purchase].freeze
+  # 🎯 item 371: eventos de CONSULTA — sem valor digitado, vai o valor da
+  # consulta (marcada ou realizada), para o Google/Meta otimizarem por consulta
+  CONSULT_GA4 = %w[agendou_consulta compareceu_consulta].freeze
+  CONSULT_META = %w[Schedule QualifiedLead].freeze
 
   GA4_NAME = /\A[a-zA-Z][a-zA-Z0-9_]{0,39}\z/
   # prefixos que o GA4 reserva — evento com eles é descartado
@@ -68,5 +72,13 @@ module Cevico::ConversionEvents
 
   def closing_meta?(name)
     CLOSING_META.include?(name.to_s)
+  end
+
+  def consult_ga4?(name)
+    CONSULT_GA4.include?(name.to_s)
+  end
+
+  def consult_meta?(name)
+    CONSULT_META.include?(name.to_s)
   end
 end

@@ -87,21 +87,23 @@ class CrmAutomationFireJob < ApplicationJob
 
     stamp_automation_trail(automation, contact, stage)
 
-    # Registra log de sucesso
+    # Registra log de sucesso (🎯 item 371: com o que saiu na conversão —
+    # valor, procedimento, gclid ou aprimorada — para a equipe conferir)
+    payload = payload.merge(@conversion_info) if @conversion_info
     Crm::AutomationLog.create!(
       automation: automation,
       contact_id: contact_id,
-      status:     'fired',
-      payload:    payload,
-      fired_at:   Time.current
+      status: 'fired',
+      payload: payload,
+      fired_at: Time.current
     )
-  rescue => e
+  rescue StandardError => e
     Rails.logger.error("[CrmAutomation] Failed for automation #{automation_id}: #{e.message}")
     Crm::AutomationLog.create!(
       automation_id: automation_id,
-      contact_id:    contact_id,
-      status:        'failed',
-      payload:       extra_payload,
+      contact_id: contact_id,
+      status: 'failed',
+      payload: extra_payload,
       error_message: e.message
     )
   ensure
@@ -229,21 +231,21 @@ class CrmAutomationFireJob < ApplicationJob
   def build_payload(automation, contact, stage, pipeline, extra)
     previous = extra[:previous_stage] || {}
     {
-      event_type:            extra[:event_type] || 'automation_fired',
-      automation_id:         automation.id,
-      automation_name:       automation.name,
-      contact_id:            contact.id,
-      contact_name:          contact.name,
-      contact_phone:         contact.phone_number,
-      contact_email:         contact.email,
-      funnel_id:             pipeline.id,
-      funnel_name:           pipeline.name,
-      previous_column_id:    previous[:id],
-      previous_column_name:  previous[:name],
-      current_column_id:     stage.id,
-      current_column_name:   stage.name,
-      tags:                  contact.label_list,
-      fired_at:              Time.current.iso8601
+      event_type: extra[:event_type] || 'automation_fired',
+      automation_id: automation.id,
+      automation_name: automation.name,
+      contact_id: contact.id,
+      contact_name: contact.name,
+      contact_phone: contact.phone_number,
+      contact_email: contact.email,
+      funnel_id: pipeline.id,
+      funnel_name: pipeline.name,
+      previous_column_id: previous[:id],
+      previous_column_name: previous[:name],
+      current_column_id: stage.id,
+      current_column_name: stage.name,
+      tags: contact.label_list,
+      fired_at: Time.current.iso8601
     }
   end
 
@@ -253,7 +255,7 @@ class CrmAutomationFireJob < ApplicationJob
 
     HTTParty.post(
       url,
-      body:    payload.to_json,
+      body: payload.to_json,
       headers: { 'Content-Type' => 'application/json' },
       timeout: 10
     )
@@ -288,11 +290,11 @@ class CrmAutomationFireJob < ApplicationJob
 
     # inbox é obrigatória no Message — sem ela a nota falhava em silêncio
     conversation.messages.create!(
-      account:     pipeline.account,
-      inbox:       conversation.inbox,
+      account: pipeline.account,
+      inbox: conversation.inbox,
       message_type: :activity,
-      content:     "🤖 Automação \"#{automation.name}\" disparada automaticamente.",
-      private:     true
+      content: "🤖 Automação \"#{automation.name}\" disparada automaticamente.",
+      private: true
     )
   end
 
@@ -312,10 +314,10 @@ class CrmAutomationFireJob < ApplicationJob
 
     # Dispara automações da nova coluna em background
     CrmAutomationTriggerService.new(
-      crm_contact:    crm_contact,
-      new_stage:      target_stage,
+      crm_contact: crm_contact,
+      new_stage: target_stage,
       previous_stage: previous_stage,
-      event_type:     'card_entered'
+      event_type: 'card_entered'
     ).call
   end
 
@@ -332,22 +334,22 @@ class CrmAutomationFireJob < ApplicationJob
       content_lines << "💬 #{cfg['message']}" if cfg['message'].present?
 
       conversation.messages.create!(
-        account:      pipeline.account,
-        inbox:        conversation.inbox,
+        account: pipeline.account,
+        inbox: conversation.inbox,
         message_type: :activity,
-        content:      content_lines.join("\n"),
-        private:      true
+        content: content_lines.join("\n"),
+        private: true
       )
     end
 
     # Se configurado um agente específico para notificar
-    if cfg['assignee_id'].present?
-      assignee = User.find_by(id: cfg['assignee_id'])
-      if assignee && conversation
-        # Atribui a conversa ao agente
-        conversation.update!(assignee: assignee)
-      end
-    end
+    return unless cfg['assignee_id'].present?
+
+    assignee = User.find_by(id: cfg['assignee_id'])
+    return unless assignee && conversation
+
+    # Atribui a conversa ao agente
+    conversation.update!(assignee: assignee)
   end
 
   def fire_meta_ads(automation, contact, pipeline)
@@ -355,43 +357,68 @@ class CrmAutomationFireJob < ApplicationJob
     # para a Meta vai SÓ valor e moeda: o evento sai com o telefone do
     # paciente (embaralhado), então o procedimento não viaja junto — dado de
     # saúde ligado a uma pessoa não sai do sistema (LGPD + regra da própria Meta)
-    value = conversion_value(automation, contact, pipeline, closing: Cevico::ConversionEvents.closing_meta?(event_name))
+    value = conversion_value(automation, contact, pipeline, closing: Cevico::ConversionEvents.closing_meta?(event_name),
+                                                            consult: Cevico::ConversionEvents.consult_meta?(event_name))
     custom = value ? { value: value, currency: automation.action_config['currency'].presence || 'BRL' } : {}
 
     result = MetaAdsConversionsService.new(
-      account:     pipeline.account,
-      event_name:  event_name,
-      contact:     contact,
+      account: pipeline.account,
+      event_name: event_name,
+      contact: contact,
       custom_data: custom,
-      event_id:    "crm_auto_#{automation.id}_#{contact.id}_#{Time.current.to_i}",
+      event_id: "crm_auto_#{automation.id}_#{contact.id}_#{Time.current.to_i}"
     ).call
     # item 313: recusa da Meta (token vencido, evento inválido…) aparece como
     # FALHA no histórico da automação — antes ficava como "disparada"
     raise "Meta recusou o evento #{event_name}: #{result[:error]}" unless result[:success]
   end
 
+  # 🎯 item 371 (27/10): com a API do Google Ads ligada (Integrações →
+  # Google → "Conversões direto no Google Ads"), a conversão vai DIRETO ao
+  # Ads pelo gclid do Protocolo (ou aprimorada, por telefone/e-mail), com
+  # valor e procedimento. Desligada, segue pelo GA4 como antes (item 313).
   def fire_google_ads(automation, contact, pipeline)
     event_name = automation.action_config['ga4_event_name'].presence || 'generate_lead'
-    extra = conversion_details(automation, contact)
-    value = conversion_value(automation, contact, pipeline, closing: Cevico::ConversionEvents.closing_ga4?(event_name))
+    extra = conversion_details(automation, contact, pipeline)
+    value = conversion_value(automation, contact, pipeline, closing: Cevico::ConversionEvents.closing_ga4?(event_name),
+                                                            consult: Cevico::ConversionEvents.consult_ga4?(event_name))
     extra[:value]    = value if value
     extra[:currency] = automation.action_config['currency'].presence || 'BRL'
+    @conversion_info = { conversion: extra.merge(event: event_name, via: 'ga4') }
+
+    return fire_google_ads_api(automation, contact, pipeline, event_name, extra) if Crm::GoogleAdsClickConversionService.enabled?(pipeline.account)
 
     result = GoogleAdsConversionsService.new(
-      account:    pipeline.account,
+      account: pipeline.account,
       event_name: event_name,
-      contact:    contact,
-      params:     extra,
+      contact: contact,
+      params: extra
     ).call
     raise "Google recusou o evento #{event_name}: #{result[:error]}" unless result[:success]
   end
 
-  # Item 313 (só Google): o PROCEDIMENTO viaja dentro do evento (não no nome):
-  # a etiqueta exigida pela automação (ex.: "refrativa") e a página de onde o
-  # lead veio. O GA4 recebe só a identidade anônima do navegador.
-  def conversion_details(automation, contact)
+  def fire_google_ads_api(automation, contact, pipeline, event_name, extra)
+    result = Crm::GoogleAdsClickConversionService.new(
+      account: pipeline.account, event_name: event_name, contact: contact,
+      value: extra[:value], currency: extra[:currency], procedure: extra[:procedimento], page: extra[:cevico_page],
+      # mesmo paciente + mesma automação + mesmo dia = a mesma conversão (o
+      # Google não conta duas vezes se o job repetir)
+      order_id: "crm_#{automation.id}_#{contact.id}_#{Date.current.iso8601}"
+    ).call
+    @conversion_info = { conversion: extra.merge(event: event_name, via: 'ads_api', tied: result[:tied], mode: result[:mode]) }
+    raise "Google Ads recusou o evento #{event_name}: #{result[:error]}" unless result[:success]
+  end
+
+  # Item 313 (só Google): o PROCEDIMENTO viaja dentro do evento (não no nome).
+  # 🎯 item 371: a etiqueta exigida vence; sem ela, o sistema descobre o
+  # procedimento no card, na cirurgia do Oftalmofácil, nas etiquetas ou na
+  # página de origem (Cevico::Procedure) — sempre num nome fixo (lasik, prk…).
+  def conversion_details(automation, contact, pipeline = nil)
+    label = automation.action_config['required_label'].to_s.strip.downcase.presence
+    slug, source = Cevico::Procedure.of_contact(contact, pipeline: pipeline, label: label)
     {
-      procedimento: automation.action_config['required_label'].to_s.strip.downcase.presence,
+      procedimento: slug || label,
+      procedimento_origem: (slug ? source : nil),
       cevico_page: contact.additional_attributes&.dig('page_ads', 'slug').presence
     }.compact
   end
@@ -400,14 +427,33 @@ class CrmAutomationFireJob < ApplicationJob
   # leva o valor do card (o preço da cirurgia); 💰 item 345: automação na
   # coluna de AGENDAMENTO sem valor digitado leva o valor da consulta marcada
   # (o mesmo da confirmação — item 324/340: 150, 350, particular do médico…)
-  def conversion_value(automation, contact, pipeline, closing:)
+  # 🎯 item 371: evento de CONSULTA (agendou/compareceu) leva o valor da
+  # consulta marcada ou realizada, em qualquer coluna; evento de FECHAMENTO
+  # sem valor no card leva o valor da cirurgia no Oftalmofácil.
+  def conversion_value(automation, contact, pipeline, closing:, consult: false)
     typed = automation.action_config['conversion_value']
     return typed.to_f if typed.present?
-    return booked_consult_value(contact) if !closing && booking_stage?(automation)
-    return unless closing
+    return closing_value(contact, pipeline) if closing
 
+    booked_consult_value(contact) if consult || booking_stage?(automation)
+  end
+
+  # fechamento: o valor do card; sem ele, o da cirurgia no Oftalmofácil
+  def closing_value(contact, pipeline)
     card_value = Crm::Contact.find_by(contact_id: contact.id, pipeline_id: pipeline.id)&.value.to_f
-    card_value.positive? ? card_value : nil
+    card_value.positive? ? card_value : surgery_value(contact)
+  end
+
+  # valor real da cirurgia no Oftalmofácil (pago, senão o combinado) — soma
+  # dos itens do último ano (cada olho é um item)
+  def surgery_value(contact)
+    total = Crm::OftalmofacilSurgery.where(contact_id: contact.id).faturaveis.cirurgias
+                                    .where('surgery_date IS NULL OR surgery_date > ?', 1.year.ago.to_date)
+                                    .sum('CASE WHEN COALESCE(paid_amount, 0) > 0 THEN paid_amount ELSE COALESCE(amount, 0) END').to_f
+    total.positive? ? total.round(2) : nil
+  rescue StandardError => e
+    Rails.logger.warn "[CrmAutomation] valor da cirurgia (contato #{contact.id}): #{e.message}"
+    nil
   end
 
   def booking_stage?(automation)
@@ -417,9 +463,7 @@ class CrmAutomationFireJob < ApplicationJob
   # a consulta que o paciente acabou de marcar: a próxima futura (ou a marcada
   # nos últimos 2 dias, se já passou) — valor em número; texto ("sem custo") = nil
   def booked_consult_value(contact)
-    scope = contact.account.tasks.where(contact_id: contact.id, task_type: 'consulta', canceled_at: nil)
-    task = scope.where('due_at > ?', Time.current).order(:due_at).first ||
-           scope.where('created_at > ?', 2.days.ago).order(created_at: :desc).first
+    task = consult_task(contact)
     return nil unless task
 
     price = Crm::AppointmentPrice.resolve(Crm::AppointmentPrice.config(contact.account), task)
@@ -428,6 +472,15 @@ class CrmAutomationFireJob < ApplicationJob
   rescue StandardError => e
     Rails.logger.warn "[CrmAutomation] valor da consulta (contato #{contact.id}): #{e.message}"
     nil
+  end
+
+  # a consulta do paciente: a próxima futura; senão a marcada nos últimos 2
+  # dias; senão (🎯 item 371, "compareceu") a realizada mais recente
+  def consult_task(contact)
+    scope = contact.account.tasks.where(contact_id: contact.id, task_type: 'consulta', canceled_at: nil)
+    scope.where('due_at > ?', Time.current).order(:due_at).first ||
+      scope.where('created_at > ?', 2.days.ago).order(created_at: :desc).first ||
+      scope.where(attendance: 'attended').where('due_at > ?', 90.days.ago).order(due_at: :desc).first
   end
 
   # 🔁 item 345 (14/10): CONVERSÃO (Google/Meta) sai UMA vez por paciente a
@@ -744,10 +797,10 @@ class CrmAutomationFireJob < ApplicationJob
       if webhook_url.blank?
         HTTParty.post(
           "#{settings.n8n_base_url_clean}/api/v1/workflows/#{cfg['n8n_workflow_id']}/execute",
-          body:    { data: payload }.to_json,
+          body: { data: payload }.to_json,
           headers: {
-            'Content-Type'  => 'application/json',
-            'X-N8N-API-KEY' => settings.n8n_api_key,
+            'Content-Type' => 'application/json',
+            'X-N8N-API-KEY' => settings.n8n_api_key
           },
           timeout: 15
         )
@@ -759,7 +812,7 @@ class CrmAutomationFireJob < ApplicationJob
 
     HTTParty.post(
       webhook_url,
-      body:    payload.to_json,
+      body: payload.to_json,
       headers: { 'Content-Type' => 'application/json' },
       timeout: 15
     )

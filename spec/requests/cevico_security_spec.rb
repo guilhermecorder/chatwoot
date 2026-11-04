@@ -93,8 +93,8 @@ RSpec.describe 'CEVICO segurança (rodada 171)', type: :request do
     let(:agent) { create(:user, account: account, role: :agent) }
     let(:base) { "/api/v1/accounts/#{account.id}/crm/settings" }
     # as ÚNICAS ações que a equipe toda pode chamar: a leitura (que vem enxuta,
-    # por papel) e fechar/reabrir dias da Agenda (item 267)
-    let(:open_to_team) { %w[show update_blocked_days] }
+    # por papel) e fechar/reabrir dias, horários e médicos da Agenda (itens 267 e 366)
+    let(:open_to_team) { %w[show update_blocked_days update_agenda_locks] }
 
     before do
       # o atendente aqui só VÊ a ficha do paciente: quem edita o orçamento recebe a tabela de preços (decisão R2-G4)

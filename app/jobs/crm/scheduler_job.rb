@@ -11,10 +11,19 @@ class Crm::SchedulerJob < ApplicationJob
 
   private
 
+  # 🔁 item 379: a campanha RECORRENTE (mãe) venceu → abre a rodada (filha) e
+  # marca a próxima data; a campanha comum sai como sempre. Uma mãe com
+  # problema não segura as outras.
   def trigger_due_campaigns
     Crm::Campaign.due.find_each do |campaign|
-      campaign.update!(status: :processing)
-      Crm::CampaignRunJob.perform_later(campaign.id)
+      if campaign.recurring?
+        Crm::RecurringCampaign.spawn!(campaign)
+      else
+        campaign.update!(status: :processing)
+        Crm::CampaignRunJob.perform_later(campaign.id)
+      end
+    rescue StandardError => e
+      Rails.logger.error "[Crm::SchedulerJob] campanha #{campaign.id}: #{e.message}"
     end
   end
 

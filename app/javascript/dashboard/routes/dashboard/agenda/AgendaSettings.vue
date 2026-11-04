@@ -16,10 +16,11 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CrmAPI from 'dashboard/api/crm';
 import {
   DOCTORS, TYPE_BY_KEY, RESERVABLE, AI_MODALITY,
-  resolveAllWindows, resolveClosedDoctors, resolveBlocked, resolveBlockedDays,
+  resolveAllWindows, resolveClosedDoctors, resolveBlocked, resolveBlockedDays, resolveOpenDays, resolveOpenWindows,
   reservedFor, windowAccepts, windowAt, sameBlock, dateKey, patientNameOf, hexToRgbSpaced,
   PRICE_TYPE_LABELS, priceLabel,
 } from 'dashboard/helper/cevicoAgenda';
@@ -32,6 +33,11 @@ const emit = defineEmits(['close', 'reschedule', 'openExamWindows', 'openSurgery
 
 const store = useStore();
 const { isAdmin } = useAdmin();
+// item 366: fechar/reabrir médico e horário = nó "Fechar e reabrir dias";
+// quem só tem esse nó vê só a aba "Abrir e fechar"
+const { canView, canEdit } = useCevicoAccess();
+const canLock = computed(() => canEdit('agenda.bloqueios'));
+const canConfigure = computed(() => canView('agenda.configuracao'));
 const settings = useMapGetter('crm/getSettings');
 const allTasks = useMapGetter('tasks/getTasks');
 
@@ -42,7 +48,8 @@ const TABS = [
   { key: 'valores', label: 'Valores', icon: 'i-lucide-badge-dollar-sign' },
   { key: 'conferencia', label: 'Conferência do dia', icon: 'i-lucide-list-checks' },
 ];
-const tab = ref(props.initialTab);
+const visibleTabs = computed(() => (canConfigure.value ? TABS : TABS.filter(x => x.key === 'abrir')));
+const tab = ref(canConfigure.value ? props.initialTab : 'abrir');
 
 const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const WEEKDAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -139,6 +146,70 @@ const addClosing = async () => {
 const reopenDay = b =>
   saveBlockedDays(blockedDays.value.filter(x => !sameBlock(x, b)), `${fmtDay(parseKey(dayOf(b)))} reaberto ✓`);
 
+// 📅 item 375 (28/10, Vaneide: "a Dra. Roberta pediu para abrir a agenda em
+// alguns dias específicos — 30/10 das 13h às 17h30 e 06/11 das 9h às 13h30"):
+// ABERTURA PONTUAL — um dia (ou um turno a mais) numa data só. Entra na grade
+// e na lista da IA no ato; a rotina da semana não muda. Mesma porta e mesmo
+// nó da equipe do "fechar dia".
+const openDays = computed(() => resolveOpenDays(settings.value));
+const futureOpenings = computed(() =>
+  openDays.value
+    .filter(o => o.date >= todayKey())
+    .sort((a, b) => `${a.date}${a.start}`.localeCompare(`${b.date}${b.start}`))
+);
+const BLOCK_OPTIONS = [5, 10, 15, 20, 30];
+// o bloco que o médico já usa nas faixas dele NAQUELA unidade (a Dra. Roberta
+// atende de 5 em 5 no Tatuapé e de 15 em 15 na Paulista); sem faixa lá, a 1ª dele
+const usualBlock = (doctor, unit) => {
+  const wins = savedWindows.value.filter(w => w.doctor === doctor);
+  return Number((wins.find(w => w.unit === unit) || wins[0])?.block) || 15;
+};
+const firstUnit = () => Object.keys(props.units)[0] || 'paulista';
+const newOpen = ref({ date: '', doctor: DOCTORS[0].name, unit: firstUnit(), start: '08:00', end: '12:00', block: usualBlock(DOCTORS[0].name, firstUnit()) });
+watch(() => [newOpen.value.doctor, newOpen.value.unit], ([d, u]) => { newOpen.value.block = usualBlock(d, u); });
+const openValid = computed(() => {
+  const o = newOpen.value;
+  return !!(o.date && o.doctor && o.unit && o.start && o.end && o.start < o.end);
+});
+// aviso: o médico já atende nesse horário pela rotina da semana
+const openClash = computed(() => {
+  const o = newOpen.value;
+  if (!o.date || !o.start || !o.end) return '';
+  const dow = parseKey(o.date).getDay();
+  const w = savedWindows.value.find(
+    x => x.doctor === o.doctor && Number(x.dow) === dow && x.unit === o.unit && x.start < o.end && x.end > o.start
+  );
+  return w
+    ? `${doctorShort(o.doctor)} já atende ${WEEKDAY_SHORT[dow]} ${w.start}–${w.end} em ${unitLabel(w.unit)} pela rotina da semana — a abertura só precisa cobrir o que é a mais.`
+    : '';
+});
+const sameOpening = (a, b) => a.date === b.date && a.doctor === b.doctor && a.unit === b.unit && a.start === b.start;
+const stripOpening = o => ({ date: o.date, doctor: o.doctor, unit: o.unit, start: o.start, end: o.end, block: Number(o.block) || 15 });
+const saveOpenDays = async (next, message) => {
+  busy.value = 'open';
+  try {
+    await CrmAPI.updateAgendaOpenDays(next.map(stripOpening));
+    await refresh();
+    useAlert(message);
+  } catch {
+    useAlert('Não consegui salvar a abertura.');
+  } finally {
+    busy.value = '';
+  }
+};
+const addOpening = async () => {
+  if (!openValid.value) return;
+  const o = { ...newOpen.value };
+  if (openDays.value.some(x => sameOpening(x, o))) {
+    useAlert('Essa abertura já existe.');
+    return;
+  }
+  await saveOpenDays([...openDays.value, o], `${doctorShort(o.doctor)} aberto em ${fmtDay(parseKey(o.date))}, ${o.start}–${o.end} ✓`);
+  newOpen.value = { ...newOpen.value, date: '' };
+};
+const removeOpening = o =>
+  saveOpenDays(openDays.value.filter(x => !sameOpening(x, o)), `Abertura de ${fmtDay(parseKey(o.date))} removida`);
+
 // horários fechados com o cadeado — de hoje em diante
 const lockedSlots = computed(() =>
   resolveBlocked(settings.value)
@@ -165,7 +236,8 @@ const reopenSlot = async slot => {
 const conflicts = computed(() => {
   const now = new Date();
   const closed = closedDoctors.value;
-  const openWins = savedWindows.value.filter(w => !closed.includes(w.doctor));
+  // item 375: a abertura pontual também é faixa válida naquele dia
+  const openWins = [...savedWindows.value.filter(w => !closed.includes(w.doctor)), ...resolveOpenWindows(settings.value)];
   const whole = new Set(blockedDays.value.filter(b => typeof b === 'string'));
   const parts = blockedDays.value.filter(b => b && typeof b === 'object');
   return (allTasks.value || [])
@@ -184,7 +256,7 @@ const conflicts = computed(() => {
         reason = 'a unidade ou o médico está fechado neste dia';
       } else if (t.doctor && closed.includes(t.doctor)) reason = `a agenda de ${doctorShort(t.doctor)} está fechada`;
       else {
-        const spot = { dow: at.getDay(), unit: t.unit, minutes: at.getHours() * 60 + at.getMinutes() };
+        const spot = { dow: at.getDay(), date: key, unit: t.unit, minutes: at.getHours() * 60 + at.getMinutes() };
         const win = windowAt(openWins, { ...spot, doctor: t.doctor }) || windowAt(openWins, spot);
         if (win && !windowAccepts(win, t.modality || AI_MODALITY)) reason = `faixa reservada para ${reservedLabel(win)}`;
       }
@@ -322,6 +394,27 @@ const savePrices = async () => {
   }
 };
 
+// ⏱️ item 367: teto de avaliações por hora em cada unidade (padrão 4)
+const hourly = ref(settings.value?.agenda_hourly_evaluations || 4);
+watch(() => settings.value?.agenda_hourly_evaluations, v => { if (v) hourly.value = v; });
+const saveHourly = async () => {
+  const n = Math.round(Number(hourly.value));
+  if (!(n >= 1 && n <= 20)) {
+    useAlert('Use um número de 1 a 20.');
+    return;
+  }
+  busy.value = 'hourly';
+  try {
+    await CrmAPI.updateAgendaHourly(n);
+    await refresh();
+    useAlert(`Pronto: no máximo ${n} avaliações por hora em cada unidade.`);
+  } catch {
+    useAlert('Não consegui salvar o limite por hora.');
+  } finally {
+    busy.value = '';
+  }
+};
+
 const saveRules = async () => {
   busy.value = 'rules';
   try {
@@ -361,7 +454,10 @@ const tryClose = () => {
   emit('close');
 };
 
-onMounted(loadPreview);
+// item 366: a prévia da IA é de "Horários e regras" — para quem só abre e fecha, pedir dava o aviso de sem acesso
+onMounted(() => {
+  if (canConfigure.value) loadPreview();
+});
 </script>
 
 <template>
@@ -370,15 +466,15 @@ onMounted(loadPreview);
       <div class="cv-modal-head flex items-center gap-3">
         <span class="i-lucide-settings-2 text-xl" />
         <div class="flex-1 min-w-0">
-          <h2 class="text-base font-bold">Configurações da agenda</h2>
-          <p class="text-[11px] opacity-85">abrir e fechar, para que serve cada faixa de horário e o que a IA oferece — tudo num lugar só</p>
+          <h2 class="text-base font-bold">{{ canConfigure ? 'Configurações da agenda' : 'Abrir e fechar agenda' }}</h2>
+          <p class="text-[11px] opacity-85">{{ canConfigure ? 'abrir e fechar, para que serve cada faixa de horário e o que a IA oferece — tudo num lugar só' : 'fechar e reabrir médicos, dias e horários' }}</p>
         </div>
         <button class="cv-glass-btn cv-iconbtn" title="Fechar" @click="tryClose"><span class="i-lucide-x" /></button>
       </div>
 
       <div class="px-4 sm:px-5 pt-4">
         <div class="cv-seg cv-seg-sm grid grid-cols-2 sm:grid-cols-5 gap-1 w-full">
-          <button v-for="t in TABS" :key="t.key" class="cv-seg-item justify-center" :class="tab === t.key ? 'cv-seg-on' : ''" @click="tab = t.key">
+          <button v-for="t in visibleTabs" :key="t.key" class="cv-seg-item justify-center" :class="tab === t.key ? 'cv-seg-on' : ''" @click="tab = t.key">
             <span :class="t.icon" class="text-xs" /> {{ t.label }}
           </button>
         </div>
@@ -418,7 +514,7 @@ onMounted(loadPreview);
                 </p>
                 <p class="text-[11px] text-n-slate-10 mt-0.5">{{ doctorSummary(d.name) }}</p>
               </div>
-              <button v-if="isAdmin" class="cv-btn" :class="isDoctorClosed(d.name) ? '' : 'cv-btn-ghost cv-btn-danger'" :disabled="busy === `doc:${d.name}`" @click="toggleDoctor(d.name)">
+              <button v-if="canLock" class="cv-btn" :class="isDoctorClosed(d.name) ? '' : 'cv-btn-ghost cv-btn-danger'" :disabled="busy === `doc:${d.name}`" @click="toggleDoctor(d.name)">
                 <span :class="isDoctorClosed(d.name) ? 'i-lucide-lock-open' : 'i-lucide-lock'" class="text-sm" />
                 {{ isDoctorClosed(d.name) ? 'Reabrir agenda' : 'Fechar agenda' }}
               </button>
@@ -439,15 +535,69 @@ onMounted(loadPreview);
                   <option v-for="s in closeScopes" :key="s.key" :value="s.key">{{ s.label }}</option>
                 </select>
               </label>
-              <button class="cv-btn" :disabled="!newClose.date || busy === 'days'" @click="addClosing"><span class="i-lucide-lock text-sm" /> Fechar</button>
+              <button v-if="canLock" class="cv-btn" :disabled="!newClose.date || busy === 'days'" @click="addClosing"><span class="i-lucide-lock text-sm" /> Fechar</button>
             </div>
             <div v-for="(b, i) in futureClosings" :key="i" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2">
               <span class="i-lucide-calendar-off text-sm text-n-slate-10" />
               <span class="text-xs font-semibold text-n-slate-12">{{ fmtDay(parseKey(dayOf(b))) }}</span>
               <span class="cv-chip cv-red">{{ closeScopeLabel(b) }}</span>
-              <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'days'" @click="reopenDay(b)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
+              <button v-if="canLock" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'days'" @click="reopenDay(b)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
             </div>
             <p v-if="!futureClosings.length" class="text-xs text-n-slate-9 pl-1">Nenhum dia fechado daqui para frente.</p>
+          </section>
+
+          <!-- 📅 item 375: ABERTURA PONTUAL — um dia/turno a mais numa data só -->
+          <section class="space-y-2">
+            <p class="cv-ag-block-title">Dias abertos</p>
+            <p class="text-[11px] text-n-slate-10">Um dia ou um turno a mais, só naquela data: entra na grade e a IA passa a oferecer na hora, sem mexer na rotina da semana. Serve também para somar um turno num dia em que o médico já atende.</p>
+            <div class="cv-sub p-3 space-y-2">
+              <div class="flex items-end gap-2 flex-wrap">
+                <label class="flex-1 min-w-[130px]">
+                  <span class="cv-label block mb-0.5">Dia</span>
+                  <input v-model="newOpen.date" type="date" :min="todayKey()" class="cv-input w-full !h-9 text-xs" />
+                </label>
+                <label class="flex-1 min-w-[170px]">
+                  <span class="cv-label block mb-0.5">Médico</span>
+                  <select v-model="newOpen.doctor" class="cv-input w-full !h-9 text-xs">
+                    <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
+                  </select>
+                </label>
+                <label class="flex-1 min-w-[130px]">
+                  <span class="cv-label block mb-0.5">Unidade</span>
+                  <select v-model="newOpen.unit" class="cv-input w-full !h-9 text-xs">
+                    <option v-for="(u, key) in units" :key="key" :value="key">{{ u.label }}</option>
+                  </select>
+                </label>
+              </div>
+              <div class="flex items-end gap-2 flex-wrap">
+                <label class="w-[108px]">
+                  <span class="cv-label block mb-0.5">Das</span>
+                  <input v-model="newOpen.start" type="time" step="300" class="cv-input w-full !h-9 text-xs" />
+                </label>
+                <label class="w-[108px]">
+                  <span class="cv-label block mb-0.5">Até</span>
+                  <input v-model="newOpen.end" type="time" step="300" class="cv-input w-full !h-9 text-xs" />
+                </label>
+                <label class="w-[112px]">
+                  <span class="cv-label block mb-0.5">Bloco</span>
+                  <select v-model.number="newOpen.block" class="cv-input w-full !h-9 text-xs">
+                    <option v-for="b in BLOCK_OPTIONS" :key="b" :value="b">{{ b }} min</option>
+                  </select>
+                </label>
+                <button class="cv-btn ml-auto" :disabled="!openValid || busy === 'open'" @click="addOpening"><span class="i-lucide-calendar-plus text-sm" /> Abrir</button>
+              </div>
+              <p v-if="openClash" class="text-[11px]" style="color: #b45309">{{ openClash }}</p>
+            </div>
+            <div v-for="(o, i) in futureOpenings" :key="i" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2" :style="{ '--cv-rgb': hexToRgbSpaced(doctorColor(o.doctor)) }">
+              <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: doctorColor(o.doctor) }" />
+              <span class="text-xs font-semibold text-n-slate-12">{{ fmtDay(parseKey(o.date)) }}</span>
+              <span class="text-xs text-n-slate-12 tabular-nums">{{ o.start }}–{{ o.end }}</span>
+              <span class="cv-chip cv-green">{{ doctorShort(o.doctor) }}</span>
+              <span class="cv-chip cv-slate">{{ unitLabel(o.unit) }}</span>
+              <span class="text-[11px] text-n-slate-10">blocos de {{ o.block }} min</span>
+              <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'open'" @click="removeOpening(o)"><span class="i-lucide-x text-xs" /> Remover</button>
+            </div>
+            <p v-if="!futureOpenings.length" class="text-xs text-n-slate-9 pl-1">Nenhuma abertura pontual daqui para frente.</p>
           </section>
 
           <section class="space-y-2">
@@ -458,7 +608,7 @@ onMounted(loadPreview);
               <span class="text-xs font-semibold text-n-slate-12 tabular-nums">{{ fmtDay(parseKey(s.date)) }} · {{ s.time }}</span>
               <span class="cv-chip cv-slate">{{ unitLabel(s.unit) }}</span>
               <span v-if="s.doctor" class="text-[11px] text-n-slate-10">{{ doctorShort(s.doctor) }}</span>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'slots'" @click="reopenSlot(s)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
+              <button v-if="canLock" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'slots'" @click="reopenSlot(s)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
             </div>
             <p v-if="!lockedSlots.length" class="text-xs text-n-slate-9 pl-1">Nenhum horário fechado daqui para frente.</p>
           </section>
@@ -466,6 +616,16 @@ onMounted(loadPreview);
 
         <!-- 2. FAIXAS DE HORÁRIO -->
         <template v-else-if="tab === 'faixas'">
+          <!-- ⏱️ item 367: avaliações por hora -->
+          <section class="cv-sub p-3 flex items-center gap-3 flex-wrap">
+            <span class="i-lucide-gauge text-sm text-n-slate-10" />
+            <div class="flex-1 min-w-[220px]">
+              <p class="text-xs font-bold text-n-slate-12">Avaliações por hora em cada unidade</p>
+              <p class="text-[11px] text-n-slate-10">Os robôs nunca marcam mais que isso e espalham os horários ao longo do dia. A equipe pode encaixar, confirmando. Exame, retorno e pós-operatório não contam.</p>
+            </div>
+            <input v-model.number="hourly" type="number" min="1" max="20" class="text-center" style="width: 4.5rem; flex: none" :disabled="!canEdit('agenda.configuracao')">
+            <button v-if="canEdit('agenda.configuracao')" class="cv-btn cv-btn-sm" :disabled="busy === 'hourly' || Number(hourly) === (settings?.agenda_hourly_evaluations || 4)" @click="saveHourly">Salvar</button>
+          </section>
           <p class="text-[11px] text-n-slate-10 leading-relaxed">
             Cada faixa diz quando o médico atende e <b>para que ela serve</b>. Faixa "Tudo" aceita qualquer atendimento.
             Faixa reservada (ex.: só Pós-operatório) fica marcada na grade, a equipe é avisada ao marcar outro tipo ali e

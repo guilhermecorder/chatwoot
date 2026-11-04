@@ -10,7 +10,8 @@
 <% cfg = @cevico_tracking || Cevico::PublicSite.tracking_config %>
 <% pixel_id = cfg['meta_pixel_id'].presence %>
 <% ga4_id = cfg['ga4_id'].presence %>
-<% clarity_id = cfg['clarity_id'].presence %>
+<%# 24/10: se o HTML anexado já traz a etiqueta do Clarity (refrativa/trifocal), não carrega duas vezes %>
+<% clarity_id = cfg['clarity_id'].presence unless page&.custom_html.to_s.include?('clarity.ms/tag') %>
 <%# GTM: quem faz a colocação certa (head + pós-body) passa include_gtm:
     false; onde o snippet é o único ponto de injeção (ex.: hub), o
     container entra aqui mesmo — funciona igual, só carrega mais tarde %>

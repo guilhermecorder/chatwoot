@@ -66,8 +66,9 @@ const pal = useCevicoPalette({
 });
 const { cvVars } = pal;
 
-// ── cores FIXAS do tipo (não seguem a paleta: verde = marcou, âmbar =
-//    remarcou, vermelho = cancelou, em qualquer tela) ──
+// ── cores FIXAS do tipo (não seguem a paleta: verde = marcou, azul-piscina =
+//    remarcou, vermelho = cancelou, em qualquer tela). Item 368: remarcou era
+//    âmbar, quase o dourado do Retorno na Agenda — as meninas confundiam ──
 const KIND_META = {
   agendada: {
     label: 'Marcada',
@@ -80,9 +81,9 @@ const KIND_META = {
   reagendada: {
     label: 'Remarcada',
     verb: 'remarcou às',
-    color: '#D97706',
-    light: '#fbbf24',
-    tone: 'cv-amber',
+    color: '#0891B2',
+    light: '#22d3ee',
+    tone: 'cv-cyan',
     icon: 'i-lucide-refresh-cw',
   },
   cancelada: {
@@ -184,7 +185,7 @@ const KINDS = [
   {
     key: 'reagendada',
     label: 'Remarcadas',
-    tone: 'cv-amber',
+    tone: 'cv-cyan', // item 368
     countKey: 'reagendada',
   },
   {

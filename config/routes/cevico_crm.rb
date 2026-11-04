@@ -21,6 +21,18 @@ namespace :crm do
       get :templates
     end
   end
+  # 📣 item 381: plano de reativação em fatias (uma mãe por conta)
+  resource :reactivation_plan, only: [:show, :update] do
+    post :simulate
+    post :activate
+    post :pause
+    post :run_now
+    # 🎛️ item 382: controle do lote
+    get :preview_next
+    post :send_batch
+    get :queue
+    get :batches
+  end
   resources :message_automations, only: [:index, :create, :update, :destroy] do
     member { get :preview_eligible }
   end
@@ -147,6 +159,9 @@ namespace :crm do
     post :copywriter_content
     post :update_google_ads
     post :test_google_ads
+    # 🎯 item 371: conversões direto no Google Ads (gclid)
+    post :prepare_google_ads
+    post :test_google_ads_api
     post :test_search_console
     post :update_sheets
     post :test_sheets
@@ -170,6 +185,7 @@ namespace :crm do
     post :update_agenda
     get :agenda_ai_preview # item 307: regras e vagas que a IA recebe
     post :update_blocked_days # item 267: qualquer pessoa da equipe fecha/reabre dias
+    post :update_agenda_locks # item 366: cadeado de horário e fechar médico (nó agenda.bloqueios)
     post :agenda_backfill
     # Configurações → Domínio (público das páginas/formulários)
     get :public_domain
@@ -210,6 +226,9 @@ namespace :crm do
     post :update_price_table
     # investimento mensal por caixa (ROI/CAC do Dashboard CRM)
     post :update_inbox_investments
+    # 📣 item 380: mensagens prontas da Reativação de fim de ano (ler = time; editar = campanhas)
+    get :reactivation_messages
+    post :update_reactivation_message
   end
   # ✍️ rodada 191: orientações dos atendentes de IA + histórico do Roteiro (só admin)
   resources :agent_guidances, only: %i[index create update destroy], controller: 'agent_guidances' do
@@ -249,6 +268,8 @@ namespace :crm do
     post :ai_suggestions
     # 16/10: foto nova do Search Console agora (botão "Atualizar agora")
     post :search_console_refresh
+    # 02/11: QUEM SÃO os leads do período (nome, página, origem, caixa, conversa)
+    get :leads
   end
   # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
   resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do

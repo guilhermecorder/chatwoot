@@ -286,3 +286,10 @@ crm_sidekiq_heartbeat_job:
   cron: '*/1 * * * *'
   class: 'Crm::SidekiqHeartbeatJob'
   queue: scheduled_jobs
+
+# 📣 CEVICO item 381: plano de reativação em fatias — de hora em hora manda a
+# fatia da hora (dentro da janela e do teto do dia configurados na mãe)
+crm_reactivation_plan_job:
+  cron: '7 * * * *'
+  class: 'Crm::ReactivationPlanJob'
+  queue: scheduled_jobs

@@ -32,7 +32,18 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   # 🕐 mesmo texto da campanha de ligação: a hora digitada é de São Paulo
   SCHEDULE_ERROR = 'Data de envio inválida ou no passado (use uma data futura, no horário de São Paulo)'.freeze
 
-  def send_now
+  def send_now # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    # 🔁 item 379: na campanha recorrente "Enviar agora" = abrir uma rodada já
+    # (filha) e marcar a próxima; a mãe nunca entra em envio ela mesma
+    return run_recurring_now if @campaign.recurring?
+
+    # 📣 item 381: a mãe do plano de reativação nunca sai como campanha comum —
+    # "Enviar agora/Retomar" aqui = reativar o plano (o robô de hora em hora manda as fatias)
+    if @campaign.reactivation_plan?
+      @campaign.update!(status: :processing, finished_at: nil) unless @campaign.processing?
+      return render json: campaign_json(@campaign)
+    end
+
     # bloqueia a campanha CONCLUÍDA (evita reblast acidental). "Pausada" ou
     # "falhou" pode ser reenviada: o job retoma sem reenviar quem já recebeu.
     return render_could_not_create_error('Campanha já foi concluída') if @campaign.completed?
@@ -56,8 +67,15 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   # POST schedule — agenda o disparo (scheduled_at obrigatório).
   # 🕐 R3 da auditoria (CONTRATO-0/#411): "2026-10-08T08:00" (sem fuso) é
   # 08:00 de SÃO PAULO — antes era gravado como UTC e a campanha saía 3 h antes.
-  def schedule
+  def schedule # rubocop:disable Metrics/CyclomaticComplexity
     return render_could_not_create_error('Campanha já foi enviada') unless @campaign.draft? || @campaign.scheduled? || @campaign.paused?
+
+    # 🔁 item 379: a recorrente sem data = "ativar/retomar" → primeira rodada
+    # hoje na hora da regra (ou no próximo dia útil)
+    if params[:scheduled_at].blank? && @campaign.recurring?
+      @campaign.update!(status: :scheduled, scheduled_at: Crm::RecurringCampaign.next_run_at(@campaign.recurrence_rules, first: true))
+      return render json: campaign_json(@campaign)
+    end
     return render_could_not_create_error('Informe a data de envio') if params[:scheduled_at].blank?
 
     when_at = parse_schedule(params[:scheduled_at])
@@ -81,7 +99,8 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   # para quem vê o Financeiro — "resultados" é leitura do time todo, então os
   # campos de R$ vão como nil para os demais.
   def results
-    recipients_count = @campaign.campaign_contacts.count
+    # 🔁 item 379: na recorrente, "recipients" soma todas as rodadas
+    recipients_count = @campaign.recipients.count
     converted = @campaign.converted_crm_contacts.to_a
 
     render json: {
@@ -104,12 +123,17 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   # "Enviar para N contatos (≈ R$ X)?". category = marketing (padrão) ou
   # utility/authentication, conforme o modelo escolhido.
   def preview_audience
-    preview = Crm::Campaign.new(account: Current.account, audience: audience_params)
+    # 🔁 item 379: prévia de uma recorrente que JÁ existe leva o id (para
+    # descontar quem recebeu nas rodadas anteriores) — sem salvar nada
+    preview = Current.account.crm_campaigns.find_by(id: params[:campaign_id]) || Crm::Campaign.new(account: Current.account)
+    preview.audience = audience_params
     contacts = preview.resolve_audience
     count = contacts.size
     render json: {
       count: count,
-      sample: contacts.limit(10).map { |c| { id: c.id, name: c.name, phone_number: c.phone_number } }
+      sample: contacts.limit(10).map { |c| { id: c.id, name: c.name, phone_number: c.phone_number } },
+      # regra dele (item 369): ~1000 contatos/mês por número — quanto esta caixa já mandou de campanha em 30 dias
+      inbox_sent_30d: inbox_sent_30d(params[:inbox_id])
     }.merge(cost_estimate(count))
   end
 
@@ -126,6 +150,24 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   end
 
   private
+
+  # 🔁 item 379: rodada imediata da recorrente — a anterior ainda em envio não
+  # pode ser atropelada (a Meta cobra por balão)
+  def run_recurring_now
+    running = Current.account.crm_campaigns.processing.exists?(["audience ->> 'parent_id' = ?", @campaign.id.to_s])
+    return render_could_not_create_error('A rodada anterior ainda está sendo enviada. Espere ela terminar.') if running
+
+    child = Crm::RecurringCampaign.spawn!(@campaign)
+    render json: campaign_json(@campaign.reload).merge(child: campaign_json(child))
+  end
+
+  def inbox_sent_30d(inbox_id)
+    return nil if inbox_id.blank?
+
+    Crm::CampaignContact.joins(:campaign)
+                        .where(crm_campaigns: { account_id: Current.account.id, inbox_id: inbox_id.to_i })
+                        .where('crm_campaign_contacts.sent_at > ?', 30.days.ago).count
+  end
 
   # soma dos valores dos cards — nil para quem não vê o Financeiro
   def money_sum(cards)
@@ -161,7 +203,7 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
   # Quem respondeu: mensagem recebida na conversa após o envio da campanha,
   # com a primeira resposta de cada um
   def build_replies
-    responded = @campaign.campaign_contacts
+    responded = @campaign.recipients
                          .where.not(conversation_id: nil)
                          .joins('INNER JOIN messages ON messages.conversation_id = crm_campaign_contacts.conversation_id ' \
                                 'AND messages.message_type = 0 AND messages.created_at > crm_campaign_contacts.sent_at')
@@ -193,7 +235,7 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
     titles = Current.account.labels.where(id: label_ids).pluck(:title)
     return { count: 0, labels: [], items: [] } if titles.empty?
 
-    recipient_ids = @campaign.campaign_contacts.select(:contact_id)
+    recipient_ids = @campaign.recipients.select(:contact_id)
     converted = Current.account.contacts.where(id: recipient_ids).tagged_with(titles, any: true)
 
     {
@@ -255,11 +297,12 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
     params.require(:audience).permit(
       :period_field, :period_from, :period_to,
       include_label_ids: [], include_stage_ids: [],
-      exclude_label_ids: [], exclude_stage_ids: []
+      exclude_label_ids: [], exclude_stage_ids: [],
+      recurrence: {} # 🔁 item 379
     ).to_h
   end
 
-  def campaign_json(c)
+  def campaign_json(c) # rubocop:disable Metrics/MethodLength, Naming/MethodParameterName, Metrics/AbcSize
     {
       id: c.id,
       name: c.name,
@@ -273,6 +316,13 @@ class Api::V1::Accounts::Crm::CampaignsController < Api::V1::Accounts::BaseContr
       conversion_label_ids: c.conversion_label_ids,
       # 🕐 R3 (#411): scheduled_at_label = hora pronta no fuso da clínica (a lista não depende do fuso do navegador)
       scheduled_at: c.scheduled_at, scheduled_at_label: scheduled_label(c),
+      # 🔁 item 379: cadência (mãe) e a rodada de quem (filha)
+      recurring: c.recurring?,
+      recurrence: c.recurrence_rules,
+      recurrence_label: Crm::RecurringCampaign.label(c.recurrence_rules),
+      parent_id: c.parent_id,
+      plan: c.reactivation_plan?, # 📣 item 381
+      reactivation_day: c.audience.is_a?(Hash) ? c.audience[Crm::ReactivationPlan::DAY_KEY] : nil,
       status: c.status,
       stats: c.stats,
       sender_name: c.sender&.name,

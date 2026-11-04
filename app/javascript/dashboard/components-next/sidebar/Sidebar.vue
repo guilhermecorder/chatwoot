@@ -10,6 +10,7 @@ import { useStore } from 'vuex';
 import { useI18n } from 'vue-i18n';
 import { useSidebarKeyboardShortcuts } from './useSidebarKeyboardShortcuts';
 import { vOnClickOutside } from '@vueuse/components';
+import { useRoute } from 'vue-router';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 import { useWindowSize, useEventListener } from '@vueuse/core';
 
@@ -335,6 +336,11 @@ const closeMobileSidebar = () => {
   if (!props.isMobileSidebarOpen) return;
   emit('closeMobileSidebar');
 };
+// 📱 celular: a gaveta fecha sozinha depois de tocar num item do menu —
+// antes só fechava tocando fora, e um item que só troca a aba (?tab=) da
+// mesma tela (Painel dos agentes) parecia "não abrir" atrás da gaveta
+const route = useRoute();
+watch(() => route.fullPath, closeMobileSidebar);
 
 const newReportRoutes = () => [
   {
@@ -424,6 +430,7 @@ const FEATURE_BY_ITEM_NAME = {
   Reports: 'reports',
   CRM: 'crm',
   'Campanha WhatsApp': 'crm_campaigns',
+  Reativação: 'crm_reativacao',
   'Jornada do paciente': 'crm_journey',
   Tasks: 'tasks',
   Agenda: 'agenda',
@@ -471,6 +478,7 @@ const DEFAULT_MENU_ORDER = [
   'Captain',
   'Companies',
   'Campanha WhatsApp',
+  'Reativação',
   'Forms',
   'Tasks',
   'Agenda',
@@ -500,6 +508,7 @@ const AGENT_MENU_ORDER = [
   'People',
   'Reports',
   'Campanha WhatsApp',
+  'Reativação',
   'Cevico Pages',
   'Strategy',
   'Finance',
@@ -641,6 +650,7 @@ const MENU_LAYOUT = [
       'Jornada do paciente',
       'Automations Hub > Automations Robos',
       'Campanha WhatsApp',
+      'Reativação', // 📣 item 380/381: mensagens + plano em fatias
       'Automations Hub > Automations AI Agents',
       'Automations Hub > Automations AI Panel',
       'Automations Hub > Automations Flows',
@@ -774,6 +784,7 @@ const TILE_COLORS = {
   CRM: '#af52de',
   'Jornada do paciente': '#ff2d55',
   'Campanha WhatsApp': '#25d366',
+  Reativação: '#ff9500',
   Forms: '#ffcc00',
   'Automations Hub': '#5856d6',
   Reports: '#0a84ff',
@@ -1429,6 +1440,13 @@ const menuItems = computed(() => {
       label: 'Campanha WhatsApp',
       icon: 'i-lucide-megaphone',
       to: accountScopedRoute('crm_campaigns'),
+    },
+    // 📣 item 380/381: Reativação (mensagens prontas + plano de envio em fatias)
+    {
+      name: 'Reativação',
+      label: 'Reativação',
+      icon: 'i-lucide-rotate-ccw',
+      to: accountScopedRoute('crm_reativacao'),
     },
     // 🗺️ Mensagens da jornada (item 168) — rótulo no vocabulário da empresa
     {

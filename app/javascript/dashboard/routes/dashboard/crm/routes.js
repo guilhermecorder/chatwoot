@@ -1,6 +1,7 @@
 import { frontendURL } from '../../../helper/URLHelper';
 import CrmBoard from './CrmBoard.vue';
 import CrmCampaigns from './CrmCampaigns.vue';
+import CrmReativacao from './CrmReativacao.vue';
 import CrmJourney from './CrmJourney.vue';
 import CrmCalls from './CrmCalls.vue';
 import CrmAppointments from './CrmAppointments.vue';
@@ -59,6 +60,13 @@ export default {
       name: 'crm_campaigns',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmCampaigns,
+    },
+    // 📣 item 380/381: Reativação com casa própria (mensagens + plano em fatias)
+    {
+      path: frontendURL('accounts/:accountId/crm/reativacao'),
+      name: 'crm_reativacao',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmReativacao,
     },
     {
       path: frontendURL('accounts/:accountId/crm/campaigns/dashboard'),

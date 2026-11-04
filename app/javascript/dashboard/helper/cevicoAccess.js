@@ -98,6 +98,7 @@ export const MENU_NODES = {
   People: 'pessoas',
   Academy: 'academia',
   'Campanha WhatsApp': 'crm.campanhas',
+  Reativação: 'crm.campanhas',
   'Jornada do paciente': 'crm.jornada',
   Forms: 'crm.formularios',
   'Creatives Center': 'marketing.criativos',
