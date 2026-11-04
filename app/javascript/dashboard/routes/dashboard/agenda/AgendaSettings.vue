@@ -354,7 +354,7 @@ const loadPreview = async () => {
 // ── 4. VALORES (item 324): pré-configuração por tipo de atendimento ──
 // "avaliação geralmente é 150; retorno e 1º pós-operatório não têm custo;
 // exames, cada um tem o seu valor; particulares, cada médico tem o seu"
-const blankPrices = () => ({ avaliacao: '', retorno: '', pos_op: '', teleconsulta: '', particular: {}, exames: [], especiais: [] });
+const blankPrices = () => ({ avaliacao: '', retorno: '', pos_op: '', teleconsulta: '', particular: {}, exames: [], especiais: [], parceiros: [] });
 const namedPrices = list => (list || []).map(e => ({ name: e.name || '', price: e.price || '' }));
 const pricesFrom = raw => ({
   ...blankPrices(),
@@ -362,6 +362,7 @@ const pricesFrom = raw => ({
   particular: { ...(raw?.particular || {}) },
   exames: namedPrices(raw?.exames),
   especiais: namedPrices(raw?.especiais),
+  parceiros: namedPrices(raw?.parceiros),
 });
 const prices = ref(pricesFrom(settings.value?.appointment_prices));
 const pricesSaved = ref(JSON.stringify(prices.value));
@@ -379,6 +380,9 @@ const removeExamPrice = idx => prices.value.exames.splice(idx, 1);
 // 🩺 19/10: avaliação com especialista, pelo problema escrito no agendamento
 const addSpecialPrice = () => prices.value.especiais.push({ name: '', price: '' });
 const removeSpecialPrice = idx => prices.value.especiais.splice(idx, 1);
+// 🤝 item 386: parceiro do Oftalmofácil com valor combinado (Amor Saúde Tatuapé = 0,00)
+const addPartnerPrice = () => prices.value.parceiros.push({ name: '', price: '' });
+const removePartnerPrice = idx => prices.value.parceiros.splice(idx, 1);
 const savePrices = async () => {
   busy.value = 'prices';
   try {
@@ -784,6 +788,20 @@ onMounted(() => {
               <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
               <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
               <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removeSpecialPrice(idx)"><span class="i-lucide-x" /></button>
+            </div>
+          </section>
+          <section class="space-y-2">
+            <div class="flex items-center gap-2">
+              <p class="cv-ag-block-title flex-1">Parceiros do Oftalmofácil, valor combinado</p>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addPartnerPrice"><span class="i-lucide-plus text-xs" /> Parceiro</button>
+            </div>
+            <p class="text-[11px] text-n-slate-10">Consulta ou exame que veio de um destes parceiros pelo Oftalmofácil vai na confirmação com este valor (0,00 = sai zerado), em vez do valor do hub ou do pré-configurado. Só o valor lançado à mão no card passa na frente; cirurgia fica fora. Escreva um número (0,00 = zerado): texto como "sem custo" não cabe no modelo da Meta e a consulta fica nas puladas. O nome é comparado sem acento nem espaço: "Amor Saúde Tatuapé" encontra "AMORSAUDE TATUAPE"; com dois nomes casando, vale o mais completo.</p>
+            <p v-if="!prices.parceiros.length" class="text-xs text-n-slate-9">Nenhum parceiro com valor combinado.</p>
+            <div v-for="(e, idx) in prices.parceiros" :key="'pt' + idx" class="cv-row flex items-center gap-2 px-3 py-2">
+              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" placeholder="Parceiro (Amor Saúde Tatuapé…)" />
+              <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="0,00" />
+              <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
+              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removePartnerPrice(idx)"><span class="i-lucide-x" /></button>
             </div>
           </section>
           <section class="space-y-2">

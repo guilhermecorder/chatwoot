@@ -1096,6 +1096,10 @@ const emptyForm = (day, prefill = {}) => {
     // 💰 item 324: consulta particular + valores lançados à mão neste card
     particular: false,
     charges: [],
+    // 🤝 item 386: de onde veio (só leitura) — o valor combinado do parceiro
+    // do Oftalmofácil depende disso; não vai no payload
+    source: '',
+    source_detail: '',
   };
 };
 const form = ref(emptyForm());
@@ -1207,6 +1211,8 @@ const openEdit = task => {
     contact_id: task.contact_id || null,
     particular: !!task.particular,
     charges: (task.charges || []).map(c => ({ ...c })),
+    source: task.source || '',
+    source_detail: task.source_detail || '',
   };
   showDeleteConfirm.value = false;
   conflictsOpen.value = false;
@@ -3100,7 +3106,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <span class="cv-ag-price-value">{{ priceEffective?.text ? priceLabel(priceEffective.text) : (priceEffective ? 'valor padrão' : '—') }}</span>
                 <span class="cv-ag-price-source">{{ priceEffective ? priceEffective.label : 'cirurgia: só valor lançado à mão' }}</span>
               </div>
-              <p v-if="pricePreset && priceEffective?.source !== 'preset'" class="text-[11px] text-n-slate-11">Pré-configurado para este tipo: <b class="text-n-slate-12">{{ priceLabel(pricePreset.text) }}</b> ({{ pricePreset.label }}) — o valor lançado à mão tem prioridade.</p>
+              <p v-if="pricePreset && priceEffective?.source !== 'preset'" class="text-[11px] text-n-slate-11">Pré-configurado para este tipo: <b class="text-n-slate-12">{{ priceLabel(pricePreset.text) }}</b> ({{ pricePreset.label }}) — {{ priceEffective?.source === 'parceiro' ? 'o valor combinado do parceiro tem prioridade' : priceEffective?.source === 'manual' ? 'o valor lançado à mão tem prioridade' : 'o valor escrito tem prioridade' }}.</p>
               <div>
                 <span class="cv-label block mb-1.5">Valores lançados à mão</span>
                 <div v-for="(c, idx) in form.charges" :key="'ch' + idx" class="cv-ag-charge">

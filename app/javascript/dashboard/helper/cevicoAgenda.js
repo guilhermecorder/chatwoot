@@ -928,6 +928,25 @@ export const humanNotes = text =>
       return lines.filter((_line, i) => i > aiUntil);
     })
     .join('\n');
+// só letras e números: "Amor Saúde Tatuapé" → "amorsaudetatuape"
+const squashText = s => foldText(s).replace(/[^a-z0-9]/g, '');
+// 🤝 item 386: parceiro do hub (task.source_detail) com valor combinado
+// (cirurgia fica fora; com mais de um nome casando vale o mais específico)
+export const partnerAppointmentPrice = (prices, appt) => {
+  if (!prices || appt.kind === 'cirurgias' || appt.source !== 'oftalmofacil')
+    return null;
+  const provider = squashText(appt.source_detail);
+  if (!provider) return null;
+  const hit = (prices.parceiros || [])
+    .filter(e => {
+      const key = squashText(e.name);
+      return e.price && key && provider.includes(key);
+    })
+    .sort((a, b) => squashText(b.name).length - squashText(a.name).length)[0];
+  return hit
+    ? { text: hit.price, source: 'parceiro', label: `combinado · ${hit.name}` }
+    : null;
+};
 // o valor que VALE para o agendamento: { text, source, label }
 export const effectiveAppointmentPrice = (prices, appt) => {
   const manual = (appt.charges || []).filter(c =>
@@ -939,6 +958,10 @@ export const effectiveAppointmentPrice = (prices, appt) => {
       source: 'manual',
       label: 'lançado à mão neste card',
     };
+  // 🤝 item 386: consulta que veio de um PARCEIRO do Oftalmofácil com valor
+  // combinado (Ajustes → Valores → Parceiros) — mesma regra de Crm::AppointmentPrice
+  const partner = partnerAppointmentPrice(prices, appt);
+  if (partner) return partner;
   const notes = humanNotes(appt.description);
   const explicit = VALUE_PATTERN.exec(notes);
   if (explicit)

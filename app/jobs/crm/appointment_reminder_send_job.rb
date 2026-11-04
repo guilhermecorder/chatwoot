@@ -214,7 +214,7 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     return skip(run, task, partner ? 'Oftalmofácil: sem modelo' : "sem modelo para #{unit_label(task)}") if template.nil? && !shadow
 
     # 💳 19/10: "R$sem custo à vista" nunca mais — valor em texto só sai por um modelo feito para o tipo
-    free = free_value_reason(template, task, rcfg)
+    free = free_value_reason(template, task, rcfg, partner: partner)
     return skip(run, task, free) if free
 
     if shadow
@@ -417,7 +417,9 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
   # personalizados → Retorno). No modelo padrão (o da avaliação) ou num modelo
   # só por médico, a consulta fica nas "puladas" com o motivo, e a equipe
   # confirma à mão — melhor do que a paciente ler "R$sem custo".
-  def free_value_reason(template, task, rcfg) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  # 🤝 item 386: paciente de parceiro só sai pelo modelo do bloco Oftalmofácil
+  # (nunca pelos personalizados) — o motivo da pulada aponta para o lugar certo
+  def free_value_reason(template, task, rcfg, partner: false) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return nil if template.nil? || template['modality'].present?
 
     value = appointment_value(task, rcfg)
@@ -425,6 +427,11 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
 
     body = personalized_params(template['template_params'], task, rcfg, template['message_preview']).dig('processed_params', 'body') || {}
     return nil unless body.values.any? { |text| text.to_s.include?(value) }
+
+    if partner
+      return "valor \"#{value}\" em texto não cabe no modelo do Oftalmofácil (que fala em R$) — " \
+             'lance um número no card ou, para parceiro com valor combinado, use 0,00 em Agenda → Valores → Parceiros'
+    end
 
     type = Crm::ReminderModels::MODALITY_LABELS[task.modality] || task.modality.presence || 'este tipo'
     "valor \"#{value}\" não cabe no modelo padrão (que fala em R$) — cadastre um modelo de #{type} em modelos personalizados"

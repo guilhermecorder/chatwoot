@@ -9,10 +9,12 @@
 #
 # De onde sai o valor de UM agendamento, nesta ordem (a primeira que existir):
 #   1. manual        valores lançados no card da Agenda (tasks.charges, com quem lançou)
-#   2. observacao    "Valor: 250" escrito por uma PESSOA na observação
-#   3. procedimento  "R$ 350" escrito no TIPO DE CONSULTA (task.procedure,
+#   2. parceiro      consulta/exame que veio de um PARCEIRO do Oftalmofácil com
+#                    valor combinado (Agenda → Valores → Parceiros) — item 386
+#   3. observacao    "Valor: 250" escrito por uma PESSOA na observação
+#   4. procedimento  "R$ 350" escrito no TIPO DE CONSULTA (task.procedure,
 #                    ex.: "CONSULTA | JÁ PAC | R$350") — item 340
-#   4. o PRÉ-CONFIGURADO do tipo (agenda_config.appointment_prices):
+#   5. o PRÉ-CONFIGURADO do tipo (agenda_config.appointment_prices):
 #        particular  consulta particular → o valor do MÉDICO
 #        exames      cada exame citado no agendamento → soma
 #        especiais   avaliação com ESPECIALISTA, pelo problema escrito no
@@ -20,8 +22,8 @@
 #                    os valores do Roteiro; 19/10, Vaneide: "agendou com
 #                    especialista em retina, só que o valor não subiu")
 #        avaliacao / retorno / pos_op / teleconsulta → o valor do tipo
-#   5. observacao    outro "R$ 250" solto na observação (sem "Valor:")
-#   6. padrao        o "valor padrão" do lembrete (como já era) ou 150,00
+#   6. observacao    outro "R$ 250" solto na observação (sem "Valor:")
+#   7. padrao        o "valor padrão" do lembrete (como já era) ou 150,00
 #
 # 💰 item 340 (13/10): a confirmação do Alessandro saiu "R$ 150" com a Agenda
 # mostrando R$ 350. Duas causas: (a) o valor escrito no tipo de consulta era
@@ -30,6 +32,15 @@
 # entra embaixo da observação da equipe. O que a IA escreveu nesses blocos
 # antigos NÃO conta como valor (human_notes); a rake cevico:limpar_valor_ia
 # tira essa linha das consultas futuras.
+#
+# 🤝 item 386 (04/11): PARCEIRO DO OFTALMOFÁCIL COM VALOR COMBINADO. A Cleide
+# (Amor Saúde Tatuapé, etiqueta of_amorsaude_tatuape) recebeu "Valor da
+# avaliação: R$ 338,00" — o sync do hub escreve o valor de lá na observação
+# ("Oftalmofácil · AMORSAUDE TATUAPE · … · R$ 338,00") e a regra 5 lia esse
+# R$ solto. Combinado do Dr. Gustavo: paciente desse parceiro vê SEMPRE zero.
+# Agora, logo depois do lançado à mão, a consulta que veio de um parceiro
+# (task.source_detail) com valor combinado em Agenda → Valores → "Parceiros
+# do Oftalmofácil" usa esse valor (padrão: Amor Saúde Tatuapé = 0,00).
 #
 # Um valor pode ser número ("150,00") ou texto ("sem custo"). Sem nada salvo
 # na pré-configuração, retorno e pós-operatório saem "sem custo" (palavra
@@ -45,8 +56,12 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
   # valores do Roteiro (Crm::CevicoScript); o admin ajusta em Agenda → Valores.
   SPECIALS = [{ 'name' => 'glaucoma', 'price' => '300,00' }, { 'name' => 'retina', 'price' => '300,00' },
               { 'name' => 'ceratocone', 'price' => '350,00' }].freeze
+  # 🤝 item 386: parceiros do Oftalmofácil com valor combinado (o nome é
+  # comparado sem acento, espaço ou pontuação: "Amor Saúde Tatuapé" casa com
+  # o "AMORSAUDE TATUAPE" que o hub manda)
+  PARTNERS = [{ 'name' => 'Amor Saúde Tatuapé', 'price' => '0,00' }].freeze
   DEFAULTS = { 'avaliacao' => '', 'retorno' => FREE, 'pos_op' => FREE, 'teleconsulta' => '', 'particular' => {}, 'exames' => [],
-               'especiais' => SPECIALS }.freeze
+               'especiais' => SPECIALS, 'parceiros' => PARTNERS }.freeze
   FALLBACK = '150,00'.freeze
   MAX_EXAMS = 60
   MAX_CHARGES = 8
@@ -71,7 +86,7 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
   end
 
   # o que a tela manda → o que fica gravado
-  def sanitize(raw) # rubocop:disable Metrics/AbcSize
+  def sanitize(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw.to_h
     out = TYPES.index_with { |type| tidy(raw[type]) }
     out['particular'] = (raw['particular'] || {}).to_h.to_h { |doctor, value| [doctor.to_s.strip[0, 80], tidy(value)] }
@@ -79,6 +94,8 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
     out['exames'] = named_prices(raw['exames'])
     # tela antiga (sem o bloco) não apaga os especiais padrão; lista vazia enviada = nenhum
     out['especiais'] = raw.key?('especiais') ? named_prices(raw['especiais']) : SPECIALS
+    # idem para os parceiros do Oftalmofácil (item 386)
+    out['parceiros'] = raw.key?('parceiros') ? named_prices(raw['parceiros']) : PARTNERS
     out
   end
 
@@ -95,6 +112,11 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
   def resolve(cfg, task, fallback: nil) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     manual = manual_total(task)
     return manual if manual
+
+    # 🤝 item 386: parceiro do Oftalmofácil com valor combinado vence a
+    # observação (onde o sync escreve o valor do hub) e o pré-configurado
+    combined = partner_price(cfg, task)
+    return combined if combined
 
     notes = human_notes(task.description)
     explicit = match_money(notes, VALUE_PATTERN)
@@ -130,6 +152,26 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
     type = TYPES.include?(task.modality) ? task.modality : 'avaliacao'
     value = cfg[type].to_s
     value.present? ? { text: value, source: 'preset', label: "pré-configurado · #{type.tr('_', ' ')}" } : nil
+  end
+
+  # 🤝 item 386: consulta/exame que veio de um PARCEIRO do hub (o sync grava o
+  # nome dele em task.source_detail) com valor combinado em Agenda → Valores.
+  # Consulta marcada pela recepção (sem source_detail) não entra: a exceção é
+  # só para o agendamento que o parceiro mandou. Cirurgia fica fora (o
+  # combinado é da avaliação; a cirurgia tem o valor dela). Com mais de um
+  # nome casando ("Amor Saúde" e "Amor Saúde Tatuapé"), vale o mais específico.
+  def partner_price(cfg, task) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return nil unless task.task_type == 'consulta' && Crm::PartnerGuard.partner_task?(task)
+
+    provider = squash(task.source_detail)
+    return nil if provider.blank?
+
+    hits = Array(cfg['parceiros']).select do |row|
+      key = squash(row['name'])
+      row['price'].present? && key.present? && provider.include?(key)
+    end
+    hit = hits.max_by { |row| squash(row['name']).length }
+    hit && { text: hit['price'], source: 'parceiro', label: "combinado · #{hit['name']}" }
   end
 
   # 🩺 avaliação com especialista: o problema do agendamento cita um dos
@@ -276,5 +318,10 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
 
   def fold(text)
     I18n.transliterate(text.to_s).downcase.squish
+  end
+
+  # só letras e números: "Amor Saúde Tatuapé" → "amorsaudetatuape"
+  def squash(text)
+    fold(text).gsub(/[^a-z0-9]/, '')
   end
 end

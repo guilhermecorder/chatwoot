@@ -66,6 +66,78 @@ describe('effectiveAppointmentPrice (item 340)', () => {
     ).toMatchObject({ text: 'sem custo' });
   });
 
+  // 🤝 item 386: parceiro do Oftalmofácil com valor combinado sai 0,00 em vez
+  // do "R$ 338,00" que o sync do hub escreve na observação
+  it('parceiro do Oftalmofácil com valor combinado vence o valor do hub; outro parceiro não', () => {
+    const withPartner = {
+      ...prices,
+      parceiros: [{ name: 'Amor Saúde Tatuapé', price: '0,00' }],
+    };
+    const hub = {
+      source: 'oftalmofacil',
+      description: 'Oftalmofácil · AMORSAUDE TATUAPE · Consulta · R$ 338,00',
+    };
+    expect(
+      effectiveAppointmentPrice(
+        withPartner,
+        appt({ ...hub, source_detail: 'AMORSAUDE TATUAPE' })
+      )
+    ).toMatchObject({ text: '0,00', source: 'parceiro' });
+    expect(
+      effectiveAppointmentPrice(
+        withPartner,
+        appt({ ...hub, source_detail: 'AMORSAUDE PAULISTA' })
+      )
+    ).toMatchObject({ text: '150,00', source: 'preset' });
+    expect(
+      effectiveAppointmentPrice(
+        withPartner,
+        appt({
+          ...hub,
+          source_detail: 'AMORSAUDE TATUAPE',
+          charges: [{ amount: '80' }],
+        })
+      )
+    ).toMatchObject({ text: '80,00', source: 'manual' });
+    // cirurgia do parceiro fica fora; config antiga (sem parceiros) e
+    // consulta sem source_detail não quebram
+    expect(
+      effectiveAppointmentPrice(
+        withPartner,
+        appt({ ...hub, kind: 'cirurgias', source_detail: 'AMORSAUDE TATUAPE' })
+      )
+    ).toMatchObject({ text: '338,00', source: 'observacao' });
+    expect(
+      effectiveAppointmentPrice(
+        prices,
+        appt({ ...hub, source_detail: 'AMORSAUDE TATUAPE' })
+      )
+    ).toMatchObject({ text: '150,00', source: 'preset' });
+    expect(
+      effectiveAppointmentPrice(withPartner, appt({ ...hub }))
+    ).toMatchObject({ text: '150,00', source: 'preset' });
+    // dois nomes casando: vale o mais específico, em qualquer ordem
+    const two = {
+      ...prices,
+      parceiros: [
+        { name: 'Amor Saúde', price: '50,00' },
+        { name: 'Amor Saúde Tatuapé', price: '0,00' },
+      ],
+    };
+    expect(
+      effectiveAppointmentPrice(
+        two,
+        appt({ ...hub, source_detail: 'AMORSAUDE TATUAPE' })
+      )
+    ).toMatchObject({ text: '0,00', label: 'combinado · Amor Saúde Tatuapé' });
+    expect(
+      effectiveAppointmentPrice(
+        two,
+        appt({ ...hub, source_detail: 'AMORSAUDE PAULISTA' })
+      )
+    ).toMatchObject({ text: '50,00', label: 'combinado · Amor Saúde' });
+  });
+
   it('"R$ X" solto na observação fica depois do pré-configurado', () => {
     const result = effectiveAppointmentPrice(
       prices,

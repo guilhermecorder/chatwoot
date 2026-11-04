@@ -777,6 +777,30 @@ RSpec.describe Crm::AppointmentReminderSendJob do
       expect(parceiro.reload.additional_attributes['cevico_appt_reminders']).to be_present
     end
 
+    # 🤝 item 386: Amor Saúde Tatuapé sai com {{valor}} = 0,00 (e não o R$ 338 do hub)
+    it 'parceiro com valor combinado: o {{valor}} vai 0,00, não é pulado e a lista diz de onde saiu', :aggregate_failures do
+      cleide = contact_named('Cleide Miguel', '+5511999990053')
+      consulta(cleide, '2026-09-28 11:00', source: 'oftalmofacil', source_detail: 'AMORSAUDE TATUAPE', external_ref: 'p53',
+                                           description: 'Oftalmofácil · AMORSAUDE TATUAPE · Consulta · R$ 338,00 · status lá: Agendado')
+      with_value = partner_cfg.deep_merge('template_params' => { 'processed_params' => { 'body' => { '4' => '{{valor}}' } } },
+                                          'message_preview' => 'Olá {{1}}, {{2}} · Valor da avaliação: R$ {{4}} à vista')
+      settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('partner' => with_value) } })
+      sources = []
+      allow(Crm::TemplateSource).to receive(:new).and_wrap_original do |m, *args|
+        sources << args
+        m.call(*args)
+      end
+      described_class.perform_now(now)
+
+      of = sources.find { |s| s[3]['name'] == 'confirmacao_oftalmofacil' && s[3].dig('processed_params', 'body', '1') == 'Cleide' }
+      expect(of).to be_present
+      expect(of[3].dig('processed_params', 'body')).to include('4' => '0,00')
+      state = settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      expect(state['skipped'].map { |e| e['name'] }).not_to include('Cleide Miguel')
+      expect(state['sent'].find { |e| e['name'] == 'Cleide Miguel' })
+        .to include('value' => '0,00', 'value_source' => 'combinado · Amor Saúde Tatuapé', 'partner' => 'AMORSAUDE TATUAPE')
+    end
+
     it 'sem modelo próprio, parceiro é pulado (nunca usa o modelo da CEVICO)' do
       settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('partner' => partner_cfg.except('template_params')) } })
       described_class.perform_now(now)
