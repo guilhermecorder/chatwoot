@@ -67,6 +67,7 @@ const pal = useCevicoPalette({
     { id: 'responsividade', label: 'Responsividade', icon: 'i-lucide-activity' },
     { id: 'tempo', label: 'Conversas no tempo', icon: 'i-lucide-chart-area' },
     { id: 'faturamento', label: 'Faturamento por caixa', icon: 'i-lucide-trending-up' },
+    { id: 'mensal', label: 'Faturamento mês a mês', icon: 'i-lucide-bar-chart-3' },
     { id: 'etiquetas', label: 'Etiquetas', icon: 'i-lucide-tags' },
     { id: 'radar', label: 'Radar × Consultas', icon: 'i-lucide-radar' },
     { id: 'perdas', label: 'Perdas por motivo', icon: 'i-lucide-heart-crack' },
@@ -520,6 +521,200 @@ const revenueChart = computed(() => {
     options: layeredAreaOptions({ stacked: true, format: formatCurrency }),
   };
 });
+
+// ── 📊 Faturamento mês a mês (03/11): últimos 12 meses, independente da
+// régua de período — barras verdes = faturamento registrado no mês (cards
+// que entraram em Cirurgia Realizada), linha dourada tracejada = média dos
+// meses com faturamento, e linhas de volume opcionais no eixo da direita.
+// Carrega UMA vez, no mount, pelo cesto de KPIs (GET crm/home/kpis).
+// Quem não pode ver dinheiro não recebe `metrics.revenue` → bloco some.
+const MENSAL_OVERLAYS_KEY = 'cevico_dash_mensal_overlays';
+const MENSAL_OVERLAYS = [
+  { key: 'new_leads', label: 'Leads novos', color: '#3B82F6' },
+  { key: 'appointments_booked', label: 'Consultas marcadas', color: '#7C3AED' },
+  { key: 'indications', label: 'Indicações de cirurgia', color: '#F59E0B' },
+  { key: 'surgeries_booked', label: 'Cirurgias marcadas', color: '#EC4899' },
+];
+const mensal = ref(null);
+const mensalLoading = ref(false);
+const mensalError = ref(false);
+
+const loadSavedMensalOverlays = () => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MENSAL_OVERLAYS_KEY) || 'null');
+    if (!Array.isArray(raw)) return ['new_leads'];
+    return raw.filter(k => MENSAL_OVERLAYS.some(o => o.key === k));
+  } catch {
+    return ['new_leads'];
+  }
+};
+const mensalOverlays = ref(loadSavedMensalOverlays());
+const mensalOverlayOn = key => mensalOverlays.value.includes(key);
+const toggleMensalOverlay = key => {
+  const base = [...mensalOverlays.value];
+  const idx = base.indexOf(key);
+  if (idx >= 0) base.splice(idx, 1);
+  else base.push(key);
+  mensalOverlays.value = base;
+  try {
+    localStorage.setItem(MENSAL_OVERLAYS_KEY, JSON.stringify(base));
+  } catch {
+    // navegador sem localStorage: segue só na sessão
+  }
+};
+
+// "hoje" no fuso de São Paulo (YYYY-MM-DD) e o dia 1 de 11 meses atrás
+const mensalRange = () => {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const [y, m] = today.split('-').map(Number);
+  const start = new Date(Date.UTC(y, m - 1 - 11, 1));
+  const from = start.toISOString().slice(0, 10);
+  return { from, to: today };
+};
+
+const loadMensal = async () => {
+  mensalLoading.value = true;
+  mensalError.value = false;
+  try {
+    const { from, to } = mensalRange();
+    const { data: res } = await CrmAPI.getKpiBag({
+      preset: 'custom',
+      from,
+      to,
+      granularity: 'month',
+    });
+    mensal.value = res || null;
+  } catch {
+    mensalError.value = true;
+    mensal.value = null;
+  } finally {
+    mensalLoading.value = false;
+  }
+};
+
+const mensalRevenue = computed(() => mensal.value?.metrics?.revenue || null);
+const mensalPoints = computed(() => mensal.value?.points || []);
+const mensalSeries = computed(() =>
+  mensalPoints.value.map((_, i) => Number(mensalRevenue.value?.series?.[i] || 0))
+);
+// média só dos meses que tiveram faturamento (mês zerado não puxa pra baixo)
+const mensalAverage = computed(() => {
+  const withValue = mensalSeries.value.filter(v => v > 0);
+  if (!withValue.length) return 0;
+  return withValue.reduce((a, v) => a + v, 0) / withValue.length;
+});
+const mensalTotal = computed(() => mensalSeries.value.reduce((a, v) => a + v, 0));
+const mensalBest = computed(() => {
+  if (!mensalSeries.value.length) return null;
+  let bi = 0;
+  mensalSeries.value.forEach((v, i) => {
+    if (v > mensalSeries.value[bi]) bi = i;
+  });
+  if (!mensalSeries.value[bi]) return null;
+  return { value: mensalSeries.value[bi], label: mensalPoints.value[bi]?.label || '' };
+});
+const mensalCurrent = computed(() =>
+  mensalSeries.value.length ? mensalSeries.value[mensalSeries.value.length - 1] : 0
+);
+
+const mensalChart = computed(() => {
+  if (!mensalRevenue.value || !mensalPoints.value.length) return null;
+  const labels = mensalPoints.value.map(p => p.label);
+  const datasets = [
+    {
+      type: 'line',
+      label: 'Média',
+      data: labels.map(() => Math.round(mensalAverage.value)),
+      borderColor: '#D4AF37',
+      borderWidth: 2,
+      borderDash: [6, 4],
+      pointRadius: 0,
+      pointHoverRadius: 0,
+      tension: 0,
+      fill: false,
+      yAxisID: 'y',
+      order: 1,
+    },
+    ...MENSAL_OVERLAYS.filter(o => mensalOverlayOn(o.key)).map(o => ({
+      type: 'line',
+      label: o.label,
+      data: mensalPoints.value.map((_, i) =>
+        Number(mensal.value?.metrics?.[o.key]?.series?.[i] || 0)
+      ),
+      borderColor: o.color,
+      backgroundColor: o.color,
+      borderWidth: 2,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      pointBackgroundColor: o.color,
+      tension: 0.35,
+      fill: false,
+      yAxisID: 'y2',
+      order: 0,
+    })),
+    {
+      type: 'bar',
+      label: 'Faturamento',
+      data: mensalSeries.value,
+      borderRadius: 10,
+      borderSkipped: false,
+      maxBarThickness: 44,
+      yAxisID: 'y',
+      order: 2,
+      // gradiente vertical verde: topo mais claro, base na cor cheia
+      backgroundColor: ctx => {
+        const { chartArea, ctx: c } = ctx.chart;
+        if (!chartArea) return '#059669';
+        const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+        g.addColorStop(0, '#34D399');
+        g.addColorStop(1, '#059669');
+        return g;
+      },
+    },
+  ];
+  const moneySets = ['Faturamento', 'Média'];
+  return {
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'bottom',
+          labels: { boxWidth: 12, padding: 14, font: { size: 11 } },
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx =>
+              moneySets.includes(ctx.dataset.label)
+                ? ` ${ctx.dataset.label}: ${formatCurrency(ctx.raw)}`
+                : ` ${ctx.dataset.label}: ${Number(ctx.raw).toLocaleString('pt-BR')}`,
+          },
+        },
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          ticks: { maxTicksLimit: 6, callback: v => formatCurrency(v) },
+          grid: { color: 'rgba(120,140,180,0.12)' },
+        },
+        y2: {
+          position: 'right',
+          beginAtZero: true,
+          display: mensalOverlays.value.length > 0,
+          ticks: { maxTicksLimit: 6, precision: 0 },
+          grid: { drawOnChartArea: false },
+        },
+        x: { grid: { display: false } },
+      },
+      animation: { duration: 500, easing: 'easeOutQuart' },
+    },
+  };
+});
+
+onMounted(loadMensal);
 
 // ── Charts ────────────────────────────────────────────────────────────
 
@@ -1479,6 +1674,77 @@ const agentView = computed(() => {
             <span>Sem faturamento no período — cards que chegarem à coluna de cirurgia aparecem aqui.</span>
           </div>
         </div>
+      </div>
+
+      <!-- 📊 Faturamento mês a mês (03/11): últimos 12 meses, NÃO muda com a
+           régua; barras verdes + média tracejada + linhas de volume por chip.
+           Só aparece pra quem pode ver dinheiro (metrics.revenue) -->
+      <div
+        v-if="mensalLoading || mensalError || mensalRevenue"
+        class="cv-block p-5 sm:p-6 mb-6"
+        :style="blockVars('mensal')"
+      >
+        <div class="flex items-center gap-2 mb-1 flex-wrap">
+          <span class="cv-icon"><span class="i-lucide-bar-chart-3 text-base" /></span>
+          <h3 class="text-sm font-bold text-n-slate-12">Faturamento mês a mês <span class="font-normal text-n-slate-10">· últimos 12 meses</span></h3>
+        </div>
+        <p class="text-[11px] text-n-slate-10 mb-4">
+          barras = faturamento registrado no mês (cards que entraram em Cirurgia Realizada) · linha tracejada = média dos meses com faturamento · as linhas de volume usam o eixo da direita
+        </p>
+
+        <p v-if="mensalLoading" class="text-[11px] text-n-slate-10 flex items-center gap-1.5">
+          <span class="i-lucide-loader-2 animate-spin text-xs" />
+          Carregando os 12 meses…
+        </p>
+        <p v-else-if="mensalError" class="text-[11px] text-n-slate-10">
+          Não deu para carregar o mês a mês.
+        </p>
+        <template v-else-if="mensalChart">
+          <!-- os 4 números do ano -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+            <div class="rounded-xl px-3 py-2" style="background: rgb(var(--cv-rgb) / 0.08)">
+              <b class="block text-base font-extrabold tabular-nums whitespace-nowrap">{{ formatCurrency(mensalAverage) }}</b>
+              <span class="text-[10px] opacity-70">Média mensal</span>
+            </div>
+            <div class="rounded-xl px-3 py-2" style="background: rgb(var(--cv-rgb) / 0.08)">
+              <b class="block text-base font-extrabold tabular-nums whitespace-nowrap">
+                {{ mensalBest ? formatCurrency(mensalBest.value) : 'R$ 0' }}<span v-if="mensalBest" class="text-[11px] font-semibold opacity-70"> · {{ mensalBest.label }}</span>
+              </b>
+              <span class="text-[10px] opacity-70">Melhor mês</span>
+            </div>
+            <div class="rounded-xl px-3 py-2" style="background: rgb(var(--cv-rgb) / 0.08)">
+              <b class="block text-base font-extrabold tabular-nums whitespace-nowrap">{{ formatCurrency(mensalTotal) }}</b>
+              <span class="text-[10px] opacity-70">Total 12 meses</span>
+            </div>
+            <div class="rounded-xl px-3 py-2" style="background: rgb(var(--cv-rgb) / 0.08)">
+              <b class="block text-base font-extrabold tabular-nums whitespace-nowrap">{{ formatCurrency(mensalCurrent) }}</b>
+              <span class="text-[10px] opacity-70">Mês atual</span>
+            </div>
+          </div>
+
+          <!-- chips: liga/desliga as linhas de volume (escolha fica salva) -->
+          <div class="flex flex-wrap items-center gap-1.5 mb-3">
+            <span class="text-[11px] text-n-slate-10 mr-1">Mostrar também:</span>
+            <button
+              v-for="o in MENSAL_OVERLAYS"
+              :key="o.key"
+              class="cv-chip"
+              :style="mensalOverlayOn(o.key) ? { background: o.color, color: 'white', borderColor: o.color } : {}"
+              :title="mensalOverlayOn(o.key) ? 'Clique para esconder esta linha' : 'Clique para mostrar esta linha'"
+              @click="toggleMensalOverlay(o.key)"
+            >
+              <span
+                class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                :style="{ background: mensalOverlayOn(o.key) ? 'white' : o.color }"
+              />
+              {{ o.label }}
+            </button>
+          </div>
+
+          <div class="h-80">
+            <Bar :data="mensalChart.data" :options="mensalChart.options" />
+          </div>
+        </template>
       </div>
 
       <!-- Etiquetas + Radar de Oportunidades -->

@@ -165,10 +165,12 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
 
   # ── a fatia de cada coluna ───────────────────────────────────────────────
   # cards da coluna com telefone, fora quem já recebeu no plano e fora das regras
-  def pool(mother, cfg, slice, now: Time.current, limit: POOL_LIMIT)
+  def pool(mother, cfg, slice, now: Time.current, limit: POOL_LIMIT) # rubocop:disable Metrics/AbcSize
     account = mother.account
     scope = Crm::Contact.joins(:contact).where(stage_id: slice['stage_id']).where.not(contacts: { phone_number: [nil, ''] })
     scope = scope.where.not(contact_id: recipients_ever(mother).select(:contact_id))
+    # 🧪 item 383: quem está num segmento (teste ou escala) é da Segmentação — o plano não encosta
+    scope = scope.where.not(contact_id: Crm::SegmentMember.holding.joins(:segment).where(crm_segments: { account_id: account.id }).select(:contact_id))
     excluded = excluded_contact_ids(account, cfg, now)
     scope = scope.where.not(contact_id: excluded) if excluded.any?
     scope = scope.where('contacts.created_at <= ?', now - cfg['min_age_days'].days) if cfg['min_age_days'].positive?

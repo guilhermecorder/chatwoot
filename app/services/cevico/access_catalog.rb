@@ -144,6 +144,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/funnels' => { node: 'crm', view: %w[acquisition clinic] },
     'crm/campaigns' => { node: 'crm.campanhas', view: %w[index show results templates] },
     'crm/call_campaigns' => { node: 'crm.campanhas', view: %w[index show] },
+    'crm/segments' => { node: 'crm.campanhas', view: %w[index show base preview results members dashboard] }, # 🧪 item 383
     'crm/message_automations' => { node: 'crm.campanhas', view: %w[index preview_eligible] },
     'crm/campaigns_dashboards' => { node: 'relatorios.campanhas', view: %w[show] },
     'crm/journey_messages' => { node: 'crm.jornada', view: %w[index map settings_show] },

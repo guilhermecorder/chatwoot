@@ -33,6 +33,22 @@ namespace :crm do
     get :queue
     get :batches
   end
+  # 🧪 item 383: segmentação da base + testes de mensagem
+  resources :segments, only: [:index, :show, :create, :update, :destroy] do
+    collection do
+      get :base
+      post :preview
+      get :dashboard
+    end
+    member do
+      post :start
+      post :pause
+      post :tick_now
+      get :results
+      get :members
+      post :escalar
+    end
+  end
   resources :message_automations, only: [:index, :create, :update, :destroy] do
     member { get :preview_eligible }
   end

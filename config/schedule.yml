@@ -293,3 +293,10 @@ crm_reactivation_plan_job:
   cron: '7 * * * *'
   class: 'Crm::ReactivationPlanJob'
   queue: scheduled_jobs
+
+# 🧪 item 383: a cada 2 minutos, a próxima leva de cada segmento que está
+# enviando (ritmo "X por hora, de Y em Y minutos", janela e teto do dia)
+crm_segment_drip_job:
+  cron: '*/2 * * * *'
+  class: 'Crm::SegmentDripJob'
+  queue: scheduled_jobs

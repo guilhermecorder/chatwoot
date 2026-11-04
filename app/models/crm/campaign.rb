@@ -108,7 +108,7 @@ class Crm::Campaign < ApplicationRecord
   #   exclude_stage_ids:  [6]      — remove quem tem card nessas colunas
   #   period_field: 'contact_created' | 'label_applied' — filtro de período
   #   period_from / period_to: datas (ISO) para acionar a base em blocos
-  def resolve_audience
+  def resolve_audience # rubocop:disable Metrics/AbcSize
     contacts = included_contacts
     contacts = contacts.where.not(id: excluded_contact_ids) if excluded_contact_ids.any?
     # opt-out fixo (conformidade 20/09): nao_perturbe / perda_* nunca entram
@@ -117,6 +117,10 @@ class Crm::Campaign < ApplicationRecord
     # 🚧 item 231 (cerca dos parceiros): paciente de parceiro do hub nunca entra
     partner_ids = Crm::PartnerGuard.excluded_contact_ids(account)
     contacts = contacts.where.not(id: partner_ids) if partner_ids.any?
+    # 🧪 item 383: quem está num SEGMENTO (teste de mensagens ou escala) é da
+    # Segmentação — campanha comum e recorrente não encostam nessa pessoa, para
+    # o teste não ser contaminado e ninguém receber duas abordagens
+    contacts = contacts.where.not(id: Crm::SegmentMember.holding.joins(:segment).where(crm_segments: { account_id: account_id }).select(:contact_id))
     contacts = apply_period_filter(contacts)
     apply_recurrence(contacts.where.not(phone_number: [nil, '']).distinct)
   end

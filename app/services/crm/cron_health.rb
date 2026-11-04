@@ -34,7 +34,8 @@ module Crm::CronHealth # rubocop:disable Metrics/ModuleLength
     'colheita' => { label: 'Colheitadeira da Base', schedule: 'crm_harvest_job' },
     'followup' => { label: 'Robôs de follow-up', schedule: 'crm_followup_bot_job' },
     'discador' => { label: 'Discador das campanhas de ligação', schedule: 'crm_voice_campaign_dialer_job' },
-    'radar' => { label: 'Radar de Oportunidades', schedule: 'crm_opportunity_radar_job' }
+    'radar' => { label: 'Radar de Oportunidades', schedule: 'crm_opportunity_radar_job' },
+    'segmentos' => { label: 'Envio dos segmentos (testes de mensagem)', schedule: 'crm_segment_drip_job' }
   }.freeze
 
   KEY = 'cevico:cron_health:%<job>s'.freeze

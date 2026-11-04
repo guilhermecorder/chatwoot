@@ -429,6 +429,7 @@ const FEATURE_BY_ITEM_NAME = {
   CRM: 'crm',
   'Campanha WhatsApp': 'crm_campaigns',
   Reativação: 'crm_reativacao',
+  Segmentação: 'crm_segmentacao',
   'Jornada do paciente': 'crm_journey',
   Tasks: 'tasks',
   Agenda: 'agenda',
@@ -477,6 +478,7 @@ const DEFAULT_MENU_ORDER = [
   'Companies',
   'Campanha WhatsApp',
   'Reativação',
+  'Segmentação',
   'Forms',
   'Tasks',
   'Agenda',
@@ -507,6 +509,7 @@ const AGENT_MENU_ORDER = [
   'Reports',
   'Campanha WhatsApp',
   'Reativação',
+  'Segmentação',
   'Cevico Pages',
   'Strategy',
   'Finance',
@@ -649,6 +652,7 @@ const MENU_LAYOUT = [
       'Automations Hub > Automations Robos',
       'Campanha WhatsApp',
       'Reativação', // 📣 item 380/381: mensagens + plano em fatias
+      'Segmentação', // 🧪 item 383: testes de mensagem + escala
       'Automations Hub > Automations AI Agents',
       'Automations Hub > Automations AI Panel',
       'Automations Hub > Automations Flows',
@@ -770,6 +774,7 @@ const TILE_COLORS = {
   'Jornada do paciente': '#ff2d55',
   'Campanha WhatsApp': '#25d366',
   Reativação: '#ff9500',
+  Segmentação: '#0a84ff',
   Forms: '#ffcc00',
   'Automations Hub': '#5856d6',
   Reports: '#0a84ff',
@@ -1432,6 +1437,13 @@ const menuItems = computed(() => {
       label: 'Reativação',
       icon: 'i-lucide-rotate-ccw',
       to: accountScopedRoute('crm_reativacao'),
+    },
+    // 🧪 item 383: Segmentação da base (testes de mensagem + escala no ritmo)
+    {
+      name: 'Segmentação',
+      label: 'Segmentação',
+      icon: 'i-lucide-layers',
+      to: accountScopedRoute('crm_segmentacao'),
     },
     // 🗺️ Mensagens da jornada (item 168) — rótulo no vocabulário da empresa
     {

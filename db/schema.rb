@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_10_19_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_11_03_120000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1694,6 +1694,47 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_19_010000) do
     t.index ["account_id"], name: "index_crm_script_versions_on_account_id"
   end
 
+  create_table "crm_segment_members", force: :cascade do |t|
+    t.bigint "segment_id", null: false
+    t.bigint "contact_id", null: false
+    t.string "variant_key", default: "A", null: false
+    t.string "status", default: "reservado", null: false
+    t.string "frente"
+    t.bigint "inbox_id"
+    t.bigint "campaign_id"
+    t.bigint "conversation_id"
+    t.datetime "sent_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["campaign_id"], name: "index_crm_segment_members_on_campaign_id"
+    t.index ["contact_id"], name: "index_crm_segment_members_on_contact_id", unique: true
+    t.index ["conversation_id"], name: "index_crm_segment_members_on_conversation_id"
+    t.index ["segment_id", "contact_id"], name: "index_crm_segment_members_on_segment_id_and_contact_id", unique: true
+    t.index ["segment_id", "status"], name: "index_crm_segment_members_on_segment_id_and_status"
+    t.index ["segment_id"], name: "index_crm_segment_members_on_segment_id"
+  end
+  create_table "crm_segments", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "creator_id"
+    t.bigint "parent_id"
+    t.string "name", null: false
+    t.string "kind", default: "teste", null: false
+    t.string "status", default: "reservado", null: false
+    t.jsonb "source", default: {}, null: false
+    t.jsonb "variants", default: [], null: false
+    t.jsonb "pace", default: {}, null: false
+    t.jsonb "stats", default: {}, null: false
+    t.datetime "started_at"
+    t.datetime "finished_at"
+    t.datetime "last_tick_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "status"], name: "index_crm_segments_on_account_id_and_status"
+    t.index ["account_id"], name: "index_crm_segments_on_account_id"
+    t.index ["creator_id"], name: "index_crm_segments_on_creator_id"
+    t.index ["parent_id"], name: "index_crm_segments_on_parent_id"
+  end
+
   create_table "crm_settings", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.string "n8n_base_url"
@@ -2552,6 +2593,13 @@ ActiveRecord::Schema[7.2].define(version: 2026_10_19_010000) do
   add_foreign_key "crm_message_automations", "users", column: "sender_id"
   add_foreign_key "crm_pipelines", "accounts"
   add_foreign_key "crm_script_versions", "accounts", on_delete: :cascade
+  add_foreign_key "crm_segment_members", "contacts", on_delete: :cascade
+  add_foreign_key "crm_segment_members", "conversations"
+  add_foreign_key "crm_segment_members", "crm_campaigns", column: "campaign_id"
+  add_foreign_key "crm_segment_members", "crm_segments", column: "segment_id"
+  add_foreign_key "crm_segments", "accounts"
+  add_foreign_key "crm_segments", "crm_segments", column: "parent_id"
+  add_foreign_key "crm_segments", "users", column: "creator_id"
   add_foreign_key "crm_settings", "accounts"
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
   add_foreign_key "crm_weekly_feedbacks", "accounts"

@@ -710,6 +710,67 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🧪 item 383 — SEGMENTAÇÃO DA BASE + TESTES DE MENSAGEM
+  getSegments() {
+    return axios.get(`${this.url}/segments`);
+  }
+
+  // a base por coluna, as caixas com modelos aprovados e os padrões
+  getSegmentsBase() {
+    return axios.get(`${this.url}/segments/base`);
+  }
+
+  // a peneira regra a regra, sem reservar
+  previewSegment(source) {
+    return axios.post(`${this.url}/segments/preview`, { source });
+  }
+
+  createSegment({ name, kind, source, variants, pace }) {
+    return axios.post(`${this.url}/segments`, { name, kind, source, variants, pace });
+  }
+
+  getSegment(id) {
+    return axios.get(`${this.url}/segments/${id}`);
+  }
+
+  updateSegment(id, payload) {
+    return axios.put(`${this.url}/segments/${id}`, payload);
+  }
+
+  deleteSegment(id) {
+    return axios.delete(`${this.url}/segments/${id}`);
+  }
+
+  startSegment(id) {
+    return axios.post(`${this.url}/segments/${id}/start`);
+  }
+
+  pauseSegment(id) {
+    return axios.post(`${this.url}/segments/${id}/pause`);
+  }
+
+  // manda a próxima leva agora (limit opcional = quantas)
+  tickSegmentNow(id, limit) {
+    return axios.post(`${this.url}/segments/${id}/tick_now`, limit ? { limit } : {});
+  }
+
+  getSegmentResults(id) {
+    return axios.get(`${this.url}/segments/${id}/results`);
+  }
+
+  getSegmentMembers(id, params = {}) {
+    return axios.get(`${this.url}/segments/${id}/members`, { params });
+  }
+
+  // 🏆 escala a vencedora num lote novo
+  escalarSegment(id, { variant, size, name, pace }) {
+    return axios.post(`${this.url}/segments/${id}/escalar`, { variant, size, name, pace });
+  }
+
+  getSegmentsDashboard() {
+    return axios.get(`${this.url}/segments/dashboard`);
+  }
+
   // qual versão do Meu Painel cada agente vê — admin
   // 🧑‍🤝‍🧑 painéis por pessoa (rodada 160): [{id, name, base, user_ids}]
   updatePanelVariants(panelVariants) {
