@@ -515,6 +515,8 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
       charges: Array(record.charges),
       price: Crm::AppointmentPrice.resolve(price_config, record),
       source_detail: record.source_detail,
+      # 🤝 item 386b: o parceiro que vale para o valor combinado (na adotada vem do paciente)
+      partner_provider: Crm::AppointmentPrice.partner_provider(record),
       # 🧭 item 362: como o paciente chegou (automático vale mais; senão o informado pela equipe)
       channel: Crm::LeadChannel.key_of(record.contact),
       comments: Array(record.comments),

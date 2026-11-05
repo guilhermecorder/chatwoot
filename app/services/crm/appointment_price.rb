@@ -154,16 +154,19 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
     value.present? ? { text: value, source: 'preset', label: "pré-configurado · #{type.tr('_', ' ')}" } : nil
   end
 
-  # 🤝 item 386: consulta/exame que veio de um PARCEIRO do hub (o sync grava o
-  # nome dele em task.source_detail) com valor combinado em Agenda → Valores.
-  # Consulta marcada pela recepção (sem source_detail) não entra: a exceção é
-  # só para o agendamento que o parceiro mandou. Cirurgia fica fora (o
-  # combinado é da avaliação; a cirurgia tem o valor dela). Com mais de um
+  # 🤝 item 386: consulta/exame que veio de um PARCEIRO do hub com valor
+  # combinado em Agenda → Valores. Vale para o agendamento ligado ao hub
+  # (task.source = oftalmofacil): o que o parceiro mandou (source_detail) e,
+  # desde o 386b ("zera", 04/11), também a consulta ADOTADA — a recepção já
+  # tinha marcado como CEVICO e o item do parceiro casou com ela; essa fica
+  # sem source_detail de propósito (regra B do 346) e o parceiro é lido da
+  # marca do PACIENTE. Consulta que a recepção marca sem vínculo com o hub não
+  # entra. Cirurgia fica fora (o combinado é da avaliação). Com mais de um
   # nome casando ("Amor Saúde" e "Amor Saúde Tatuapé"), vale o mais específico.
   def partner_price(cfg, task) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    return nil unless task.task_type == 'consulta' && Crm::PartnerGuard.partner_task?(task)
+    return nil unless task.task_type == 'consulta' && task.source == 'oftalmofacil'
 
-    provider = squash(task.source_detail)
+    provider = squash(partner_provider(task))
     return nil if provider.blank?
 
     hits = Array(cfg['parceiros']).select do |row|
@@ -172,6 +175,18 @@ module Crm::AppointmentPrice # rubocop:disable Metrics/ModuleLength
     end
     hit = hits.max_by { |row| squash(row['name']).length }
     hit && { text: hit['price'], source: 'parceiro', label: "combinado · #{hit['name']}" }
+  end
+
+  # o parceiro desta consulta: o carimbo do hub ou, na adotada, a marca do
+  # paciente (atributo 'parceiro' gravado pelo sync, ou a etiqueta of_…)
+  def partner_provider(task)
+    return task.source_detail if task.source_detail.present?
+
+    contact = task.contact
+    return nil if contact.nil?
+
+    (contact.additional_attributes || {})['parceiro'].presence ||
+      contact.label_list.find { |label| label.to_s.start_with?(Crm::PartnerGuard::LABEL_PREFIX) }
   end
 
   # 🩺 avaliação com especialista: o problema do agendamento cita um dos

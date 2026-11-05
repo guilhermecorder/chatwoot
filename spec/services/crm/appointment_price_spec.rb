@@ -72,6 +72,24 @@ RSpec.describe Crm::AppointmentPrice do
       expect(described_class.resolve(described_class.config(account), parceiro('AMORSAUDE TATUAPE'))).to include(text: '0,00')
     end
 
+    # 🤝 386b ("zera", 04/11): a consulta ADOTADA (recepção marcou como CEVICO, o
+    # item do parceiro casou) fica sem source_detail — o parceiro vem do paciente
+    it 'consulta ADOTADA zera pela marca do paciente (atributo ou etiqueta of_); sem vínculo com o hub não', :aggregate_failures do
+      marcado = create(:contact, account: account, name: 'Cleide', additional_attributes: { 'parceiro' => 'AMORSAUDE TATUAPE' })
+      adotada = consulta(source: 'oftalmofacil', external_ref: 'of-1', source_detail: nil, contact: marcado, origin: 'cevico')
+      expect(described_class.resolve(cfg, adotada)).to include(text: '0,00', source: 'parceiro')
+
+      etiquetado = create(:contact, account: account, name: 'Cleide 2')
+      etiquetado.label_list = %w[oftalmofacil of_amorsaude_tatuape]
+      etiquetado.save!
+      expect(described_class.resolve(cfg, consulta(source: 'oftalmofacil', external_ref: 'of-2', contact: etiquetado))).to include(text: '0,00')
+
+      # a recepção marca outra consulta para a mesma pessoa, sem vínculo com o hub → valor normal
+      expect(described_class.resolve(cfg, consulta(contact: marcado))).to include(text: '150,00', source: 'preset')
+      expect(described_class.resolve(cfg, consulta(source: 'oftalmofacil', external_ref: 'of-3', contact: create(:contact, account: account))))
+        .to include(text: '150,00')
+    end
+
     it 'config salva ANTES desta versão (sem a chave parceiros) já zera o Amor Saúde Tatuapé' do
       CrmSetting.create!(account: account, agenda_config: { 'appointment_prices' => { 'avaliacao' => '150,00' } })
       expect(described_class.resolve(described_class.config(account), parceiro('AMORSAUDE TATUAPE'))).to include(text: '0,00', source: 'parceiro')

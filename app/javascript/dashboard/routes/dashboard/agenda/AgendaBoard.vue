@@ -1212,7 +1212,7 @@ const openEdit = task => {
     particular: !!task.particular,
     charges: (task.charges || []).map(c => ({ ...c })),
     source: task.source || '',
-    source_detail: task.source_detail || '',
+    source_detail: task.source_detail || task.partner_provider || '', // 386b: adotada lê o parceiro do paciente
   };
   showDeleteConfirm.value = false;
   conflictsOpen.value = false;
