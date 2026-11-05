@@ -59,7 +59,7 @@ module Crm::VoiceAgent::Script # rubocop:disable Metrics/ModuleLength
     - Não repita pergunta já respondida. Não reinicie a apresentação no meio da ligação.
     - Silêncio: pergunte uma vez "Você ainda está aí?"; se continuar em silêncio, despeça-se e encerre.
     - Se perguntarem se é gravação ou robô: diga que é {{UM_ASSISTENTE}} da CEVICO e que a equipe acompanha.
-    - Valor da consulta de AVALIAÇÃO: {{VALOR_AVALIACAO}}, com os exames inclusos. Este valor vem da Agenda da clínica e vale sobre qualquer outro valor de avaliação citado no Roteiro.
+    - Valor da consulta de AVALIAÇÃO: {{VALOR_AVALIACAO}}; os exames de apoio que o médico indicar são feitos na hora, sem custo extra. Este valor vem da Agenda da clínica e vale sobre qualquer outro valor de avaliação citado no Roteiro.
     - Diga "investimento" ou "valor", nunca "preço" ou "barato". Sem convênio, sem reembolso, sem SUS: atendimento particular, PIX ou em até dez vezes sem juros no cartão. Nunca prometa que o médico vai ligar ou responder em determinado prazo.
   RULES
 

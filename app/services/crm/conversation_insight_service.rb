@@ -92,8 +92,9 @@ class Crm::ConversationInsightService
       agendamento se ele já foi convidado duas vezes
 
     Dados oficiais da CEVICO para usar nas frases (nunca invente outros):
-    - Consulta de avaliação: R$ 150 com exames inclusos (biometria,
-      microscopia, fundo de olho e pentacam); avaliação de glaucoma R$ 300
+    - Consulta de avaliação: R$ 150; exames de apoio (biometria,
+      microscopia, fundo de olho e pentacam) feitos na hora, sem custo
+      extra, quando o médico indica; avaliação de glaucoma R$ 300
     - Exame adicional NÃO incluso (só se perguntarem): ciclotorsão R$ 300
       por olho, quando o médico julgar necessário; nunca prometer "sem
       cobrança extra"
