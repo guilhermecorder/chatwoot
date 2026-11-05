@@ -304,6 +304,26 @@ class CrmAPI extends ApiClient {
     return axios.put(`${this.url}/agent_guidances/${id}`, payload);
   }
 
+  // 🎓 item 389: Motor de Educação
+  educationEngine() {
+    return axios.get(`${this.url}/education_engine`);
+  }
+
+  updateEducationEngine(payload) {
+    return axios.put(`${this.url}/education_engine`, payload);
+  }
+
+  updateEducationRules(rules) {
+    return axios.put(`${this.url}/education_engine/rules`, { rules });
+  }
+
+  runEducationEngine(day) {
+    return axios.post(
+      `${this.url}/education_engine/run_now`,
+      day ? { day } : {}
+    );
+  }
+
   applyAgentGuidance(id) {
     return axios.post(`${this.url}/agent_guidances/${id}/apply`);
   }

@@ -9,9 +9,12 @@ class Api::V1::Accounts::Crm::AgentGuidancesController < Api::V1::Accounts::Base
   LIMIT = 200
 
   # GET /crm/agent_guidances?agent_key=&status=
-  def index # rubocop:disable Metrics/AbcSize
+  def index # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     scope = Crm::AgentGuidance.where(account: Current.account)
     scope = scope.where(agent_key: params[:agent_key].to_s) if params[:agent_key].present?
+    # 🎓 item 389: a fila do Motor de Educação tem tela própria
+    scope = scope.where(source: params[:source].to_s) if Crm::AgentGuidance::SOURCES.include?(params[:source].to_s)
+    scope = scope.where.not(source: params[:exclude_source].to_s) if params[:exclude_source].present?
     counts = scope.group(:status).count
     scope = scope.where(status: params[:status].to_s) if Crm::AgentGuidance::STATUSES.include?(params[:status].to_s)
     items = scope.includes(:created_by, :applied_by).recent.limit(LIMIT)

@@ -164,6 +164,13 @@ crm_conversation_auditor_job:
   class: 'Crm::ConversationAuditorJob'
   queue: low
 
+# 🎓 Motor de Educação (item 389): diário 11:10 UTC (08:10 SP) — conversas de
+# ontem, quem agendou × quem não; sugestões esperam a aprovação do admin
+crm_education_engine_job:
+  cron: '10 11 * * *'
+  class: 'Crm::EducationEngineJob'
+  queue: low
+
 # 🎨 Criativo Perpétuo (item 131): segunda 11:30 UTC (08:30 SP) — variações
 # dos vencedores da semana (termos/anúncios que viraram cirurgia) p/ aprovar
 crm_creative_job:

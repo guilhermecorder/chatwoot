@@ -257,6 +257,11 @@ namespace :crm do
   resources :script_versions, only: [:index], controller: 'script_versions' do
     member { post :restore }
   end
+  # 🎓 item 389: Motor de Educação (lê as conversas de ontem, sugere aprendizados)
+  resource :education_engine, only: [:show, :update], controller: 'education_engines' do
+    put :rules
+    post :run_now
+  end
   # Feedback de bugs do time (vira card 🐞 no board do admin)
   resources :bug_reports, only: [:create], controller: 'bug_reports'
   # Páginas públicas (ambiente Páginas)

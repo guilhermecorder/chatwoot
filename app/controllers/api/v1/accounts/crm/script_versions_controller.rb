@@ -15,12 +15,14 @@ class Api::V1::Accounts::Crm::ScriptVersionsController < Api::V1::Accounts::Base
   end
 
   # POST /crm/script_versions/:id/restore
-  def restore
+  def restore # rubocop:disable Metrics/AbcSize
     version = Crm::ScriptVersion.where(account: Current.account).find(params[:id])
     version.restore!(by: Current.user)
     payload = { ok: true, version: version.to_payload, kind: version.kind, agent_key: version.agent_key }
     if version.kind == 'stage'
       payload[:prompt] = Crm::CevicoScript.stage_prompt(Current.account, version.agent_key)
+    elsif version.kind == 'motor'
+      payload[:rules] = Crm::EducationEngine.rules(Current.account)
     else
       payload[:script] = Crm::CevicoScript.sections(Current.account)
       payload[:script_updated_at] = Crm::CevicoScript.updated_at(Current.account)

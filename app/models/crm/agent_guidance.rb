@@ -39,11 +39,15 @@
 class Crm::AgentGuidance < ApplicationRecord
   self.table_name = 'crm_agent_guidances'
 
-  SOURCES = %w[manual sombra].freeze
+  # 'motor' = sugestão do Motor de Educação (item 389): aplicada, vai para os
+  # APRENDIZADOS do motor (valem só nas caixas piloto), não para o Roteiro
+  SOURCES = %w[manual sombra motor].freeze
   STATUSES = %w[pending applied ignored].freeze
   # seções do Roteiro + 'stage' (os passos do próprio agente)
-  SECTIONS = (Crm::CevicoScript::SECTIONS.pluck('key') + ['stage']).freeze
-  SECTION_TITLES = Crm::CevicoScript::SECTIONS.to_h { |s| [s['key'], s['title']] }.merge('stage' => 'Passos do agente').freeze
+  SECTIONS = (Crm::CevicoScript::SECTIONS.pluck('key') + %w[stage motor]).freeze
+  SECTION_TITLES = Crm::CevicoScript::SECTIONS.to_h { |s| [s['key'], s['title']] }
+                                              .merge('stage' => 'Passos do agente',
+                                                     'motor' => 'Aprendizados do motor (caixas piloto)').freeze
 
   belongs_to :account
   belongs_to :created_by, class_name: 'User', optional: true
@@ -101,14 +105,18 @@ class Crm::AgentGuidance < ApplicationRecord
   # texto formatado no FIM da seção (foto antes) → status applied.
   # Devolve o texto novo da seção. Levanta ArgumentError com a mensagem
   # para a tela quando falta algo.
-  def apply!(by:)
+  def apply!(by:) # rubocop:disable Metrics/CyclomaticComplexity
     raise ArgumentError, 'Esta orientação já foi aplicada.' unless pending? || status == 'ignored'
     raise ArgumentError, 'Escolha em qual seção a orientação entra.' unless SECTIONS.include?(target_section)
     raise ArgumentError, 'Escreva como o agente deveria responder ou a regra para o futuro.' if ideal_reply.blank? && rule.blank?
 
     new_text = nil
     transaction do
-      new_text = target_section == 'stage' ? apply_to_stage!(by) : apply_to_script!(by)
+      new_text = case target_section
+                 when 'stage' then apply_to_stage!(by)
+                 when 'motor' then apply_to_motor!(by)
+                 else apply_to_script!(by)
+                 end
       update!(status: 'applied', applied_at: Time.current, applied_by: by)
     end
     new_text
@@ -136,6 +144,12 @@ class Crm::AgentGuidance < ApplicationRecord
     # Rodada 4: a linha entra no Roteiro relido DENTRO da trava (não some edição
     # que outro admin salvou entre a foto e a gravação)
     Crm::ScriptVersion.append_script_line!(account, target_section, formatted_line)
+  end
+
+  # 🎓 item 389: aprendizado do motor = uma linha nos aprendizados (foto antes)
+  def apply_to_motor!(by)
+    Crm::ScriptVersion.snapshot!(account, kind: 'motor', note: "antes de aplicar o aprendizado ##{id}", by: by, guidance: self)
+    Crm::EducationEngine.append_rule!(account, formatted_line)
   end
 
   # passos do agente: parte do prompt vigente (personalizado ou padrão) e

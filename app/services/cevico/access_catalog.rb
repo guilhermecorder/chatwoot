@@ -186,6 +186,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/automations_dashboards' => { node: 'automacoes.resultados', view: %w[show] },
     'crm/agent_guidances' => { node: 'automacoes.agentes_ia', view: %w[index] },
     'crm/script_versions' => { node: 'automacoes.agentes_ia', view: %w[index] },
+    'crm/education_engines' => { node: 'automacoes.agentes_ia', view: %w[show] },
     'crm/ai_dashboards' => { node: 'automacoes.agentes_ia', view: %w[show] },
     'crm/batch_updates' => { node: 'automacoes.tratamento', view: %w[preview] },
     'crm/retro_labels' => { node: 'automacoes.tratamento', view: %w[preview] },

@@ -44,7 +44,7 @@ const load = async () => {
   isLoading.value = true;
   loadError.value = '';
   try {
-    const { data } = await CrmAPI.agentGuidances();
+    const { data } = await CrmAPI.agentGuidances({ exclude_source: 'motor' });
     items.value = Array.isArray(data)
       ? data
       : data?.guidances || data?.items || [];

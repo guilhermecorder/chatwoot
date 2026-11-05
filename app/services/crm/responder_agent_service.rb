@@ -144,10 +144,18 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     return voice_system_prompt if voice?
 
     "#{Crm::CevicoScript.text(@account, @script_version)}\n\n== SUA ETAPA ==\n" \
-      "#{Crm::CevicoScript.stage_prompt(@account, @agent_key, @script_version)}#{RESPONDER_GUARDRAIL}"
+      "#{Crm::CevicoScript.stage_prompt(@account, @agent_key, @script_version)}#{motor_block}#{RESPONDER_GUARDRAIL}"
   end
 
   private
+
+  # 🎓 item 389: aprendizados aprovados do Motor de Educação — só nas caixas
+  # piloto e só no Roteiro 1 (o Roteiro 2 é laboratório à parte)
+  def motor_block
+    return '' if @script_version != 'v1'
+
+    Crm::EducationEngine.prompt_block(@conversation, @agent_key).to_s
+  end
 
   # (#100) cliente da IA dos RESPONDEDORES: 90 s por chamada e só 1 nova
   # tentativa (o padrão do Crm::AiAgentConfig é 300 s × 3 tentativas, feito

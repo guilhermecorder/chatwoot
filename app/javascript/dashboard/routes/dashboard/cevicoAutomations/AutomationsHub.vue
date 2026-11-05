@@ -24,6 +24,7 @@ import AiAgentsDashboard from './AiAgentsDashboard.vue';
 import ShadowReviewModal from './ShadowReviewModal.vue';
 import AgentTestModal from './AgentTestModal.vue';
 import GuidancesPanel from './GuidancesPanel.vue';
+import EducationEnginePanel from './EducationEnginePanel.vue';
 import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
 import NpsSurveyCard from './NpsSurveyCard.vue';
 import FollowupSmartCard from './FollowupSmartCard.vue';
@@ -4468,6 +4469,9 @@ onUnmounted(() => {
             @test="openTestAgent"
             @applied="onGuidanceApplied"
           />
+
+          <!-- 🎓 item 389: MOTOR DE EDUCAÇÃO (aprendizados da caixa piloto) -->
+          <EducationEnginePanel :can-edit="canEditAgents" />
 
           <ShadowReviewModal
             v-if="shadowOpen"
