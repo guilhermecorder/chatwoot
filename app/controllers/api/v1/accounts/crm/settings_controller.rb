@@ -13,6 +13,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                              report:agenda report:meta report:google report:whatsapp report:etiquetas
                              report:criativos crm:chamadas crm:jornada crm:paginas crm:formularios crm:tarefas
                              crm:agendamentos crm:oftalmofacil report:paginas].freeze
+  # 🎨 item 387 (04/11, "está tudo travado no strawberry"): a lista acima
+  # parou no tempo — 13 telas novas (Segmentação, Tráfego, Fluxos, Gasto do
+  # WhatsApp, Acessos…) tinham a escolha "para todo mundo" jogada fora em
+  # silêncio e voltavam para a cor do dia. Agora vale QUALQUER tela com nome
+  # seguro ("report:segmentacao", "crm:sources", "automations") e '*' = TODAS
+  # as telas (padrão da clínica para quem não escolheu nada).
+  PALETTE_SCOPE_PATTERN = /\A(?:\*|[a-z0-9_]{1,30}(?::[A-Za-z0-9_-]{1,40})?)\z/
+  PALETTE_SCOPES_PER_REQUEST = 60 # "tirar a cor própria de todas as telas" manda várias de uma vez
 
   # integração/config sensível = admin (ou área concedida). A leitura (show)
   # continua aberta à equipe, mas desde a Rodada 2 da auditoria (12/10) o JSON
@@ -1373,7 +1381,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     if params.key?(:panel_palettes)
       raw = params.require(:panel_palettes).permit!.to_h
       # (Rodada 4: só o painel editado; entrada vazia ou null = apaga a daquele painel)
-      cfg['panel_palettes'] = raw.slice(*(layout_panel_keys(cfg) + REPORT_PALETTE_SCOPES)).transform_values do |v|
+      known = layout_panel_keys(cfg) + REPORT_PALETTE_SCOPES
+      cfg['panel_palettes'] = raw.select { |scope, _v| known.include?(scope) || scope.to_s.match?(PALETTE_SCOPE_PATTERN) }
+                                 .first(PALETTE_SCOPES_PER_REQUEST).to_h.transform_values do |v|
         v.nil? ? nil : sanitize_panel_palette(v)
       end
     end
@@ -2831,9 +2841,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     { 'mode' => mode, 'key' => key, 'blocks' => blocks }
   end
 
-  # modo fixo sem chave válida vira cor do dia
+  # modo fixo sem chave válida vira cor do dia; 'random' (item 387) = uma
+  # paleta sorteada cada vez que a tela abre
   def palette_mode(raw_mode, key)
-    mode = %w[day fixed salad].include?(raw_mode.to_s) ? raw_mode.to_s : 'day'
+    mode = %w[day fixed salad random].include?(raw_mode.to_s) ? raw_mode.to_s : 'day'
     mode == 'fixed' && key.blank? ? 'day' : mode
   end
 

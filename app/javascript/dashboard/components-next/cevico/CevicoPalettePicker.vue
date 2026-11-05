@@ -3,6 +3,7 @@
 // página inteira ou bloco a bloco, a cor do dia (iMac G3), uma das 17
 // paletas (iMac G3 + frutas da Apple) ou a salada de frutas. Recebe o
 // objeto do composable useCevicoPalette e salva sozinho.
+// 🎨 item 387: "Vale para" esta tela × TODAS as telas + modo ALEATÓRIA.
 import {
   SALAD,
   IMAC_PALETTES,
@@ -21,7 +22,6 @@ const {
   cvVars,
   pagePalette,
   dayFlavor,
-  panelPalette,
   blockPalette,
   paletteChoice,
   pickPalette,
@@ -33,7 +33,17 @@ const {
   userPalette,
   paletteAudience,
   setPaletteAudience,
+  paletteReach,
+  setPaletteReach,
   clearUserPalette,
+  clearUserPagePalette,
+  userOwnScopes,
+  clearUserOwnPalettes,
+  clinicOwnScopes,
+  clearClinicOwnPalettes,
+  hasChoiceHere,
+  randomFlavor,
+  reroll,
   isAdmin,
 } = props.pal;
 </script>
@@ -57,8 +67,8 @@ const {
           <div class="flex-1 min-w-0">
             <h2 class="text-base font-bold leading-tight">{{ title }}</h2>
             <p class="text-[11px] opacity-85 mt-0.5">
-              iMac G3, frutas da Apple ou salada de frutas — para a página
-              inteira ou bloco a bloco
+              iMac G3, frutas da Apple, salada de frutas ou aleatória — para
+              esta tela ou para todas
             </p>
           </div>
           <span
@@ -103,8 +113,85 @@ const {
             </div>
           </div>
 
+          <!-- 🎨 item 387: esta tela × todas as telas -->
+          <div>
+            <p class="cv-label mb-1.5">Vale para</p>
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button
+                class="cv-btn cv-btn-sm"
+                :class="paletteReach === 'page' ? '' : 'cv-btn-ghost'"
+                @click="setPaletteReach('page')"
+              >
+                <span class="i-lucide-app-window text-xs" />
+                Esta tela
+              </button>
+              <button
+                class="cv-btn cv-btn-sm"
+                :class="paletteReach === 'all' ? '' : 'cv-btn-ghost'"
+                @click="setPaletteReach('all')"
+              >
+                <span class="i-lucide-layout-grid text-xs" />
+                Todas as telas
+              </button>
+              <span class="text-[11px] text-n-slate-9">{{
+                paletteReach === 'all'
+                  ? 'vale em todo o sistema, menos nas telas que têm cor própria'
+                  : 'só nesta tela; ela passa na frente da cor de todas as telas'
+              }}</span>
+            </div>
+            <p
+              v-if="
+                paletteReach === 'all' && paletteAudience === 'me' && userPalette
+              "
+              class="text-[11px] text-n-slate-10 mt-1.5 flex items-center gap-1.5 flex-wrap"
+            >
+              <span class="i-lucide-info text-xs" />
+              Esta tela tem uma cor só dela, que continua valendo aqui.
+              <button
+                class="underline font-semibold text-n-slate-12"
+                @click="clearUserPagePalette"
+              >
+                Usar a de todas as telas aqui também
+              </button>
+            </p>
+            <!-- telas com cor própria: tira todas de uma vez -->
+            <p
+              v-if="
+                paletteReach === 'all' &&
+                (paletteAudience === 'me'
+                  ? userOwnScopes.length
+                  : clinicOwnScopes.length)
+              "
+              class="text-[11px] text-n-slate-10 mt-1.5 flex items-center gap-1.5 flex-wrap"
+            >
+              <span class="i-lucide-layers text-xs" />
+              {{
+                paletteAudience === 'me'
+                  ? userOwnScopes.length
+                  : clinicOwnScopes.length
+              }}
+              {{
+                (paletteAudience === 'me'
+                  ? userOwnScopes.length
+                  : clinicOwnScopes.length) === 1
+                  ? 'tela tem cor própria e não muda.'
+                  : 'telas têm cor própria e não mudam.'
+              }}
+              <button
+                class="underline font-semibold text-n-slate-12"
+                @click="
+                  paletteAudience === 'me'
+                    ? clearUserOwnPalettes()
+                    : clearClinicOwnPalettes()
+                "
+              >
+                Tirar a cor própria de todas
+              </button>
+            </p>
+          </div>
+
           <!-- onde aplicar -->
-          <div v-if="paletteAudience === 'everyone'">
+          <div v-if="paletteAudience === 'everyone' && paletteReach === 'page'">
             <p class="cv-label mb-1.5">Onde aplicar</p>
             <div class="flex flex-wrap gap-1.5">
               <button
@@ -141,8 +228,14 @@ const {
               >
                 <span class="cv-icon cv-icon-lg flex-shrink-0"><span class="i-lucide-building-2 text-base"/></span>
                 <span class="min-w-0">
-                  <b class="text-xs text-n-slate-12 block">Padrão da clínica</b>
-                  <span class="text-[11px] text-n-slate-10 leading-snug block">seguir a cor que o admin escolheu para esta tela</span>
+                  <b class="text-xs text-n-slate-12 block">{{
+                    paletteReach === 'all' ? 'Padrão da clínica' : 'Sem cor própria'
+                  }}</b>
+                  <span class="text-[11px] text-n-slate-10 leading-snug block">{{
+                    paletteReach === 'all'
+                      ? 'seguir as cores que o admin escolheu'
+                      : 'seguir a sua cor de todas as telas (ou a da clínica)'
+                  }}</span>
                 </span>
               </button>
               <button
@@ -175,6 +268,33 @@ const {
                     trocar a fruta de qualquer bloco depois</span>
                 </span>
               </button>
+              <!-- 🎲 item 387: aleatória -->
+              <div
+                class="cv-sub cv-sub-hover p-3 text-left flex items-center gap-3 cursor-pointer"
+                :class="paletteChoice === 'random' ? 'cv-sub-on' : ''"
+                role="button"
+                tabindex="0"
+                @click="pickPalette('random')"
+                @keydown.enter="pickPalette('random')"
+              >
+                <span
+                  class="cv-icon cv-icon-lg flex-shrink-0"
+                  :style="{ background: randomFlavor.hero }"
+                  ><span class="i-lucide-dices text-base"/></span>
+                <span class="min-w-0 flex-1">
+                  <b class="text-xs text-n-slate-12 block">Aleatória</b>
+                  <span class="text-[11px] text-n-slate-10 leading-snug block">uma cor diferente a cada vez que a tela abre — agora:
+                    {{ randomFlavor.label }}</span>
+                </span>
+                <button
+                  v-if="paletteChoice === 'random'"
+                  class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn flex-shrink-0"
+                  title="Sortear outra agora"
+                  @click.stop="reroll"
+                >
+                  <span class="i-lucide-refresh-cw text-xs" />
+                </button>
+              </div>
             </div>
           </div>
           <!-- um bloco: pode voltar a seguir a página -->
@@ -232,7 +352,9 @@ const {
           <!-- resumo dos blocos com paleta própria -->
           <div
             v-if="
-              palettePicker.target === 'panel' && paletteAudience === 'everyone'
+              palettePicker.target === 'panel' &&
+              paletteAudience === 'everyone' &&
+              paletteReach === 'page'
             "
           >
             <p class="cv-label mb-1.5">Blocos com paleta própria</p>
@@ -259,17 +381,19 @@ const {
         </div>
         <div class="cv-modal-foot flex items-center gap-2 flex-wrap">
           <button
-            v-if="paletteAudience === 'me' && userPalette"
+            v-if="paletteAudience === 'me' && hasChoiceHere"
             class="cv-btn cv-btn-ghost cv-btn-danger"
             @click="clearUserPalette"
           >
             <span class="i-lucide-rotate-ccw text-xs" />
-            Voltar ao padrão da clínica
+            {{
+              paletteReach === 'all'
+                ? 'Voltar ao padrão da clínica'
+                : 'Tirar a cor desta tela'
+            }}
           </button>
           <button
-            v-else-if="
-              paletteAudience === 'everyone' && Object.keys(panelPalette).length
-            "
+            v-else-if="paletteAudience === 'everyone' && hasChoiceHere"
             class="cv-btn cv-btn-ghost cv-btn-danger"
             @click="clearPanelPalettes"
           >
@@ -278,8 +402,12 @@ const {
           </button>
           <span class="flex-1 text-[11px] text-n-slate-9">{{
             paletteAudience === 'me'
-              ? 'salva sozinho · só para você'
-              : 'salva sozinho · vale para todo mundo que vê esta página'
+              ? paletteReach === 'all'
+                ? 'salva sozinho · só para você, em todas as telas'
+                : 'salva sozinho · só para você, nesta tela'
+              : paletteReach === 'all'
+                ? 'salva sozinho · padrão de todas as telas para a clínica'
+                : 'salva sozinho · vale para todo mundo que vê esta tela'
           }}</span>
           <button class="cv-btn" @click="closePalettePicker">Pronto</button>
         </div>
