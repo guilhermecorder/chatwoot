@@ -51,7 +51,14 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   }.freeze
   NAMES = %w[buscar_consulta remarcar_consulta cancelar_consulta confirmar_presenca horarios_do_dia].freeze
   TASK_TOOL_NAME = 'abrir_tarefa'.freeze
-  ALL_NAMES = (NAMES + [TASK_TOOL_NAME]).freeze
+  # 🏷️ 06/11/2026 (LIFE): o atendente marca a ETAPA do lead com uma etiqueta
+  # no contato; a "Automação da coluna" (gatilho: ao receber etiqueta → move o
+  # cartão) faz o resto. As etapas vêm da conta (ai_config['crm_etapas']:
+  # [{ 'etiqueta' => 'conta_recebida', 'quando' => 'mandou a conta de luz' }]);
+  # sem lista configurada, a ferramenta nem aparece para a IA.
+  STAGE_TOOL_NAME = 'marcar_etapa'.freeze
+  STAGE_MAX = 12
+  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
   # 🩺 item 251: o Atendente de Pós-operatório abre tarefa para a equipe.
@@ -76,7 +83,37 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def definitions
     list = base_definitions
     list << task_definition if TASK_TOOL_KEYS.include?(@agent_key)
+    list << stage_definition if TASK_TOOL_KEYS.include?(@agent_key) && crm_etapas.any?
     list
+  end
+
+  # etapas configuradas na conta (etiqueta + quando usar), já normalizadas
+  def crm_etapas
+    @crm_etapas ||= Array(CrmSetting.find_by(account: @account)&.ai_config&.dig('crm_etapas')).first(STAGE_MAX).filter_map do |e|
+      e = e.to_h.transform_keys(&:to_s)
+      tag = e['etiqueta'].to_s.strip.downcase.gsub(/[^a-z0-9_-]/, '_').squeeze('_')[0, 40]
+      next if tag.blank?
+
+      { 'etiqueta' => tag, 'quando' => e['quando'].to_s.strip[0, 200] }
+    end
+  end
+
+  def stage_definition
+    guia = crm_etapas.map { |e| "#{e['etiqueta']} = #{e['quando']}" }.join('; ')
+    {
+      name: STAGE_TOOL_NAME,
+      description: 'Marca a ETAPA em que o lead está (vira etiqueta no contato e o cartão anda sozinho no CRM). ' \
+                   "Use assim que a conversa chegar ao momento descrito, uma vez por etapa: #{guia}. " \
+                   'Não conte ao cliente que marcou.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          etapa: { type: 'string', enum: crm_etapas.pluck('etiqueta'), description: 'A etapa que acabou de acontecer' }
+        },
+        required: %w[etapa],
+        additionalProperties: false
+      }
+    }
   end
 
   # 🩺 item 251: tarefa para a pessoa responsável (Meu Painel) — dúvida do caso,
@@ -195,6 +232,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when 'confirmar_presenca' then confirmar(args)
     when 'horarios_do_dia' then horarios_do_dia(args)
     when 'abrir_tarefa' then abrir_tarefa(args)
+    when 'marcar_etapa' then marcar_etapa(args)
     else
       { ok: false, motivo: "Ferramenta desconhecida: #{name}" }
     end
@@ -419,6 +457,31 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     verb = outcome[:created] ? 'abriu' : 'complementou'
     log_acao('abrir_tarefa', true, "#{verb} tarefa ##{task.id} (#{urgencia}) p/ #{task.assignee&.name || 'equipe'}: #{motivo}")
     { ok: true, id: task.id, criada: outcome[:created], responsavel: task.assignee&.name, urgencia: urgencia }
+  end
+
+  # 🏷️ etiqueta da etapa no CONTATO → CrmAutomationTriggerService (após gravar)
+  # dispara "ao receber etiqueta" na coluna atual de cada cartão dele
+  def marcar_etapa(args)
+    return refuse(STAGE_TOOL_NAME, 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
+
+    etapa = args['etapa'].to_s.strip.downcase
+    return refuse(STAGE_TOOL_NAME, 'Etapa fora da lista desta conta.') unless crm_etapas.pluck('etiqueta').include?(etapa)
+    return refuse(STAGE_TOOL_NAME, 'Conversa sem contato.') if @contact.nil?
+
+    if @contact.label_list.map(&:downcase).include?(etapa)
+      log_acao(STAGE_TOOL_NAME, true, "etapa #{etapa} já estava marcada")
+      return { ok: true, ja_marcada: true }
+    end
+    unless @live
+      log_acao(STAGE_TOOL_NAME, true, "marcaria a etapa #{etapa} (simulado)")
+      return { simulado: true, ok: true, mensagem: 'Em sombra nada foi marcado; a etiqueta seria posta no contato.' }
+    end
+
+    @account.labels.find_or_create_by!(title: etapa)
+    @contact.add_labels([etapa])
+    activity_note!("🏷️ #{agent_name} marcou a etapa: #{etapa}")
+    log_acao(STAGE_TOOL_NAME, true, "marcou a etapa #{etapa}")
+    { ok: true, etapa: etapa }
   end
 
   # ── vagas de um dia específico (item 200: agendamento futuro liberado) ──

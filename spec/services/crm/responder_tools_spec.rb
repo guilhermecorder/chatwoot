@@ -22,10 +22,53 @@ RSpec.describe Crm::ResponderTools do
   describe 'definitions' do
     it 'expõe as ferramentas da Agenda + abrir_tarefa (#458) com input_schema; o Agente de Ligação só as da Agenda' do
       defs = tools.definitions
-      expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES)
+      expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES - [described_class::STAGE_TOOL_NAME])
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).to eq(described_class::NAMES)
       expect(defs).to all(include(:description, :input_schema))
       expect(defs.find { |d| d[:name] == 'remarcar_consulta' }.dig(:input_schema, :required)).to eq(%w[id dia hora unidade])
+    end
+  end
+
+  describe 'marcar_etapa (06/11 · LIFE: etiqueta da etapa → cartão anda no CRM)' do
+    before do
+      CrmSetting.find_or_create_by!(account: account).update!(ai_config: {
+                                                               'crm_etapas' => [
+                                                                 { 'etiqueta' => 'conta_recebida', 'quando' => 'mandou a conta de luz' },
+                                                                 { 'etiqueta' => 'Quer Visita', 'quando' => 'quer a visita técnica' }
+                                                               ]
+                                                             })
+    end
+
+    it 'só aparece com etapas configuradas e lista as etiquetas normalizadas', :aggregate_failures do
+      defs = tools(agent_key: 'atendente_agendamento').definitions
+      stage = defs.find { |d| d[:name] == 'marcar_etapa' }
+      expect(stage.dig(:input_schema, :properties, :etapa, :enum)).to eq(%w[conta_recebida quer_visita])
+      expect(stage[:description]).to include('conta_recebida = mandou a conta de luz')
+      expect(tools(agent_key: 'voice').definitions.pluck(:name)).not_to include('marcar_etapa')
+    end
+
+    it 'some sem etapas configuradas' do
+      CrmSetting.find_by(account: account).update!(ai_config: {})
+      expect(tools(agent_key: 'atendente_agendamento').definitions.pluck(:name)).not_to include('marcar_etapa')
+    end
+
+    it 'em sombra não grava nada' do
+      result = tools(agent_key: 'atendente_agendamento').call('marcar_etapa', { 'etapa' => 'conta_recebida' })
+      expect(result).to include(simulado: true, ok: true)
+      expect(contact.reload.label_list).to be_empty
+    end
+
+    it 'ao vivo põe a etiqueta no contato (e cria a etiqueta na conta)', :aggregate_failures do
+      result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'conta_recebida' })
+      expect(result).to include(ok: true, etapa: 'conta_recebida')
+      expect(contact.reload.label_list).to include('conta_recebida')
+      expect(account.labels.pluck(:title)).to include('conta_recebida')
+    end
+
+    it 'recusa etapa fora da lista' do
+      result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'fechou_negocio' })
+      expect(result[:ok]).to be(false)
+      expect(contact.reload.label_list).to be_empty
     end
   end
 
