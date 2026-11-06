@@ -29,6 +29,42 @@ RSpec.describe 'CEVICO Meus negócios API', type: :request do
     expect(body['negocios'].first).not_to have_key('user_id')
   end
 
+  context 'com sócio dono de um cartão só (lista donos no negócio — 06/11)' do
+    let(:socio) { create(:user, account: account, role: :administrator, email: 'socio@teste.com') }
+    let(:config) do
+      [
+        { chave: 'cevico', nome: 'CEVICO', url: 'https://cevico.test', user_id: 7, account_id: 1, token: 'segredo' },
+        { chave: 'life', nome: 'LIFE', local: true, account_id: account.id, donos: ['Socio@teste.com'] }
+      ].to_json
+    end
+
+    it 'mostra ao sócio só o cartão dele, sem a lista de donos', :aggregate_failures do
+      get base, headers: socio.create_new_auth_token, as: :json
+
+      body = response.parsed_body
+      expect(body['dono']).to be(true)
+      expect(body['negocios'].pluck('chave')).to eq(%w[life])
+      expect(body['negocios'].first).not_to have_key('donos')
+    end
+
+    it 'não deixa o sócio entrar no cartão que não é dele' do
+      allow(HTTParty).to receive(:get)
+      post "#{base}/cevico/login", headers: socio.create_new_auth_token, as: :json
+      expect(response).not_to have_http_status(:success)
+      expect(HTTParty).not_to have_received(:get)
+    end
+
+    it 'deixa o sócio abrir o cartão dele' do
+      post "#{base}/life/login", headers: socio.create_new_auth_token, as: :json
+      expect(response.parsed_body['url']).to eq("/app/accounts/#{account.id}/inicio")
+    end
+
+    it 'o dono geral continua vendo todos' do
+      get base, headers: admin.create_new_auth_token, as: :json
+      expect(response.parsed_body['negocios'].pluck('chave')).to eq(%w[cevico life])
+    end
+  end
+
   it 'esconde a lista de um administrador que não é dono' do
     get base, headers: outro_admin.create_new_auth_token, as: :json
     expect(response.parsed_body).to eq('dono' => false, 'negocios' => [])

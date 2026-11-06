@@ -15,6 +15,9 @@
 #       "token":"<token do app de plataforma criado lá>"},
 #      {"chave":"life","nome":"LIFE Energia Solar","local":true,"account_id":1}]
 #   `local: true` = este mesmo sistema (abre direto, sem SSO).
+#   `donos: ["email@…"]` (opcional, por negócio — 06/11/2026) = pessoas que
+#     enxergam SÓ aquele cartão (ex.: o sócio da LIFE vê só a LIFE). Quem está
+#     em MEUS_NEGOCIOS_DONOS continua vendo todos.
 #   O token nasce no sistema de destino com:
 #     bundle exec rake "cevico:negocios:autorizar[email@do.dono]"
 module Cevico
@@ -36,6 +39,21 @@ module Cevico
         return hub? if donos.empty?
 
         donos.include?(user.email.to_s.strip.downcase)
+      end
+
+      # dono geral OU dono de pelo menos um cartão (lista `donos` do negócio)
+      def acesso?(user)
+        dono?(user) || visiveis(user).any?
+      end
+
+      # os negócios que ESTA pessoa enxerga: dono geral vê todos; o resto vê
+      # só os cartões em que o e-mail dela aparece na lista `donos`
+      def visiveis(user)
+        return [] if user.nil?
+        return lista if dono?(user)
+
+        email = user.email.to_s.strip.downcase
+        lista.select { |n| n['donos'].include?(email) }
       end
 
       def hub?
@@ -72,18 +90,18 @@ module Cevico
         []
       end
 
-      # o que a tela recebe: nunca o token
-      def publicos
-        lista.map { |n| n.except('token', 'user_id') }
+      # o que a tela recebe: nunca o token (nem a lista de donos)
+      def publicos(user = nil)
+        (user ? visiveis(user) : lista).map { |n| n.except('token', 'user_id', 'donos') }
       end
 
-      def encontrar(chave)
-        lista.find { |n| n['chave'] == chave.to_s }
+      def encontrar(chave, user: nil)
+        (user ? visiveis(user) : lista).find { |n| n['chave'] == chave.to_s }
       end
 
       # link de entrada no sistema do negócio (uso único, expira em 5 min)
-      def link_de_entrada(chave, account: nil)
-        negocio = encontrar(chave)
+      def link_de_entrada(chave, account: nil, user: nil)
+        negocio = encontrar(chave, user: user)
         raise Erro, 'negócio não configurado' if negocio.nil?
         raise Erro, "#{negocio['nome']} ainda não está ligado: preencha MEUS_NEGOCIOS (docs/MEUS_NEGOCIOS.md)" if negocio['pendente']
 
@@ -129,7 +147,8 @@ module Cevico
           'url' => item['url'].to_s.delete_suffix('/'),
           'user_id' => item['user_id'],
           'account_id' => item['account_id'],
-          'token' => item['token'].to_s
+          'token' => item['token'].to_s,
+          'donos' => Array(item['donos']).map { |e| e.to_s.strip.downcase }.compact_blank
         }
       end
     end
