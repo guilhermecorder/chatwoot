@@ -338,6 +338,14 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     end
   end
 
+  # nomes das unidades da CONTA (Personalização/segmento), com os da CEVICO
+  # de reserva — 06/11: a LIFE quebrava com "undefined method unit_labels"
+  def unit_labels(account)
+    UNIT_LABELS.merge(Crm::SegmentoConta.unit_labels(account))
+  rescue StandardError
+    UNIT_LABELS
+  end
+
   # texto compacto p/ entrar no prompt do agente:
   # "quarta 22/07 · Tatuapé · Dr. Gustavo Bittar: 08:30, 08:40, 08:50"
   def free_slots_text(account, days: 10, per_window: 3, modality: AI_MODALITY)
