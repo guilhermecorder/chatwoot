@@ -304,6 +304,26 @@ class CrmAPI extends ApiClient {
     return axios.put(`${this.url}/agent_guidances/${id}`, payload);
   }
 
+  // 🎓 item 389: Motor de Educação
+  educationEngine() {
+    return axios.get(`${this.url}/education_engine`);
+  }
+
+  updateEducationEngine(payload) {
+    return axios.put(`${this.url}/education_engine`, payload);
+  }
+
+  updateEducationRules(rules) {
+    return axios.put(`${this.url}/education_engine/rules`, { rules });
+  }
+
+  runEducationEngine(day) {
+    return axios.post(
+      `${this.url}/education_engine/run_now`,
+      day ? { day } : {}
+    );
+  }
+
   applyAgentGuidance(id) {
     return axios.post(`${this.url}/agent_guidances/${id}/apply`);
   }
@@ -345,6 +365,11 @@ class CrmAPI extends ApiClient {
   }
 
   // 🗂️ item 307: regras da agenda para a IA + o que ela recebe agora
+  // ⏱️ item 367: teto de avaliações por hora em cada unidade
+  updateAgendaHourly(hourly) {
+    return axios.post(`${this.url}/settings/update_agenda`, { hourly_evaluations: hourly });
+  }
+
   updateAgendaAiRules(aiRules) {
     return axios.post(`${this.url}/settings/update_agenda`, {
       ai_rules: aiRules,
@@ -434,6 +459,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/oftalmofacil/items/${id}`);
   }
 
+  // 👯 ponta 2 e 🗂️ ponta 3 (22/10)
+  oftalmofacilMatching() {
+    return axios.get(`${this.url}/oftalmofacil/matching`);
+  }
+
+  oftalmofacilSurgeryCards() {
+    return axios.get(`${this.url}/oftalmofacil/surgery_cards`);
+  }
+
   // 🔎 item 249: conferência de um dia (hub × Agenda) e trazer o que faltou
   oftalmofacilDayCheck(params) {
     return axios.get(`${this.url}/oftalmofacil/day_check`, { params });
@@ -516,9 +550,9 @@ class CrmAPI extends ApiClient {
     });
   }
 
-  // médicos com a agenda fechada (item 76)
+  // médicos com a agenda fechada (item 76) — item 366: porta da equipe
   updateClosedDoctors(closedDoctors) {
-    return axios.post(`${this.url}/settings/update_agenda`, {
+    return axios.post(`${this.url}/settings/update_agenda_locks`, {
       closed_doctors: closedDoctors,
     });
   }
@@ -530,14 +564,23 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // cadeado de UM horário — item 366: porta da equipe (nó agenda.bloqueios)
   updateAgendaBlocked(blocked) {
-    return axios.post(`${this.url}/settings/update_agenda`, { blocked });
+    return axios.post(`${this.url}/settings/update_agenda_locks`, { blocked });
   }
 
   // item 267: rota própria, liberada para a equipe inteira (não só admin)
   updateAgendaBlockedDays(blockedDays) {
     return axios.post(`${this.url}/settings/update_blocked_days`, {
       blocked_days: blockedDays,
+    });
+  }
+
+  // 📅 item 375: aberturas pontuais (um dia/turno a mais numa data só) —
+  // mesma porta e mesmo nó da equipe do fechar dia
+  updateAgendaOpenDays(openDays) {
+    return axios.post(`${this.url}/settings/update_blocked_days`, {
+      open_days: openDays,
     });
   }
 
@@ -619,6 +662,139 @@ class CrmAPI extends ApiClient {
     const payload = { investments };
     if (captureInboxIds) payload.capture_inbox_ids = captureInboxIds;
     return axios.post(`${this.url}/settings/update_inbox_investments`, payload);
+  }
+
+  // 📣 item 380: mensagens prontas da Reativação de fim de ano (YAML + edições)
+  getReactivationMessages() {
+    return axios.get(`${this.url}/settings/reactivation_messages`);
+  }
+
+  // edita uma mensagem (titulo opcional); reset: 1 volta ao original
+  updateReactivationMessage({ id, texto, titulo, reset }) {
+    const payload = { id };
+    if (reset) payload.reset = 1;
+    else {
+      payload.texto = texto;
+      if (titulo !== undefined) payload.titulo = titulo;
+    }
+    return axios.post(`${this.url}/settings/update_reactivation_message`, payload);
+  }
+
+  // 📣 item 381: plano de reativação em fatias (uma mãe por conta)
+  getReactivationPlan() {
+    return axios.get(`${this.url}/reactivation_plan`);
+  }
+
+  saveReactivationPlan(plan) {
+    return axios.put(`${this.url}/reactivation_plan`, { plan });
+  }
+
+  // prévia sem salvar: tamanho de cada fatia e dias estimados
+  simulateReactivationPlan(plan) {
+    return axios.post(`${this.url}/reactivation_plan/simulate`, { plan });
+  }
+
+  activateReactivationPlan() {
+    return axios.post(`${this.url}/reactivation_plan/activate`);
+  }
+
+  pauseReactivationPlan() {
+    return axios.post(`${this.url}/reactivation_plan/pause`);
+  }
+
+  // manda a fatia de UMA hora agora (ignora janela e dia útil)
+  runReactivationPlanNow() {
+    return axios.post(`${this.url}/reactivation_plan/run_now`);
+  }
+
+  // 🎛️ item 382 — CONTROLE DO LOTE
+  // a próxima fatia, pessoa por pessoa, SEM mandar (force = ignora janela/fim de semana)
+  previewReactivationNext(force = true) {
+    return axios.get(`${this.url}/reactivation_plan/preview_next`, {
+      params: { force: force ? 1 : 0 },
+    });
+  }
+
+  // manda exatamente estas pessoas (ids de contato) agora
+  sendReactivationBatch(contactIds) {
+    return axios.post(`${this.url}/reactivation_plan/send_batch`, {
+      contact_ids: contactIds,
+    });
+  }
+
+  // a fila inteira projetada dia a dia (lote 1 = hoje, lote 2 = próximo dia…)
+  getReactivationQueue({ days = 30, detailDays = 3 } = {}) {
+    return axios.get(`${this.url}/reactivation_plan/queue`, {
+      params: { days, detail_days: detailDays },
+    });
+  }
+
+  // os lotes que já saíram, com o status de cada mensagem
+  getReactivationBatches({ days = 14 } = {}) {
+    return axios.get(`${this.url}/reactivation_plan/batches`, {
+      params: { days },
+    });
+  }
+
+  // 🧪 item 383 — SEGMENTAÇÃO DA BASE + TESTES DE MENSAGEM
+  getSegments() {
+    return axios.get(`${this.url}/segments`);
+  }
+
+  // a base por coluna, as caixas com modelos aprovados e os padrões
+  getSegmentsBase() {
+    return axios.get(`${this.url}/segments/base`);
+  }
+
+  // a peneira regra a regra, sem reservar
+  previewSegment(source) {
+    return axios.post(`${this.url}/segments/preview`, { source });
+  }
+
+  createSegment({ name, kind, source, variants, pace }) {
+    return axios.post(`${this.url}/segments`, { name, kind, source, variants, pace });
+  }
+
+  getSegment(id) {
+    return axios.get(`${this.url}/segments/${id}`);
+  }
+
+  updateSegment(id, payload) {
+    return axios.put(`${this.url}/segments/${id}`, payload);
+  }
+
+  deleteSegment(id) {
+    return axios.delete(`${this.url}/segments/${id}`);
+  }
+
+  startSegment(id) {
+    return axios.post(`${this.url}/segments/${id}/start`);
+  }
+
+  pauseSegment(id) {
+    return axios.post(`${this.url}/segments/${id}/pause`);
+  }
+
+  // manda a próxima leva agora (limit opcional = quantas)
+  tickSegmentNow(id, limit) {
+    return axios.post(`${this.url}/segments/${id}/tick_now`, limit ? { limit } : {});
+  }
+
+  getSegmentResults(id) {
+    return axios.get(`${this.url}/segments/${id}/results`);
+  }
+
+  getSegmentMembers(id, params = {}) {
+    return axios.get(`${this.url}/segments/${id}/members`, { params });
+  }
+
+  // 🏆 escala a vencedora num lote novo
+  escalarSegment(id, { variant, size, name, pace }) {
+    return axios.post(`${this.url}/segments/${id}/escalar`, { variant, size, name, pace });
+  }
+
+  getSegmentsDashboard() {
+    return axios.get(`${this.url}/segments/dashboard`);
   }
 
   // qual versão do Meu Painel cada agente vê — admin
@@ -861,10 +1037,14 @@ class CrmAPI extends ApiClient {
   }
 
   // category (marketing | utility | authentication) = tarifa usada no custo estimado
-  previewAudience(audience, category = 'marketing') {
+  // 🔁 item 379: campaignId = recorrente que já existe (desconta as rodadas
+  // anteriores); inboxId = quanto a caixa já mandou de campanha em 30 dias
+  previewAudience(audience, category = 'marketing', { campaignId, inboxId } = {}) {
     return axios.post(`${this.url}/campaigns/preview_audience`, {
       audience,
       category,
+      campaign_id: campaignId || undefined,
+      inbox_id: inboxId || undefined,
     });
   }
 
@@ -962,6 +1142,15 @@ class CrmAPI extends ApiClient {
 
   testGoogleAds() {
     return axios.post(`${this.url}/settings/test_google_ads`);
+  }
+
+  // 🎯 item 371: conversões direto no Google Ads (gclid)
+  prepareGoogleAds() {
+    return axios.post(`${this.url}/settings/prepare_google_ads`);
+  }
+
+  testGoogleAdsApi() {
+    return axios.post(`${this.url}/settings/test_google_ads_api`);
   }
 
   // 🔎 16/10: Search Console (mesma conta de serviço do GA4)
@@ -1337,6 +1526,11 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/pages_report`, { params });
   }
 
+  // 02/11: quem são os leads do período (nome, página, origem, caixa, conversa)
+  getPagesReportLeads(params = {}) {
+    return axios.get(`${this.url}/pages_report/leads`, { params });
+  }
+
   // 💡 item 329: coleção de insights das páginas (guardar / mudar situação /
   // apagar) e sugestões da IA para uma página no período da régua
   savePageInsight(payload) {
@@ -1637,6 +1831,11 @@ class CrmAPI extends ApiClient {
   // ── 💰 Financeiro & CAC (item 318; admin ou concessão Financeiro) ───
   getAcquisitionCost(params = {}) {
     return axios.get(`${this.url}/acquisition_cost`, { params });
+  }
+
+  // 📈 custo por fonte ao longo do tempo + faturamento × etapas do CRM (19/10)
+  getAcquisitionTimeline(params = {}) {
+    return axios.get(`${this.url}/acquisition_cost/timeline`, { params });
   }
 
   // ── 📄 Agente de Páginas (item 353): placar, pódio, linha do tempo e fila ──

@@ -85,6 +85,24 @@ class Crm::OftalmofacilSurgery < ApplicationRecord
   }
   scope :faturaveis, -> { where(status_kind: %w[agendada realizada aguardando_pagamento]) }
 
+  # 🧮 ponta 5 (22/10): o que conta como CIRURGIA em toda tela — a régua que o
+  # CAC já usava (Crm::AcquisitionPatients). Exame, consulta, retorno e pós-op
+  # do hub são ITENS, mas não são cirurgia. Cada item é UM olho: paciente
+  # operado = contato distinto.
+  NOT_SURGERY = /exam|consult|p[o]s.?op|pos.?operat|retorno/
+  scope :cirurgias, lambda {
+    where("translate(LOWER(COALESCE(procedure_type, '')), 'óôõ', 'ooo') !~ ?", NOT_SURGERY.source)
+  }
+
+  def self.surgery_type?(type)
+    t = type.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase
+    t.blank? || !t.match?(NOT_SURGERY)
+  end
+
+  def cirurgia?
+    self.class.surgery_type?(procedure_type)
+  end
+
   def self.today_sp
     ActiveSupport::TimeZone['America/Sao_Paulo'].today
   end

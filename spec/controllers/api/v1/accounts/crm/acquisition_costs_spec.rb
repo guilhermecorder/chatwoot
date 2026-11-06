@@ -28,4 +28,22 @@ RSpec.describe 'CEVICO Acquisition Cost API', type: :request do
     get base, headers: agent.create_new_auth_token, as: :json
     expect(response).to have_http_status(:forbidden)
   end
+
+  # 📈 19/10: custo por fonte ao longo do tempo + faturamento × etapas
+  it 'devolve a linha do tempo agrupada por semana para o admin', :aggregate_failures do
+    get "#{base}/timeline", params: { preset: 'last90' }, headers: admin.create_new_auth_token, as: :json
+
+    expect(response).to have_http_status(:success)
+    body = response.parsed_body
+    expect(body['period']).to include('days' => 90, 'unit' => 'week')
+    expect(body['buckets'].size).to eq(body['revenue'].size)
+    expect(body['sources'].keys).to eq(%w[google meta organico all])
+    expect(body['sources']['google'].keys).to eq(%w[spend leads booked closed])
+    expect(body['pipelines']).to eq([])
+  end
+
+  it 'barra a linha do tempo para atendente sem a concessão Financeiro' do
+    get "#{base}/timeline", headers: agent.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:forbidden)
+  end
 end

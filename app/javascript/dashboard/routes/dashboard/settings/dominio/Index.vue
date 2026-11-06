@@ -85,11 +85,21 @@ const save = async () => {
 };
 
 // ── 🚪 HUB (porta de entrada na raiz do domínio dedicado) ──
-const hub = ref({ whatsapp: '', tagline: '', cta_text: '' });
+const hub = ref({
+  whatsapp: '',
+  whatsapp_google: '',
+  whatsapp_meta: '',
+  roteamento: false,
+  tagline: '',
+  cta_text: '',
+});
 const isSavingHub = ref(false);
 const loadHub = data => {
   hub.value = {
     whatsapp: data.hub?.whatsapp || '',
+    whatsapp_google: data.hub?.whatsapp_google || '',
+    whatsapp_meta: data.hub?.whatsapp_meta || '',
+    roteamento: data.hub?.roteamento === '1',
     tagline: data.hub?.tagline || '',
     cta_text: data.hub?.cta_text || '',
   };
@@ -111,13 +121,14 @@ const saveHub = async () => {
 // ── 📊 RASTREAMENTO central (item 117): Pixel da Meta + GA4 ──
 // Preenche uma vez; toda página publicada (e o hub) sai carimbada, com o
 // nome da página dentro dos eventos. Clique no WhatsApp = evento de Lead.
-const tracking = ref({ meta_pixel_id: '', ga4_id: '', gtm_id: '' });
+const tracking = ref({ meta_pixel_id: '', ga4_id: '', gtm_id: '', clarity_id: '' });
 const isSavingTracking = ref(false);
 const loadTracking = data => {
   tracking.value = {
     meta_pixel_id: data.tracking?.meta_pixel_id || '',
     ga4_id: data.tracking?.ga4_id || '',
     gtm_id: data.tracking?.gtm_id || '',
+    clarity_id: data.tracking?.clarity_id || '',
   };
 };
 const saveTracking = async () => {
@@ -268,6 +279,31 @@ const hasChanges = computed(() => (info.value?.host || '') !== cleanedInput.valu
                 <input v-model="hub.tagline" type="text" placeholder="Tecnologia de ponta, acolhimento humano e clareza visual." class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
               </label>
             </div>
+            <!-- 02/11: WhatsApp por ORIGEM — cada canal cai na caixa certa -->
+            <div class="mt-4 p-4 rounded-xl bg-n-alpha-1 border border-n-weak">
+              <label class="flex items-start gap-3 cursor-pointer">
+                <input v-model="hub.roteamento" type="checkbox" class="mt-0.5" />
+                <span>
+                  <span class="block text-xs font-semibold text-n-slate-12">WhatsApp por origem</span>
+                  <span class="block text-[11px] text-n-slate-10 mt-0.5">
+                    Ligado, o clique no WhatsApp de QUALQUER página escolhe o número pela origem da visita:
+                    anúncio do Google vai para a caixa do Google, anúncio da Meta para a caixa da Meta,
+                    e o resto (busca orgânica, Instagram, link direto, linktree) para o número de cima,
+                    o do orgânico. Desligado, cada página continua com o número que tem.
+                  </span>
+                </span>
+              </label>
+              <div class="grid gap-3 md:grid-cols-2 mt-3">
+                <label class="block">
+                  <span class="text-[11px] font-medium text-n-slate-11">Número dos anúncios do Google (só números, com DDI)</span>
+                  <input v-model="hub.whatsapp_google" type="text" placeholder="5511999999999" class="mt-1 w-full px-3 py-2 text-sm bg-n-solid-1 border border-n-weak rounded-lg text-n-slate-12" />
+                </label>
+                <label class="block">
+                  <span class="text-[11px] font-medium text-n-slate-11">Número dos anúncios da Meta (Instagram/Facebook)</span>
+                  <input v-model="hub.whatsapp_meta" type="text" placeholder="5511999999999" class="mt-1 w-full px-3 py-2 text-sm bg-n-solid-1 border border-n-weak rounded-lg text-n-slate-12" />
+                </label>
+              </div>
+            </div>
             <label class="block mt-3">
               <span class="text-[11px] font-medium text-n-slate-11">Mensagem que o paciente envia ao clicar no WhatsApp</span>
               <input v-model="hub.cta_text" type="text" placeholder="Olá! Vim do site da CEVICO e quero agendar uma avaliação." class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
@@ -314,6 +350,11 @@ const hasChanges = computed(() => (info.value?.host || '') !== cleanedInput.valu
                 <input v-model="tracking.gtm_id" type="text" placeholder="GTM-ABC1234" class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
                 <span class="text-[10px] text-n-slate-9">tagmanager.google.com → seu contêiner → o código GTM- do topo. Entra sozinho no head e no body de todas as páginas, como o Google pede.</span>
               </label>
+              <label class="block">
+                <span class="text-[11px] font-medium text-n-slate-11">Mapa de calor — Microsoft Clarity (ID do projeto)</span>
+                <input v-model="tracking.clarity_id" type="text" placeholder="abc1de2fgh" class="mt-1 w-full px-3 py-2 text-sm bg-n-alpha-1 border border-n-weak rounded-lg text-n-slate-12" />
+                <span class="text-[10px] text-n-slate-9">clarity.microsoft.com → seu projeto → Configurações → Visão geral → ID do projeto. Grátis: mapa de calor, gravações e até onde a pessoa rola, em toda página.</span>
+              </label>
             </div>
             <div class="flex items-center gap-3 mt-3 flex-wrap">
               <button
@@ -327,7 +368,8 @@ const hasChanges = computed(() => (info.value?.host || '') !== cleanedInput.valu
               <span v-if="info?.tracking?.meta_pixel_id" class="text-[11px] text-emerald-600 font-semibold">✓ Pixel ativo em todas as páginas</span>
               <span v-if="info?.tracking?.ga4_id" class="text-[11px] text-emerald-600 font-semibold">✓ GA4 ativo em todas as páginas</span>
               <span v-if="info?.tracking?.gtm_id" class="text-[11px] text-emerald-600 font-semibold">✓ Tag Manager ativo em todas as páginas</span>
-              <span v-if="!info?.tracking?.meta_pixel_id && !info?.tracking?.ga4_id && !info?.tracking?.gtm_id" class="text-[11px] text-n-slate-9">Sem IDs, as páginas seguem só com o rastreio interno (Protocolo).</span>
+              <span v-if="info?.tracking?.clarity_id" class="text-[11px] text-emerald-600 font-semibold">✓ Mapa de calor ativo em todas as páginas</span>
+              <span v-if="!info?.tracking?.meta_pixel_id && !info?.tracking?.ga4_id && !info?.tracking?.gtm_id && !info?.tracking?.clarity_id" class="text-[11px] text-n-slate-9">Sem IDs, as páginas seguem só com o rastreio interno (Protocolo).</span>
             </div>
           </div>
         </div>

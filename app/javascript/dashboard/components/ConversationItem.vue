@@ -1,12 +1,15 @@
 <script setup>
-import { computed, ref, watch, inject } from 'vue';
+import { computed, inject } from 'vue';
 import { useRouter } from 'vue-router';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { frontendURL, conversationUrl } from 'dashboard/helper/URLHelper';
 import ConversationCard from './widgets/conversation/ConversationCard.vue';
 import ConversationCardExpanded from 'dashboard/components-next/Conversation/ConversationCard/ConversationCardExpanded.vue';
-import ContextMenu from 'dashboard/components/ui/ContextMenu.vue';
-import ConversationContextMenu from './widgets/conversation/contextMenu/Index.vue';
+// 🖱️ item 384 (04/11): o MENU DO BOTÃO DIREITO do CEVICO (o mesmo da Agenda e
+// do CRM) no lugar do menu padrão do Chatwoot — toque longo no celular.
+import { useAlert } from 'dashboard/composables';
+import { copyTextToClipboard } from 'shared/helpers/clipboard';
+import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 
 const props = defineProps({
   source: { type: Object, required: true },
@@ -24,32 +27,14 @@ const store = useStore();
 const selectConversation = inject('selectConversation');
 const deSelectConversation = inject('deSelectConversation');
 const assignAgent = inject('assignAgent');
-const assignTeam = inject('assignTeam');
 const assignLabels = inject('assignLabels');
 const removeLabels = inject('removeLabels');
 const updateConversationStatus = inject('updateConversationStatus');
-const toggleContextMenu = inject('toggleContextMenu');
 const markAsUnread = inject('markAsUnread');
 const markAsRead = inject('markAsRead');
 const assignPriority = inject('assignPriority');
 const isConversationSelected = inject('isConversationSelected');
-const deleteConversation = inject('deleteConversation');
 
-// --- Context menu state (shared by both layouts) ---
-const showContextMenu = ref(false);
-const contextMenu = ref({ x: null, y: null });
-
-// Reset context menu state when the row is recycled to a different conversation.
-watch(
-  () => props.source.id,
-  () => {
-    if (showContextMenu.value) {
-      toggleContextMenu(false);
-    }
-    showContextMenu.value = false;
-    contextMenu.value = { x: null, y: null };
-  }
-);
 
 const currentChat = useMapGetter('getSelectedChat');
 const inboxesList = useMapGetter('inboxes/getInboxes');
@@ -119,66 +104,101 @@ const onExpandedSelect = checked => {
   }
 };
 
-const openContextMenu = e => {
-  e.preventDefault();
-  toggleContextMenu(true);
-  contextMenu.value.x = e.pageX || e.clientX;
-  contextMenu.value.y = e.pageY || e.clientY;
-  showContextMenu.value = true;
+// ── 🖱️ item 384: menu do botão direito do CEVICO ───────────────────────
+// As ações são as mesmas que a lista já injeta (status, pessoa, etiquetas,
+// lida/não lida, prioridade); o que é da casa entra junto: Espaço do
+// Paciente, copiar telefone e nome.
+const accountLabels = useMapGetter('labels/getLabels');
+const copyToClipboard = async (text, okMessage) => {
+  if (!text) return;
+  try {
+    await copyTextToClipboard(String(text));
+    useAlert(okMessage);
+  } catch {
+    useAlert('Não deu para copiar.');
+  }
 };
-
-const closeContextMenu = () => {
-  toggleContextMenu(false);
-  showContextMenu.value = false;
-  contextMenu.value.x = null;
-  contextMenu.value.y = null;
+const openPatientSpace = () => {
+  if (!senderId.value) return;
+  router.push(frontendURL(`accounts/${accountId.value}/patient/${senderId.value}`));
 };
-
-const onUpdateConversation = (status, snoozedUntil) => {
-  closeContextMenu();
-  updateConversationStatus(props.source.id, status, snoozedUntil);
+const assignableAgents = () => {
+  const list = store.getters['inboxAssignableAgents/getAssignableAgents'](inbox.value?.id) || [];
+  if (!list.length && inbox.value?.id) {
+    store.dispatch('inboxAssignableAgents/fetch', [inbox.value.id]).catch(() => {});
+  }
+  return list;
 };
-
-const onAssignAgent = agent => {
-  assignAgent(agent, [props.source.id]);
-  closeContextMenu();
-};
-
-const onAssignLabel = label => {
-  assignLabels([label.title], [props.source.id]);
-};
-
-const onRemoveLabel = label => {
-  removeLabels([label.title], [props.source.id]);
-};
-
-const onAssignTeam = team => {
-  assignTeam(team, props.source.id);
-  closeContextMenu();
-};
-
-const onMarkAsUnread = () => {
-  markAsUnread(props.source.id);
-  closeContextMenu();
-};
-
-const onMarkAsRead = () => {
-  markAsRead(props.source.id);
-  closeContextMenu();
-};
-
-const onAssignPriority = priority => {
-  assignPriority(priority, props.source.id);
-  closeContextMenu();
-};
-
-const onDeleteConversation = () => {
-  deleteConversation(props.source.id);
-  closeContextMenu();
+const PRIORITIES = [
+  { key: null, label: 'Sem prioridade' },
+  { key: 'urgent', label: 'Urgente' },
+  { key: 'high', label: 'Alta' },
+  { key: 'medium', label: 'Média' },
+  { key: 'low', label: 'Baixa' },
+];
+const cevicoMenu = () => {
+  const chat = props.source;
+  const contact = currentContact.value || {};
+  const status = chat.status;
+  const applied = new Set(chat.labels || []);
+  const agents = assignableAgents();
+  const items = [
+    { label: 'Abrir conversa', icon: 'i-lucide-message-circle', hidden: isActiveChat.value, action: () => router.push({ path: conversationPath.value }) },
+    { label: 'Abrir o Espaço do Paciente', icon: 'i-lucide-user-round', hidden: !senderId.value, action: openPatientSpace },
+    { separator: true },
+    { label: 'Marcar como resolvida', icon: 'i-lucide-check-check', hidden: status === 'resolved', action: () => updateConversationStatus(chat.id, 'resolved') },
+    { label: 'Reabrir', icon: 'i-lucide-rotate-ccw', hidden: status === 'open', action: () => updateConversationStatus(chat.id, 'open') },
+    { label: 'Deixar pendente', icon: 'i-lucide-clock', hidden: status === 'pending', action: () => updateConversationStatus(chat.id, 'pending') },
+    { label: 'Marcar como não lida', icon: 'i-lucide-mail', hidden: chat.unread_count > 0, action: () => markAsUnread(chat.id) },
+    { label: 'Marcar como lida', icon: 'i-lucide-mail-open', hidden: !(chat.unread_count > 0), action: () => markAsRead(chat.id) },
+    { separator: true },
+    {
+      label: 'Atribuir a',
+      icon: 'i-lucide-user-plus',
+      hint: assignee.value?.name || 'ninguém',
+      children: agents.length
+        ? agents.map(a => ({
+            label: a.name,
+            icon: assignee.value?.id === a.id ? 'i-lucide-check' : 'i-lucide-user',
+            action: () => assignAgent(a, [chat.id]),
+          }))
+        : [{ label: 'Carregando a equipe…', disabled: true }],
+    },
+    {
+      label: 'Etiquetas',
+      icon: 'i-lucide-tag',
+      hint: applied.size ? `${applied.size}` : '',
+      children: (accountLabels.value || []).map(l => ({
+        label: l.title,
+        icon: applied.has(l.title) ? 'i-lucide-check' : 'i-lucide-tag',
+        action: () => (applied.has(l.title) ? removeLabels([l.title], [chat.id]) : assignLabels([l.title], [chat.id])),
+      })),
+    },
+    {
+      label: 'Prioridade',
+      icon: 'i-lucide-flag',
+      hint: PRIORITIES.find(p => p.key === (chat.priority || null))?.label || '',
+      children: PRIORITIES.map(p => ({
+        label: p.label,
+        icon: (chat.priority || null) === p.key ? 'i-lucide-check' : 'i-lucide-flag',
+        action: () => assignPriority(p.key, chat.id),
+      })),
+    },
+    { separator: true },
+    { label: 'Copiar telefone', icon: 'i-lucide-phone', hint: contact.phone_number || '', hidden: !contact.phone_number, action: () => copyToClipboard(contact.phone_number, 'Telefone copiado ✓') },
+    { label: 'Copiar nome', icon: 'i-lucide-copy', hidden: !contact.name, action: () => copyToClipboard(contact.name, 'Nome copiado ✓') },
+  ];
+  return {
+    title: contact.name || 'Conversa',
+    subtitle: [inbox.value?.name, contact.phone_number].filter(Boolean).join(' · '),
+    items,
+  };
 };
 </script>
 
 <template>
+  <!-- 🖱️ item 384: botão direito / toque longo = menu do CEVICO (display: contents não mexe no layout) -->
+  <div v-cv-menu="cevicoMenu" class="contents">
   <!-- Expanded layout: wide screen + expanded setting -->
   <ConversationCardExpanded
     v-if="showExpanded"
@@ -194,7 +214,6 @@ const onDeleteConversation = () => {
     @select-conversation="onExpandedSelect"
     @de-select-conversation="onExpandedSelect"
     @click="onCardClick"
-    @contextmenu="openContextMenu"
   />
 
   <!-- Default (condensed) layout -->
@@ -209,36 +228,8 @@ const onDeleteConversation = () => {
     :show-assignee="showAssignee"
     :show-inbox-name="showInboxName"
     @click="onCardClick"
-    @contextmenu="openContextMenu"
     @select-conversation="selectConversation"
     @de-select-conversation="deSelectConversation"
   />
-
-  <!-- Shared context menu for both layouts -->
-  <ContextMenu
-    v-if="showContextMenu"
-    :x="contextMenu.x"
-    :y="contextMenu.y"
-    @close="closeContextMenu"
-  >
-    <ConversationContextMenu
-      :status="source.status"
-      :inbox-id="inbox.id"
-      :priority="source.priority"
-      :chat-id="source.id"
-      :has-unread-messages="source.unread_count > 0"
-      :conversation-labels="source.labels"
-      :conversation-url="conversationPath"
-      @update-conversation="onUpdateConversation"
-      @assign-agent="onAssignAgent"
-      @assign-label="onAssignLabel"
-      @remove-label="onRemoveLabel"
-      @assign-team="onAssignTeam"
-      @mark-as-unread="onMarkAsUnread"
-      @mark-as-read="onMarkAsRead"
-      @assign-priority="onAssignPriority"
-      @delete-conversation="onDeleteConversation"
-      @close="closeContextMenu"
-    />
-  </ContextMenu>
+  </div>
 </template>

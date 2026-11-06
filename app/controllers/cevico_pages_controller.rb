@@ -9,10 +9,14 @@
 class CevicoPagesController < ActionController::Base # rubocop:disable Rails/ApplicationController, Metrics/ClassLength
   layout false
   include Cevico::PublicSecurity # 🔐 CSP só-relatar + sem iframe (rodada 171)
+  include Cevico::SystemLogin # 🔐 29/10: Biblioteca só com login do sistema
 
-  def show # rubocop:disable Metrics/AbcSize
+  def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     @page = CevicoPage.published.find_by(slug: params[:slug])
     return render plain: 'Página não encontrada.', status: :not_found if @page.nil?
+
+    blocked = library_guard
+    return blocked if blocked
 
     # endereço antigo (/p/slug ou host da VPS) → 301 pro oficial (rodada 334:
     # o oficial é o domínio da EMPRESA dona da página, quando ela tem um)
@@ -24,6 +28,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
 
     @cevico_tracking = Cevico::PublicSite.tracking_config_for(@page.account)
     request.env['cevico.gzip'] = true # 🗜️ 20/10: resposta comprimida (Rack::Deflater em config/application.rb)
+    return show_for_xray if xray_frame?
 
     # teste A/B: sorteia a variação (ou respeita ?v= de quem já entrou nela);
     # item 306: quem volta à página vê a MESMA variação
@@ -34,7 +39,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     @page.track_hit!('view', source: origin_slug, variant: @page.serving_variant)
     # rastreio de ORIGEM (plano 100+ páginas): visita entra no balde
     # página/dia/origem/campanha — Google Ads, SEO, Meta, funil, direto
-    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer)
+    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer, account: @page.account)
     CevicoPageTraffic.bump!(page: @page, kind: 'view', source: trk[:source], campaign: trk[:campaign])
     return render_custom_page if @page.custom_html.present?
 
@@ -135,7 +140,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     return render plain: 'Página não encontrada.', status: :not_found if @page.nil? || @page.cta_url.blank?
 
     @page.track_hit!('cta', variant: requested_variant(@page))
-    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer)
+    trk = Cevico::TrafficSource.classify(request.query_parameters, referer: request.referer, account: @page.account)
     CevicoPageTraffic.bump!(page: @page, kind: 'cta', source: trk[:source], campaign: trk[:campaign])
     redirect_to url_with_protocol(@page) || @page.cta_url, allow_other_host: true
   end
@@ -146,7 +151,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     page = CevicoPage.published.find_by(slug: params[:slug])
     return head :not_found if page.nil?
 
-    trk = Cevico::TrafficSource.classify(params, referer: request.referer)
+    trk = Cevico::TrafficSource.classify(params, referer: request.referer, account: page.account)
     CevicoPageTraffic.bump!(page: page, kind: 'cta', source: trk[:source], campaign: trk[:campaign])
     # item 306: o clique conta para a variação que o visitante viu, e a letra
     # viaja no Protocolo — é ela que diz qual headline trouxe o LEAD
@@ -176,13 +181,28 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # beacon de rolagem + retoque inline + chat do construtor: sem
   # formulário Rails, a proteção de forgery não se aplica (a segurança é
   # o token assinado)
-  skip_forgery_protection only: [:track, :inline_update, :builder_chat, :builder_upload, :mint_ref, :hub_ref]
+  skip_forgery_protection only: [:track, :inline_update, :builder_chat, :builder_upload, :mint_ref, :hub_ref, :lead]
+
+  # 02/11: LEAD DA PÁGINA (pré-análise): nome + WhatsApp + respostas chegam
+  # ANTES de a pessoa abrir o WhatsApp — o paciente nasce no sistema mesmo
+  # que ela nunca aperte "enviar". Devolve o Protocolo para a página pôr na
+  # mensagem (o clique depois não conta duas vezes). Regras em Cevico::PageLead.
+  def lead
+    page = CevicoPage.published.find_by(slug: params[:slug])
+    return head :not_found if page.nil?
+
+    result = Cevico::PageLead.new(page: page, params: params, request: request).call
+    render json: result, status: result[:ok] ? :ok : :unprocessable_entity
+  end
 
   def track
     page = CevicoPage.published.find_by(slug: params[:slug])
     return head :not_found if page.nil?
 
-    page.track_scroll!(params[:depth])
+    # página anexada (Raio-X, 23/10): além da rolagem, os títulos vistos, os botões clicados e os toques errados
+    page.track_reading!(depth: params[:depth], from: params[:de], sections: beacon_keys(:secoes),
+                        buttons: beacon_keys(:botoes), misses: beacon_keys(:erros), taps: beacon_keys(:toques),
+                        device: params[:aparelho], times: beacon_keys(:tempo))
     head :no_content
   end
 
@@ -195,7 +215,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   def home
     account = host_account
     scope = account ? CevicoPage.published.where(account: account) : CevicoPage.published
-    @pages_by_category = scope.order(:title).group_by(&:category)
+    @pages_by_category = scope.order(:title).reject(&:library?).group_by(&:category) # a Biblioteca é da equipe
     @hub = Cevico::PublicSite.hub_config_for(account)
     @hub_whatsapp = Cevico::PublicSite.hub_whatsapp_url(account)
     @company = account && Cevico::Company.for(account)
@@ -220,7 +240,25 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
     render json: { token: ref.token, line: "Protocolo: #{ref.token}" }
   end
 
+  # 📚 29/10: Biblioteca de guias DENTRO do sistema (sistema.cevico.com.br/biblioteca),
+  # só para quem está logado no painel: serve o HTML anexado da página marcada
+  # com data-biblioteca="1" da conta da pessoa — sem rastreio, sem contar visita.
+  def library
+    return require_system_login! if system_user.nil?
+
+    accounts = system_user.account_users.select(:account_id)
+    @page = CevicoPage.published.libraries.where(account_id: accounts).order(:id).detect(&:library?)
+    return render plain: 'Biblioteca não encontrada.', status: :not_found if @page.nil?
+
+    render html: @page.custom_html.html_safe, layout: false # rubocop:disable Rails/OutputSafety
+  end
+
   private
+
+  # "a,b,c" do beacon → no máximo 80 chaves distintas (o modelo confere cada uma no mapa da página)
+  def beacon_keys(name)
+    params[name].to_s.split(',').map(&:strip).compact_blank.uniq.first(80)
+  end
 
   WHATSAPP_URL = %r{\A(https?://(wa\.me|api\.whatsapp\.com)|whatsapp:)}i
   TRACKING_PARAMS = %w[utm_source utm_medium utm_campaign utm_id utm_content utm_term gclid gbraid wbraid fbclid ref_host].freeze
@@ -287,7 +325,10 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # noscript logo após o <body>) — é o que o "Testar" do GTM confere
   def render_custom_page(preview_banner: nil)
     html = @page.custom_html_for_serving # item 306: headline da variação no lugar do <h1>
-    if preview_banner.nil? # ao vivo: injeta o rastreio; prévia fica limpa
+    if @raiox # Ver na página: só as marcas dos trechos, nada de rastreio
+      snippet = render_to_string(partial: 'cevico_pages/tracking_snippet', locals: { page: @page, raiox: true })
+      html = html.match?(%r{</body>}i) ? html.sub(%r{</body>}i) { "#{snippet}</body>" } : html + snippet
+    elsif preview_banner.nil? # ao vivo: injeta o rastreio; prévia fica limpa
       html = Cevico::Gtm.inject(html)
       snippet = render_to_string(partial: 'cevico_pages/analytics_snippet', locals: { page: @page, include_gtm: false }) +
                 render_to_string(partial: 'cevico_pages/tracking_snippet', locals: { page: @page })
@@ -300,20 +341,73 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   # que fale do assunto (pelo slug/título); sem página ainda, a porta
   # manda direto pro WhatsApp com o assunto no texto — a entrada nunca
   # fica sem destino.
+  # 29/10: a raiz da clínica é um "linktree" por QUEIXA — a pessoa toca no
+  # que sente e cai na página certa. `icon` (lucide) + `tint` (degradê
+  # dopamina) = ícone de app do iPhone, como no menu do sistema; `emoji` fica
+  # para o hub antigo das empresas. `prefer` = endereços preferidos, na
+  # ordem; sem nenhum publicado, cai no `match` (slug/título) e, por fim,
+  # no WhatsApp com o assunto.
   HUB_DOORS = [
-    { emoji: '👓', title: 'Cirurgia Refrativa', text: 'Liberdade dos óculos: miopia, astigmatismo e hipermetropia.',
-      match: /refrativa|lasik|prk|miopia/i, whats: 'Olá! Quero saber mais sobre a cirurgia refrativa.' },
-    { emoji: '👁️', title: 'Cirurgia de Catarata', text: 'A visão nítida de volta, com a lente certa pra sua vida.',
-      match: /catarata/i, whats: 'Olá! Quero saber mais sobre a cirurgia de catarata.' },
-    { emoji: '✨', title: 'Lente Trifocal', text: 'Longe, meio e perto — enxergar sem óculos depois da catarata.',
-      match: /trifocal|galaxy|premium/i, whats: 'Olá! Quero saber mais sobre a lente trifocal.' }
+    { icon: 'glasses', tint: %w[#38bdf8 #2563eb], emoji: '👓', title: 'Miopia',
+      text: 'Enxergar de longe sem óculos ou lente de contato',
+      prefer: %w[refrativa], match: /refrativa|lasik|prk|miopia/i,
+      whats: 'Olá! Tenho miopia e quero saber sobre a cirurgia.' },
+    { icon: 'scan-eye', tint: %w[#a78bfa #7b5cff], emoji: '🔍', title: 'Astigmatismo',
+      text: 'Visão embaçada ou distorcida, de perto e de longe',
+      prefer: %w[o-que-e-astigmatismo astigmatismo-e-miopia refrativa], match: /astigmatismo|refrativa/i,
+      whats: 'Olá! Tenho astigmatismo e quero saber sobre a cirurgia.' },
+    { icon: 'book-open', tint: %w[#ff6aa2 #ff2e88], emoji: '📖', title: 'Hipermetropia',
+      text: 'Esforço para enxergar de perto (às vezes de longe também)',
+      prefer: %w[cirurgia-de-hipermetropia-em-sao-paulo refrativa], match: /hipermetropia|refrativa/i,
+      whats: 'Olá! Tenho hipermetropia e quero saber sobre a cirurgia.' },
+    { icon: 'eye', tint: %w[#ffb547 #ff7a00], emoji: '👁️', title: 'Catarata',
+      text: 'Visão nublada: a cirurgia e a lente trifocal (longe, meio e perto)',
+      prefer: %w[trifocal], match: /catarata|trifocal/i,
+      whats: 'Olá! Quero saber sobre a cirurgia de catarata.' }
   ].freeze
 
   def hub_doors(scope = CevicoPage.published)
     published = scope.to_a
-    HUB_DOORS.map do |door|
-      page = published.find { |pg| pg.slug.match?(door[:match]) || pg.title.match?(door[:match]) }
-      door.merge(page_slug: page&.slug)
+    HUB_DOORS.map { |door| door.merge(page_slug: door_page(door, published)&.slug) }
+  end
+
+  # a página da porta: a preferida (na ordem) ou, sem ela, a primeira que fala do assunto
+  def door_page(door, published)
+    preferred = door[:prefer].filter_map { |slug| published.find { |pg| pg.slug == slug } }.first
+    preferred || published.find { |pg| pg.slug.match?(door[:match]) || pg.title.match?(door[:match]) }
+  end
+
+  # 🩻 24/10 "Ver na página": a Biblioteca (mesmo domínio) abre a página num
+  # iframe e desenha o mapa de calor por cima. Aqui a página sai LIMPA: não
+  # conta visita, não carrega Pixel/GA4/Clarity, não manda beacon — só marca os
+  # títulos e botões (data-cv-marco / data-cv-botao) para o desenho achar cada trecho.
+  def xray_frame?
+    params[:raiox] == '1'
+  end
+
+  # o concern Cevico::PublicSecurity pergunta: iframe da própria origem só neste modo
+  def same_origin_frame?
+    xray_frame?
+  end
+
+  def show_for_xray
+    @raiox = true
+    @page.serving_variant = requested_variant(@page)
+    request.content_security_policy = request.content_security_policy.clone.tap { |policy| policy.frame_ancestors :self }
+    return render_custom_page if @page.custom_html.present?
+
+    render :show
+  end
+
+  # 📚 29/10: a Biblioteca de guias NÃO existe no domínio público (404). No
+  # host do SISTEMA, com login, só o iframe limpo do Raio-X (?raiox=1) —
+  # a própria Biblioteca entra por /biblioteca (action library).
+  # Devolve a resposta que barra a requisição, ou nil para seguir.
+  def library_guard
+    if xray_frame? && Cevico::PublicSite.system_host?(request.host)
+      require_system_login! unless system_user_in?(@page.account)
+    elsif @page.library?
+      render plain: 'Página não encontrada.', status: :not_found
     end
   end
 

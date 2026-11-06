@@ -45,6 +45,42 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     end
   end
 
+  # 📅 ABERTURA PONTUAL (item 375, 28/10 — Vaneide: "a Dra. Roberta pediu para
+  # abrir a agenda em alguns dias específicos: 30/10 das 13h às 17h30 e 06/11
+  # das 9h às 13h30"): um dia (ou um turno a mais) numa DATA só, sem mexer na
+  # rotina da semana. Mesmo formato das faixas, com 'date' no lugar do 'dow'.
+  # Entra na mesma régua das faixas: grade da Agenda, lista de vagas do prompt,
+  # horarios_do_dia, conferência do horário e médico da faixa — para TODO robô
+  # de uma vez. Cadeados (dia, unidade, médico, horário) valem em cima dela.
+  def open_days(account)
+    cfg = agenda_config(account)
+    closed = Array(cfg['closed_doctors']).map(&:to_s)
+    Array(cfg['open_days']).select { |win| open_day?(win) && closed.exclude?(win['doctor'].to_s) }.map { |win| normalize_open_day(win) }
+  end
+
+  # tem médico, das/até e uma data de verdade?
+  def open_day?(win)
+    win.is_a?(Hash) && win['doctor'].present? && win['start'].present? && win['end'].present? && iso_date(win['date']).present?
+  end
+
+  def normalize_open_day(win)
+    date = iso_date(win['date'])
+    win.merge('date' => date.to_s, 'dow' => date.wday, 'block' => win['block'].to_i.positive? ? win['block'].to_i : 15)
+  end
+
+  # "2026-10-30" → Date; qualquer outra coisa (inclusive 2026-13-45) → nil
+  def iso_date(value)
+    Date.iso8601(value.to_s)
+  rescue ArgumentError, TypeError
+    nil
+  end
+
+  # aberturas pontuais de hoje em diante (as passadas não interessam a ninguém)
+  def future_open_days(account)
+    today = TZ.now.to_date.to_s
+    open_days(account).select { |w| w['date'] >= today }.sort_by { |w| [w['date'], w['start'].to_s] }
+  end
+
   def reserved_for(win)
     Array(win['only']).map(&:to_s) & RESERVABLE
   end
@@ -67,7 +103,15 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # dedicadas — é o que mantém o pós-operatório fora do período das consultas.
   # Sem faixa dedicada, vale qualquer faixa que aceite o tipo.
   def windows_for(account, modality)
-    wins = windows(account)
+    by_modality(windows(account), modality)
+  end
+
+  # item 375: as aberturas pontuais seguem a mesma regra de tipo das faixas
+  def open_windows_for(account, modality)
+    by_modality(open_days(account), modality)
+  end
+
+  def by_modality(wins, modality)
     if modality.to_s != AI_MODALITY
       dedicated = wins.select { |w| reserved_for(w).include?(modality.to_s) }
       return dedicated if dedicated.any?
@@ -131,6 +175,45 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     SOFT_MODALITIES.include?(modality) ? 'flexivel' : 'consulta'
   end
 
+  # ⏱️ item 367 (23/10, ele: "o comparecimento aumentou… muitos agendamentos
+  # acumulados nas primeiras horas e sobrando horários no desenrolar do dia —
+  # limitar em 4 avaliações por hora, em todos os horários, e ir distribuindo"):
+  # cada unidade recebe no máximo N avaliações por hora (padrão 4; editável em
+  # Agenda → Configurações → Faixas de horário). Contam as avaliações e as
+  # consultas sem tipo — inclusive as do OftalmoFácil (decisão dele). NÃO contam
+  # exame (agenda das meninas), retorno e pós-op (marcados à mão) e teleconsulta.
+  # Vale para todo robô que oferece ou grava horário (todos passam por aqui).
+  HOURLY_DEFAULT = 4
+  HOURLY_RANGE = (1..20)
+  NOT_EVALUATION = %w[exames retorno pos_op teleconsulta].freeze
+
+  def hourly_cap(account)
+    cap_from(agenda_config(account))
+  end
+
+  def cap_from(cfg)
+    n = cfg.to_h['hourly_evaluations'].to_i
+    HOURLY_RANGE.cover?(n) ? n : HOURLY_DEFAULT
+  end
+
+  # "2026-10-27|08|tatuape" — a hora cheia de uma unidade
+  def hour_key(day, hhmm, unit)
+    "#{day}|#{hhmm.to_s[0, 2]}|#{unit}"
+  end
+
+  # avaliações já marcadas em cada unidade × hora do intervalo
+  def evaluations_per_hour(account, from_date, to_date)
+    account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
+           .where.not(unit: [nil, ''])
+           .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', NOT_EVALUATION)
+           .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
+           .pluck(:due_at, :unit)
+           .each_with_object(Hash.new(0)) do |(due, unit), out|
+             at = due.in_time_zone(TZ)
+             out[hour_key(at.to_date, at.strftime('%H'), unit)] += 1
+           end
+  end
+
   # item 297 (30/09): na janela do MÉDICO o agendamento ocupa SÓ o bloco em que
   # começa — a mesma regra da tela. Antes a duração presumida (cirurgia 60,
   # exame 30, consulta 15) tomava 2 ou 3 blocos de 10 min e a IA deixava de
@@ -163,6 +246,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       now: TZ.now,
       # item 307: só as faixas deste tipo de atendimento
       wins: windows_for(account, modality),
+      # item 375: aberturas pontuais (com 'date') — somam às faixas da semana
+      open: open_windows_for(account, modality),
       blocked: Array(cfg['blocked']).to_set { |b| "#{b['date']}|#{b['time']}|#{b['unit']}" },
       blocked_days: Array(cfg['blocked_days']).select { |b| b.is_a?(String) }.to_set,
       # item 267: fechamentos de PARTE do dia (uma unidade ou um médico)
@@ -170,6 +255,9 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       # item 330: exame não ocupa horário de consulta (tem agenda própria);
       # item 330b: retorno e pós-op também não travam — a IA pode encaixar UMA
       # avaliação no mesmo horário (e só uma: a avaliação, sim, trava)
+      # item 367: só a CONSULTA NOVA respeita o teto por hora (retorno e pós-op seguem as faixas deles)
+      per_hour: evaluations_per_hour(account, from_date, to_date),
+      cap: modality.to_s == AI_MODALITY ? hourly_cap(account) : nil,
       occupied: account.tasks
                        .where(task_type: 'consulta', canceled_at: nil)
                        .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', ['exames'] + SOFT_MODALITIES)
@@ -179,29 +267,44 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     }
   end
 
-  def day_slots(ctx, day, per_window:) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    return [] if day.saturday? || day.sunday?
+  # faixas em vigor NESTE dia: as da semana (nunca no fim de semana) + as
+  # aberturas pontuais com esta data (item 375 — um sábado aberto de propósito vale)
+  def windows_on(ctx, day)
+    weekly = day.saturday? || day.sunday? ? [] : ctx[:wins].select { |w| w['dow'] == day.wday }
+    weekly + Array(ctx[:open]).select { |w| w['date'] == day.to_s }
+  end
+
+  def day_slots(ctx, day, per_window:)
     return [] if ctx[:blocked_days].include?(day.to_s)
 
-    slots = []
-    ctx[:wins].select { |w| w['dow'] == day.wday }.each do |win|
-      next if window_blocked?(ctx, day, win)
-
-      taken = 0
-      each_slot(win) do |hm|
-        break if taken >= per_window
-
-        slot_time = TZ.parse("#{day} #{hm}")
-        next if slot_time <= ctx[:now]
-        next if ctx[:blocked].include?("#{day}|#{hm}|#{win['unit']}")
-        next if ctx[:occupied].include?("#{day}|#{hm}|#{win['unit']}") || ctx[:occupied].include?("#{day}|#{hm}|")
-        next if hub_overlap?(ctx, day, hm, win)
-
-        slots << { date: day, time: hm, unit: win['unit'], doctor: win['doctor'] }
-        taken += 1
-      end
+    windows_on(ctx, day).reject { |w| window_blocked?(ctx, day, w) }.flat_map do |win|
+      free = []
+      each_slot(win) { |hm| free << hm if slot_free?(ctx, day, win, hm) }
+      spread(ctx, day, win, free, per_window).map { |hm| { date: day, time: hm, unit: win['unit'], doctor: win['doctor'] } }
     end
-    slots
+  end
+
+  def slot_free?(ctx, day, win, hhmm)
+    return false if TZ.parse("#{day} #{hhmm}") <= ctx[:now]
+    return false if ctx[:blocked].include?("#{day}|#{hhmm}|#{win['unit']}")
+    return false if ctx[:occupied].include?("#{day}|#{hhmm}|#{win['unit']}") || ctx[:occupied].include?("#{day}|#{hhmm}|")
+    return false if hub_overlap?(ctx, day, hhmm, win)
+
+    ctx[:cap].nil? || ctx[:per_hour][hour_key(day, hhmm, win['unit'])] < ctx[:cap]
+  end
+
+  # item 367: em vez dos N primeiros horários do dia (que enchiam a manhã),
+  # uma vaga por hora, começando pelas horas MAIS VAZIAS, até completar N;
+  # a lista volta na ordem do relógio
+  def spread(ctx, day, win, free, limit)
+    return free if free.size <= limit
+
+    by_hour = free.group_by { |hm| hm[0, 2] }
+    hours = by_hour.keys.sort_by { |hh| [ctx[:per_hour][hour_key(day, hh, win['unit'])], hh] }
+    # rodadas: a 1ª vaga de cada hora (da mais vazia para a mais cheia), depois a 2ª…
+    rounds = by_hour.values.map(&:size).max
+    picked = (0...rounds).flat_map { |i| hours.filter_map { |hh| by_hour[hh][i] } }
+    picked.first(limit).sort
   end
 
   # 🔒 20/10 (ele: "quando alguém fechar o dia na agenda, o agente não agende"):
@@ -260,24 +363,54 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # Horário fora de qualquer faixa: a 1ª do dia, como era.
   def doctor_at(account, date, time, unit, modality: AI_MODALITY)
     minutes = hm_to_min(time.to_s)
-    wins = windows_for(account, modality).select { |w| w['dow'] == date.wday && w['unit'] == unit }
+    wins = unit_windows_on(account, date.to_date, unit, modality)
     covering = wins.find { |w| minutes >= hm_to_min(w['start']) && minutes < hm_to_min(w['end']) }
     (covering || wins.first)&.[]('doctor')
+  end
+
+  # faixas desta unidade neste dia: as da semana + a abertura pontual com a data (item 375)
+  def unit_windows_on(account, date, unit, modality)
+    windows_for(account, modality).select { |w| w['dow'] == date.wday && w['unit'] == unit } +
+      open_windows_for(account, modality).select { |w| w['date'] == date.to_s && w['unit'] == unit }
   end
 
   # 🗂️ item 307: REGRAS DA AGENDA para o prompt dos agentes — as faixas
   # reservadas (geradas das janelas) + o texto livre que a clínica escreve em
   # Agenda → Configurações → Regras para a IA. Vazio = nada entra no prompt.
   def rules_text(account)
-    lines = windows(account).reject { |w| accepts?(w, AI_MODALITY) }.map do |w|
+    custom = agenda_config(account)['ai_rules'].to_s.strip
+    (reserved_rules(account) + open_day_rules(account) + [hourly_rule(account), custom.presence]).compact.join("\n")
+  end
+
+  # 📅 item 375: a abertura pontual já entra na lista HORÁRIOS DISPONÍVEIS por
+  # conta própria; a regra escrita é para o robô SABER que aquele dia é uma
+  # exceção combinada — e não "estranhar" (nem negar) um dia fora da rotina
+  def open_day_rules(account)
+    future_open_days(account).map do |w|
+      date = Date.iso8601(w['date'])
+      "- ABERTURA EXTRA em #{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
+        "atende das #{w['start']} às #{w['end']} SÓ neste dia (fora da rotina da semana). Pode oferecer e marcar " \
+        'esses horários normalmente, como em qualquer dia de atendimento.'
+    end
+  end
+
+  def reserved_rules(account)
+    windows(account).reject { |w| accepts?(w, AI_MODALITY) }.map do |w|
       kinds = reserved_for(w).map { |k| MODALITY_LABELS[k] }.join(' e ')
       "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
         "faixa reservada para #{kinds}. NÃO ofereça nem marque consulta nova nesta faixa " \
         "(ela só serve para remarcar #{kinds})."
     end
-    custom = agenda_config(account)['ai_rules'].to_s.strip
-    lines << custom if custom.present?
-    lines.join("\n")
+  end
+
+  # ⏱️ item 367 (23/10, ele pediu também no prompt): a lista de vagas e a conferência
+  # do horário já seguram o teto; a regra escrita é para o robô EXPLICAR a hora cheia
+  # ao paciente e oferecer outra, em vez de só dizer que não está livre
+  def hourly_rule(account)
+    cap = hourly_cap(account)
+    "- Cada unidade recebe no máximo #{cap} avaliações (consultas novas) por hora, para o atendimento fluir " \
+      'sem fila. Se a hora que o paciente pedir estiver completa, diga com naturalidade que esse horário já está ' \
+      'completo e ofereça os mais próximos da lista HORÁRIOS DISPONÍVEIS — de preferência espalhando ao longo do dia.'
   end
 
   # bloco pronto para colar no contexto do agente ('' quando não há regra)

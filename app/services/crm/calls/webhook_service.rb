@@ -91,9 +91,9 @@ class Crm::Calls::WebhookService # rubocop:disable Metrics/ClassLength
     # 🔒 item 325: com a trava ligada, o RESPONSÁVEL pela coluna do paciente toca
     # primeiro e a tela dele trava depois de alguns segundos chamando
     targets = Crm::Calls::CallbackLock.ringing(call.account, call, settings.resolved_ring_user_ids(inbox),
-                                               settings.resolved_ring_first_user_ids(inbox))
-    broadcast('cevico_call.ringing', **targets, call: call.to_payload(include_sdp: true),
-                                                ring_cascade_seconds: settings.ring_cascade_seconds(inbox))
+                                               settings.resolved_ring_first_user_ids(inbox),
+                                               cascade_seconds: settings.ring_cascade_seconds(inbox))
+    broadcast('cevico_call.ringing', **targets, call: call.to_payload(include_sdp: true))
   end
 
   # ── clínica ligou e a Meta devolveu a resposta SDP ────────────────────────

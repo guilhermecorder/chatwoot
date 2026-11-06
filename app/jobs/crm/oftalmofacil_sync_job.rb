@@ -145,6 +145,8 @@ class Crm::OftalmofacilSyncJob < ApplicationJob
     # auditoria 10/2026 (#462/#472): consulta lançada pela recepção DEPOIS de o hub
     # trazer o item vira uma só (a da equipe fica com o vínculo; a cópia vai para a Lixeira)
     service.dedupe_tasks!
+    # 🗂️ ponta 3 (22/10): cirurgia que passou (com prova) ou foi cancelada tira o card de "Cirurgia Agendada"
+    service.settle_cards!
     # Rodada 4 (revisão do #382): o service não levanta quando o hub cai — devolve
     # result.fatal. Os consertos acima usam só o espelho daqui e podem rodar;
     # mas a rodada NÃO conta como boa: nada de last_run_at nem de cursor novo.

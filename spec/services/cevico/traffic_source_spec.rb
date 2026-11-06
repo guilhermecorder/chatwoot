@@ -55,4 +55,27 @@ RSpec.describe Cevico::TrafficSource do
 
     expect(snapshot).to include('source' => 'google_ads', 'gclid' => 'Abc', 'ga_client_id' => '111.222')
   end
+
+  # 🧭 item 385: regras do Guilherme por cima das automáticas, na visita e no lead já carimbado
+  it 'aplica as regras configuradas antes das automáticas e explica o motivo' do # rubocop:disable RSpec/MultipleExpectations
+    rules = described_class.sanitize_rules([
+                                             { 'quando' => { 'utm_source' => 'Newsletter', 'utm_medium' => '' }, 'origem' => 'outros_ads' },
+                                             { 'quando' => { 'host' => 'bing.' }, 'origem' => 'google_organico' },
+                                             { 'quando' => {}, 'origem' => 'meta_ads' }, # sem condição: descartada
+                                             { 'quando' => { 'utm_source' => 'x' }, 'origem' => 'inventada' } # origem inválida: descartada
+                                           ])
+    expect(rules.size).to eq(2)
+    expect(described_class.source_key({ 'utm_source' => 'newsletter' }, nil, rules: rules)).to eq('outros_ads')
+    expect(described_class.source_key({ 'utm_source' => 'newsletter' }, nil)).to eq('outros_ads') # automática também cai em outros
+    expect(described_class.source_key({}, 'https://www.bing.com/search', rules: rules)).to eq('google_organico')
+    expect(described_class.source_key({}, 'https://www.bing.com/search')).to eq('busca')
+
+    stored = { 'source' => 'busca', 'ref_host' => 'www.bing.com', 'utm_source' => nil }
+    expect(described_class.effective_source(stored, rules)).to eq('google_organico')
+    expect(described_class.effective_source(stored, [])).to eq('busca')
+    expect(described_class.reason(stored, rules)).to eq('regra sua nº 2')
+    expect(described_class.reason({ 'gclid' => 'abc', 'utm_source' => 'google', 'utm_medium' => 'cpc' })).to include('gclid')
+    expect(described_class.reason({ 'ref_host' => 'www.google.com' })).to include('busca sem anúncio')
+    expect(described_class.reason({})).to eq('link direto, sem utm')
+  end
 end

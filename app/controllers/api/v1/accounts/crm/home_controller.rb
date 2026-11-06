@@ -286,7 +286,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def overview
     since, until_at = resolve_range
     admin = Current.account_user.administrator?
-    key = ['cevico:overview:v342', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i]
+    key = ['cevico:overview:v354', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i]
     payload = Rails.cache.fetch(key, expires_in: heavy_ttl) do
       Crm::OverviewService.new(account: account, since: since, until_at: until_at, lens: lens, admin: admin).call
     end

@@ -57,6 +57,7 @@ RSpec.describe Crm::Calls::WebhookService do
         agenda_config: { 'calls' => { 'enabled' => true, 'inbox_id' => inbox.id, 'ring_user_ids' => [agent.id, other.id],
                                       'ring_first_user_ids' => [agent.id, 999_999], 'ring_cascade_seconds' => 20 } }
       )
+      OnlineStatusTracker.update_presence(account.id, 'User', agent.id) # 21/10: linha de frente só vale disponível
       perform(connect_value)
       expect(ActionCableBroadcastJob).to have_been_enqueued.with(
         ["account_#{account.id}"], 'cevico_call.ringing',
@@ -77,6 +78,7 @@ RSpec.describe Crm::Calls::WebhookService do
       expect(cfg.inbox_ids).to eq([inbox.id, channel_b.inbox.id])
       expect(cfg.inbox?(channel_b.inbox)).to be(true)
 
+      OnlineStatusTracker.update_presence(account.id, 'User', other.id) # 21/10: linha de frente só vale disponível
       described_class.new(channel: channel_b, value: connect_value, simulated: true).perform
       expect(ActionCableBroadcastJob).to have_been_enqueued.with(
         ["account_#{account.id}"], 'cevico_call.ringing',

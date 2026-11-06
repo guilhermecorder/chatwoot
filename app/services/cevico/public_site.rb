@@ -47,6 +47,12 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
     configured? && request_host.to_s.casecmp?(host)
   end
 
+  # host do PRÓPRIO sistema (FRONTEND_URL): onde mora o que é só da equipe,
+  # com login — a Biblioteca de guias e os números dela (29/10)
+  def system_host?(request_host)
+    app_host.present? && request_host.to_s.casecmp?(app_host)
+  end
+
   # host do sistema (FRONTEND_URL) — para saber se o domínio público é
   # dedicado ou o mesmo do app
   def app_host
@@ -74,6 +80,11 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
 
   def base_url
     configured? ? "https://#{host}" : ENV.fetch('FRONTEND_URL', '').chomp('/')
+  end
+
+  # 📚 29/10: a Biblioteca de guias mora DENTRO do sistema (host do FRONTEND_URL), com login
+  def library_url
+    "#{ENV.fetch('FRONTEND_URL', '').chomp('/')}/biblioteca"
   end
 
   # URL pública de uma página: raiz limpa no domínio oficial,
@@ -139,7 +150,13 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
 
   def save_hub!(attrs)
     value = {
-      'whatsapp' => attrs['whatsapp'].to_s.gsub(/\D/, '')[0, 15],
+      'whatsapp' => digits(attrs['whatsapp']),
+      # 02/11: WhatsApp POR ORIGEM — anúncio do Google e anúncio da Meta têm
+      # a sua própria caixa; o resto (SEO, Instagram, direto, linktree) cai no
+      # número de cima, o do orgânico. Só vale com a chavinha ligada.
+      'whatsapp_google' => digits(attrs['whatsapp_google']),
+      'whatsapp_meta' => digits(attrs['whatsapp_meta']),
+      'roteamento' => (ActiveModel::Type::Boolean.new.cast(attrs['roteamento']) ? '1' : nil),
       'tagline' => attrs['tagline'].to_s.strip[0, 300],
       'cta_text' => attrs['cta_text'].to_s.strip[0, 300]
     }.compact_blank
@@ -148,6 +165,26 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
     config.save!
     GlobalConfig.clear_cache
     value
+  end
+
+  # só dígitos; número brasileiro digitado sem o 55 (DDD + 8 ou 9 dígitos) ganha o DDI,
+  # porque o wa.me só abre com o código do país
+  def digits(raw)
+    number = raw.to_s.gsub(/\D/, '')
+    number = "55#{number}" if number.length.between?(10, 11)
+    number[0, 15]
+  end
+
+  # 02/11: números por origem para o script da página trocar o DESTINO do
+  # clique no WhatsApp: anúncio do Google → caixa do Google; anúncio da Meta →
+  # caixa da Meta; o resto (SEO, Instagram, direto, linktree) → caixa do
+  # orgânico. nil = chavinha desligada (as páginas ficam como estão).
+  def whatsapp_routing(account = nil)
+    cfg = hub_config_for(account)
+    return nil unless cfg['roteamento'] == '1'
+
+    { 'organico' => cfg['whatsapp'].presence, 'google' => cfg['whatsapp_google'].presence,
+      'meta' => cfg['whatsapp_meta'].presence }.compact.presence
   end
 
   # link do botão do hub (sem protocolo — ele entra no clique). Com `account`,
@@ -185,7 +222,9 @@ module Cevico::PublicSite # rubocop:disable Metrics/ModuleLength
     value = {
       'meta_pixel_id' => attrs['meta_pixel_id'].to_s.gsub(/\D/, '')[0, 20],
       'ga4_id' => attrs['ga4_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20],
-      'gtm_id' => attrs['gtm_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20]
+      'gtm_id' => attrs['gtm_id'].to_s.strip.upcase.gsub(/[^A-Z0-9-]/, '')[0, 20],
+      # 🔥 21/10: Microsoft Clarity (mapa de calor + gravações, grátis) — ID do projeto
+      'clarity_id' => attrs['clarity_id'].to_s.strip.downcase.gsub(/[^a-z0-9]/, '')[0, 20]
     }.compact_blank
     config = InstallationConfig.where(name: 'CEVICO_TRACKING').first_or_initialize
     config.value = value

@@ -11,9 +11,33 @@
 <% default_origin = page ? "a página \"#{page.title}\"" : 'o site da CEVICO' %>
 <%# item 306: letra da variação do teste A/B que este visitante está vendo %>
 <% ab_variant = page&.serving_variant.to_s[/\A[a-z0-9]{1,3}\z/] %>
+<%# 24/10 Ver na página (raiox): dentro do iframe da Biblioteca nada é rastreado — só as marcas dos trechos, no fim %>
+<% raiox = local_assigns[:raiox] == true %>
+<%# 02/11: WhatsApp POR ORIGEM (Configurações → Domínio): números por canal; vazio = desligado %>
+<% routing = Cevico::PublicSite.whatsapp_routing(page&.account) || {} %>
+<% unless raiox %>
 <script nonce="<%= content_security_policy_nonce %>">
 (function () {
   var KEY = 'cevico_trk';
+  // 02/11: WhatsApp POR ORIGEM — anúncio do Google cai na caixa do Google,
+  // anúncio da Meta na da Meta e o resto (SEO, Instagram, direto, linktree)
+  // na caixa do orgânico. Mesma régua do servidor (Cevico::TrafficSource).
+  var ROUTE = <%= raw routing.to_json %>;
+  var PAID = ['cpc', 'ppc', 'paid', 'paid_social', 'paid_search', 'ads', 'ad'];
+  var GOOGLE = ['google', 'googleads', 'google-ads', 'adwords'];
+  var META = ['meta', 'facebook', 'fb', 'instagram', 'ig'];
+  function channelOf(t) {
+    var src = String(t.utm_source || '').toLowerCase(), paid = PAID.indexOf(String(t.utm_medium || '').toLowerCase()) >= 0;
+    if (t.gclid || t.gbraid || t.wbraid || (GOOGLE.indexOf(src) >= 0 && paid)) return 'google';
+    if (META.indexOf(src) >= 0 && paid) return 'meta';
+    if (t.fbclid && src) return 'meta';
+    return 'organico';
+  }
+  function routed(href, t) {
+    var num = ROUTE[channelOf(t)];
+    if (!num) return href;
+    return href.replace(/^(https?:\/\/(?:wa\.me\/|api\.whatsapp\.com\/send\/?\?phone=))\+?(\d{8,15})/i, function (m, base) { return base + num; });
+  }
   // utm_id = ID da campanha no Google Ads ({campaignid}) — liga o lead ao custo da campanha (ROI)
   var KEEP = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_id', 'utm_content', 'utm_term', 'gclid', 'gbraid', 'wbraid', 'fbclid', 'ref_host'];
   // código de clique (Google/Meta) é comprido: cortado em 150 ele não serve mais
@@ -54,6 +78,7 @@
     if (/^(https?:\/\/(wa\.me|api\.whatsapp\.com)|whatsapp:)/i.test(href)) {
       if (a.dataset.cevicoRef) return; // já processado — segue o clique
       e.preventDefault();
+      href = routed(href, trk); // 02/11: o número certo para a origem desta visita
       var body = new URLSearchParams(trk);
 <% if ab_variant.present? %>
       body.set('v', '<%= ab_variant %>'); // teste A/B: o clique e o lead contam para esta headline
@@ -105,3 +130,166 @@
   }, true);
 })();
 </script>
+<% end %>
+<%# 🩻 Raio-X da página (23/10): na página ANEXADA, por visita, até onde leu,
+    quais títulos (h2) apareceram na tela, quais botões foram tocados e os
+    TOQUES ERRADOS (foto, título, selo/chip que parece botão, texto, ou 3 toques
+    seguidos no mesmo lugar), marcados no trecho onde aconteceram. As
+    chaves seguem as MESMAS regras do Cevico::PageReading (id do título ou o
+    texto dele em forma de endereço; data-ev do botão ou "<título>#n"). Vai num
+    beacon quando a pessoa sai da aba; se ela voltar e seguir lendo, o próximo
+    beacon leva só o que é novo. A página montada já mede a rolagem sozinha. %>
+<% if page&.custom_html.present? %>
+<script nonce="<%= content_security_policy_nonce %>">
+(function () {
+  var SO_MARCA = <%= raiox ? 'true' : 'false' %>;
+  if (!SO_MARCA && (!navigator.sendBeacon || !window.IntersectionObserver)) return;
+  var KEY = /^[a-z0-9_-]{1,48}$/;
+  var CTA = /wa\.me\/|api\.whatsapp\.com|^whatsapp:|\/cta(\?|$)|[?&]de=/i;
+  function slug(t) {
+    return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '');
+  }
+  var vistos = {}, tocados = {}, erros = {}, pontos = {}, mandados = {}, atual = 'topo', conta = {}, maxDepth = 0;
+  var tempo = {}, ultimaAcao = Date.now(); // 24/10: segundos com cada trecho na tela (para de contar após 30 s parado)
+  var H = [], toques = [], px = 0, py = 0;
+  var VIVO = 'a,button,summary,input,select,textarea,label,video,audio,iframe,[role="button"],[role="link"],[role="tab"],[onclick],[tabindex],[data-ev]';
+  var PARECE = /(^|[\s_-])(chip|pill|btn|botao|selo|tag|badge|cta)([\s_-]|$)/i;
+  var io = SO_MARCA ? { observe: function () {} } : new IntersectionObserver(function (es) {
+    es.forEach(function (e) { if (e.isIntersecting) { vistos[e.target.getAttribute('data-cv-marco')] = 1; io.unobserve(e.target); } });
+    agenda(2500);
+  }, { rootMargin: '0px 0px -15% 0px' });
+  [].forEach.call(document.querySelectorAll('h2, a[href]'), function (el) {
+    if (el.tagName === 'H2') {
+      var k = KEY.test(el.id || '') ? el.id : slug(el.textContent);
+      if (!k) return;
+      atual = k; el.setAttribute('data-cv-marco', k); io.observe(el); H.push([el, k]);
+      return;
+    }
+    if (!CTA.test(el.getAttribute('href') || '')) return;
+    var ev = el.getAttribute('data-ev') || '';
+    if (!KEY.test(ev)) { conta[atual] = (conta[atual] || 0) + 1; ev = atual + '#' + conta[atual]; }
+    el.setAttribute('data-cv-botao', ev);
+  });
+  // Ver na página: a Biblioteca só precisa das marcas — sem beacon, sem ouvir toques
+  if (SO_MARCA) { document.documentElement.setAttribute('data-cv-raiox', '1'); return; }
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('[data-cv-botao]');
+    if (a) { tocados[a.getAttribute('data-cv-botao')] = 1; manda(); }
+  }, true);
+  // toque errado: em quem NÃO faz nada (foto, título, texto, algo com cara de botão)
+  function trecho(el) {
+    var k = 'topo';
+    for (var i = 0; i < H.length; i++) {
+      if (H[i][0] === el || H[i][0].contains(el) || (H[i][0].compareDocumentPosition(el) & 4)) k = H[i][1]; else break;
+    }
+    // a etiqueta logo acima do título é do mesmo bloco: conta no trecho desse título
+    var sec = el.closest('section'), h = sec && sec.querySelector('[data-cv-marco]');
+    if (h && (h.compareDocumentPosition(el) & 2)) k = h.getAttribute('data-cv-marco');
+    return k;
+  }
+  function classe(n) { var c = n.className; return typeof c === 'string' ? c : (c && c.baseVal) || ''; }
+  function fotoNoPonto(el, x, y) {
+    for (var n = el, i = 0; n && n !== document.body && i < 3; n = n.parentElement, i++) {
+      var imgs = n.querySelectorAll('img');
+      for (var j = 0; j < imgs.length; j++) {
+        var r = imgs[j].getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+      }
+    }
+    return false;
+  }
+  function tipo(el, x, y) {
+    if (el.closest(VIVO)) return null;
+    if (el.closest('img,picture,svg,figure,canvas') || fotoNoPonto(el, x, y)) return 'foto';
+    if (el.closest('h1,h2,h3,h4')) return 'titulo';
+    for (var n = el; n && n !== document.body; n = n.parentElement) {
+      if (PARECE.test(classe(n))) return 'parece-botao';
+      if (getComputedStyle(n).cursor === 'pointer') return null; // tem ação própria
+    }
+    return el.closest('p,li,blockquote,span,b,strong,em,small,q') ? 'texto' : null;
+  }
+  document.addEventListener('pointerdown', function (e) { px = e.clientX; py = e.clientY; }, true);
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    if (!el || !el.closest || Math.abs(e.clientX - px) > 10 || Math.abs(e.clientY - py) > 10) return; // arrastou
+    var agora = Date.now();
+    toques = toques.filter(function (t) { return agora - t[0] < 900 && Math.abs(t[1] - e.clientX) < 30 && Math.abs(t[2] - e.clientY) < 30; });
+    toques.push([agora, e.clientX, e.clientY]);
+    if (toques.length >= 3) erros[trecho(el) + '~repetido'] = 1;
+    if (window.getSelection && String(window.getSelection())) return; // selecionando texto
+    var tp = tipo(el, e.clientX, e.clientY);
+    if (tp) erros[trecho(el) + '~' + tp] = 1;
+    // 24/10 mapa visual: onde foi o toque, numa grade 10×10 do trecho (coluna da tela × altura do trecho)
+    var k = trecho(el), lim = limites(k), alt = Math.max(1, lim[1] - lim[0]);
+    var cx = Math.min(9, Math.max(0, Math.floor(e.clientX / window.innerWidth * 10)));
+    var cy = Math.min(9, Math.max(0, Math.floor((e.clientY + window.scrollY - lim[0]) / alt * 10)));
+    pontos[k + '@' + cx + cy + (tp ? '!' : '')] = 1; // "!" = tocou onde não há nada para tocar
+    agenda(4000);
+  }, true);
+  // o trecho que está na tela agora: o último título acima de 40% da altura da janela
+  function trechoNaTela() {
+    var y = (window.scrollY || 0) + window.innerHeight * 0.4, k = 'topo';
+    for (var i = 0; i < H.length; i++) { if (H[i][0].getBoundingClientRect().top + window.scrollY <= y) k = H[i][1]; else break; }
+    return k;
+  }
+  ['scroll', 'pointerdown', 'keydown', 'touchstart'].forEach(function (ev) { window.addEventListener(ev, function () { ultimaAcao = Date.now(); }, { passive: true, capture: true }); });
+  setInterval(function () {
+    if (document.visibilityState !== 'visible' || Date.now() - ultimaAcao > 30000) return;
+    var k = trechoNaTela();
+    tempo[k] = (tempo[k] || 0) + 1;
+  }, 1000);
+  // topo e fim do trecho na página (do título dele até o próximo título)
+  function limites(k) {
+    var i = -1;
+    for (var j = 0; j < H.length; j++) if (H[j][1] === k) i = j;
+    var topo = i < 0 ? 0 : H[i][0].getBoundingClientRect().top + window.scrollY;
+    var fim = i + 1 < H.length ? H[i + 1][0].getBoundingClientRect().top + window.scrollY : document.documentElement.scrollHeight;
+    return [topo, fim];
+  }
+  function mede() {
+    var doc = document.documentElement, total = doc.scrollHeight - window.innerHeight;
+    var pct = total > 0 ? ((window.scrollY || doc.scrollTop) / total) * 100 : 100;
+    var b = pct >= 95 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+    if (b > maxDepth) maxDepth = b;
+  }
+  function novos(set, tipo) {
+    return Object.keys(set).filter(function (k) { return !mandados[tipo + k]; });
+  }
+  // 23/10 (noite): manda AOS POUCOS — 3 s depois de abrir, a cada título novo,
+  // no toque do botão e ao sair. O navegador interno do Instagram/Facebook não
+  // avisa "saiu da página", e só com o aviso de saída as visitas de anúncio
+  // nunca eram medidas. A rolagem já mandada sobe de faixa com `de=` (o
+  // servidor tira da faixa antiga e põe na nova: a visita conta uma vez).
+  var enviado = -1, timer = null;
+  function manda() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    var s = novos(vistos, 's'), b = novos(tocados, 'b'), er = novos(erros, 'e'), pt = novos(pontos, 'p'), p = new URLSearchParams();
+    var tm = Object.keys(tempo).filter(function (k) { return tempo[k] > 0; });
+    if (enviado < 0) p.set('depth', String(maxDepth));
+    else if (maxDepth > enviado) { p.set('de', String(enviado)); p.set('depth', String(maxDepth)); }
+    else if (!s.length && !b.length && !er.length && !pt.length && !tm.length) return;
+    if (tm.length) p.set('tempo', tm.map(function (k) { return k + ':' + tempo[k]; }).join(','));
+    if (s.length) p.set('secoes', s.join(','));
+    if (b.length) p.set('botoes', b.join(','));
+    if (er.length) p.set('erros', er.join(','));
+    if (pt.length) { p.set('toques', pt.join(',')); p.set('aparelho', window.innerWidth >= 768 ? 'pc' : 'cel'); }
+    if (navigator.sendBeacon('/p/<%= j page.slug %>/track', p)) {
+      enviado = maxDepth;
+      s.forEach(function (k) { mandados['s' + k] = 1; });
+      b.forEach(function (k) { mandados['b' + k] = 1; });
+      er.forEach(function (k) { mandados['e' + k] = 1; });
+      pt.forEach(function (k) { mandados['p' + k] = 1; });
+      tm.forEach(function (k) { tempo[k] = 0; }); // o tempo vai em parcelas: zera o que já foi
+    }
+  }
+  function agenda(ms) { if (!timer) timer = setTimeout(manda, ms); }
+  window.addEventListener('scroll', function () { mede(); agenda(4000); }, { passive: true });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') manda(); });
+  window.addEventListener('pagehide', manda);
+  mede();
+  agenda(3000);
+  setInterval(function () { if (Object.keys(tempo).some(function (k) { return tempo[k] >= 5; })) agenda(500); }, 20000);
+})();
+</script>
+<% end %>

@@ -7,8 +7,9 @@
 #   3. e-mail para os administradores (AdministratorNotifications::CevicoAlertMailer).
 # Um aviso por problema: enquanto o mesmo problema continua, repete só a cada
 # 12 h. Quando o robô volta a rodar, o próprio vigia tira o aviso do Radar
-# (não depende do Radar de Oportunidades estar ligado) e a tela também
-# esconde na leitura o aviso de robô que já voltou.
+# (não depende do Radar de Oportunidades estar ligado), FECHA a tarefa 🔴
+# dele (22/10: as de 16/10 ficaram abertas 6 dias com o robô já rodando) e a
+# tela também esconde na leitura o aviso de robô que já voltou.
 # O resumo fica em ai_config.cron_health (para tela/console), gravado pelo
 # Cevico::SettingMerge. A marca "já avisei" é gravada ANTES de avisar: se o
 # aviso falhar, no pior caso perde um aviso — nunca vira rajada.
@@ -33,7 +34,7 @@ class Crm::CronWatchdogJob < ApplicationJob
 
   private
 
-  def watch_account(settings, problems, snapshot, now)
+  def watch_account(settings, problems, snapshot, now) # rubocop:disable Metrics/AbcSize
     due = []
     Cevico::SettingMerge.merge_key!(settings, :ai_config, STATE_KEY) do |state|
       incidents = (state['incidents'] || {}).slice(*problems.keys) # o que voltou ao normal sai da lista
@@ -50,6 +51,7 @@ class Crm::CronWatchdogJob < ApplicationJob
       state
     end
     clear_recovered_alerts!(settings, problems)
+    close_recovered_tasks!(settings.account, problems, now)
     due.each { |problem| alert!(settings.account, for_account(problem, settings.account_id)) }
   end
 
@@ -62,6 +64,19 @@ class Crm::CronWatchdogJob < ApplicationJob
       state['alerts'] = Array(state['alerts']).reject { |a| a['kind'] == Crm::AgentAlert::ROBOT_KIND && !problems.key?(a['job'].to_s) }
       state
     end
+  end
+
+  # tarefa 🔴 de robô que voltou: fecha, com a linha de quando voltou (só as
+  # que o vigia abriu — o título é o dele; robô ainda com problema fica aberto)
+  def close_recovered_tasks!(account, problems, now)
+    labels = Crm::CronHealth::JOBS.transform_values { |meta| meta[:label] }.merge('sidekiq' => Crm::CronHealth::SIDEKIQ_LABEL)
+    titles = labels.except(*problems.keys).values.flat_map { |label| ["🔴 Robô parado: #{label}", "🔴 Robô com erro: #{label}"] }
+    line = "#{now.in_time_zone(TZ).strftime('%d/%m %H:%M')} · o robô voltou a rodar — tarefa fechada pelo vigia."
+    account.tasks.where(title: titles, status: %i[todo doing]).find_each do |task|
+      task.update!(status: :done, description: [task.description.presence, line].compact.join("\n\n"))
+    end
+  rescue StandardError => e
+    Rails.logger.warn "[CEVICO vigia dos robôs] conta #{account.id}: tarefa não fechada (#{e.message})"
   end
 
   # o último erro vem com "conta N · ": a outra conta não vê o número alheio

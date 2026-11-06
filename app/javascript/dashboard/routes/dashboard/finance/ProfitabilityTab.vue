@@ -58,7 +58,7 @@ onMounted(load);
 const s = computed(() => data.value?.summary || {});
 // cards principais — dopamine: degradê pleno + fonte branca (padrão do Financeiro)
 const kpiCards = computed(() => [
-  { key: 'receita', label: 'Receita das cirurgias', value: s.value.receita, grad: 'linear-gradient(135deg, #0F5FA6, #3B82F6)', icon: 'i-lucide-wallet', badge: `${s.value.count || 0} realizada(s)` },
+  { key: 'receita', label: 'Receita das cirurgias', value: s.value.receita, grad: 'linear-gradient(135deg, #0F5FA6, #3B82F6)', icon: 'i-lucide-wallet', badge: `${s.value.count || 0} olho(s) · ${s.value.pacientes ?? '—'} paciente(s)` },
   { key: 'custo', label: 'Custo do prestador', value: s.value.custo, grad: 'linear-gradient(135deg, #B45309, #F59E0B)', icon: 'i-lucide-building-2', badge: 'repasse ao centro cirúrgico' },
   { key: 'taxa', label: 'Taxa da plataforma', value: s.value.taxa, grad: 'linear-gradient(135deg, #6D28D9, #8B5CF6)', icon: 'i-lucide-percent', badge: 'fica no OftalmoFácil' },
   { key: 'resultado', label: 'Resultado CEVICO', value: s.value.resultado, grad: 'linear-gradient(135deg, #065F46, #10B981)', icon: 'i-lucide-trending-up', badge: `margem ${fmtPct(s.value.margem_pct)}` },
@@ -129,6 +129,24 @@ const maxMonth = computed(() => Math.max(1, ...monthly.value.map(m => m.receita 
           <p class="text-lg font-bold tabular-nums mt-1 relative" style="color: #fff">{{ fmtMoney(card.value) }}</p>
         </div>
       </div>
+
+      <!-- 🧾 ponta 1 (22/10): o hub nunca marca "realizada" — a receita acima conta a cirurgia ativa com data passada; aqui, quantas têm prova -->
+      <div v-if="s.prova && s.count" class="rounded-2xl border p-3 mb-4 text-xs" :class="s.sem_prova?.count ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700' : 'border-n-weak bg-n-solid-1'">
+        <p class="font-semibold text-n-slate-12">
+          🧾 Das {{ s.count }} realizada(s), {{ s.count - (s.sem_prova?.count || 0) }} têm prova
+          <span v-if="s.sem_prova?.count" class="text-amber-700 dark:text-amber-400">· {{ s.sem_prova.count }} sem prova ({{ fmtMoney(s.sem_prova.receita) }})</span>
+        </p>
+        <p class="text-n-slate-10 mt-1 leading-relaxed">
+          Prova = pagamento aprovado no OftalmoFácil ({{ s.prova.pago }}), card em Cirurgia Realizada ou Pós-operatório ({{ s.prova.equipe }}) ou pós-op/presença na Agenda ({{ s.prova.agenda }}).
+          <template v-if="s.sem_prova?.count">"Sem prova" = está ativa lá e a data passou, mas nada confirma que aconteceu. A receita acima continua contando essas cirurgias.</template>
+        </p>
+      </div>
+
+      <!-- 🧮 ponta 5 (22/10): o que cada número conta -->
+      <p class="text-[11px] text-n-slate-10 mb-2 leading-relaxed">
+        Cada cirurgia é <b>um olho</b> (quem operou os dois olhos conta 2 cirurgias e 1 paciente).
+        <template v-if="s.exames?.count">Exames do hub ficam fora: {{ s.exames.count }} exame(s), {{ fmtMoney(s.exames.receita) }}.</template>
+      </p>
 
       <p v-if="s.agendadas" class="text-xs text-n-slate-10 mb-4">
         📅 Além das realizadas, há <b>{{ s.agendadas }}</b> cirurgia(s) agendada(s) no período somando <b>{{ fmtMoney(s.agendadas_receita) }}</b> — entram no resultado quando acontecerem.

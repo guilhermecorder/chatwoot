@@ -5,16 +5,27 @@
 //   apoio  → 2º bloco, título e cartões no apoio (30%)
 //   neutro → os demais
 // Slot `acoes` = chavinha Lista|Cards, botão secundário etc.
+// 21/10: a PALETA DO BLOCO (salada de frutas / fruta escolhida por bloco no
+// popup de cores) vale aqui também: o useCevicoPalette da tela fornece a API
+// e o bloco se reconhece pelo id="bloco-<id>" (o mesmo id da lista `blocks`).
+import { computed, inject, useAttrs } from 'vue';
+
 defineProps({
   titulo: { type: String, required: true },
   subtitulo: { type: String, default: '' },
   tom: { type: String, default: 'neutro' }, // dia | apoio | neutro
   icon: { type: String, default: '' },
 });
+const pal = inject('cevicoPalette', null);
+const attrs = useAttrs();
+const blocoVars = computed(() => {
+  const key = String(attrs.id || '').replace(/^bloco-/, '');
+  return pal && key ? pal.blockVars(key) : null;
+});
 </script>
 
 <template>
-  <section class="cvg-bloco" :class="`cvg-bloco--${tom}`">
+  <section class="cvg-bloco" :class="`cvg-bloco--${tom}`" :style="blocoVars">
     <header class="cvg-bloco-head">
       <div class="cvg-bloco-titulo">
         <span v-if="icon" class="cvg-bloco-icone" aria-hidden="true">

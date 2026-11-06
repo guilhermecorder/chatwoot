@@ -38,6 +38,10 @@ class Cevico::CampaignAgent::Baselines
   def compute
     WINDOWS.each_with_object({}) do |days, acc|
       totals = Cevico::CampaignAgent::Reader.new(account: @account, since_date: @until_date - (days - 1), until_date: @until_date, goal: @goal).totals
+      # item 359: o orgânico tem a própria régua e NÃO entra no 'all' (que é só anúncio pago)
+      seo = Cevico::CampaignAgent::Reader.new(account: @account, since_date: @until_date - (days - 1), until_date: @until_date, goal: @goal,
+                                              channels: %w[seo]).totals['seo']
+      totals['seo'] = seo if seo
       totals.each do |channel, row|
         (acc[channel] ||= {})[days] = row.merge('days' => days, 'since' => (@until_date - (days - 1)).iso8601, 'until' => @until_date.iso8601,
                                                 'daily_spend' => (row['spend'].to_f / days).round(2))

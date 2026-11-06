@@ -144,6 +144,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/funnels' => { node: 'crm', view: %w[acquisition clinic] },
     'crm/campaigns' => { node: 'crm.campanhas', view: %w[index show results templates] },
     'crm/call_campaigns' => { node: 'crm.campanhas', view: %w[index show] },
+    'crm/segments' => { node: 'crm.campanhas', view: %w[index show base preview results members dashboard] }, # 🧪 item 383
     'crm/message_automations' => { node: 'crm.campanhas', view: %w[index preview_eligible] },
     'crm/campaigns_dashboards' => { node: 'relatorios.campanhas', view: %w[show] },
     'crm/journey_messages' => { node: 'crm.jornada', view: %w[index map settings_show] },
@@ -177,7 +178,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/google_dashboards' => { node: 'relatorios.google', view: %w[show] },
     'crm/whatsapp_spends' => { node: 'relatorios.gasto_whatsapp', view: %w[show rates] },
     'crm/whatsapp_healths' => { node: 'relatorios.whatsapp_saude', view: %w[show] },
-    'crm/acquisition_costs' => { node: 'financeiro.cac', view: %w[show] },
+    'crm/acquisition_costs' => { node: 'financeiro.cac', view: %w[show timeline] },
     # ── Automações ──
     'crm/automations' => { node: 'automacoes.robos', view: %w[index] },
     'crm/followup_bots' => { node: 'automacoes.robos', view: %w[index ai_preview smart results], skip: %w[toggle] },
@@ -185,6 +186,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/automations_dashboards' => { node: 'automacoes.resultados', view: %w[show] },
     'crm/agent_guidances' => { node: 'automacoes.agentes_ia', view: %w[index] },
     'crm/script_versions' => { node: 'automacoes.agentes_ia', view: %w[index] },
+    'crm/education_engines' => { node: 'automacoes.agentes_ia', view: %w[show] },
     'crm/ai_dashboards' => { node: 'automacoes.agentes_ia', view: %w[show] },
     'crm/batch_updates' => { node: 'automacoes.tratamento', view: %w[preview] },
     'crm/retro_labels' => { node: 'automacoes.tratamento', view: %w[preview] },

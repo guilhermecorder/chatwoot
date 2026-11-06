@@ -164,6 +164,13 @@ crm_conversation_auditor_job:
   class: 'Crm::ConversationAuditorJob'
   queue: low
 
+# 🎓 Motor de Educação (item 389): diário 11:10 UTC (08:10 SP) — conversas de
+# ontem, quem agendou × quem não; sugestões esperam a aprovação do admin
+crm_education_engine_job:
+  cron: '10 11 * * *'
+  class: 'Crm::EducationEngineJob'
+  queue: low
+
 # 🎨 Criativo Perpétuo (item 131): segunda 11:30 UTC (08:30 SP) — variações
 # dos vencedores da semana (termos/anúncios que viraram cirurgia) p/ aprovar
 crm_creative_job:
@@ -285,4 +292,18 @@ crm_cron_watchdog_job:
 crm_sidekiq_heartbeat_job:
   cron: '*/1 * * * *'
   class: 'Crm::SidekiqHeartbeatJob'
+  queue: scheduled_jobs
+
+# 📣 CEVICO item 381: plano de reativação em fatias — de hora em hora manda a
+# fatia da hora (dentro da janela e do teto do dia configurados na mãe)
+crm_reactivation_plan_job:
+  cron: '7 * * * *'
+  class: 'Crm::ReactivationPlanJob'
+  queue: scheduled_jobs
+
+# 🧪 item 383: a cada 2 minutos, a próxima leva de cada segmento que está
+# enviando (ritmo "X por hora, de Y em Y minutos", janela e teto do dia)
+crm_segment_drip_job:
+  cron: '*/2 * * * *'
+  class: 'Crm::SegmentDripJob'
   queue: scheduled_jobs

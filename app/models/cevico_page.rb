@@ -146,6 +146,16 @@ class CevicoPage < ApplicationRecord
 
   scope :published, -> { where(status: 'published') }
 
+  # 📚 29/10: a Biblioteca de guias (HTML anexado com data-biblioteca="1") é
+  # ferramenta da EQUIPE: nunca responde no domínio público, só dentro do
+  # sistema, com login (CevicoPagesController#library)
+  LIBRARY_MARK = /data-biblioteca\s*=\s*["']?1\b/
+  scope :libraries, -> { where('custom_html LIKE ?', '%data-biblioteca=%') }
+
+  def library?
+    custom_html.to_s.match?(LIBRARY_MARK)
+  end
+
   def published?
     status == 'published'
   end
@@ -343,34 +353,108 @@ class CevicoPage < ApplicationRecord
   end
 
   COUNTER_BY_KIND = { 'view' => :views_count, 'cta' => :cta_clicks_count, 'next' => :next_clicks_count }.freeze
+  # rolagem máxima da visita; 0 = abriu e não rolou (só o beacon da página anexada manda)
+  SCROLL_BUCKETS = %w[0 25 50 75 100].freeze
 
   # soma 1 no contador do dia (e no total). `source` = slug da página de
   # origem quando o visitante chegou pelo funil (?de=slug); `variant` =
   # letra do teste A/B em curso (conta também por variação)
   def track_hit!(kind, source: nil, variant: nil)
-    stats = daily_stats.presence || {}
-    day = (stats[Date.current.iso8601] ||= {})
-    day[kind.to_s] = day[kind.to_s].to_i + 1
-    day["#{kind}_#{variant}"] = day["#{kind}_#{variant}"].to_i + 1 if variant.present?
-    record_origin(day, source)
-    updates = { daily_stats: stats }
-    counter = COUNTER_BY_KIND[kind.to_s]
-    updates[counter] = self[counter].to_i + 1 if counter
-    update_columns(updates) # rubocop:disable Rails/SkipsModelValidations
+    bump_daily_stats!(COUNTER_BY_KIND[kind.to_s]) do |day|
+      day[kind.to_s] = day[kind.to_s].to_i + 1
+      day["#{kind}_#{variant}"] = day["#{kind}_#{variant}"].to_i + 1 if variant.present?
+      record_origin(day, source)
+    end
   end
 
   # profundidade de rolagem (25/50/75/100) — beacon leve da página pública
   def track_scroll!(bucket)
-    return unless %w[25 50 75 100].include?(bucket.to_s)
+    track_reading!(depth: bucket)
+  end
 
-    stats = daily_stats.presence || {}
-    day = (stats[Date.current.iso8601] ||= {})
-    scroll = (day['scroll'] ||= {})
-    scroll[bucket.to_s] = scroll[bucket.to_s].to_i + 1
-    update_columns(daily_stats: stats) # rubocop:disable Rails/SkipsModelValidations
+  # 23/10 (Raio-X da página): o beacon da página ANEXADA conta, por visita, até
+  # onde leu (0 = não rolou, para saber quantas visitas foram medidas), os
+  # títulos (h2) que apareceram na tela e os botões clicados. Só entram as
+  # chaves que existem no HTML da própria página (Cevico::PageReading). Os
+  # toques errados ("<trecho>~<tipo>") também, uma vez por visita.
+  # `from` (23/10 noite): a visita já tinha mandado a rolagem `from` e agora
+  # chegou mais fundo — sai da faixa antiga e entra na nova, contando uma vez só
+  # `taps` (24/10, mapa visual): onde a pessoa tocou, "<trecho>@<coluna><linha>" numa grade 10×10 do trecho
+  # ("!" no fim = toque errado); `device` 'pc' guarda em 'toques_pc' — o computador tem outro desenho de página.
+  # `times` (24/10): segundos com cada trecho na tela, "<trecho>:<segundos>" (parcelas; até 120 s por aviso)
+  def track_reading!(depth: nil, from: nil, device: nil, **groups)
+    depth = SCROLL_BUCKETS.include?(depth.to_s) ? depth.to_s : nil
+    keys = known_reading_keys(groups)
+    return if depth.nil? && keys.values.all?(&:blank?)
+
+    bump_daily_stats! do |day|
+      unbump(day, 'scroll', scroll_bucket_before(from, depth))
+      bump(day, 'scroll', [depth].compact)
+      bump(day, 'secoes', keys[:sections])
+      bump(day, 'botoes', keys[:buttons])
+      bump(day, 'erros', keys[:misses])
+      bump(day, device.to_s == 'pc' ? 'toques_pc' : 'toques', keys[:taps])
+      add(day, 'tempo', keys[:times])
+    end
   end
 
   private
+
+  # a página recebe vários avisos ao mesmo tempo (visita, clique, rolagem):
+  # lê o daily_stats TRAVANDO a linha, para um aviso não apagar o outro
+  def bump_daily_stats!(counter = nil)
+    self.class.transaction do
+      stats, total = self.class.where(id: id).lock.pick(:daily_stats, counter || :id)
+      stats = stats.presence || {}
+      yield(stats[Date.current.iso8601] ||= {})
+      updates = { daily_stats: stats }
+      updates[counter] = total.to_i + 1 if counter
+      update_columns(updates) # rubocop:disable Rails/SkipsModelValidations
+    end
+  end
+
+  def bump(day, group, keys)
+    return if keys.blank?
+
+    counts = (day[group] ||= {})
+    keys.each { |key| counts[key] = counts[key].to_i + 1 }
+  end
+
+  # só as chaves que existem no HTML da própria página
+  def known_reading_keys(groups)
+    keys = { sections: [], buttons: [], misses: [], taps: [], times: [] }.merge(groups.compact)
+    return keys.merge(times: {}) if keys.values.all?(&:blank?)
+
+    map = Cevico::PageReading.map_for(self)
+    { sections: keys[:sections] & map['marcos'].pluck('key'), buttons: keys[:buttons] & map['botoes'].pluck('key'),
+      misses: keys[:misses].select { |key| Cevico::PageReading.miss_key?(map, key) },
+      taps: keys[:taps].select { |key| Cevico::PageReading.tap_key?(map, key) },
+      times: Cevico::PageReading.seconds_by_marker(map, keys[:times]) }
+  end
+
+  # faixa que a visita já tinha mandado, só se for mais rasa que a nova
+  def scroll_bucket_before(from, depth)
+    return nil if depth.nil? || SCROLL_BUCKETS.exclude?(from.to_s)
+
+    from.to_i < depth.to_i ? from.to_s : nil
+  end
+
+  # soma quantidades (segundos) em vez de 1
+  def add(day, group, amounts)
+    return if amounts.blank?
+
+    counts = (day[group] ||= {})
+    amounts.each { |key, n| counts[key] = counts[key].to_i + n }
+  end
+
+  # tira 1 da faixa (nunca abaixo de zero: a visita pode ter começado ontem)
+  def unbump(day, group, key)
+    counts = day[group]
+    return if key.nil? || counts.blank? || counts[key].to_i <= 0
+
+    counts[key] -= 1
+    counts.delete(key) if counts[key].zero?
+  end
 
   def cta_url_allowed
     errors.add(:cta_url, CTA_MESSAGE) unless self.class.cta_url_allowed?(cta_url, account: account)

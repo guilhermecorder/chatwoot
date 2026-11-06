@@ -104,6 +104,22 @@ RSpec.describe Crm::CronWatchdogJob do
     expect(radar_alerts.select { |a| a['kind'] == 'robo_parado' }).to be_empty
   end
 
+  it 'quando o robô volta, o vigia fecha a tarefa 🔴 dele; a de robô ainda parado fica aberta', :aggregate_failures do
+    all_healthy!(now - 3.hours)
+    health.ran!('nps', now: now - 3.hours)
+    described_class.perform_now(now)
+    parados = account.tasks.where('title LIKE ?', '🔴 Robô parado:%').pluck(:title)
+    expect(parados).to include('🔴 Robô parado: Pesquisa de satisfação (NPS)')
+
+    all_healthy!(now + 9.minutes, except: 'radar')
+    described_class.perform_now(now + 10.minutes)
+
+    nps = account.tasks.find_by(title: '🔴 Robô parado: Pesquisa de satisfação (NPS)')
+    expect(nps).to be_done
+    expect(nps.description).to include('o robô voltou a rodar — tarefa fechada pelo vigia')
+    expect(account.tasks.find_by(title: '🔴 Robô parado: Radar de Oportunidades')).to be_todo
+  end
+
   it 'fila dos robôs parada (sinal de 1 min velho) também avisa' do
     all_healthy!(now - 1.minute)
     health.sidekiq_beat!(now: now - 20.minutes)

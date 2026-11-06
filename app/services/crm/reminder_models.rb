@@ -113,9 +113,12 @@ module Crm::ReminderModels
     { 'template_params' => raw['template_params'], 'message_preview' => raw['message_preview'] }
   end
 
+  # modality: o tipo de atendimento para o qual o modelo foi feito (nil = o
+  # padrão, ou um modelo só por médico) — o lembrete usa para não mandar um
+  # valor em texto ("sem custo") num modelo que fala em R$
   def chosen(tpl, set, spec, unit:)
     slot(tpl).merge('rank' => [spec, unit ? 1 : 0], 'general' => (true unless unit),
-                    'model' => (spec.positive? ? label(set) : nil)).compact
+                    'model' => (spec.positive? ? label(set) : nil), 'modality' => set['modality'].presence).compact
   end
 
   def fold(text)

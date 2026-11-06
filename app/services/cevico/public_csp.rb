@@ -1,12 +1,14 @@
 # 🔐 Política de segurança de conteúdo (CSP) das páginas PÚBLICAS do CEVICO
 # (landing pages + formulários; rodada 171). Terceiros que elas realmente
-# usam: Google Tag Manager/Analytics, Pixel da Meta, Google Fonts. Tudo o
+# usam: Google Tag Manager/Analytics, Pixel da Meta, Google Fonts, Microsoft Clarity. Tudo o
 # mais é da própria origem. Aplicada em modo "só relatar" pelo concern
 # Cevico::PublicSecurity — nada quebra; violações vão pro log.
 module Cevico::PublicCsp
-  THIRD_PARTY_SCRIPTS = %w[https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net].freeze
+  THIRD_PARTY_SCRIPTS = %w[https://www.googletagmanager.com https://www.google-analytics.com https://connect.facebook.net
+                           https://www.clarity.ms https://*.clarity.ms].freeze
   ANALYTICS_CONNECT = %w[https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com
-                         https://www.googletagmanager.com https://www.facebook.com https://connect.facebook.net].freeze
+                         https://www.googletagmanager.com https://www.facebook.com https://connect.facebook.net
+                         https://*.clarity.ms].freeze
 
   def self.apply(policy)
     policy.default_src :self

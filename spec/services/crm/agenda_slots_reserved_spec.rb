@@ -43,7 +43,7 @@ RSpec.describe Crm::AgendaSlots do
               'only' => ['inventado'] }]
     CrmSetting.create!(account: account, agenda_config: { 'windows' => wins })
     expect(paulista.call).to eq(%w[13:00 13:30 14:00 14:30])
-    expect(described_class.rules_text(account)).to eq('')
+    expect(described_class.rules_text(account)).not_to include('faixa reservada')
   end
 
   it 'médico com a agenda fechada some das vagas da IA', :aggregate_failures do
@@ -71,9 +71,12 @@ RSpec.describe Crm::AgendaSlots do
     expect(described_class.doctor_at(account, tuesday, '09:00', 'tatuape')).to be_nil
   end
 
-  it 'sem faixa reservada e sem texto, nada entra no prompt' do
+  # item 367: sem faixa reservada e sem texto, só a regra das avaliações por hora entra (com o número configurado)
+  it 'sem faixa reservada e sem texto, entra só a regra das avaliações por hora', :aggregate_failures do
     wins = [{ 'dow' => 3, 'unit' => 'paulista', 'doctor' => 'Dr. Henrique Gemelli', 'start' => '13:00', 'end' => '17:00', 'block' => 15 }]
-    CrmSetting.create!(account: account, agenda_config: { 'windows' => wins })
-    expect(described_class.rules_block(account)).to eq('')
+    CrmSetting.create!(account: account, agenda_config: { 'windows' => wins, 'hourly_evaluations' => 3 })
+    block = described_class.rules_block(account)
+    expect(block).to start_with('REGRAS DA AGENDA').and include('no máximo 3 avaliações').and include('já está completo')
+    expect(block).not_to include('faixa reservada')
   end
 end

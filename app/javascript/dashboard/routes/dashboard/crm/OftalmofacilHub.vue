@@ -10,6 +10,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useMapGetter } from 'dashboard/composables/store.js';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import CrmAPI from 'dashboard/api/crm';
+import { useAlert } from 'dashboard/composables';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
@@ -93,11 +94,15 @@ const statusMeta = k => STATUS.find(s => s.key === k) || { key: k, label: k || '
 // para a tela (status_view: ativa com a data já passada = realizada)
 const kindOf = r => r?.status_view || r?.status_kind;
 const kindLabel = r => r?.status_view_label || r?.status_kind_label;
+// 🧾 ponta 1 (22/10): realizada sem prova (nem pagamento, nem card de pós, nem Agenda)
+const noProof = r => kindOf(r) === 'realizada' && r?.proof === 'sem_prova';
+const PROOF_HINT = 'Ativa no OftalmoFácil e a data passou, mas nada confirma que aconteceu: sem pagamento aprovado lá, card fora de Cirurgia Realizada/Pós-operatório e sem pós-op na Agenda';
 const UNIT_LABEL = { paulista: 'Av. Paulista', tatuape: 'Tatuapé', online: 'Online', iop: 'IOP', ocular_surgery: 'Ocular Surgery' };
 const unitLabel = key => UNIT_LABEL[key] || key || '';
 const pad = n => String(n).padStart(2, '0');
 const dateKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 const fmtDate = d => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) : '');
+const fmtDateYear = d => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR') : '');
 const fmtDateLong = d => (d ? new Date(`${d}T12:00:00`).toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }) : '');
 const fmtMonth = m => { const [y, mo] = String(m).split('-'); return new Date(Number(y), Number(mo) - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }); };
 const fmtBRL = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -118,6 +123,71 @@ const fetchOverview = async () => {
     if (mine === seq) isLoading.value = false;
   }
 };
+// 👯 ponta 2 + 🗂️ ponta 3 (22/10): casamento dos pacientes e cards em "Cirurgia Agendada" — carregam à parte (mais pesados)
+const matching = ref(null);
+const matchingLoading = ref(false);
+const showWeakTwins = ref(false);
+const twinBusy = ref('');
+const surgeryCards = ref(null);
+const surgeryCardsLoading = ref(false);
+const showCardRows = ref('');
+const MATCH_VIA = [
+  { key: 'phone', label: 'pelo telefone' },
+  { key: 'cpf', label: 'pelo CPF' },
+  { key: 'name_email', label: 'nome + e-mail' },
+  { key: 'name', label: 'só pelo nome (antigo, a conferir)' },
+  { key: 'created', label: 'criados (ninguém bateu)' },
+];
+const STRENGTH = { alta: { label: 'forte', tone: 'cv-red' }, media: { label: 'média', tone: 'cv-amber' }, baixa: { label: 'fraca', tone: 'cv-slate' } };
+const fetchMatching = async () => {
+  matchingLoading.value = true;
+  try {
+    const { data } = await CrmAPI.oftalmofacilMatching();
+    matching.value = data;
+  } catch {
+    matching.value = { error: true };
+  } finally {
+    matchingLoading.value = false;
+  }
+};
+const fetchSurgeryCards = async () => {
+  surgeryCardsLoading.value = true;
+  try {
+    const { data } = await CrmAPI.oftalmofacilSurgeryCards();
+    surgeryCards.value = data;
+  } catch {
+    surgeryCards.value = { error: true };
+  } finally {
+    surgeryCardsLoading.value = false;
+  }
+};
+const visibleTwins = computed(() => (matching.value?.twins || []).filter(t => showWeakTwins.value || t.strength !== 'baixa'));
+const weakTwins = computed(() => (matching.value?.twins || []).filter(t => t.strength === 'baixa').length);
+const twinKey = t => `${t.created.id}-${t.other.id}`;
+const twinAction = async (t, action, payload, okText) => {
+  twinBusy.value = twinKey(t);
+  try {
+    await CrmAPI.appointmentAlertAction(action, payload);
+    useAlert(okText);
+    await fetchMatching();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não deu certo. Tente de novo.');
+  } finally {
+    twinBusy.value = '';
+  }
+};
+// fica o cadastro que já existia (o que conversa); nome, e-mail e CPF vêm do Oftalmofácil (item 346)
+const mergeTwin = t => {
+  // eslint-disable-next-line no-alert
+  const ok = window.confirm(
+    `Juntar os dois cadastros?\n\nFica: ${t.other.name} (${t.other.phone || 'sem telefone'})\nSai: ${t.created.name} (${t.created.phone || 'sem telefone'}) — criado pelo Oftalmofácil\n\nCirurgias, consultas, card e conversas do que sai passam para o que fica; nome, e-mail e CPF vêm do Oftalmofácil. Não dá para desfazer.`
+  );
+  if (ok) twinAction(t, 'merge', { keep_id: t.other.id, drop_id: t.created.id }, 'Cadastros juntados ✓');
+};
+const notTwin = t => twinAction(t, 'not_same', { one_id: t.created.id, other_id: t.other.id }, 'Anotado: são pessoas diferentes');
+const contactUrl = id => frontendURL(`accounts/${accountId.value}/patient/${id}`);
+const cardRows = klass => (surgeryCards.value?.rows || []).filter(r => r.klass === klass);
+
 let seqItems = 0;
 const fetchItems = async () => {
   const mine = ++seqItems;
@@ -508,6 +578,8 @@ const onResize = () => { if (tourStep.value !== null) placeTour(); };
 onMounted(async () => {
   await fetchOverview();
   fetchWeek();
+  fetchSurgeryCards();
+  fetchMatching();
   window.addEventListener('resize', onResize);
   let done = '1';
   try { done = localStorage.getItem(TOUR_KEY); } catch (e) { /* sem storage */ }
@@ -568,6 +640,17 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
 
         <!-- ═══════════ VISÃO GERAL ═══════════ -->
         <template v-if="view === 'overview' && overview">
+          <!-- 🩺 ponta 4 (22/10): aviso fixo quando a Agenda do hub volta a ficar incompleta -->
+          <div v-if="health.without_task || health.task_without_doctor" class="cv-block cv-strip cv-amber px-4 py-3.5 mb-8 flex items-center gap-3 flex-wrap">
+            <span class="i-lucide-triangle-alert text-lg text-amber-600 flex-shrink-0" />
+            <p class="text-xs text-n-slate-11 flex-1 min-w-0">
+              <b>Agenda do hub incompleta:</b>
+              <template v-if="health.without_task"> {{ health.without_task }} item(ns) marcado(s) lá sem agendamento aqui</template>
+              <template v-if="health.without_task && health.task_without_doctor"> ·</template>
+              <template v-if="health.task_without_doctor"> {{ health.task_without_doctor }} agendamento(s) sem médico</template>
+            </p>
+            <button v-if="health.without_task" class="cv-btn cv-btn-ghost cv-btn-sm" @click="goItems({ agenda: 'without', status: 'por_vir', usePeriod: false })">ver os que faltam ›</button>
+          </div>
           <section class="cv-block p-6 sm:p-9 mb-8" :style="blockVars('agenda')" data-tour="health">
             <div class="flex items-start gap-3 mb-1">
               <span class="cv-ag-num">1</span>
@@ -577,12 +660,22 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
               </div>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-6">
-              <button class="text-left" @click="goItems({ status: 'agendada', usePeriod: false })"><DashKpi label="Marcados no hub" :value="Number(health.upcoming || 0)" sub="de hoje em diante" grad="linear-gradient(135deg, #0F766E, #2DD4BF)" glass compact /></button>
-              <button class="text-left" @click="goItems({ agenda: 'with', status: 'agendada', usePeriod: false })"><DashKpi label="Já na nossa Agenda" :value="Number(health.with_task || 0)" :sub="`${pct(health.with_task, health.upcoming)}% dos marcados`" grad="linear-gradient(135deg, #047857, #10B981)" glass compact /></button>
-              <button class="text-left" @click="goItems({ agenda: 'without', status: 'agendada', usePeriod: false })"><DashKpi label="Faltando na Agenda" :value="Number(health.without_task || 0)" sub="ligue a Agenda ou recarregue" :grad="health.without_task ? 'linear-gradient(135deg, #B45309, #F59E0B)' : ''" glass compact /></button>
+              <button class="text-left" @click="goItems({ status: 'por_vir', usePeriod: false })"><DashKpi label="Marcados no hub" :value="Number(health.upcoming || 0)" sub="de hoje em diante" grad="linear-gradient(135deg, #0F766E, #2DD4BF)" glass compact /></button>
+              <button class="text-left" @click="goItems({ agenda: 'with', status: 'por_vir', usePeriod: false })"><DashKpi label="Já na nossa Agenda" :value="Number(health.with_task || 0)" :sub="`${pct(health.with_task, health.upcoming)}% dos marcados`" grad="linear-gradient(135deg, #047857, #10B981)" glass compact /></button>
+              <button class="text-left" @click="goItems({ agenda: 'without', status: 'por_vir', usePeriod: false })"><DashKpi label="Faltando na Agenda" :value="Number(health.without_task || 0)" sub="ligue a Agenda ou recarregue" :grad="health.without_task ? 'linear-gradient(135deg, #B45309, #F59E0B)' : ''" glass compact /></button>
               <button class="text-left" @click="goItems({ unmatched: true, status: 'agendada', usePeriod: false })"><DashKpi label="Sem paciente casado" :value="Number(health.unmatched_contacts || 0)" sub="telefone/CPF/nome não bateu" :grad="health.unmatched_contacts ? 'linear-gradient(135deg, #9F1239, #F43F5E)' : ''" glass compact /></button>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-4">
+              <!-- 🩺 ponta 4 (22/10): sem médico = o CRM do hub ainda não tem nome no de-para -->
+              <div class="cv-sub p-4">
+                <p class="cv-label mb-1">Agendamentos sem médico</p>
+                <p class="text-2xl font-bold" :class="health.task_without_doctor ? 'text-amber-700 dark:text-amber-400' : 'text-n-slate-12'">{{ health.task_without_doctor || 0 }}</p>
+                <p class="text-[11px] text-n-slate-10">o CRM do médico lá ainda não tem nome aqui; com o nome, eles se completam sozinhos</p>
+                <div v-if="health.doctors_unmapped?.length" class="flex flex-wrap gap-1 mt-1.5">
+                  <span v-for="d in health.doctors_unmapped" :key="d.crm" class="cv-chip cv-amber" :title="d.providers.join(' · ')">CRM {{ d.crm }} · {{ d.total }}</span>
+                </div>
+                <router-link v-if="isAdmin && health.task_without_doctor" class="text-[11px] font-semibold hover:underline mt-2 inline-block" style="color: var(--cv)" :to="integrationsUrl">dar nome em Integrações →</router-link>
+              </div>
               <div class="cv-sub p-4"><p class="cv-label mb-1">Agendamentos sem local</p><p class="text-2xl font-bold text-n-slate-12">{{ health.task_without_unit || 0 }}</p><p class="text-[11px] text-n-slate-10">a clínica do hub ainda não tem de-para para um local nosso</p></div>
               <div class="cv-sub p-4">
                 <p class="cv-label mb-1">Clínicas sem de-para</p>
@@ -706,11 +799,26 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                 <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="view = 'partners'">Parceiros ›</button>
               </div>
               <div class="grid grid-cols-2 gap-2 mb-4">
-                <DashKpi label="Itens" :value="Number(overview.totals?.total || 0)" grad="linear-gradient(135deg, #0F766E, #2DD4BF)" glass compact />
+                <DashKpi label="Itens (olhos + exames)" :value="Number(overview.totals?.total || 0)" grad="linear-gradient(135deg, #0F766E, #2DD4BF)" glass compact />
                 <DashKpi label="Realizados" :value="Number(overview.totals?.realizada || 0)" grad="linear-gradient(135deg, #047857, #10B981)" glass compact />
                 <DashKpi label="Agendados" :value="Number((overview.totals?.agendada || 0) + (overview.totals?.aguardando_pagamento || 0))" grad="linear-gradient(135deg, #1D4ED8, #3B82F6)" glass compact />
                 <DashKpi label="Cancelados + faltas" :value="Number((overview.totals?.cancelada || 0) + (overview.totals?.ausente || 0))" grad="linear-gradient(135deg, #991B1B, #EF4444)" glass compact />
               </div>
+              <!-- 🧮 ponta 5 (22/10): o que cada número conta -->
+              <p v-if="overview.measures" class="text-[11px] text-n-slate-10 mb-3 leading-relaxed">
+                CEVICO realizado: <b class="text-n-slate-12">{{ overview.measures.olhos }} cirurgia(s)</b> (cada uma é um olho) ·
+                <b class="text-n-slate-12">{{ overview.measures.pacientes }} paciente(s)</b>
+                <template v-if="overview.measures.exames"> · {{ overview.measures.exames }} exame(s), que não contam como cirurgia</template>
+              </p>
+              <button v-if="overview.totals?.realizada" class="cv-sub w-full text-left p-3 mb-4 flex items-start gap-2" :title="PROOF_HINT" @click="goItems({ status: 'sem_prova', side: 'own' })">
+                <span class="i-lucide-circle-help text-base mt-0.5" :class="overview.proof?.sem_prova ? 'text-amber-600' : 'text-emerald-600'" />
+                <span class="flex-1 text-xs text-n-slate-11 leading-relaxed">
+                  <b class="text-n-slate-12">CEVICO: {{ overview.proof?.sem_prova || 0 }} realizado(s) sem prova</b>
+                  <span v-if="overview.proof" class="block">com prova: {{ overview.proof.pago }} pago(s) no hub · {{ overview.proof.equipe }} pelo card de pós · {{ overview.proof.agenda }} pela Agenda</span>
+                  <span class="block text-[11px] text-n-slate-10">"realizado" = ativo lá com a data passada; sem prova = nada confirma que aconteceu</span>
+                </span>
+                <span v-if="overview.proof?.sem_prova" class="text-xs font-semibold" style="color: var(--cv)">ver ›</span>
+              </button>
               <div class="space-y-1.5">
                 <button v-for="p in overview.partners.slice(0, 5)" :key="p.name" class="cv-row w-full text-left px-3 py-2 flex items-center gap-3" @click="goItems({ partner: p.name })">
                   <span :class="p.own ? 'i-lucide-star text-amber-500' : 'i-lucide-handshake text-n-slate-10'" class="text-sm flex-shrink-0" />
@@ -734,9 +842,78 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                   <div class="absolute inset-y-0 left-0 rounded-full" :style="{ width: `${Math.round((m.total / monthMax) * 100)}%`, background: 'rgb(var(--cv-rgb) / 0.35)' }" />
                   <div class="absolute inset-y-0 left-0 rounded-full" :style="{ width: `${Math.round((m.realizada / monthMax) * 100)}%`, background: 'var(--cv-grad)' }" />
                 </div>
-                <span class="w-32 text-[11px] text-n-slate-10 tabular-nums text-right">{{ m.realizada }} realizados · {{ m.total }} no total</span>
+                <span class="w-32 sm:w-44 text-[11px] text-n-slate-10 tabular-nums text-right">{{ m.realizada }} realizados · {{ m.total }} no total<span v-if="m.sem_prova" class="block text-amber-700 dark:text-amber-400" :title="PROOF_HINT">{{ m.sem_prova }} sem prova</span></span>
               </div>
             </div>
+          </section>
+
+          <!-- 🗂️ ponta 3 (22/10): cards em "Cirurgia Agendada" × o que o hub diz da cirurgia -->
+          <section class="cv-block p-6 sm:p-9 mb-8" :style="blockVars('meses')">
+            <div class="flex items-start gap-3 mb-1">
+              <span class="cv-ag-num">6</span>
+              <div class="flex-1"><h2 class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12">Cards em "Cirurgia Agendada"</h2><p class="text-xs text-n-slate-10">funil da CEVICO: quem está na coluna × a situação da cirurgia no hub (exame não conta) · a sincronização tira de lá quem já operou com prova e quem cancelou</p></div>
+            </div>
+            <div v-if="surgeryCardsLoading && !surgeryCards" class="cv-sub p-6 text-center text-sm text-n-slate-10 mt-6">Lendo os cards…</div>
+            <div v-else-if="surgeryCards?.error" class="cv-sub p-6 text-center text-sm text-n-slate-10 mt-6">Não consegui ler os cards agora.</div>
+            <div v-else-if="surgeryCards" class="space-y-1.5 mt-6">
+              <template v-for="k in ['futura', 'operou_com_prova', 'operou_sem_prova', 'aguardando_vencido', 'cancelada', 'sem_item']" :key="k">
+                <button class="cv-row w-full text-left px-3 py-2 flex items-center gap-3" :disabled="k === 'futura' || !surgeryCards.tally[k]" @click="showCardRows = showCardRows === k ? '' : k">
+                  <span class="w-12 text-right text-lg font-bold tabular-nums" :class="k === 'futura' ? 'text-emerald-700 dark:text-emerald-400' : (surgeryCards.tally[k] ? 'text-amber-700 dark:text-amber-400' : 'text-n-slate-9')">{{ surgeryCards.tally[k] || 0 }}</span>
+                  <span class="flex-1 text-sm text-n-slate-12 min-w-0">{{ surgeryCards.labels[k] }}
+                    <span class="block text-[11px] text-n-slate-10">{{ { futura: 'está certo ali', operou_com_prova: 'sai para Cirurgia Realizada (até 30 dias) ou Pós Operatório', operou_sem_prova: 'fica até ter prova', aguardando_vencido: 'fica — perguntar ao Oftalmofácil se ainda vale', cancelada: 'sai para Não Fechou Ainda', sem_item: 'a equipe pôs ali: fica' }[k] }}</span>
+                  </span>
+                  <span v-if="k !== 'futura' && surgeryCards.tally[k]" class="text-xs font-semibold" style="color: var(--cv)">{{ showCardRows === k ? 'fechar' : 'ver' }}</span>
+                </button>
+                <div v-if="showCardRows === k" class="cv-sub p-3 max-h-72 overflow-y-auto">
+                  <router-link v-for="r in cardRows(k)" :key="r.contact_id" :to="contactUrl(r.contact_id)" class="flex items-center gap-2 text-xs py-1 hover:underline">
+                    <span class="flex-1 truncate text-n-slate-12">{{ r.name }}</span>
+                    <span class="text-n-slate-10 tabular-nums">{{ fmtDateYear(r.surgery_date) }}</span>
+                    <span v-if="r.target" class="cv-chip cv-green">→ {{ r.target }}</span>
+                  </router-link>
+                </div>
+              </template>
+            </div>
+          </section>
+
+          <!-- 👯 ponta 2 (22/10): como cada paciente foi casado + criados com provável gêmeo -->
+          <section class="cv-block p-6 sm:p-9 mb-8" :style="blockVars('parceiros')">
+            <div class="flex items-start gap-3 mb-1">
+              <span class="cv-ag-num">7</span>
+              <div class="flex-1"><h2 class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12">Como os pacientes foram casados</h2><p class="text-xs text-n-slate-10">cirurgias da CEVICO: o hub acha o paciente pelo telefone, depois CPF, depois nome + e-mail; se nada bate, cria um novo — e o paciente criado perde o caminho do lead (Central, Campanhas, CAC)</p></div>
+            </div>
+            <div v-if="matchingLoading && !matching" class="cv-sub p-6 text-center text-sm text-n-slate-10 mt-6">Procurando…</div>
+            <div v-else-if="matching?.error" class="cv-sub p-6 text-center text-sm text-n-slate-10 mt-6">Não consegui ler agora.</div>
+            <template v-else-if="matching">
+              <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-6">
+                <div v-for="m in MATCH_VIA" :key="m.key" class="cv-sub p-3">
+                  <p class="text-xl font-bold tabular-nums" :class="m.key === 'created' ? 'text-amber-700 dark:text-amber-400' : 'text-n-slate-12'">{{ matching.patients?.[m.key] || 0 }}</p>
+                  <p class="text-[11px] text-n-slate-10 leading-tight">paciente(s) {{ m.label }}</p>
+                  <p class="text-[10px] text-n-slate-9">{{ matching.items?.[m.key] || 0 }} item(ns)</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 mt-6 mb-2 flex-wrap">
+                <p class="text-sm font-semibold text-n-slate-12 flex-1">Criados com provável gêmeo: {{ visibleTwins.length }}</p>
+                <button v-if="weakTwins" class="cv-chip" :class="showWeakTwins ? 'cv-chip-on' : ''" @click="showWeakTwins = !showWeakTwins">+ {{ weakTwins }} fraco(s) (nome curto)</button>
+              </div>
+              <p class="text-[11px] text-n-slate-10 mb-3">nunca junta sozinho: confira e escolha. "Juntar" mantém o cadastro que já existia (o que conversa) e traz nome, e-mail e CPF do Oftalmofácil</p>
+              <p v-if="!visibleTwins.length" class="cv-sub p-4 text-sm text-emerald-700 dark:text-emerald-400">Nenhum gêmeo provável ✓</p>
+              <div v-for="t in visibleTwins" :key="twinKey(t)" class="cv-row px-3 py-2.5 mb-1.5">
+                <div class="flex items-start gap-3 flex-wrap">
+                  <div class="flex-1 min-w-[220px] grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <router-link :to="contactUrl(t.created.id)" class="hover:underline min-w-0"><span class="block text-[10px] uppercase tracking-wider text-n-slate-9">criado pelo hub</span><b class="text-n-slate-12 block truncate">{{ t.created.name }}</b><span class="text-n-slate-10">{{ t.created.phone || 'sem telefone' }} · {{ t.created.stage || 'sem card' }}</span></router-link>
+                    <router-link :to="contactUrl(t.other.id)" class="hover:underline min-w-0"><span class="block text-[10px] uppercase tracking-wider text-n-slate-9">já existia</span><b class="text-n-slate-12 block truncate">{{ t.other.name }}</b><span class="text-n-slate-10">{{ t.other.phone || 'sem telefone' }} · {{ t.other.stage || 'sem card' }}</span></router-link>
+                  </div>
+                  <div class="flex items-center gap-1 flex-wrap">
+                    <span class="cv-chip" :class="STRENGTH[t.strength].tone">{{ STRENGTH[t.strength].label }}</span>
+                    <span v-for="r in t.reasons" :key="r" class="cv-chip">{{ r }}</span>
+                  </div>
+                </div>
+                <div v-if="isAdmin" class="flex items-center gap-2 mt-2 flex-wrap">
+                  <button class="cv-btn cv-btn-sm" :disabled="twinBusy === twinKey(t)" @click="mergeTwin(t)"><span class="i-lucide-merge text-xs" /> Juntar · fica o que já existia</button>
+                  <button class="cv-btn cv-btn-ghost cv-btn-sm" :disabled="twinBusy === twinKey(t)" @click="notTwin(t)">São pessoas diferentes</button>
+                </div>
+              </div>
+            </template>
           </section>
         </template>
 
@@ -912,6 +1089,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                 </div>
                 <div class="cv-ag-card-pills">
                   <span class="cv-chip" :class="statusMeta(kindOf(r)).tone">{{ kindLabel(r) }}</span>
+                  <span v-if="noProof(r)" class="cv-chip cv-amber" :title="PROOF_HINT"><span class="i-lucide-circle-help text-xs" /> sem prova</span>
                   <span class="cv-chip" :class="r.own ? 'cv-gold' : ''" :title="r.provider_name"><span :class="r.own ? 'i-lucide-star' : 'i-lucide-handshake'" class="text-xs shrink-0" /> <span class="truncate">{{ r.provider_name }}</span></span>
                   <span class="cv-chip" :class="agendaStateOf(r).tone"><span :class="agendaStateOf(r).icon" class="text-xs shrink-0" /> <span class="truncate">{{ agendaStateOf(r).label }}</span></span>
                 </div>
@@ -932,6 +1110,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
               <button v-for="o in [['', 'Todos'], ['own', '⭐ CEVICO'], ['partners', 'Parceiros']]" :key="'side' + o[0]" class="cv-chip" :class="filters.side === o[0] ? 'cv-chip-on' : ''" @click="filters.side = o[0]">{{ o[1] }}</button>
               <span class="w-px h-4 bg-n-weak mx-1" />
               <button v-for="s in STATUS" :key="s.key" class="cv-chip" :class="[s.tone, filters.status === s.key ? 'cv-chip-on' : '']" @click="filters.status = filters.status === s.key ? '' : s.key">{{ s.label }}</button>
+              <button class="cv-chip cv-amber" :class="filters.status === 'sem_prova' ? 'cv-chip-on' : ''" :title="PROOF_HINT" @click="filters.status = filters.status === 'sem_prova' ? '' : 'sem_prova'"><span class="i-lucide-circle-help text-xs" /> Realizada sem prova</button>
               <span class="w-px h-4 bg-n-weak mx-1" />
               <button v-for="o in [['with', 'Na Agenda'], ['without', 'Fora da Agenda']]" :key="'ag' + o[0]" class="cv-chip" :class="filters.agenda === o[0] ? 'cv-chip-on' : ''" @click="filters.agenda = filters.agenda === o[0] ? '' : o[0]">{{ o[1] }}</button>
               <button class="cv-chip cv-red" :class="filters.unmatched ? 'cv-chip-on' : ''" @click="filters.unmatched = !filters.unmatched">Sem paciente</button>
@@ -983,7 +1162,8 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
                     </td>
                     <td class="cv-of-sep">
                       <span class="flex items-center gap-1 flex-wrap">
-                        <span class="cv-chip" :class="statusMeta(kindOf(row)).tone">{{ kindLabel(row) }}</span>
+                        <span class="cv-chip" :class="statusMeta(kindOf(row)).tone" :title="row.proof_label ? `prova: ${row.proof_label}` : null">{{ kindLabel(row) }}</span>
+                        <span v-if="noProof(row)" class="cv-chip cv-amber" :title="PROOF_HINT"><span class="i-lucide-circle-help text-xs" /> sem prova</span>
                         <span v-if="isAdmin && Number(row.amount) > 0" class="text-xs font-semibold text-n-slate-11 tabular-nums">{{ fmtBRL(row.amount) }}</span>
                       </span>
                       <span class="flex items-center gap-1 flex-wrap mt-1">
@@ -1168,7 +1348,7 @@ onBeforeUnmount(() => window.removeEventListener('resize', onResize));
         <div class="cv-modal-head flex items-center gap-3">
           <span class="cv-glass w-9 h-9 flex items-center justify-center flex-shrink-0"><span class="i-lucide-hospital text-base" /></span>
           <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">{{ detail.procedure_type || 'Item' }} · {{ kindLabel(detail) }}</p>
+            <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">{{ detail.procedure_type || 'Item' }} · {{ kindLabel(detail) }}<template v-if="detail.proof_label"> · {{ detail.proof === 'sem_prova' ? '⚠️ sem prova' : `prova: ${detail.proof_label}` }}</template></p>
             <h2 class="text-base font-bold leading-tight truncate">{{ detail.patient_name || '(sem nome)' }}</h2>
             <p class="text-[11px] opacity-90 truncate capitalize">{{ fmtDateLong(detail.surgery_date) }} · {{ detail.surgery_hour || 'sem hora' }} · {{ detail.own ? '⭐ CEVICO' : detail.provider_name }}</p>
           </div>

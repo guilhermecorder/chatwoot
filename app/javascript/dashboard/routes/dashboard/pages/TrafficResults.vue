@@ -48,6 +48,7 @@ const pal = useCevicoPalette({
     { id: 'funil', label: 'O funil', icon: 'i-lucide-filter' },
     { id: 'evolucao', label: 'Evolução', icon: 'i-lucide-activity' },
     { id: 'origens', label: 'Origens', icon: 'i-lucide-git-fork' },
+    { id: 'leads', label: 'Quem são os leads', icon: 'i-lucide-users' },
     {
       id: 'campanhas',
       label: 'Campanhas',
@@ -91,6 +92,7 @@ const load = async () => {
   try {
     const { data: payload } = await CrmAPI.getPagesReport(params());
     data.value = payload;
+    loadLeads(); // 02/11: a lista "Quem são os leads" acompanha a mesma régua
   } catch {
     useAlert('Não consegui carregar os resultados.');
   } finally {
@@ -98,6 +100,54 @@ const load = async () => {
   }
 };
 watch(period, load, { deep: true });
+
+// ── 02/11: QUEM SÃO os leads (nome, página, origem, caixa, conversa) ────
+// Pedido: "os leads que vieram do linktree, hipermetropia e tal, eu não
+// tenho acesso a isso e precisava ter". Segue a régua e o filtro de origem.
+const accountId = useRoute().params.accountId;
+const leads = ref([]);
+const leadsLoading = ref(false);
+const leadsView = ref('list');
+const loadLeads = async () => {
+  leadsLoading.value = true;
+  try {
+    const { data: payload } = await CrmAPI.getPagesReportLeads({
+      ...params(),
+      ...(sourceFilter.value ? { source: sourceFilter.value } : {}),
+    });
+    leads.value = payload.leads || [];
+  } catch {
+    leads.value = [];
+  } finally {
+    leadsLoading.value = false;
+  }
+};
+watch(sourceFilter, loadLeads); // a régua já recarrega tudo por load()
+const conversationUrl = lead =>
+  lead.conversa
+    ? `/app/accounts/${accountId}/conversations/${lead.conversa.id}`
+    : null;
+const contactUrl = lead => `/app/accounts/${accountId}/contacts/${lead.id}`;
+const fmtWhen = iso => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+const leadsByOrigin = computed(() => {
+  const acc = {};
+  leads.value.forEach(l => {
+    acc[l.origem] = (acc[l.origem] || 0) + 1;
+  });
+  return Object.entries(acc)
+    .map(([src, n]) => ({ src, n, label: sourceLabel(src) }))
+    .sort((a, b) => b.n - a.n);
+});
+const preAnaliseText = lead =>
+  lead.pre_analise
+    ? Object.entries(lead.pre_analise)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(' · ')
+    : '';
 onMounted(load);
 
 // ── formatos ────────────────────────────────────────────────────────────
@@ -1076,6 +1126,124 @@ const keepAi = sug =>
                     class="py-2.5 pl-2 text-right tabular-nums whitespace-nowrap"
                   >
                     {{ fmtMoney(s.revenue) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- ══ 3a · QUEM SÃO OS LEADS (02/11): nome, página, origem, caixa, conversa ══ -->
+        <div class="cv-block p-6 sm:p-8 mb-8" :style="blockVars('leads')">
+          <div class="flex items-center gap-3 mb-1 flex-wrap">
+            <span class="cv-icon">
+              <span class="i-lucide-users text-base" />
+            </span>
+            <h2 class="text-base font-bold text-n-slate-12">
+              Quem são os leads
+            </h2>
+            <span class="text-xs text-n-slate-10">
+              {{ fmtNum(leads.length) }} no período<template v-if="sourceFilter"> · só {{ sourceLabel(sourceFilter) }}</template>
+            </span>
+            <button
+              v-if="sourceFilter"
+              class="cv-btn cv-btn-sm cv-btn-ghost"
+              @click="sourceFilter = ''"
+            >
+              Ver todas as origens
+            </button>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-4">
+            Cada pessoa que chegou com o Protocolo de uma página, do linktree ou
+            da pré-análise, com a caixa em que a conversa caiu. Toque na origem
+            lá em cima para filtrar.
+          </p>
+          <div v-if="leadsByOrigin.length" class="flex flex-wrap gap-2 mb-4">
+            <button
+              v-for="o in leadsByOrigin"
+              :key="o.src"
+              class="cv-btn cv-btn-sm"
+              :class="sourceFilter === o.src ? 'cv-amber' : 'cv-btn-ghost'"
+              @click="sourceFilter = sourceFilter === o.src ? '' : o.src"
+            >
+              <span
+                class="inline-block w-2 h-2 rounded-full mr-1.5 align-middle"
+                :style="{ background: SOURCE_META[o.src]?.color || '#64748B' }"
+              />{{ o.label }} · {{ fmtNum(o.n) }}
+            </button>
+          </div>
+          <SkeletonScreen v-if="leadsLoading" :rows="4" />
+          <p v-else-if="!leads.length" class="text-sm text-n-slate-10">
+            Nenhum lead com Protocolo neste período.
+          </p>
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead>
+                <tr
+                  class="text-left text-[10px] uppercase tracking-wide text-n-slate-10"
+                >
+                  <th class="py-2 pr-3">Quando</th>
+                  <th class="py-2 px-2">Quem</th>
+                  <th class="py-2 px-2">Página</th>
+                  <th class="py-2 px-2">Origem</th>
+                  <th class="py-2 px-2">Caixa</th>
+                  <th class="py-2 pl-2 text-right">Conversa</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="lead in leads"
+                  :key="lead.id"
+                  class="border-t border-n-weak hover:bg-n-alpha-1"
+                >
+                  <td class="py-2.5 pr-3 tabular-nums whitespace-nowrap text-n-slate-11">
+                    {{ fmtWhen(lead.em) }}
+                  </td>
+                  <td class="py-2.5 px-2">
+                    <a
+                      :href="contactUrl(lead)"
+                      class="font-semibold text-n-slate-12 hover:underline"
+                    >
+                      {{ lead.nome }}
+                    </a>
+                    <span
+                      v-if="lead.agendou"
+                      class="ml-1 text-[10px] font-semibold text-emerald-600"
+                    >
+                      agendou
+                    </span>
+                    <span
+                      v-if="lead.via === 'pagina_lead'"
+                      class="ml-1 text-[10px] font-semibold text-sky-600"
+                      :title="preAnaliseText(lead)"
+                    >
+                      pré-análise
+                    </span>
+                  </td>
+                  <td class="py-2.5 px-2 text-n-slate-11">
+                    {{ lead.pagina }}
+                  </td>
+                  <td class="py-2.5 px-2 whitespace-nowrap">
+                    <span
+                      class="inline-block w-2 h-2 rounded-full mr-1.5 align-middle"
+                      :style="{ background: SOURCE_META[lead.origem]?.color || '#64748B' }"
+                    />{{ sourceLabel(lead.origem) }}
+                    <span v-if="lead.campanha" class="text-n-slate-10">
+                      · {{ lead.campanha }}
+                    </span>
+                  </td>
+                  <td class="py-2.5 px-2 text-n-slate-11">
+                    {{ lead.conversa?.inbox || 'ainda não escreveu' }}
+                  </td>
+                  <td class="py-2.5 pl-2 text-right whitespace-nowrap">
+                    <a
+                      v-if="conversationUrl(lead)"
+                      :href="conversationUrl(lead)"
+                      class="cv-btn cv-btn-sm cv-btn-ghost"
+                    >
+                      Abrir
+                    </a>
+                    <span v-else class="text-n-slate-10">—</span>
                   </td>
                 </tr>
               </tbody>

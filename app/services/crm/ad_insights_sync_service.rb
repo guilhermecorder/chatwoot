@@ -22,6 +22,13 @@ class Crm::AdInsightsSyncService # rubocop:disable Metrics/ClassLength
   AD_FIELDS = 'id,name,effective_status,adset{id,name},campaign{id,name},' \
               'creative{id,name,title,body,call_to_action_type,thumbnail_url,image_url,video_id,' \
               'instagram_permalink_url,object_story_spec,asset_feed_spec}'.freeze
+  # 21/10: ao expandir object_story_spec/asset_feed_spec a Meta VALIDA o criativo de cada anúncio;
+  # um único anúncio Advantage+ com "graus de liberdade" inconsistentes (código 100/2446211)
+  # derrubava a lista inteira e, com ela, a carga dos números (ficou parada de 14 a 21/10).
+  # Campos leves = sem as especificações; o texto/página já guardados são preservados.
+  LIGHT_AD_FIELDS = 'id,name,effective_status,adset{id,name},campaign{id,name},' \
+                    'creative{id,name,title,body,call_to_action_type,thumbnail_url,image_url,video_id,' \
+                    'instagram_permalink_url}'.freeze
   DEFAULT_DAYS = 3      # a Meta reprocessa os últimos dias → refaz sempre
   FIRST_SYNC_DAYS = 90
   MAX_DAYS = 1125       # 37 meses: até onde a Meta guarda os números por anúncio
@@ -104,17 +111,41 @@ class Crm::AdInsightsSyncService # rubocop:disable Metrics/ClassLength
   # com todos os status (apagados/arquivados vêm); se a Meta recusar o filtro,
   # refaz sem ele — os apagados ainda voltam pela recuperação por id
   def sync_creatives
-    ads = begin
-      @graph.fetch_all('ads', { fields: AD_FIELDS, limit: 100, effective_status: ALL_STATUSES.to_json }, max_pages: 20)
-    rescue Crm::MetaGraph::Error => e
-      Rails.logger.warn "[CEVICO criativos] /ads com filtro de status recusado (#{e.message}); refazendo sem filtro"
-      @graph.fetch_all('ads', { fields: AD_FIELDS, limit: 100 }, max_pages: 20)
-    end
+    ads, light = fetch_ads
+    return 0 if ads.nil?
+
     now = Time.current
     rows = ads.map { |ad| creative_row(ad, now) }
-    keep_transcripts!(rows)
+    keep_transcripts!(rows, keep_all: light)
     upsert_creatives(rows)
     rows.size
+  end
+
+  # Tenta em ordem: campos completos (com e sem o filtro de status) e campos
+  # leves (idem). Se a Meta recusar tudo, avisa em last_warning e devolve nil:
+  # a lista de criativos fica como está e a carga dos NÚMEROS segue normalmente
+  # (antes, o erro parava tudo). Devolve [anúncios, usou_campos_leves?].
+  AD_ATTEMPTS = [
+    [AD_FIELDS, true, false], [AD_FIELDS, false, false],
+    [LIGHT_AD_FIELDS, true, true], [LIGHT_AD_FIELDS, false, true]
+  ].freeze
+
+  def fetch_ads
+    last = nil
+    AD_ATTEMPTS.each do |fields, with_status, light|
+      query = { fields: fields, limit: 100 }
+      query[:effective_status] = ALL_STATUSES.to_json if with_status
+      ads = @graph.fetch_all('ads', query, max_pages: 20)
+      if light && last
+        write_state('last_warning' => "anúncios: a Meta recusou os campos completos (#{last.message}); lista carregada com campos leves")
+      end
+      return [ads, light]
+    rescue Crm::MetaGraph::Error => e
+      last = e
+      Rails.logger.warn "[CEVICO criativos] /ads recusado (#{e.message}); tentando de outro jeito"
+    end
+    write_state('last_warning' => "anúncios: #{last&.message} — números carregados sem atualizar a lista de criativos")
+    [nil, false]
   end
 
   # a transcrição do vídeo (item 181) mora em creative['transcript'] e NÃO vem
@@ -122,12 +153,19 @@ class Crm::AdInsightsSyncService # rubocop:disable Metrics/ClassLength
   # (item 287: a duração do vídeo, `video_length`, também é guardada à parte e preservada)
   KEEP_KEYS = %w[transcript video_length].freeze
 
-  def keep_transcripts!(rows)
+  # keep_all: true (campos leves) → preserva TUDO que já estava guardado do
+  # criativo (texto da página, link…); o que veio agora só sobrescreve o que trouxe
+  def keep_transcripts!(rows, keep_all: false)
     ids = rows.pluck(:ad_id)
     existing = Crm::AdCreative.where(account_id: @account.id, ad_id: ids).pluck(:ad_id, :creative).to_h
     rows.each do |row|
-      kept = (existing[row[:ad_id]] || {}).slice(*KEEP_KEYS).compact_blank
-      row[:creative] = row[:creative].merge(kept) if kept.present?
+      old = existing[row[:ad_id]] || {}
+      if keep_all
+        row[:creative] = old.merge(row[:creative].compact_blank)
+      else
+        kept = old.slice(*KEEP_KEYS).compact_blank
+        row[:creative] = row[:creative].merge(kept) if kept.present?
+      end
     end
   end
 

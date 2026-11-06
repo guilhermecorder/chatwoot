@@ -37,6 +37,101 @@ RSpec.describe Crm::AppointmentPrice do
     expect(described_class.resolve(cfg, consulta(doctor: 'Dra. Roberta Negri'))).to include(text: '150,00') # não é particular
   end
 
+  # 🩺 19/10 (Vaneide): "agendou com especialista em retina, só que o valor não subiu"
+  it 'avaliação com especialista: o problema escrito puxa o valor do especialista (padrão do Roteiro)', :aggregate_failures do
+    expect(described_class.resolve(cfg, consulta(procedure: 'avaliação retina', doctor: 'Dr. Henrique Gemelli')))
+      .to include(text: '300,00', source: 'preset', label: 'pré-configurado · avaliação de retina')
+    expect(described_class.resolve(cfg, consulta(procedure: 'Avaliação Glaucoma'))).to include(text: '300,00')
+    expect(described_class.resolve(cfg, consulta(procedure: 'ceratocone'))).to include(text: '350,00')
+    expect(described_class.resolve(cfg, consulta(procedure: 'miopia'))).to include(text: '150,00')
+    expect(described_class.resolve(cfg, consulta(modality: 'retorno', procedure: 'retorno glaucoma'))).to include(text: 'sem custo')
+    # valor lançado à mão continua vencendo
+    expect(described_class.resolve(cfg, consulta(procedure: 'retina', description: 'Valor: 280'))).to include(text: '280,00', source: 'observacao')
+  end
+
+  it 'a tela pode trocar os especiais; lista vazia = nenhum' do
+    custom = described_class::DEFAULTS.merge(described_class.sanitize(prices.merge('especiais' => [{ 'name' => 'Retina', 'price' => '400' }])))
+    expect(custom['especiais']).to eq([{ 'name' => 'Retina', 'price' => '400,00' }])
+    expect(described_class.resolve(custom, consulta(procedure: 'avaliação retina'))).to include(text: '400,00')
+    expect(described_class.resolve(custom, consulta(procedure: 'glaucoma'))).to include(text: '150,00')
+  end
+
+  # 🤝 item 386 (04/11): a Cleide (Amor Saúde Tatuapé) recebeu "R$ 338,00" — o
+  # valor do hub escrito na observação pelo sync. Combinado: parceiro sai zerado.
+  describe 'item 386: parceiro do Oftalmofácil com valor combinado' do
+    let(:hub_notes) { 'Oftalmofácil · AMORSAUDE TATUAPE · Instituto Oftalmológico Paulista · Consulta · R$ 338,00 · status lá: Agendado' }
+
+    def parceiro(provider, attrs = {})
+      consulta({ source: 'oftalmofacil', source_detail: provider, description: hub_notes }.merge(attrs))
+    end
+
+    it 'Amor Saúde Tatuapé sai 0,00 por padrão, antes do valor do hub e do pré-configurado', :aggregate_failures do
+      expect(described_class.resolve(cfg, parceiro('AMORSAUDE TATUAPE')))
+        .to include(text: '0,00', source: 'parceiro', label: 'combinado · Amor Saúde Tatuapé')
+      expect(described_class.resolve(cfg, parceiro('Amor Saúde - Tatuapé', modality: 'exames'))).to include(text: '0,00')
+      expect(described_class.resolve(described_class.config(account), parceiro('AMORSAUDE TATUAPE'))).to include(text: '0,00')
+    end
+
+    # 🤝 386b ("zera", 04/11): a consulta ADOTADA (recepção marcou como CEVICO, o
+    # item do parceiro casou) fica sem source_detail — o parceiro vem do paciente
+    it 'consulta ADOTADA zera pela marca do paciente (atributo ou etiqueta of_); sem vínculo com o hub não', :aggregate_failures do
+      marcado = create(:contact, account: account, name: 'Cleide', additional_attributes: { 'parceiro' => 'AMORSAUDE TATUAPE' })
+      adotada = consulta(source: 'oftalmofacil', external_ref: 'of-1', source_detail: nil, contact: marcado, origin: 'cevico')
+      expect(described_class.resolve(cfg, adotada)).to include(text: '0,00', source: 'parceiro')
+
+      etiquetado = create(:contact, account: account, name: 'Cleide 2')
+      etiquetado.label_list = %w[oftalmofacil of_amorsaude_tatuape]
+      etiquetado.save!
+      expect(described_class.resolve(cfg, consulta(source: 'oftalmofacil', external_ref: 'of-2', contact: etiquetado))).to include(text: '0,00')
+
+      # a recepção marca outra consulta para a mesma pessoa, sem vínculo com o hub → valor normal
+      expect(described_class.resolve(cfg, consulta(contact: marcado))).to include(text: '150,00', source: 'preset')
+      expect(described_class.resolve(cfg, consulta(source: 'oftalmofacil', external_ref: 'of-3', contact: create(:contact, account: account))))
+        .to include(text: '150,00')
+    end
+
+    it 'config salva ANTES desta versão (sem a chave parceiros) já zera o Amor Saúde Tatuapé' do
+      CrmSetting.create!(account: account, agenda_config: { 'appointment_prices' => { 'avaliacao' => '150,00' } })
+      expect(described_class.resolve(described_class.config(account), parceiro('AMORSAUDE TATUAPE'))).to include(text: '0,00', source: 'parceiro')
+    end
+
+    it 'cirurgia do parceiro, formulário "Oftalmofácil" sem parceiro e linha sem valor ficam de fora', :aggregate_failures do
+      cirurgia = parceiro('AMORSAUDE TATUAPE', task_type: 'cirurgia', modality: nil, title: 'Cirurgia: Paciente')
+      expect(described_class.resolve(cfg, cirurgia)).to include(text: '338,00', source: 'observacao')
+      recepcao = consulta(origin: 'oftalmofacil', description: 'Valor: 200')
+      expect(described_class.resolve(cfg, recepcao)).to include(text: '200,00', source: 'observacao')
+      vazio = [{ 'name' => 'Amor Saúde Tatuapé', 'price' => '' }]
+      sem_valor = described_class::DEFAULTS.merge(described_class.sanitize(prices.merge('parceiros' => vazio)))
+      expect(described_class.resolve(sem_valor, parceiro('AMORSAUDE TATUAPE'))).to include(text: '150,00', source: 'preset')
+    end
+
+    it 'com "Amor Saúde" e "Amor Saúde Tatuapé" cadastrados, vale o mais específico, em qualquer ordem', :aggregate_failures do
+      geral_primeiro = [{ 'name' => 'Amor Saúde', 'price' => '50' }, { 'name' => 'Amor Saúde Tatuapé', 'price' => '0' }]
+      custom = described_class::DEFAULTS.merge(described_class.sanitize(prices.merge('parceiros' => geral_primeiro)))
+      expect(described_class.resolve(custom, parceiro('AMORSAUDE TATUAPE'))).to include(text: '0,00', label: 'combinado · Amor Saúde Tatuapé')
+      expect(described_class.resolve(custom, parceiro('AMORSAUDE PAULISTA'))).to include(text: '50,00', label: 'combinado · Amor Saúde')
+      invertido = described_class::DEFAULTS.merge(described_class.sanitize(prices.merge('parceiros' => geral_primeiro.reverse)))
+      expect(described_class.resolve(invertido, parceiro('AMORSAUDE TATUAPE'))).to include(text: '0,00')
+    end
+
+    it 'outro parceiro, consulta da recepção ou valor lançado à mão não mudam', :aggregate_failures do
+      expect(described_class.resolve(cfg, parceiro('AMORSAUDE PAULISTA'))).to include(text: '150,00', source: 'preset')
+      expect(described_class.resolve(cfg, consulta(description: hub_notes))).to include(text: '150,00', source: 'preset')
+      manual = parceiro('AMORSAUDE TATUAPE', charges: [{ 'label' => 'Exame extra', 'amount' => '80,00', 'by_name' => 'Ana' }])
+      expect(described_class.resolve(cfg, manual)).to include(text: '80,00', source: 'manual')
+    end
+
+    it 'a tela pode trocar os parceiros; lista vazia = nenhum', :aggregate_failures do
+      boa_vista = [{ 'name' => 'Clínica Boa Vista', 'price' => '90' }]
+      custom = described_class::DEFAULTS.merge(described_class.sanitize(prices.merge('parceiros' => boa_vista)))
+      expect(custom['parceiros']).to eq([{ 'name' => 'Clínica Boa Vista', 'price' => '90,00' }])
+      expect(described_class.resolve(custom, parceiro('CLINICA BOA VISTA'))).to include(text: '90,00', source: 'parceiro')
+      expect(described_class.resolve(custom, parceiro('AMORSAUDE TATUAPE'))).to include(text: '150,00', source: 'preset')
+      none = described_class::DEFAULTS.merge(described_class.sanitize(prices.merge('parceiros' => [])))
+      expect(described_class.resolve(none, parceiro('AMORSAUDE TATUAPE'))).to include(text: '150,00')
+    end
+  end
+
   it 'exames: soma os exames citados no agendamento' do
     exame = consulta(modality: 'exames', procedure: 'Pentacam + topografia')
     expect(described_class.resolve(cfg, exame)).to include(text: '550,00', label: 'pré-configurado · Pentacam + Topografia')

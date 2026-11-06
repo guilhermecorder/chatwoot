@@ -22,6 +22,8 @@ const props = defineProps({
   labelWidth: { type: Number, default: 11 },
   // destaca a maior barra de cada série
   highlightMax: { type: Boolean, default: true },
+  // 358c: a NOSSA MÉDIA como traço vertical em todas as barras: { value, label, color }
+  reference: { type: Object, default: null },
   emptyText: { type: String, default: 'sem dados no período' },
 });
 
@@ -47,8 +49,15 @@ const nums = (r, i) => Number((r.values || [])[i] || 0);
 const max = computed(() =>
   Math.max(
     1,
-    ...props.rows.flatMap(r => props.series.map((_, i) => nums(r, i)))
+    ...props.rows.flatMap(r => props.series.map((_, i) => nums(r, i))),
+    Number(props.reference?.value) || 0
   )
+);
+const refValue = computed(() => Number(props.reference?.value) || 0);
+const refPct = computed(() =>
+  refValue.value > 0 && max.value > 0
+    ? (refValue.value / max.value) * 100
+    : null
 );
 const maxBySeries = computed(() =>
   props.series.map((_, i) => Math.max(0, ...props.rows.map(r => nums(r, i))))
@@ -91,6 +100,20 @@ const rowTitle = r =>
       </span>
     </div>
 
+    <p
+      v-if="reference && rows.length"
+      class="inline-flex items-center gap-1.5 text-[11px] text-n-slate-11 mb-2"
+    >
+      <span
+        class="inline-block w-[2px] h-3 rounded-full"
+        :style="{ background: reference.color || 'var(--g-texto, #111827)' }"
+      />
+      {{ reference.label || 'a nossa média' }}:
+      <b class="text-n-slate-12">{{
+        (series[0]?.format || format)(refValue)
+      }}</b>
+    </p>
+
     <p v-if="!rows.length" class="text-xs text-n-slate-9 py-3">
       {{ emptyText }}
     </p>
@@ -116,7 +139,8 @@ const rowTitle = r =>
             class="text-xs font-medium text-n-slate-12 truncate block"
             :class="r.href ? 'hover:underline' : ''"
           >
-            <span v-if="r.badge" class="mr-1">{{ r.badge }}</span>{{ r.label }}
+            <span v-if="r.badge" class="mr-1">{{ r.badge }}</span
+            >{{ r.label }}
           </component>
           <p v-if="r.sub" class="text-[10px] text-n-slate-9 truncate">
             {{ r.sub }}
@@ -126,19 +150,25 @@ const rowTitle = r =>
           <div
             v-for="(s, si) in series"
             :key="si"
-            class="grid items-center gap-2"
-            style="grid-template-columns: minmax(0, 1fr) max-content"
+            class="grid items-center gap-2 grid-cols-[minmax(0,1fr)_max-content]"
           >
             <div
-              class="h-[9px] rounded-full overflow-hidden"
-              style="background: rgb(var(--cv-rgb) / 0.09)"
+              class="relative h-[9px] rounded-full bg-[rgb(var(--cv-rgb)/0.09)]"
             >
               <div
-                class="h-full rounded-r-full transition-[width] duration-500"
+                class="h-full rounded-full transition-[width] duration-500"
                 :style="{
                   width: `${pct(r, si)}%`,
                   background: fillOf(r, s),
                   opacity: isMax(r, si) ? 1 : 0.82,
+                }"
+              />
+              <span
+                v-if="refPct !== null"
+                class="absolute -top-[3px] -bottom-[3px] w-[2px] rounded-full"
+                :style="{
+                  left: `calc(${refPct}% - 1px)`,
+                  background: reference.color || 'var(--g-texto, #111827)',
                 }"
               />
             </div>

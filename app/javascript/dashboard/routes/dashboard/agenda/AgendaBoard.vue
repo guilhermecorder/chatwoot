@@ -28,13 +28,14 @@ import {
   DOCTORS, MODALITIES, ONLINE_UNIT,
   TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
   kindFor, kindOf, kindVars, hexToRgbSpaced, isAppointmentTask as isAppointment,
-  resolveWindows, resolveBlocked, resolveBlockedDays, resolveExamWindows,
+  resolveWindows, resolveOpenWindows, windowOnDay, resolveBlocked, resolveBlockedDays, resolveExamWindows,
   wholeBlockedDays, partialBlocksOn, isWindowBlocked, sameBlock,
   resolveSurgeryWindows, slotsFor as sharedSlotsFor, dateKey, blockKey, scanAgenda,
   TASK_COLORS, taskColorOf, attendanceMarkOf,
   occupiesSlot,
   patientNameOf, handConfirmed, isConfirmed, isDeclined, confirmationTitle,
-  ORIGINS, ORIGIN_BY_KEY, originOf,
+  isRescheduled, rescheduledTitle,
+  ORIGINS, ORIGIN_BY_KEY, originOf, LEAD_CHANNELS, LEAD_CHANNEL_BY_KEY,
   reservedFor, windowAccepts, windowAt,
   effectiveAppointmentPrice,
   presetAppointmentPrice,
@@ -213,7 +214,7 @@ const taskDuration = task => {
   const mins = d.getHours() * 60 + d.getMinutes();
   const list = isSurgeryTask(task) ? surgeryWindows.value : kindOf(task) === 'exames' ? examWindows.value : windows.value;
   const win = list.find(w => {
-    if (w.dow !== d.getDay()) return false;
+    if (!windowOnDay(w, d)) return false;
     if (task.unit && w.unit !== task.unit) return false;
     const [sh, sm] = w.start.split(':').map(Number);
     const [eh, em] = w.end.split(':').map(Number);
@@ -317,7 +318,10 @@ const procedureLabel = computed(() => {
 // ── Médicos e janelas de avaliação da clínica ───────────────
 const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
 const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
-const windows = computed(() => resolveWindows(crmSettings.value).filter(w => unitAllowed(w.unit)));
+// item 375: as aberturas pontuais (data fixa) somam às faixas da semana
+const windows = computed(() =>
+  [...resolveWindows(crmSettings.value), ...resolveOpenWindows(crmSettings.value)].filter(w => unitAllowed(w.unit))
+);
 
 // horários fechados com o cadeado ({date, time, unit})
 const blockedList = computed(() => resolveBlocked(crmSettings.value));
@@ -370,7 +374,9 @@ const dayBlockSummary = day => {
   return parts.map(b => (b.unit ? (UNITS[b.unit]?.label || b.unit) : doctorShort(b.doctor))).join(', ') + ' fechado';
 };
 // teleconsulta pode acontecer em qualquer dia útil, mesmo sem janela
-const isDayOff = day => isWeekend(day) || isDayBlocked(day);
+// item 375: sábado/domingo com abertura pontual é dia de agenda
+const hasOpenWindow = day => windows.value.some(w => w.date === dateKey(day));
+const isDayOff = day => (isWeekend(day) && !hasOpenWindow(day)) || isDayBlocked(day);
 
 const toggleBlockDay = async (day, part = null) => {
   if (isSavingBlock.value) return;
@@ -403,7 +409,7 @@ const rawWindowsForDay = day => {
   const out = [];
   if (resources.value.has('doctor')) {
     out.push(...windows.value
-      .filter(w => w.dow === day.getDay())
+      .filter(w => windowOnDay(w, day))
       .filter(w => !activeUnit.value || w.unit === activeUnit.value)
       .filter(w => !activeDoctor.value || w.doctor === activeDoctor.value));
   }
@@ -450,6 +456,20 @@ const liveTasksByDay = computed(() => {
   return map;
 });
 const isSurgeryWin = win => !win.doctor && !win.exam;
+// ⏱️ item 367 (23/10, ele: "limitar em 4 avaliações por hora, em todos os horários"):
+// os robôs nunca passam do teto; aqui a equipe VÊ a hora cheia e pode encaixar, confirmando.
+// Contam avaliação e consulta sem tipo (inclusive do Oftalmofácil); exame, retorno,
+// pós-op e teleconsulta não contam — a mesma conta do servidor (Crm::AgendaSlots)
+const NOT_EVALUATION = ['exames', 'retorno', 'pos_op', 'teleconsulta'];
+const hourlyCap = computed(() => crmSettings.value?.agenda_hourly_evaluations || 4);
+const isEvaluationTask = t => t.task_type === 'consulta' && !NOT_EVALUATION.includes(t.modality) && t.unit && t.unit !== ONLINE_UNIT;
+const hourOf = t => String(Math.floor(taskStartMin(t) / 60)).padStart(2, '0');
+const evaluationsInHour = (dayKey, hh, unit, skipId) =>
+  (liveTasksByDay.value[dayKey] || []).filter(t => t.id !== skipId && t.unit === unit && isEvaluationTask(t) && hourOf(t) === hh).length;
+const hourLoad = (day, win, hh) => evaluationsInHour(format(day, 'yyyy-MM-dd'), hh, win.unit);
+const hoursOfWin = win => [...new Set(slotsFor(win).map(s => s.slice(0, 2)))];
+const countsHourly = win => Boolean(win.doctor) && !win.exam;
+const hourFull = (day, win, slot) => countsHourly(win) && hourLoad(day, win, slot.slice(0, 2)) >= hourlyCap.value;
 const taskStartMin = t => {
   const d = new Date(t.due_at);
   return d.getHours() * 60 + d.getMinutes();
@@ -902,7 +922,7 @@ const occCaption = scan => {
 };
 const dayOccupancy = day => {
   if (isDayOff(day) || !showOccupancy.value) return null;
-  if (!occWindows.value.some(w => w.dow === day.getDay())) return null;
+  if (!occWindows.value.some(w => windowOnDay(w, day))) return null;
   return occScan(day, 1);
 };
 
@@ -1070,11 +1090,16 @@ const emptyForm = (day, prefill = {}) => {
     booking_kind: prefill.booking_kind || 'agendamento',
     // 🏥 item 300: CEVICO × Oftalmofácil — obrigatório ao criar (nasce em branco de propósito)
     origin: prefill.origin || '',
+    channel: '', // 🧭 item 362: como chegou
     // 🔎 item 346: paciente escolhido na busca (nome travado, consulta no cadastro dele)
     contact_id: prefill.contact_id || null,
     // 💰 item 324: consulta particular + valores lançados à mão neste card
     particular: false,
     charges: [],
+    // 🤝 item 386: de onde veio (só leitura) — o valor combinado do parceiro
+    // do Oftalmofácil depende disso; não vai no payload
+    source: '',
+    source_detail: '',
   };
 };
 const form = ref(emptyForm());
@@ -1182,9 +1207,12 @@ const openEdit = task => {
     description: task.description ?? '',
     booking_kind: task.booking_kind || 'agendamento',
     origin: task.origin || '',
+    channel: task.channel?.key || '', // 🧭 item 362
     contact_id: task.contact_id || null,
     particular: !!task.particular,
     charges: (task.charges || []).map(c => ({ ...c })),
+    source: task.source || '',
+    source_detail: task.source_detail || task.partner_provider || '', // 386b: adotada lê o parceiro do paciente
   };
   showDeleteConfirm.value = false;
   conflictsOpen.value = false;
@@ -1213,6 +1241,7 @@ const hubConflicts = computed(() => formConflicts.value.filter(t => t.source ===
 const reservedMismatch = computed(() => {
   if (!showModal.value || form.value.kind !== 'consultas' || !form.value.date || !form.value.time) return null;
   const spot = { dow: new Date(`${form.value.date}T12:00:00`).getDay(), unit: form.value.unit, minutes: toMin(form.value.time) };
+  spot.date = form.value.date; // item 375: enxerga a abertura pontual do dia
   const win = windowAt(windows.value, { ...spot, doctor: form.value.doctor }) || windowAt(windows.value, spot);
   return win && !windowAccepts(win, form.value.modality || 'avaliacao') ? win : null;
 });
@@ -1229,6 +1258,15 @@ const hmOf = t => format(new Date(t.due_at), 'HH:mm');
 const originLocked = computed(() => Boolean(editingTask.value?.source));
 const originMissing = computed(() => !editingTask.value && !form.value.origin);
 const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.');
+// 🧭 item 362 (21/10): COMO CHEGOU — obrigatório ao criar paciente NOVO (o que
+// já tem carimbo automático de anúncio/página vem travado; o que já foi informado
+// vem preenchido). Vira carimbo canal_origem no contato e conta no CAC e nas Campanhas.
+const channelAuto = ref(false);
+const channelMissing = computed(() => !editingTask.value && !form.value.contact_id && !form.value.channel);
+const channelHint = computed(() => {
+  if (channelAuto.value) return 'Carimbo automático (clique no anúncio ou página): não precisa escolher.';
+  return LEAD_CHANNEL_BY_KEY[form.value.channel] ? 'Vira o rastro deste paciente no Financeiro & CAC e nas Campanhas.' : 'Pergunte: "como você chegou até a gente?" — é o que liga esta consulta ao canal que trouxe o paciente.';
+});
 // 📱 item 346: paciente NOVO só nasce com telefone (DDD + número) — sem ele
 // não há como achar o cadastro de quem já existe e o paciente duplica
 const phoneMissing = computed(() => !editingTask.value && !form.value.contact_id && (form.value.phone || '').replace(/\D/g, '').length < 10);
@@ -1246,6 +1284,9 @@ const pickPatient = p => {
   form.value.name = p.name || form.value.name;
   if (p.phone_number) form.value.phone = p.phone_number;
   if (!form.value.origin && p.origin) form.value.origin = p.origin;
+  // 🧭 item 362: o que já se sabe do canal vem junto (automático trava)
+  form.value.channel = p.channel?.key || '';
+  channelAuto.value = Boolean(p.channel?.auto);
   nameFocused.value = false;
   phoneOwner.value = null;
 };
@@ -1253,6 +1294,8 @@ const unpickPatient = () => {
   form.value.contact_id = null;
   form.value.name = '';
   form.value.phone = '';
+  form.value.channel = '';
+  channelAuto.value = false;
 };
 const onNameKey = e => {
   if (e.key === 'Escape') { nameFocused.value = false; return; }
@@ -1270,7 +1313,7 @@ watch(() => [form.value.phone, form.value.contact_id, showModal.value], ([phone,
     } catch { phoneOwner.value = null; }
   }, 400);
 });
-const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value && !phoneMissing.value));
+const canSave = computed(() => Boolean(form.value.name.trim() && form.value.date && !originMissing.value && !phoneMissing.value && !channelMissing.value));
 
 const save = async () => {
   if (!canSave.value || isSaving.value) return;
@@ -1289,6 +1332,15 @@ const save = async () => {
     const win = reservedMismatch.value;
     // eslint-disable-next-line no-alert
     if (!window.confirm(`A faixa ${win.start}–${win.end} de ${win.doctor} está reservada para ${reservedLabelOf(win)}. Agendar mesmo assim?`)) return;
+  }
+  // ⏱️ item 367: hora já com o teto de avaliações = encaixe, só com confirmação
+  const modality = form.value.modality || 'avaliacao';
+  if (form.value.kind === 'consultas' && !NOT_EVALUATION.includes(modality) && (timeChanged || typeChanged)) {
+    const hh = (form.value.time || '09:00').slice(0, 2);
+    const n = evaluationsInHour(form.value.date, hh, form.value.unit, editingTask.value?.id);
+    const where = UNITS[form.value.unit]?.label || form.value.unit;
+    // eslint-disable-next-line no-alert
+    if (n >= hourlyCap.value && !window.confirm(`Às ${hh}h, ${where} já tem ${n} avaliações (o limite é ${hourlyCap.value} por hora). Marcar mesmo assim, como encaixe?`)) return;
   }
   isSaving.value = true;
   try {
@@ -1315,6 +1367,7 @@ const save = async () => {
         .map(c => ({ label: String(c.label || '').trim(), amount: String(c.amount).trim() })),
     };
     if (form.value.origin && !originLocked.value) payload.origin = form.value.origin;
+    if (form.value.channel && !channelAuto.value) payload.channel = form.value.channel; // 🧭 item 362
     // 🔎 item 346: paciente escolhido na busca → a consulta fica no cadastro dele
     if (form.value.contact_id) payload.contact_id = form.value.contact_id;
     // o ✅ digitado no nome sai do nome e vira o confirmado de verdade
@@ -1907,7 +1960,7 @@ const typeItems = (day, time, band) =>
       openCreateOnDay(day, prefill);
     },
   }));
-// fechar/reabrir UM horário: o mesmo cadeado do bloco do médico (só admin)
+// fechar/reabrir UM horário: o mesmo cadeado do bloco do médico (item 366: nó agenda.bloqueios)
 const blockSlotItem = (day, win, slot) =>
   canEdit('agenda.bloqueios') && {
     label: isBlocked(day, win, slot) ? `Reabrir o horário das ${slot}` : `Fechar o horário das ${slot}`,
@@ -2206,9 +2259,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <!-- 01/10 (item 307, pedido dele: "deixar mais fácil e evidente abrir e fechar agendas"):
                    um botão só para tudo que muda na agenda -->
-              <button v-if="canView('agenda.configuracao')" class="cv-btn cv-btn-ghost" title="Abrir e fechar agendas, faixas de horário, regras para a IA e conferência do dia" @click="openSettings('abrir')">
+              <!-- item 366: quem só tem "Fechar e reabrir dias" entra direto em Abrir e fechar -->
+              <button v-if="canView('agenda.configuracao') || canEdit('agenda.bloqueios')" class="cv-btn cv-btn-ghost" title="Abrir e fechar agendas, faixas de horário, regras para a IA e conferência do dia" @click="openSettings('abrir')">
                 <span class="i-lucide-settings-2 text-sm" />
-                Configurações da agenda
+                {{ canView('agenda.configuracao') ? 'Configurações da agenda' : 'Abrir e fechar agenda' }}
               </button>
               <button v-if="canEditAgenda" class="cv-btn" @click="openCreateOnDay(viewMode === 'month' ? new Date() : cursor)">
                 <span class="i-lucide-plus text-sm" />
@@ -2249,6 +2303,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <span class="cv-ag-kind-n" :title="`${kindCounts[tt.key]} ${rangeNoun}`">{{ kindCounts[tt.key] }}</span>
                     </button>
                   </div>
+                  <!-- 🔁 item 368: a cor do reagendamento (não é tipo, por isso não liga/desliga) -->
+                  <p class="text-[11px] text-n-slate-10 mt-1.5 flex items-center gap-1">
+                    <span class="cv-ag-resched i-lucide-refresh-cw" /> contorno azul-piscina = consulta reagendada (a cor de dentro continua sendo o tipo)
+                  </p>
                 </div>
               </div>
               <div class="flex items-start gap-3 flex-wrap lg:flex-nowrap">
@@ -2559,7 +2617,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
         <!-- ══ DIA ══ -->
         <div v-else>
           <!-- avisos do dia -->
-          <div v-if="isWeekend(cursor)" class="cv-sub flex items-center gap-2 px-4 py-3 mb-4 text-sm text-n-slate-10">
+          <div v-if="isWeekend(cursor) && !hasOpenWindow(cursor)" class="cv-sub flex items-center gap-2 px-4 py-3 mb-4 text-sm text-n-slate-10">
             <span class="i-lucide-lock text-base" />
             {{ WEEKDAY_FULL[cursor.getDay()] }} — sem agenda em nenhuma unidade.
           </div>
@@ -2667,13 +2725,20 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <span class="i-lucide-lock text-[10px]" /> fechar dia
                     </button>
                   </div>
+                  <!-- ⏱️ item 367: avaliações em cada hora × o teto (hora cheia em vermelho) -->
+                  <div v-if="countsHourly(win)" class="flex flex-wrap gap-1.5 mb-2">
+                    <span v-for="hh in hoursOfWin(win)" :key="hh" class="cv-chip" :class="hourLoad(cursor, win, hh) >= hourlyCap ? 'cv-red' : 'cv-slate'" :title="hourLoad(cursor, win, hh) >= hourlyCap ? 'Hora cheia: os robôs não marcam mais avaliações aqui; a equipe pode encaixar, confirmando' : 'Avaliações marcadas nesta hora'">
+                      {{ hh }}h · {{ hourLoad(cursor, win, hh) }}/{{ hourlyCap }}<template v-if="hourLoad(cursor, win, hh) >= hourlyCap"> · cheia</template>
+                    </span>
+                  </div>
                   <div class="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
                     <template v-for="slot in slotsFor(win)" :key="slot">
                       <!-- item 319: um balão POR PACIENTE (antes o encaixe virava "+2" escondido) -->
                       <template v-if="taskAtSlot(cursor, win, slot)">
                         <span v-for="(st, si) in tasksAtSlotAll(cursor, win, slot)" :key="slot + '-' + st.id" v-cv-menu="() => taskMenu(st)" class="relative group min-w-0">
-                          <button class="cv-ag-slot cv-ag-slot-taken truncate" :class="isSoftTask(st) ? 'cv-ag-slot-soft' : ''" :title="`${slot} · ${displayName(st)}${softTitle(st)}`" @click="openEdit(st)">
+                          <button class="cv-ag-slot cv-ag-slot-taken truncate" :class="[isSoftTask(st) ? 'cv-ag-slot-soft' : '', isRescheduled(st) ? 'cv-ag-slot-resched' : '']" :title="`${slot} · ${displayName(st)}${softTitle(st)}`" @click="openEdit(st)">
                             <span class="tabular-nums opacity-90">{{ slot }}</span>
+                            <span v-if="isRescheduled(st)" class="cv-ag-resched i-lucide-refresh-cw" :title="rescheduledTitle(st)" />
                             <span v-if="isConfirmed(st)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(st)" /><span v-else-if="isDeclined(st)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />
                             <span class="truncate">{{ displayName(st) }}</span>
                           </button>
@@ -2684,7 +2749,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <span class="i-lucide-lock text-[10px]" /> {{ slot }}
                       </button>
                       <span v-else v-cv-menu="() => slotMenu(cursor, win, slot)" class="relative group">
-                        <button class="cv-ag-slot cv-ag-slot-free tabular-nums" title="Bloco livre — clique para agendar" @click="openCreateSlot(cursor, win, slot)">{{ slot }}</button>
+                        <button class="cv-ag-slot cv-ag-slot-free tabular-nums" :class="hourFull(cursor, win, slot) ? 'opacity-50' : ''" :title="hourFull(cursor, win, slot) ? `Hora cheia (${hourlyCap} avaliações) — dá para encaixar, confirmando` : 'Bloco livre — clique para agendar'" @click="openCreateSlot(cursor, win, slot)">{{ slot }}</button>
                         <button v-if="canEdit('agenda.bloqueios')" class="cv-ag-corner" title="Fechar este horário 🔒" @click.stop="toggleBlock(cursor, win, slot)"><span class="i-lucide-lock" /></button>
                       </span>
                     </template>
@@ -2745,6 +2810,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                         <span v-if="unitOf(task)" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(unitOf(task).color), '--cv-deep': unitOf(task).color }"><span class="i-lucide-map-pin text-[10px] shrink-0" /> <span class="truncate">{{ unitOf(task).label }}</span></span>
                         <span v-if="task.source" class="cv-chip cv-slate" :title="`Veio do ${task.source === 'oftalmofacil' ? 'Oftalmofácil' : task.source}${task.source_detail ? ' · parceiro: ' + task.source_detail : ''}`"><span class="i-lucide-hospital text-[10px] shrink-0" /> <span class="truncate">{{ originLabel(task) }}</span></span>
                         <span v-if="task.origin && !task.source" class="cv-chip" :style="{ '--cv-rgb': hexToRgbSpaced(originOf(task).color), '--cv-deep': originOf(task).color }" :title="originOf(task).hint"><span :class="originOf(task).icon" class="text-[10px] shrink-0" /> {{ originOf(task).label }}</span>
+                        <span v-if="isRescheduled(task)" class="cv-chip cv-cyan" :title="rescheduledTitle(task)"><span class="i-lucide-refresh-cw text-[11px] shrink-0" /> {{ rescheduledTitle(task) }}</span>
                         <span v-if="!task.attendance && isConfirmed(task)" class="cv-chip cv-green" :title="confirmationTitle(task)"><span class="i-lucide-badge-check text-[11px] shrink-0" /> Confirmou</span>
                         <span v-else-if="!task.attendance && isDeclined(task)" class="cv-chip cv-red" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar"><span class="i-lucide-badge-x text-[11px] shrink-0" /> Disse não</span>
                         <span v-if="task.attendance === 'attended'" class="cv-chip cv-green">{{ isSurgeryTask(task) ? '✓ Realizada' : '✓ Compareceu' }}</span>
@@ -2912,6 +2978,27 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <p class="text-[11px] mt-1.5" :class="originMissing ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-n-slate-10'">{{ originHint }}</p>
             </div>
+            <!-- 🧭 item 362: como o paciente chegou (obrigatório ao criar paciente novo) -->
+            <div v-if="!originLocked" class="mt-3">
+              <span class="cv-label block mb-1.5">Como chegou? {{ channelMissing ? '*' : '' }}</span>
+              <div class="cv-ag-origin cv-ag-channel" :class="channelMissing ? 'cv-ag-origin-need' : ''">
+                <button
+                  v-for="o in LEAD_CHANNELS"
+                  :key="'ch' + o.key"
+                  type="button"
+                  class="cv-ag-origin-opt"
+                  :class="form.channel === o.key ? 'cv-ag-origin-on' : ''"
+                  :style="{ '--o': o.color, '--o-rgb': hexToRgbSpaced(o.color) }"
+                  :disabled="channelAuto"
+                  :title="o.title || o.label"
+                  @click="form.channel = form.channel === o.key && !channelAuto ? '' : o.key"
+                >
+                  <span :class="form.channel === o.key ? 'i-lucide-circle-check' : o.icon" class="text-sm shrink-0" />
+                  <span class="truncate">{{ o.label }}</span>
+                </button>
+              </div>
+              <p class="text-[11px] mt-1.5" :class="channelMissing ? 'text-amber-700 dark:text-amber-400 font-semibold' : 'text-n-slate-10'">{{ channelHint }}</p>
+            </div>
           </section>
 
           <!-- 2 · quando e onde -->
@@ -3019,7 +3106,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <span class="cv-ag-price-value">{{ priceEffective?.text ? priceLabel(priceEffective.text) : (priceEffective ? 'valor padrão' : '—') }}</span>
                 <span class="cv-ag-price-source">{{ priceEffective ? priceEffective.label : 'cirurgia: só valor lançado à mão' }}</span>
               </div>
-              <p v-if="pricePreset && priceEffective?.source !== 'preset'" class="text-[11px] text-n-slate-11">Pré-configurado para este tipo: <b class="text-n-slate-12">{{ priceLabel(pricePreset.text) }}</b> ({{ pricePreset.label }}) — o valor lançado à mão tem prioridade.</p>
+              <p v-if="pricePreset && priceEffective?.source !== 'preset'" class="text-[11px] text-n-slate-11">Pré-configurado para este tipo: <b class="text-n-slate-12">{{ priceLabel(pricePreset.text) }}</b> ({{ pricePreset.label }}) — {{ priceEffective?.source === 'parceiro' ? 'o valor combinado do parceiro tem prioridade' : priceEffective?.source === 'manual' ? 'o valor lançado à mão tem prioridade' : 'o valor escrito tem prioridade' }}.</p>
               <div>
                 <span class="cv-label block mb-1.5">Valores lançados à mão</span>
                 <div v-for="(c, idx) in form.charges" :key="'ch' + idx" class="cv-ag-charge">
@@ -3068,7 +3155,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             </div>
           </div>
           <button class="cv-btn cv-btn-ghost cv-btn-lg" :class="editingTask && canEditAgenda ? '' : 'ml-auto'" @click="showModal = false">{{ canEditAgenda ? 'Cancelar' : 'Fechar' }}</button>
-          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : phoneMissing ? 'Informe o telefone do paciente com DDD' : ''" @click="save">
+          <button v-if="canEditAgenda" class="cv-btn cv-btn-lg min-w-[170px]" :disabled="!canSave || isSaving" :title="originMissing ? 'Escolha se o paciente é da CEVICO ou do Oftalmofácil' : phoneMissing ? 'Informe o telefone do paciente com DDD' : channelMissing ? 'Informe como o paciente chegou' : ''" @click="save">
             <span :class="isSaving ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-check'" class="text-sm" />
             {{ isSaving ? 'Salvando…' : (editingTask ? `Salvar ${formKind.noun}` : `Agendar ${formKind.noun}`) }}
           </button>

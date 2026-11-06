@@ -178,6 +178,7 @@ const go = key => emit('go', key);
 }
 .cvs-number-sub {
   display: block;
+  letter-spacing: 0; /* não herdar o -0.03em (em px) do número gigante */
   margin-top: 6px;
   font-size: clamp(14px, 1.6vw, 18px);
   font-weight: 500;

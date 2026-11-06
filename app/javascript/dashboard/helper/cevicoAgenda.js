@@ -85,7 +85,9 @@ export const kindFor = key => KIND_BY_KEY[key] || KINDS[0];
 // menu. A regra é uma só, usada pela Agenda, por Tarefas e pela store.
 export const isAppointmentTask = task =>
   !!task &&
-  (task.task_type === 'consulta' || task.task_type === 'cirurgia' || !!task.unit);
+  (task.task_type === 'consulta' ||
+    task.task_type === 'cirurgia' ||
+    !!task.unit);
 
 // a que tipo uma task pertence
 export const kindOf = task => {
@@ -124,21 +126,88 @@ export const kindVars = kind => {
 // dow: 0=Dom … 6=Sáb; end é exclusivo (último bloco = end - block).
 // Mapa padrão — editável em Agenda → "Janelas dos médicos".
 export const DEFAULT_WINDOWS = [
-  { dow: 1, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '10:00', block: 15 },
-  { dow: 2, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Manhã', start: '08:00', end: '11:30', block: 15 },
-  { dow: 2, unit: 'paulista', doctor: 'Dra. Roberta Negri',   turno: 'Tarde', start: '14:30', end: '16:30', block: 15 },
+  {
+    dow: 1,
+    unit: 'paulista',
+    doctor: 'Dr. Gustavo Bittar',
+    turno: 'Manhã',
+    start: '08:30',
+    end: '10:00',
+    block: 15,
+  },
+  {
+    dow: 2,
+    unit: 'paulista',
+    doctor: 'Dr. Henrique Gemelli',
+    turno: 'Manhã',
+    start: '08:00',
+    end: '11:30',
+    block: 15,
+  },
+  {
+    dow: 2,
+    unit: 'paulista',
+    doctor: 'Dra. Roberta Negri',
+    turno: 'Tarde',
+    start: '14:30',
+    end: '16:30',
+    block: 15,
+  },
   // item 307 (01/10): quarta 13h–14h do Dr. Henrique = só pós-operatório; consulta a partir das 14h
-  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '13:00', end: '14:00', block: 15, only: ['pos_op'] },
-  { dow: 3, unit: 'paulista', doctor: 'Dr. Henrique Gemelli', turno: 'Tarde', start: '14:00', end: '17:00', block: 15 },
-  { dow: 3, unit: 'tatuape',  doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 10 },
-  { dow: 4, unit: 'paulista', doctor: 'Dr. Gustavo Bittar',   turno: 'Manhã', start: '08:30', end: '11:00', block: 15 },
-  { dow: 5, unit: 'tatuape',  doctor: 'Dra. Roberta Negri',   turno: 'Manhã', start: '10:30', end: '13:00', block: 10 },
+  {
+    dow: 3,
+    unit: 'paulista',
+    doctor: 'Dr. Henrique Gemelli',
+    turno: 'Tarde',
+    start: '13:00',
+    end: '14:00',
+    block: 15,
+    only: ['pos_op'],
+  },
+  {
+    dow: 3,
+    unit: 'paulista',
+    doctor: 'Dr. Henrique Gemelli',
+    turno: 'Tarde',
+    start: '14:00',
+    end: '17:00',
+    block: 15,
+  },
+  {
+    dow: 3,
+    unit: 'tatuape',
+    doctor: 'Dr. Gustavo Bittar',
+    turno: 'Manhã',
+    start: '08:30',
+    end: '11:00',
+    block: 10,
+  },
+  {
+    dow: 4,
+    unit: 'paulista',
+    doctor: 'Dr. Gustavo Bittar',
+    turno: 'Manhã',
+    start: '08:30',
+    end: '11:00',
+    block: 15,
+  },
+  {
+    dow: 5,
+    unit: 'tatuape',
+    doctor: 'Dra. Roberta Negri',
+    turno: 'Manhã',
+    start: '10:30',
+    end: '13:00',
+    block: 10,
+  },
 ];
 
 // médicos com a agenda FECHADA (item 76) — as janelas deles somem em
 // TODO consumidor (agenda, ocupação, saúde do Meu Painel)
 export const resolveClosedDoctors = settings =>
-  Array.isArray(settings?.agenda_closed_doctors) ? settings.agenda_closed_doctors : [];
+  Array.isArray(settings?.agenda_closed_doctors)
+    ? settings.agenda_closed_doctors
+    : [];
 
 // TODAS as janelas salvas (ou o padrão), inclusive as de médico com a agenda
 // fechada — é o que a tela de Configurações da Agenda edita (item 307)
@@ -156,6 +225,38 @@ export const resolveWindows = settings => {
   return closed.length ? list.filter(w => !closed.includes(w.doctor)) : list;
 };
 
+// 📅 ABERTURA PONTUAL (item 375, 28/10 — "a Dra. Roberta pediu para abrir a
+// agenda em alguns dias específicos"): um dia (ou um turno a mais) numa DATA
+// só, sem mexer na rotina da semana. Mesmo formato da faixa, com `date` no
+// lugar do `dow` (o `dow` vem da data, para quem só olha o dia da semana).
+// Espelho de Crm::AgendaSlots.open_days — a grade, a ocupação e os robôs leem
+// a mesma lista. Cadeados (dia, unidade, médico, horário) valem em cima dela.
+const dowOfKey = key => new Date(`${key}T12:00:00`).getDay();
+export const resolveOpenDays = settings =>
+  Array.isArray(settings?.agenda_open_days)
+    ? settings.agenda_open_days
+        .filter(
+          o =>
+            o &&
+            /^\d{4}-\d{2}-\d{2}$/.test(o.date) &&
+            o.doctor &&
+            o.start &&
+            o.end
+        )
+        .map(o => ({
+          ...o,
+          dow: dowOfKey(o.date),
+          block: Number(o.block) || 15,
+          open: true,
+        }))
+    : [];
+// aberturas em vigor — sem os médicos com a agenda fechada
+export const resolveOpenWindows = settings => {
+  const closed = resolveClosedDoctors(settings);
+  const list = resolveOpenDays(settings);
+  return closed.length ? list.filter(w => !closed.includes(w.doctor)) : list;
+};
+
 // 🗂️ item 307 (01/10, "todas as quartas, das 13h às 14h, só retornos de
 // pós-operatório"): FAIXA RESERVADA. Cada janela pode aceitar só alguns tipos
 // de atendimento (`only`); sem `only` aceita tudo. A IA marca consulta nova
@@ -170,15 +271,18 @@ export const windowAccepts = (win, modality) => {
   return !only.length || only.includes(modality);
 };
 const hmToMin = hm => {
-  const [h, m] = String(hm || '0:0').split(':').map(Number);
+  const [h, m] = String(hm || '0:0')
+    .split(':')
+    .map(Number);
   return h * 60 + (m || 0);
 };
-// a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade)
-export const windowAt = (windows, { dow, unit, minutes, doctor }) =>
+// a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade;
+// item 375: abertura pontual só na data dela — quem passa `date` enxerga as duas)
+export const windowAt = (windows, { dow, unit, minutes, doctor, date }) =>
   windows.find(
     w =>
       w.doctor &&
-      w.dow === dow &&
+      (w.date ? w.date === date : w.dow === dow) &&
       w.unit === unit &&
       (!doctor || w.doctor === doctor) &&
       minutes >= hmToMin(w.start) &&
@@ -223,7 +327,9 @@ export const resolveSurgeryWindows = settings =>
     : [];
 
 export const resolveBlockedDays = settings =>
-  Array.isArray(settings?.agenda_blocked_days) ? settings.agenda_blocked_days : [];
+  Array.isArray(settings?.agenda_blocked_days)
+    ? settings.agenda_blocked_days
+    : [];
 // item 267: a lista mistura dias INTEIROS ('2026-10-12') e PARTES do dia
 // ({ date, unit } ou { date, doctor })
 export const wholeBlockedDays = list =>
@@ -232,11 +338,16 @@ export const partialBlocksOn = (list, key) =>
   list.filter(b => b && typeof b === 'object' && b.date === key);
 export const isWindowBlocked = (list, key, win) =>
   partialBlocksOn(list, key).some(
-    b => (!b.unit || b.unit === win.unit) && (!b.doctor || b.doctor === win.doctor)
+    b =>
+      (!b.unit || b.unit === win.unit) && (!b.doctor || b.doctor === win.doctor)
   );
 export const sameBlock = (a, b) => {
   if (typeof a === 'string' || typeof b === 'string') return a === b;
-  return a.date === b.date && (a.unit || '') === (b.unit || '') && (a.doctor || '') === (b.doctor || '');
+  return (
+    a.date === b.date &&
+    (a.unit || '') === (b.unit || '') &&
+    (a.doctor || '') === (b.doctor || '')
+  );
 };
 
 // blocos ('08:30', '08:45'…) de uma janela
@@ -245,7 +356,9 @@ export const slotsFor = win => {
   const [eh, em] = win.end.split(':').map(Number);
   const slots = [];
   for (let t = sh * 60 + sm; t < eh * 60 + em; t += win.block) {
-    slots.push(`${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
+    slots.push(
+      `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+    );
   }
   return slots;
 };
@@ -254,6 +367,11 @@ export const dateKey = d => {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
+
+// item 375: a faixa vale neste dia? abertura pontual = só na data dela;
+// faixa da semana = no dia da semana dela
+export const windowOnDay = (win, day) =>
+  win.date ? win.date === dateKey(day) : win.dow === day.getDay();
 
 export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 
@@ -265,7 +383,13 @@ export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 // mesma consulta aparecia em 2 ou 3 horários e roubava vaga livre.
 // Sala cirúrgica e agenda de exames continuam por sobreposição (lá o
 // procedimento pode mesmo durar mais que um bloco).
-export const occupiesSlot = ({ taskStart, duration, slotStart, block, win }) => {
+export const occupiesSlot = ({
+  taskStart,
+  duration,
+  slotStart,
+  block,
+  win,
+}) => {
   const slotEnd = slotStart + (Number(block) || 15);
   if (win && win.doctor) return taskStart >= slotStart && taskStart < slotEnd;
   return taskStart < slotEnd && taskStart + duration > slotStart;
@@ -295,24 +419,108 @@ const mkType = t => ({
   hero: `linear-gradient(135deg, ${t.dark} 0%, ${t.deep} 55%, ${t.light} 100%)`,
 });
 export const TYPES = [
-  mkType({ key: 'avaliacao', label: 'Avaliação', noun: 'avaliação', plural: 'avaliações', article: 'a', icon: 'i-lucide-stethoscope',
-    color: '#2563EB', deep: '#1E40AF', light: '#60A5FA', pale: '#BFDBFE', dark: '#172554', kind: 'consultas', modality: 'avaliacao',
-    resource: 'doctor', hint: 'primeira consulta com o médico, nas unidades' }),
-  mkType({ key: 'retorno', label: 'Retorno', noun: 'retorno', plural: 'retornos', article: 'o', icon: 'i-lucide-rotate-ccw',
-    color: '#D4A017', deep: '#A16207', light: '#FACC15', pale: '#FEF08A', dark: '#713F12', kind: 'consultas', modality: 'retorno',
-    resource: 'doctor', hint: 'volta ao médico depois de exames ou tratamento' }),
-  mkType({ key: 'pos_op', label: 'Pós-operatório', noun: 'pós-operatório', plural: 'pós-operatórios', article: 'o', icon: 'i-lucide-heart-pulse',
-    color: '#DB2777', deep: '#9D174D', light: '#F472B6', pale: '#FBCFE8', dark: '#500724', kind: 'consultas', modality: 'pos_op',
-    resource: 'doctor', hint: 'revisão depois da cirurgia' }),
-  mkType({ key: 'exames', label: 'Exame', noun: 'exame', plural: 'exames', article: 'o', icon: 'i-lucide-scan-eye',
-    color: '#0D9488', deep: '#0F766E', light: '#2DD4BF', pale: '#99F6E4', dark: '#134E4A', kind: 'exames', modality: 'exames',
-    resource: 'exam', hint: 'pentacam, OCT, topografia… na janela de exames' }),
-  mkType({ key: 'teleconsulta', label: 'Teleconsulta', noun: 'teleconsulta', plural: 'teleconsultas', article: 'a', icon: 'i-lucide-video',
-    color: '#7C3AED', deep: '#5B21B6', light: '#A78BFA', pale: '#DDD6FE', dark: '#3B0764', kind: 'teleconsultas', modality: 'teleconsulta',
-    resource: 'online', hint: 'consulta por vídeo, sem unidade' }),
-  mkType({ key: 'cirurgia', label: 'Cirurgia', noun: 'cirurgia', plural: 'cirurgias', article: 'a', icon: 'i-lucide-slice',
-    color: '#EA580C', deep: '#9A3412', light: '#FB923C', pale: '#FED7AA', dark: '#431407', kind: 'cirurgias', modality: null,
-    resource: 'surgery', hint: 'sala cirúrgica das clínicas parceiras' }),
+  mkType({
+    key: 'avaliacao',
+    label: 'Avaliação',
+    noun: 'avaliação',
+    plural: 'avaliações',
+    article: 'a',
+    icon: 'i-lucide-stethoscope',
+    color: '#2563EB',
+    deep: '#1E40AF',
+    light: '#60A5FA',
+    pale: '#BFDBFE',
+    dark: '#172554',
+    kind: 'consultas',
+    modality: 'avaliacao',
+    resource: 'doctor',
+    hint: 'primeira consulta com o médico, nas unidades',
+  }),
+  mkType({
+    key: 'retorno',
+    label: 'Retorno',
+    noun: 'retorno',
+    plural: 'retornos',
+    article: 'o',
+    icon: 'i-lucide-rotate-ccw',
+    color: '#D4A017',
+    deep: '#A16207',
+    light: '#FACC15',
+    pale: '#FEF08A',
+    dark: '#713F12',
+    kind: 'consultas',
+    modality: 'retorno',
+    resource: 'doctor',
+    hint: 'volta ao médico depois de exames ou tratamento',
+  }),
+  mkType({
+    key: 'pos_op',
+    label: 'Pós-operatório',
+    noun: 'pós-operatório',
+    plural: 'pós-operatórios',
+    article: 'o',
+    icon: 'i-lucide-heart-pulse',
+    color: '#DB2777',
+    deep: '#9D174D',
+    light: '#F472B6',
+    pale: '#FBCFE8',
+    dark: '#500724',
+    kind: 'consultas',
+    modality: 'pos_op',
+    resource: 'doctor',
+    hint: 'revisão depois da cirurgia',
+  }),
+  mkType({
+    key: 'exames',
+    label: 'Exame',
+    noun: 'exame',
+    plural: 'exames',
+    article: 'o',
+    icon: 'i-lucide-scan-eye',
+    color: '#0D9488',
+    deep: '#0F766E',
+    light: '#2DD4BF',
+    pale: '#99F6E4',
+    dark: '#134E4A',
+    kind: 'exames',
+    modality: 'exames',
+    resource: 'exam',
+    hint: 'pentacam, OCT, topografia… na janela de exames',
+  }),
+  mkType({
+    key: 'teleconsulta',
+    label: 'Teleconsulta',
+    noun: 'teleconsulta',
+    plural: 'teleconsultas',
+    article: 'a',
+    icon: 'i-lucide-video',
+    color: '#7C3AED',
+    deep: '#5B21B6',
+    light: '#A78BFA',
+    pale: '#DDD6FE',
+    dark: '#3B0764',
+    kind: 'teleconsultas',
+    modality: 'teleconsulta',
+    resource: 'online',
+    hint: 'consulta por vídeo, sem unidade',
+  }),
+  mkType({
+    key: 'cirurgia',
+    label: 'Cirurgia',
+    noun: 'cirurgia',
+    plural: 'cirurgias',
+    article: 'a',
+    icon: 'i-lucide-slice',
+    color: '#EA580C',
+    deep: '#9A3412',
+    light: '#FB923C',
+    pale: '#FED7AA',
+    dark: '#431407',
+    kind: 'cirurgias',
+    modality: null,
+    resource: 'surgery',
+    hint: 'sala cirúrgica das clínicas parceiras',
+  }),
 ];
 export const TYPE_BY_KEY = Object.fromEntries(TYPES.map(t => [t.key, t]));
 
@@ -363,7 +571,8 @@ export const attendanceMarkOf = task => {
 // (SIM ao lembrete, card na coluna "Consulta Confirmada" ou a equipe marcou na
 // Agenda). O ✅ que a equipe digitava no nome também vale — e sai do nome, para
 // o selo ser um só. `declined_at` = respondeu NÃO ao lembrete.
-const TYPE_PREFIX = /^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i;
+const TYPE_PREFIX =
+  /^(Consulta|Teleconsulta|Exame|Cirurgia|P[oó]s-operat[oó]rio):\s*/i;
 const HAND_CHECK = /^\s*✅\s*/;
 const bareTitle = task => String(task?.title || '').replace(TYPE_PREFIX, '');
 export const patientNameOf = task => bareTitle(task).replace(HAND_CHECK, '');
@@ -381,14 +590,104 @@ export const confirmationTitle = task => {
 };
 // 🏥 item 300: de quem é o paciente (escolha obrigatória no formulário)
 export const ORIGINS = [
-  { key: 'cevico', label: 'CEVICO', icon: 'i-lucide-eye', color: '#152C61', hint: 'Paciente nosso: etiqueta cevico, card no CRM da CEVICO e lembrete pela caixa da CEVICO.' },
-  { key: 'oftalmofacil', label: 'Oftalmofácil', icon: 'i-lucide-hospital', color: '#0D9488', hint: 'Paciente do Oftalmofácil: etiqueta of_agenda, card no CRM do Oftalmofácil e lembrete só pela caixa do Oftalmofácil — sem IA.' },
+  {
+    key: 'cevico',
+    label: 'CEVICO',
+    icon: 'i-lucide-eye',
+    color: '#152C61',
+    hint: 'Paciente nosso: etiqueta cevico, card no CRM da CEVICO e lembrete pela caixa da CEVICO.',
+  },
+  {
+    key: 'oftalmofacil',
+    label: 'Oftalmofácil',
+    icon: 'i-lucide-hospital',
+    color: '#0D9488',
+    hint: 'Paciente do Oftalmofácil: etiqueta of_agenda, card no CRM do Oftalmofácil e lembrete só pela caixa do Oftalmofácil — sem IA.',
+  },
 ];
 export const ORIGIN_BY_KEY = Object.fromEntries(ORIGINS.map(o => [o.key, o]));
+// 🧭 item 362: COMO O PACIENTE CHEGOU (informado pela equipe; espelho de Crm::LeadChannel)
+export const LEAD_CHANNELS = [
+  {
+    key: 'google_anuncio',
+    label: 'Google anúncio',
+    title: 'Google · anúncio',
+    icon: 'i-lucide-search',
+    color: '#0a84ff',
+  },
+  {
+    key: 'google_busca',
+    label: 'Google busca/site',
+    title: 'Google · busca ou site',
+    icon: 'i-lucide-globe',
+    color: '#0891b2',
+  },
+  {
+    key: 'meta_anuncio',
+    label: 'Insta/Face anúncio',
+    title: 'Instagram / Facebook · anúncio',
+    icon: 'i-lucide-megaphone',
+    color: '#bf5af2',
+  },
+  {
+    key: 'instagram_perfil',
+    label: 'Insta perfil/bio',
+    title: 'Instagram · perfil ou bio',
+    icon: 'i-lucide-instagram',
+    color: '#db2777',
+  },
+  {
+    key: 'whatsapp_direto',
+    label: 'WhatsApp direto',
+    title: 'WhatsApp direto (salvou o número, veio sozinho)',
+    icon: 'i-lucide-message-circle',
+    color: '#16a34a',
+  },
+  {
+    key: 'ligacao',
+    label: 'Ligação',
+    title: 'Ligação telefônica',
+    icon: 'i-lucide-phone',
+    color: '#d97706',
+  },
+  {
+    key: 'indicacao',
+    label: 'Indicação',
+    title: 'Indicação de paciente',
+    icon: 'i-lucide-heart-handshake',
+    color: '#dc2626',
+  },
+  {
+    key: 'parceiro',
+    label: 'Médico/parceiro',
+    title: 'Médico ou parceiro',
+    icon: 'i-lucide-stethoscope',
+    color: '#0d9488',
+  },
+  {
+    key: 'balcao',
+    label: 'Passou aqui',
+    title: 'Passou na clínica (balcão)',
+    icon: 'i-lucide-building-2',
+    color: '#152C61',
+  },
+  {
+    key: 'outro',
+    label: 'Outro',
+    title: 'Outro',
+    icon: 'i-lucide-circle-help',
+    color: '#6b7280',
+  },
+];
+export const LEAD_CHANNEL_BY_KEY = Object.fromEntries(
+  LEAD_CHANNELS.map(o => [o.key, o])
+);
 // origem para MOSTRAR: a escolhida no formulário ou, no que veio do hub, o parceiro
 export const originOf = task => {
-  if (task?.origin && ORIGIN_BY_KEY[task.origin]) return ORIGIN_BY_KEY[task.origin];
-  if (task?.source === 'oftalmofacil' && task.source_detail) return ORIGIN_BY_KEY.oftalmofacil;
+  if (task?.origin && ORIGIN_BY_KEY[task.origin])
+    return ORIGIN_BY_KEY[task.origin];
+  if (task?.source === 'oftalmofacil' && task.source_detail)
+    return ORIGIN_BY_KEY.oftalmofacil;
   return null;
 };
 export const taskColorOf = task => {
@@ -396,9 +695,34 @@ export const taskColorOf = task => {
   return TASK_COLOR_SET.has(hex) ? hex : null;
 };
 // a "Agenda geral" (todas as camadas ligadas) veste um tom neutro
-export const GENERAL_TYPE = mkType({ key: 'geral', label: 'Agenda geral', noun: 'agendamento', plural: 'agendamentos', article: 'o',
-  icon: 'i-lucide-layers', color: '#475569', deep: '#1E293B', light: '#94A3B8', pale: '#CBD5E1', dark: '#0F172A', kind: null,
-  modality: null, resource: null, hint: 'todos os tipos juntos — ligue e desligue as camadas' });
+export const GENERAL_TYPE = mkType({
+  key: 'geral',
+  label: 'Agenda geral',
+  noun: 'agendamento',
+  plural: 'agendamentos',
+  article: 'o',
+  icon: 'i-lucide-layers',
+  color: '#475569',
+  deep: '#1E293B',
+  light: '#94A3B8',
+  pale: '#CBD5E1',
+  dark: '#0F172A',
+  kind: null,
+  modality: null,
+  resource: null,
+  hint: 'todos os tipos juntos — ligue e desligue as camadas',
+});
+// 🔁 item 368 (23/10, ele: "quando o agente reagenda… fica a mesma cor de retorno; as
+// meninas se confundem — precisa ter uma outra corzinha"): REAGENDADA tem cor própria,
+// azul-piscina, em toda tela. O âmbar do "Remarcada" era quase o dourado do Retorno.
+// Na Agenda a consulta continua com a cor do TIPO (avaliação × retorno muda valor e
+// lembrete) e ganha o contorno + o ↻ azul-piscina.
+export const RESCHEDULED_COLOR = '#0891B2';
+export const isRescheduled = task => Number(task?.rescheduled_count) > 0 && !task?.canceled_at;
+export const rescheduledTitle = task => {
+  const n = Number(task?.rescheduled_count) || 0;
+  return n > 1 ? `Reagendada ${n} vezes` : 'Reagendada';
+};
 export const typeOf = task => {
   if (!task) return 'avaliacao';
   if (task.task_type === 'cirurgia') return 'cirurgia';
@@ -420,7 +744,17 @@ export const modalityFor = key =>
 // 23/09: igual ao servidor (Crm::AgendaSlots) — uma consulta COM unidade só
 // ocupa o bloco daquela unidade; sem unidade ocupa em todas. Teleconsultas
 // (unidade 'online') não ocupam bloco físico nenhum.
-export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set(), from, days, freeLimit = 3, futureOnly = false, pastOnly = false }) => {
+export const scanAgenda = ({
+  windows,
+  tasks,
+  blockedSet,
+  blockedDays = new Set(),
+  from,
+  days,
+  freeLimit = 3,
+  futureOnly = false,
+  pastOnly = false,
+}) => {
   const occupied = new Set();
   const modalityByKey = new Map();
   tasks.forEach(t => {
@@ -444,11 +778,12 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
     const day = new Date(from);
     day.setDate(day.getDate() + i);
     const dow = day.getDay();
-    if (dow === 0 || dow === 6) continue; // fim de semana bloqueado
+    // fim de semana bloqueado — salvo abertura pontual naquela data (item 375)
+    if ((dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day))) continue;
     if (blockedDays.has(dateKey(day))) continue; // dia fechado inteiro
 
     windows
-      .filter(w => w.dow === dow)
+      .filter(w => windowOnDay(w, day))
       .forEach(win => {
         slotsFor(win).forEach(slot => {
           const key = blockKey(dateKey(day), slot, win.unit);
@@ -463,7 +798,10 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
           const isTaken = occupied.has(key) || occupied.has(noUnitKey);
           if (isTaken) {
             filled += 1;
-            const mod = modalityByKey.get(key) || modalityByKey.get(noUnitKey) || 'avaliacao';
+            const mod =
+              modalityByKey.get(key) ||
+              modalityByKey.get(noUnitKey) ||
+              'avaliacao';
             byModality[mod] = (byModality[mod] || 0) + 1;
           } else if (freeSlots.length < freeLimit && slotDate > now) {
             freeSlots.push({ day: new Date(day), slot, win });
@@ -472,7 +810,13 @@ export const scanAgenda = ({ windows, tasks, blockedSet, blockedDays = new Set()
       });
   }
 
-  return { total, filled, freeSlots, byModality, pct: total ? Math.round((filled / total) * 100) : 0 };
+  return {
+    total,
+    filled,
+    freeSlots,
+    byModality,
+    pct: total ? Math.round((filled / total) * 100) : 0,
+  };
 };
 
 // ── 💰 item 324 (05/10): VALOR do agendamento ─────────────────────────
@@ -540,6 +884,16 @@ export const presetAppointmentPrice = (prices, appt) => {
       label: hits.map(e => e.name).join(' + '),
     };
   }
+  // 🩺 19/10: avaliação com especialista — o problema escrito ("avaliação
+  // retina", "glaucoma") puxa o valor do especialista (só na avaliação)
+  if (!appt.modality || appt.modality === 'avaliacao') {
+    const wanted = foldText(appt.procedure);
+    const special = (prices.especiais || []).find(
+      e => e.price && e.name && wanted.includes(foldText(e.name))
+    );
+    if (special)
+      return { text: special.price, label: `avaliação de ${special.name}` };
+  }
   const type = PRICE_TYPES.includes(appt.modality)
     ? appt.modality
     : 'avaliacao';
@@ -574,6 +928,25 @@ export const humanNotes = text =>
       return lines.filter((_line, i) => i > aiUntil);
     })
     .join('\n');
+// só letras e números: "Amor Saúde Tatuapé" → "amorsaudetatuape"
+const squashText = s => foldText(s).replace(/[^a-z0-9]/g, '');
+// 🤝 item 386: parceiro do hub (task.source_detail) com valor combinado
+// (cirurgia fica fora; com mais de um nome casando vale o mais específico)
+export const partnerAppointmentPrice = (prices, appt) => {
+  if (!prices || appt.kind === 'cirurgias' || appt.source !== 'oftalmofacil')
+    return null;
+  const provider = squashText(appt.source_detail);
+  if (!provider) return null;
+  const hit = (prices.parceiros || [])
+    .filter(e => {
+      const key = squashText(e.name);
+      return e.price && key && provider.includes(key);
+    })
+    .sort((a, b) => squashText(b.name).length - squashText(a.name).length)[0];
+  return hit
+    ? { text: hit.price, source: 'parceiro', label: `combinado · ${hit.name}` }
+    : null;
+};
 // o valor que VALE para o agendamento: { text, source, label }
 export const effectiveAppointmentPrice = (prices, appt) => {
   const manual = (appt.charges || []).filter(c =>
@@ -585,6 +958,10 @@ export const effectiveAppointmentPrice = (prices, appt) => {
       source: 'manual',
       label: 'lançado à mão neste card',
     };
+  // 🤝 item 386: consulta que veio de um PARCEIRO do Oftalmofácil com valor
+  // combinado (Ajustes → Valores → Parceiros) — mesma regra de Crm::AppointmentPrice
+  const partner = partnerAppointmentPrice(prices, appt);
+  if (partner) return partner;
   const notes = humanNotes(appt.description);
   const explicit = VALUE_PATTERN.exec(notes);
   if (explicit)

@@ -56,7 +56,29 @@ RSpec.describe Crm::Calls::CallbackLock do
 
     it 'o responsável toca primeiro e é quem trava; os outros continuam na lista (rede de segurança)' do
       targets = described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id])
-      expect(targets).to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [ana.id], lock_user_ids: [ana.id], lock_after_seconds: 5)
+      expect(targets).to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [ana.id], lock_user_ids: [ana.id], lock_after_seconds: 5,
+                            ring_cascade_seconds: 10)
+    end
+
+    # 21/10 ("já cai como perdida, nem chamou"): com o responsável tocando primeiro, os outros entram em até 10 s
+    it 'os outros entram em no máximo 10 s, mesmo que a caixa tenha espera de 30 s; espera menor é respeitada', :aggregate_failures do
+      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id], cascade_seconds: 30)[:ring_cascade_seconds]).to eq(10)
+      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id], cascade_seconds: 6)[:ring_cascade_seconds]).to eq(6)
+    end
+
+    it 'responsável "ocupado" não é linha de frente: os outros tocam na hora, sem trava ao tocar' do
+      OnlineStatusTracker.set_status(account.id, ana.id, 'busy')
+      online!(bia)
+      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id], cascade_seconds: 30))
+        .to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [bia.id], ring_cascade_seconds: 30)
+    end
+
+    it 'sem trava: a linha de frente da caixa só vale para quem está disponível; ninguém disponível = todos tocam juntos', :aggregate_failures do
+      settings.update!(agenda_config: { 'calls' => calls_cfg.deep_merge('lock' => { 'enabled' => false }) })
+      expect(described_class.ringing(account, call!(status: :ringing), [ana.id, bia.id], [bia.id])[:ring_first_user_ids]).to eq([])
+      online!(bia)
+      expect(described_class.ringing(account, call!(status: :ringing), [ana.id, bia.id],
+                                     [bia.id, ana.id])[:ring_first_user_ids]).to eq([bia.id, ana.id])
     end
 
     it 'com "só o responsável", toca só para ele; com a trava desligada, nada muda', :aggregate_failures do
@@ -64,6 +86,7 @@ RSpec.describe Crm::Calls::CallbackLock do
       expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [])[:ring_user_ids]).to eq([ana.id])
 
       settings.update!(agenda_config: { 'calls' => calls_cfg.deep_merge('lock' => { 'enabled' => false }) })
+      online!(bia)
       expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id]))
         .to eq(ring_user_ids: [bia.id], ring_first_user_ids: [bia.id])
     end
@@ -79,8 +102,14 @@ RSpec.describe Crm::Calls::CallbackLock do
       end
 
       it 'sem "só o responsável", os outros tocam na hora, sem esperar a cascata por ele' do
+        online!(bia)
         expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id]))
           .to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [bia.id])
+      end
+
+      it 'linha de frente da caixa também deslogada: todo mundo toca junto, na hora' do
+        expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [bia.id]))
+          .to eq(ring_user_ids: [bia.id, ana.id], ring_first_user_ids: [])
       end
 
       it 'a ligação PERDIDA continua travando a tela dele, para retornar quando voltar' do
@@ -90,13 +119,14 @@ RSpec.describe Crm::Calls::CallbackLock do
       end
     end
 
-    it 'com o sistema aberto mas marcado "offline" (ausente), vale como deslogado; "ocupado" ainda toca', :aggregate_failures do
+    # 21/10: "ocupado" também sai da linha de frente — com "só o responsável", a ligação cai para a caixa inteira
+    it 'com o sistema aberto mas marcado "offline" (ausente) ou "ocupado", vale como indisponível', :aggregate_failures do
       settings.update!(agenda_config: { 'calls' => calls_cfg.deep_merge('lock' => { 'exclusive' => true }) })
       OnlineStatusTracker.set_status(account.id, ana.id, 'offline')
       expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [])[:ring_user_ids]).to eq([bia.id, ana.id])
 
       OnlineStatusTracker.set_status(account.id, ana.id, 'busy')
-      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [])[:ring_user_ids]).to eq([ana.id])
+      expect(described_class.ringing(account, call!(status: :ringing), [bia.id], [])[:ring_user_ids]).to eq([bia.id, ana.id])
     end
 
     it 'se a presença não puder ser lida, segue como antes (responsável toca)' do

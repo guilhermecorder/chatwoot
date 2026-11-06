@@ -11,6 +11,8 @@ import {
   isConfirmed,
   isDeclined,
   confirmationTitle,
+  isRescheduled,
+  rescheduledTitle,
 } from 'dashboard/helper/cevicoAgenda';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 
@@ -179,6 +181,7 @@ const evClass = ev => ({
   'cv-ag-ev-tight': !ev.roomy,
   'cv-ag-ev-done': ev.task.status === 'done' && ev.task.attendance !== 'missed',
   'cv-ag-ev-missed': ev.task.attendance === 'missed',
+  'cv-ag-ev-resched': isRescheduled(ev.task), // item 368
 });
 </script>
 
@@ -225,6 +228,7 @@ const evClass = ev => ({
     >
       <span class="cv-ag-ev-time">{{ ev.time }}</span>
       <span class="cv-ag-ev-name">
+        <span v-if="isRescheduled(ev.task)" class="cv-ag-resched i-lucide-refresh-cw" :title="rescheduledTitle(ev.task)" />
         <span v-if="isConfirmed(ev.task)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(ev.task)" />
         <span v-else-if="isDeclined(ev.task)" class="cv-ag-conf cv-ag-conf-no i-lucide-badge-x" title="Respondeu NÃO ao lembrete — ligar para remarcar ou cancelar" />{{ ev.name }}
       </span>

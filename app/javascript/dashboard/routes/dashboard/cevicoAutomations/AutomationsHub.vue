@@ -24,6 +24,7 @@ import AiAgentsDashboard from './AiAgentsDashboard.vue';
 import ShadowReviewModal from './ShadowReviewModal.vue';
 import AgentTestModal from './AgentTestModal.vue';
 import GuidancesPanel from './GuidancesPanel.vue';
+import EducationEnginePanel from './EducationEnginePanel.vue';
 import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
 import NpsSurveyCard from './NpsSurveyCard.vue';
 import FollowupSmartCard from './FollowupSmartCard.vue';
@@ -117,6 +118,12 @@ watch(
     if (TABS.includes(tab)) activeTab.value = tab;
   }
 );
+// trocar de aba volta ao topo da tela (a página não remonta, então o
+// rolamento da aba anterior ficava — no celular parecia que nada mudou)
+const pageRoot = ref(null);
+watch(activeTab, () => {
+  nextTick(() => pageRoot.value?.scrollTo?.({ top: 0 }));
+});
 
 // garante que atendente concedido nunca fica numa aba que não é dele
 watch(
@@ -3390,6 +3397,7 @@ onUnmounted(() => {
 
 <template>
   <div
+    ref="pageRoot"
     class="cv-page bg-n-surface-1 flex flex-col h-full w-full overflow-y-auto"
     :style="cvVars"
   >
@@ -4461,6 +4469,9 @@ onUnmounted(() => {
             @test="openTestAgent"
             @applied="onGuidanceApplied"
           />
+
+          <!-- 🎓 item 389: MOTOR DE EDUCAÇÃO (aprendizados da caixa piloto) -->
+          <EducationEnginePanel :can-edit="canEditAgents" />
 
           <ShadowReviewModal
             v-if="shadowOpen"

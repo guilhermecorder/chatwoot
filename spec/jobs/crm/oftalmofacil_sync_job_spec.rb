@@ -23,7 +23,7 @@ RSpec.describe Crm::OftalmofacilSyncJob do
     )
   end
   let(:service) do
-    instance_double(Crm::OftalmofacilSyncService, call: result, heal_agenda!: nil, dedupe_tasks!: nil, refresh_upcoming!: nil)
+    instance_double(Crm::OftalmofacilSyncService, call: result, heal_agenda!: nil, dedupe_tasks!: nil, settle_cards!: [], refresh_upcoming!: nil)
   end
 
   before { allow(Crm::OftalmofacilSyncService).to receive(:new).and_return(service) }

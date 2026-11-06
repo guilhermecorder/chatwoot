@@ -13,6 +13,12 @@ class Api::V1::Accounts::Crm::AcquisitionCostsController < Api::V1::Accounts::Ba
     ).call
   end
 
+  # 📈 custo por fonte ao longo do tempo + faturamento × etapas (19/10/2026)
+  def timeline
+    since, until_at = standard_period_range || default_range
+    render json: Crm::AcquisitionTimelineService.new(account: Current.account, since: since, until_at: until_at).call
+  end
+
   private
 
   def default_range

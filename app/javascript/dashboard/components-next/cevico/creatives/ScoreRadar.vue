@@ -10,6 +10,18 @@ const props = defineProps({
   radar: { type: Object, required: true },
   color: { type: String, default: '#2563eb' },
   size: { type: Number, default: 240 },
+  // 19/10: a ficha da página usa a mesma teia com as palavras dela
+  labels: {
+    type: Object,
+    default: () => ({
+      mine: 'este criativo',
+      avg: 'média da conta',
+      record: 'recorde da conta (borda)',
+      isRecord: '🏆 este anúncio é o recorde da conta',
+      recordOf: 'recorde da conta',
+      none: 'a conta ainda não tem recorde aqui',
+    }),
+  },
 });
 
 const list = computed(() => props.radar.axes || []);
@@ -22,7 +34,7 @@ const datasets = computed(() => {
   const sets = [
     {
       key: 'ad',
-      label: 'este criativo',
+      label: props.labels.mine,
       color: props.color,
       values: pick('score', 0),
       texts: pick('value_text', ''),
@@ -31,7 +43,7 @@ const datasets = computed(() => {
   if (list.value.some(a => a.avg_score !== null && a.avg_score !== undefined))
     sets.push({
       key: 'avg',
-      label: 'média da conta',
+      label: props.labels.avg,
       color: '#94a3b8',
       dashed: true,
       values: pick('avg_score', 0),
@@ -40,7 +52,7 @@ const datasets = computed(() => {
   if (list.value.some(a => a.record_score))
     sets.push({
       key: 'record',
-      label: 'recorde da conta (borda)',
+      label: props.labels.record,
       color: '#d4a017',
       dashed: true,
       values: pick('record_score', 0),
@@ -73,14 +85,14 @@ const datasets = computed(() => {
           </span>
           <span class="col-span-3 text-[13px] text-n-slate-9">
             <template v-if="a.is_record">
-              🏆 este anúncio é o recorde da conta
+              {{ labels.isRecord }}
             </template>
             <template v-else-if="a.record_text">
-              recorde da conta {{ a.record_text }}
+              {{ labels.recordOf }} {{ a.record_text }}
               <template v-if="a.record_ad">({{ a.record_ad }})</template>
               · está em {{ a.score }}% do recorde
             </template>
-            <template v-else>a conta ainda não tem recorde aqui</template>
+            <template v-else>{{ labels.none }}</template>
           </span>
         </li>
       </ul>

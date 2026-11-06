@@ -119,7 +119,7 @@ RSpec.describe CrmAutomationFireJob do
 
       expect(GoogleAdsConversionsService).to have_received(:new).with(
         hash_including(event_name: 'fechou_cirurgia',
-                       params: { procedimento: 'refrativa', cevico_page: 'refrativa', value: 5700.0, currency: 'BRL' })
+                       params: { procedimento: 'refrativa', procedimento_origem: 'etiqueta_exigida', cevico_page: 'refrativa', value: 5700.0, currency: 'BRL' })
       )
     end
 
@@ -157,6 +157,99 @@ RSpec.describe CrmAutomationFireJob do
       log = Crm::AutomationLog.find_by(automation: automation, contact_id: contact.id)
       expect(log.status).to eq('failed')
       expect(log.error_message).to include('token vencido')
+    end
+
+    # 🎯 item 371 ----------------------------------------------------------
+    describe 'conversões direto no Google Ads (gclid, procedimento e valor)' do
+      let(:ads_service) { instance_double(Crm::GoogleAdsClickConversionService, call: { success: true, tied: true, mode: 'gclid' }) }
+
+      before { allow(Crm::GoogleAdsClickConversionService).to receive(:new).and_return(ads_service) }
+
+      it 'com a API do Ads ligada, a conversão vai direto ao Google Ads com valor, procedimento e página' do
+        allow(Crm::GoogleAdsClickConversionService).to receive(:enabled?).with(account).and_return(true)
+        allow(GoogleAdsConversionsService).to receive(:new)
+        Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stage, value: 5700, procedure_of_interest: 'Lasik')
+        contact.update!(additional_attributes: { 'page_ads' => { 'slug' => 'refrativa', 'gclid' => 'abc' } })
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'fechou_cirurgia' })
+
+        job.perform(automation.id, contact.id)
+
+        expect(Crm::GoogleAdsClickConversionService).to have_received(:new).with(
+          hash_including(account: account, event_name: 'fechou_cirurgia', contact: contact, value: 5700.0, currency: 'BRL',
+                         procedure: 'lasik', page: 'refrativa', order_id: "crm_#{automation.id}_#{contact.id}_#{Date.current.iso8601}")
+        )
+        expect(GoogleAdsConversionsService).not_to have_received(:new)
+        log = Crm::AutomationLog.find_by(automation: automation, contact_id: contact.id, status: 'fired')
+        expect(log.payload['conversion']).to include('via' => 'ads_api', 'procedimento' => 'lasik', 'procedimento_origem' => 'card',
+                                                     'value' => 5700.0, 'tied' => true, 'mode' => 'gclid')
+      end
+
+      it 'com a API desligada, segue pelo GA4 — agora com o procedimento descoberto no card' do
+        allow(Crm::GoogleAdsClickConversionService).to receive(:enabled?).and_return(false)
+        service = instance_double(GoogleAdsConversionsService, call: { success: true })
+        allow(GoogleAdsConversionsService).to receive(:new).and_return(service)
+        Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stage, procedure_of_interest: 'Catarata trifocal')
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'agendou_consulta' })
+
+        job.perform(automation.id, contact.id)
+
+        expect(GoogleAdsConversionsService).to have_received(:new).with(
+          hash_including(params: hash_including(procedimento: 'catarata_trifocal', procedimento_origem: 'card'))
+        )
+        expect(Crm::GoogleAdsClickConversionService).not_to have_received(:new)
+      end
+
+      it 'recusa do Google Ads vira FALHA no histórico' do
+        allow(Crm::GoogleAdsClickConversionService).to receive(:enabled?).and_return(true)
+        allow(ads_service).to receive(:call).and_return({ success: false, error: 'CLICK_NOT_FOUND' })
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'agendou_consulta' })
+
+        job.perform(automation.id, contact.id)
+
+        log = Crm::AutomationLog.find_by(automation: automation, contact_id: contact.id)
+        expect(log.status).to eq('failed')
+        expect(log.error_message).to include('CLICK_NOT_FOUND')
+      end
+
+      it '"compareceu à consulta" em qualquer coluna leva o valor da consulta realizada' do
+        allow(Crm::GoogleAdsClickConversionService).to receive(:enabled?).and_return(true)
+        account.tasks.create!(title: 'Consulta: Paciente', task_type: 'consulta', contact: contact, creator: create(:user, account: account),
+                              due_at: 3.days.ago, attendance: 'attended', procedure: 'CONSULTA | JÁ PAC | R$350')
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'compareceu_consulta' })
+
+        job.perform(automation.id, contact.id)
+
+        expect(Crm::GoogleAdsClickConversionService).to have_received(:new).with(hash_including(value: 350.0))
+      end
+
+      it 'fechamento sem valor no card leva o valor real da cirurgia no Oftalmofácil (cada olho é um item)' do
+        allow(Crm::GoogleAdsClickConversionService).to receive(:enabled?).and_return(true)
+        Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stage)
+        Crm::OftalmofacilSurgery.create!(account: account, contact_id: contact.id, item_token: 'od', status_kind: 'realizada',
+                                         procedure_name: 'FACECTOMIA + LIO TRIFOCAL OD', amount: 8490, surgery_date: 10.days.ago.to_date)
+        Crm::OftalmofacilSurgery.create!(account: account, contact_id: contact.id, item_token: 'oe', status_kind: 'agendada',
+                                         procedure_name: 'FACECTOMIA + LIO TRIFOCAL OE', amount: 8490, paid_amount: 8000,
+                                         surgery_date: 5.days.from_now.to_date)
+        Crm::OftalmofacilSurgery.create!(account: account, contact_id: contact.id, item_token: 'ex', status_kind: 'realizada',
+                                         procedure_name: 'EXAME', procedure_type: 'Exame', amount: 300, surgery_date: 20.days.ago.to_date)
+        automation = create_automation('google_ads_conversion', action_config: { 'ga4_event_name' => 'fechou_cirurgia' })
+
+        job.perform(automation.id, contact.id)
+
+        expect(Crm::GoogleAdsClickConversionService).to have_received(:new).with(hash_including(value: 16_490.0, procedure: 'catarata_trifocal'))
+      end
+
+      it 'Meta: Schedule/QualifiedLead levam o valor da consulta mesmo fora da coluna de agendamento' do
+        meta = instance_double(MetaAdsConversionsService, call: { success: true })
+        allow(MetaAdsConversionsService).to receive(:new).and_return(meta)
+        account.tasks.create!(title: 'Consulta: Paciente', task_type: 'consulta', contact: contact, creator: create(:user, account: account),
+                              due_at: 2.days.from_now, procedure: 'CONSULTA | JÁ PAC | R$350')
+        automation = create_automation('meta_ads_event', action_config: { 'meta_event_name' => 'QualifiedLead' })
+
+        job.perform(automation.id, contact.id)
+
+        expect(MetaAdsConversionsService).to have_received(:new).with(hash_including(custom_data: { value: 350.0, currency: 'BRL' }))
+      end
     end
 
     # item 345 -------------------------------------------------------------

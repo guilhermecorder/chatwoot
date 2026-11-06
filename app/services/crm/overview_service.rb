@@ -516,6 +516,16 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
     cur = booking_split(@since, @until_at)
     prev = booking_split(@prev_since, @prev_until)
     [
+      # 📅 19/10 (Guilherme: "tivemos 23 agendamentos hoje, mas ele conta apenas 5
+      # no novo; perto disso quero o volume total"): o TOTAL de consultas novas
+      # marcadas na Agenda no período (a régua da Agenda: conta consultas, não
+      # pessoas; retorno e pós-op entram; lançada, exame e tele ficam fora)
+      # 📅 item 385: só a PRIMEIRA consulta; retorno e pós-op aparecem na linha de baixo
+      volume_tasks('marcadas', 'Consultas marcadas', 'consultas', ->(s, u) { marcadas_na_agenda(s, u) },
+                   'Primeiras consultas (avaliação) criadas na Agenda no período, pela data em que foram marcadas, não canceladas. ' \
+                   'Retorno, pós-op, exame, teleconsulta e consulta lançada (já estava marcada fora do sistema) ficam fora. ' \
+                   'Conta consultas, não pessoas.',
+                   extra: retornos_extra),
       volume_agendamentos(cur, prev),
       volume_tasks('reagendamentos', 'Reagendamentos', 'consultas', ->(s, u) { consultas_todas.where(REAGENDADA_SQL, s: s, u: u) },
                    'Consultas que mudaram de dia ou hora no período (carimbo da remarcação — tocar na consulta não conta). ' \
@@ -546,11 +556,24 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
     lens.tasks(account.tasks).where(task_type: 'consulta', canceled_at: nil, due_at: since..until_at)
   end
 
-  # consulta NOVA na Agenda (a mesma régua de "Marcadas na Agenda" do Meu Painel, item 217/233)
+  # consulta NOVA na Agenda (a mesma régua de "Consultas marcadas" do Meu Painel, item 217/233/385)
   def marcadas_na_agenda(since, until_at)
     lens.tasks(account.tasks).bookings.where(task_type: 'consulta', created_at: since..until_at, canceled_at: nil)
         .where('tasks.due_at IS NULL OR tasks.due_at >= tasks.created_at')
-        .where("tasks.modality IS NULL OR tasks.modality NOT IN ('teleconsulta', 'exames')")
+        .primeira_consulta
+  end
+
+  # retorno e pós-op marcados no período (fora da conta principal, mas visíveis)
+  def retornos_extra
+    base = lens.tasks(account.tasks).bookings.where(task_type: 'consulta', created_at: @since..@until_at, canceled_at: nil)
+    counts = base.retorno_ou_pos_op.group(:modality).count
+    outros = base.where(modality: %w[teleconsulta exames]).count
+    [
+      { label: 'Retornos marcados no período (fora da conta acima)', valor: counts['retorno'].to_i },
+      { label: 'Pós-operatórios marcados no período (fora da conta acima)', valor: counts['pos_op'].to_i },
+      { label: 'Exames e teleconsultas marcados no período (fora da conta acima)', valor: outros },
+      { label: 'Total criado na Agenda no período (tudo junto)', valor: base.count }
+    ]
   end
 
   def volume_agendamentos(cur, prev) # rubocop:disable Metrics/AbcSize
@@ -574,11 +597,11 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
     }
   end
 
-  def volume_tasks(key, label, medida, scope_for, formula, motivo: false, tipo: :modalidade) # rubocop:disable Metrics/ParameterLists
+  def volume_tasks(key, label, medida, scope_for, formula, motivo: false, tipo: :modalidade, extra: nil) # rubocop:disable Metrics/ParameterLists
     scope = scope_for.call(@since, @until_at)
     tasks = scope.includes(:contact).limit(QUEBRA_LIMIT).to_a
     {
-      key: key, label: label, medida: medida,
+      key: key, label: label, medida: medida, extra: extra,
       valor: scope.count, anterior: scope_for.call(@prev_since, @prev_until).count,
       # sem cadastro (consulta sem paciente ligado) conta como 1 pessoa cada
       pessoas_distintas: scope.where.not(contact_id: nil).distinct.count(:contact_id) + scope.where(contact_id: nil).count,

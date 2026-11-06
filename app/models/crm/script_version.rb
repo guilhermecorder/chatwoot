@@ -33,7 +33,8 @@
 class Crm::ScriptVersion < ApplicationRecord
   self.table_name = 'crm_script_versions'
 
-  KINDS = %w[script stage].freeze
+  # 'motor' (item 389) → content = { 'rules' => ai_config['motor']['rules'] }
+  KINDS = %w[script stage motor].freeze
   SCRIPT_KEYS = Crm::CevicoScript::SECTIONS.pluck('key').freeze
 
   belongs_to :account
@@ -60,6 +61,8 @@ class Crm::ScriptVersion < ApplicationRecord
     cfg = CrmSetting.find_by(account: account)&.ai_config || {}
     if kind == 'stage'
       { 'prompt' => cfg.dig('agents', agent_key, 'prompt').to_s }
+    elsif kind == 'motor'
+      { 'rules' => cfg.dig('motor', 'rules').to_s }
     else
       (cfg['script'] || {}).slice(*SCRIPT_KEYS).transform_values(&:to_s)
     end
@@ -123,6 +126,8 @@ class Crm::ScriptVersion < ApplicationRecord
     self.class.snapshot!(account, kind: kind, agent_key: agent_key, note: "antes de voltar para a versão ##{id}", by: by)
     if kind == 'stage'
       self.class.write_stage_prompt!(account, agent_key, content['prompt'])
+    elsif kind == 'motor'
+      Crm::EducationEngine.write_rules!(account, content['rules'])
     else
       self.class.write_script!(account, content)
     end

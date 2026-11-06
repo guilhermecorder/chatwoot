@@ -28,6 +28,34 @@ namespace :crm do
       get :templates
     end
   end
+  # 📣 item 381: plano de reativação em fatias (uma mãe por conta)
+  resource :reactivation_plan, only: [:show, :update] do
+    post :simulate
+    post :activate
+    post :pause
+    post :run_now
+    # 🎛️ item 382: controle do lote
+    get :preview_next
+    post :send_batch
+    get :queue
+    get :batches
+  end
+  # 🧪 item 383: segmentação da base + testes de mensagem
+  resources :segments, only: [:index, :show, :create, :update, :destroy] do
+    collection do
+      get :base
+      post :preview
+      get :dashboard
+    end
+    member do
+      post :start
+      post :pause
+      post :tick_now
+      get :results
+      get :members
+      post :escalar
+    end
+  end
   resources :message_automations, only: [:index, :create, :update, :destroy] do
     member { get :preview_eligible }
   end
@@ -154,6 +182,9 @@ namespace :crm do
     post :copywriter_content
     post :update_google_ads
     post :test_google_ads
+    # 🎯 item 371: conversões direto no Google Ads (gclid)
+    post :prepare_google_ads
+    post :test_google_ads_api
     post :test_search_console
     post :update_sheets
     post :test_sheets
@@ -177,6 +208,7 @@ namespace :crm do
     post :update_agenda
     get :agenda_ai_preview # item 307: regras e vagas que a IA recebe
     post :update_blocked_days # item 267: qualquer pessoa da equipe fecha/reabre dias
+    post :update_agenda_locks # item 366: cadeado de horário e fechar médico (nó agenda.bloqueios)
     post :agenda_backfill
     # Configurações → Domínio (público das páginas/formulários)
     get :public_domain
@@ -217,6 +249,9 @@ namespace :crm do
     post :update_price_table
     # investimento mensal por caixa (ROI/CAC do Dashboard CRM)
     post :update_inbox_investments
+    # 📣 item 380: mensagens prontas da Reativação de fim de ano (ler = time; editar = campanhas)
+    get :reactivation_messages
+    post :update_reactivation_message
   end
   # ✍️ rodada 191: orientações dos atendentes de IA + histórico do Roteiro (só admin)
   resources :agent_guidances, only: %i[index create update destroy], controller: 'agent_guidances' do
@@ -228,6 +263,11 @@ namespace :crm do
   end
   resources :script_versions, only: [:index], controller: 'script_versions' do
     member { post :restore }
+  end
+  # 🎓 item 389: Motor de Educação (lê as conversas de ontem, sugere aprendizados)
+  resource :education_engine, only: [:show, :update], controller: 'education_engines' do
+    put :rules
+    post :run_now
   end
   # Feedback de bugs do time (vira card 🐞 no board do admin)
   resources :bug_reports, only: [:create], controller: 'bug_reports'
@@ -256,6 +296,8 @@ namespace :crm do
     post :ai_suggestions
     # 16/10: foto nova do Search Console agora (botão "Atualizar agora")
     post :search_console_refresh
+    # 02/11: QUEM SÃO os leads do período (nome, página, origem, caixa, conversa)
+    get :leads
   end
   # Análise de Páginas + montador de funis (PÁGINAS PRO, admin)
   resource :pages_dashboard, only: [:show], controller: 'pages_dashboards' do
@@ -392,7 +434,9 @@ namespace :crm do
     end
   end
   # 💰 Financeiro & CAC (item 318): CAC de anúncios × total, canais, campanhas
-  resource :acquisition_cost, only: [:show], controller: 'acquisition_costs'
+  resource :acquisition_cost, only: [:show], controller: 'acquisition_costs' do
+    get :timeline # 📈 custo por fonte ao longo do tempo + faturamento × etapas
+  end
   # 📄 Agente de Páginas (item 353): placar, pódio, linha do tempo e fila de recomendações das páginas
   resource :page_agent, only: [:show], controller: 'page_agent' do
     get :timeline
@@ -424,6 +468,9 @@ namespace :crm do
   get 'oftalmofacil/items', to: 'oftalmofacil#items'
   get 'oftalmofacil/patients', to: 'oftalmofacil#patients'
   get 'oftalmofacil/items/:id', to: 'oftalmofacil#show'
+  # ponta 2 e 3 (22/10): casamento dos pacientes + cards em Cirurgia Agendada
+  get 'oftalmofacil/matching', to: 'oftalmofacil#matching'
+  get 'oftalmofacil/surgery_cards', to: 'oftalmofacil#surgery_cards'
   # 🔎 item 249: conferência de um dia (hub × Agenda) + trazer o que faltou
   get 'oftalmofacil/day_check', to: 'oftalmofacil#day_check'
   post 'oftalmofacil/reconcile_day', to: 'oftalmofacil#reconcile_day'

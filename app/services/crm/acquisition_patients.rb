@@ -16,11 +16,14 @@
 #             cobrado) + valor do card de quem é novo e não tem valor lá
 class Crm::AcquisitionPatients
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
-  NOT_SURGERY = /exam|consult|p[o]s.?op|pos.?operat|retorno/
+  NOT_SURGERY = Crm::OftalmofacilSurgery::NOT_SURGERY # ponta 5: uma régua só
 
   Patient = Struct.new(:key, :contact_id, :name, :first_on, :source, :partner, keyword_init: true)
 
   attr_reader :firsts, :partner_result
+  # [[chave, data, valor]] — cada real da receita COM a data em que entrou
+  # (o gráfico "Faturamento × etapas" soma por semana/mês)
+  attr_reader :revenue_events
 
   def initialize(account, from:, to:)
     @account = account
@@ -30,6 +33,7 @@ class Crm::AcquisitionPatients
     @own = Crm::PartnerGuard.own_provider_name(account)
     @firsts = {}
     @revenue = Hash.new(0.0)
+    @revenue_events = []
     @partner_result = 0.0
     load_crm
     load_agenda
@@ -112,7 +116,7 @@ class Crm::AcquisitionPatients
 
   def load_oftalmofacil # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
     Crm::OftalmofacilSurgery.where(account_id: @account.id, status_kind: Crm::AdFunnelSteps::OF_DONE)
-                            .where(surgery_date: ...Time.zone.today)
+                            .where(surgery_date: ...Crm::OftalmofacilSurgery.today_sp) # ponta 5: o "hoje" de São Paulo
                             .pluck(:contact_id, :patient_cpf, :patient_name, :surgery_date, :provider_name,
                                    :procedure_type, :paid_amount, :amount, :clinic_price, :profit)
                             .each do |cid, cpf, name, on, provider, type, paid, amount, clinic, profit| # rubocop:disable Metrics/ParameterLists
@@ -125,6 +129,7 @@ class Crm::AcquisitionPatients
 
       value = paid.to_f.positive? ? paid.to_f : amount.to_f
       @revenue[key] += value
+      @revenue_events << [key, on, value]
       @partner_result += amount.to_f - clinic.to_f - profit.to_f if partner
     end
   end
@@ -136,12 +141,14 @@ class Crm::AcquisitionPatients
 
     Crm::Contact.joins(:pipeline).where(crm_pipelines: { account_id: @account.id }, contact_id: ids)
                 .group(:contact_id).maximum(:value)
-                .each { |cid, value| @revenue[cid] += value.to_f }
+                .each do |cid, value|
+      @revenue[cid] += value.to_f
+      @revenue_events << [cid, firsts[cid].first_on, value.to_f]
+    end
   end
 
   def surgery_type?(type)
-    t = type.to_s.unicode_normalize(:nfd).gsub(/\p{Mn}/, '').downcase
-    t.blank? || !t.match?(NOT_SURGERY)
+    Crm::OftalmofacilSurgery.surgery_type?(type)
   end
 
   def of_key(cpf, name)

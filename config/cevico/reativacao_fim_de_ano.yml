@@ -1,0 +1,426 @@
+# 📣 CAMPANHA DE REATIVAÇÃO DE FIM DE ANO (item 380, 03/11/2026)
+#
+# Mensagens PRONTAS de WhatsApp para reativar a base, por público (coluna do
+# CRM, em ordem de prioridade 1 → 6) e por frente (refrativa a laser, lentes
+# intraoculares, catarata). Este arquivo é o ORIGINAL; o que o Guilherme
+# editar na tela (Marketing → Campanhas → Reativação) fica por cima, em
+# agenda_config['reactivation_messages'] (por id), com "Restaurar original".
+#
+# Voz (nucleo-criativo/marca/cevico.md): curta, simples, "a gente", informa
+# primeiro e convida depois; sem superlativo, sem promessa de resultado, sem
+# "última vaga/desconto"; "investimento", nunca preço; valores só de
+# provas/fatos.md e sempre com a unidade; autoridade = equipe + estrutura da
+# CEVICO; "só indicamos quando é seguro e eficaz, com margem".
+# Variável: {{nome}} = primeiro nome do paciente (no modelo da Meta vira {{1}}).
+campanha:
+  titulo: Reativação de fim de ano
+  resumo: >-
+    Reativar quem já falou com a CEVICO e ainda não operou: do mais quente (teve
+    indicação e orçamento, não fechou) ao mais frio (chegou e sumiu). A premissa
+    de todas as mensagens é verdadeira e precisa continuar verdadeira: o
+    investimento será atualizado em janeiro, e quem opera ainda este ano fica com
+    as condições de hoje.
+  variavel: "{{nome}}"
+  regras:
+    - "Cada mensagem é UMA ideia: ou o fim do ano, ou a dúvida que ficou, ou a família."
+    - "Valores só os confirmados: PRK 4.900 e LASIK 5.700 reais (dois olhos, até 10x sem juros); Artisan 11.900 reais por olho; avaliação 150 reais com biometria, microscopia, fundo de olho e tomografia da córnea inclusos. Catarata: sem valor na mensagem (por olho, a equipe informa)."
+    - "Nunca: melhor, garantia, 100%, sem risco, cura, zerar o grau, última vaga, promoção, desconto, antes-e-depois."
+    - "A mensagem sai como MODELO aprovado pela Meta (categoria Marketing): {{nome}} vira {{1}}."
+
+frentes:
+  - key: refrativa
+    titulo: Refrativa a laser
+    sub: PRK e LASIK — miopia, astigmatismo, hipermetropia
+    cor: "#2563EB"
+    icone: i-lucide-zap
+  - key: lentes
+    titulo: Lentes intraoculares
+    sub: Artisan (grau alto) e faco refrativa / trifocal (vista cansada)
+    cor: "#7C3AED"
+    icone: i-lucide-circle-dot
+  - key: catarata
+    titulo: Catarata
+    sub: Cirurgia de catarata com lente definitiva
+    cor: "#0F766E"
+    icone: i-lucide-sun
+
+publicos:
+  - key: nao_fechou
+    prioridade: 1
+    coluna: Não Fechou Ainda
+    coluna_regex: "n[aã]o fechou"
+    titulo: Não fechou ainda
+    quem: Passou pela consulta, tem indicação e orçamento, mas não marcou a cirurgia.
+    estrategia: >-
+      O passo difícil já foi dado. A mensagem lembra que a avaliação está feita e
+      válida, traz o fim do ano como momento natural e abre espaço para a dúvida
+      que segurou a decisão. Nunca cobra; convida.
+    quando: Primeira rodada em novembro; segunda 15 dias depois, com a mensagem da dúvida.
+    mensagens:
+      refrativa:
+        - id: p1-refrativa-1
+          titulo: Fechar o ano enxergando
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você já passou pela avaliação e a cirurgia é indicada para você — só faltou a data.
+            Até dezembro ainda temos datas no centro cirúrgico, e quem opera este ano fica com as condições de investimento de hoje (em janeiro elas serão atualizadas).
+            Quer que eu te passe as opções?
+        - id: p1-refrativa-2
+          titulo: O custo de adiar mais um ano
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Todo começo de ano é a mesma cena: procurar os óculos antes de conseguir enxergar o despertador.
+            A sua avaliação já está feita e válida. Se quiser, eu te explico como ficaria em até 10x sem juros, sem compromisso.
+            Posso?
+        - id: p1-refrativa-3
+          titulo: A dúvida que ficou
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Às vezes o que segura a decisão é uma dúvida que ninguém respondeu: o pós, o dia da cirurgia, o investimento.
+            Me conta qual é a sua que eu respondo com calma. E se fizer sentido operar ainda este ano, a gente vê a melhor data juntos.
+      lentes:
+        - id: p1-lentes-1
+          titulo: Ainda dá tempo este ano
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Na sua avaliação ficou definido que a lente intraocular é o caminho seguro e eficaz para o seu grau.
+            Ainda dá para fazer este ano: temos datas em novembro e dezembro, e o investimento de hoje vale para quem opera até o fim do ano.
+            Quer ver as opções?
+        - id: p1-lentes-2
+          titulo: Um olho de cada vez
+          texto: |
+            Oi, {{nome}}, é da CEVICO. Grau alto cansa: a lente grossa, o óculos pesado, a lente de contato que seca no fim do dia.
+            A sua indicação foi pensada para isso, e a decisão pode ser em etapas, um olho de cada vez.
+            Quer que eu te explique o investimento por olho e as datas?
+        - id: p1-lentes-3
+          titulo: Não deixar parado
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Fiquei de te acompanhar depois da avaliação e não quero que a sua decisão fique parada por falta de resposta.
+            Qual foi a dúvida que ficou: a lente, a recuperação, o investimento? Me conta por aqui que eu explico, e se quiser fechamos o ano com isso resolvido.
+      catarata:
+        - id: p1-catarata-1
+          titulo: Antes das festas
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. A sua cirurgia de catarata já está indicada e a equipe só aguarda a sua data.
+            Ainda temos horários no centro cirúrgico antes das festas, e quem opera este ano fica com as condições de investimento de hoje.
+            Posso te passar as datas por aqui?
+        - id: p1-catarata-2
+          titulo: A catarata não espera o ano virar
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. A catarata vai embaçando a visão aos poucos, e dirigir à noite ou ler fica cada vez mais difícil.
+            A cirurgia é feita pela nossa equipe de cirurgiões de catarata, com mais de 30.000 cirurgias cada um, com lentes importadas Rayner.
+            Quer que eu explique como fica o investimento por olho?
+        - id: p1-catarata-3
+          titulo: Decidir com a família
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se a decisão passa pela família, podemos conversar com quem vai te acompanhar (filho, filha, esposo ou esposa) e tirar todas as dúvidas juntos, por aqui ou por ligação.
+            Me diz o melhor horário que a gente combina.
+
+  - key: indicacao
+    prioridade: 2
+    coluna: Indicação de Cirurgia
+    coluna_regex: "indica[çc][aã]o de cirurgia"
+    titulo: Indicação de cirurgia
+    quem: Fez a consulta e o médico indicou a cirurgia; ainda não falou de data.
+    estrategia: >-
+      Reforçar o que o médico já confirmou (é seguro e eficaz, com margem) e
+      transformar a indicação em próximo passo: investimento e data. Responder a
+      pergunta que mais aparece depois da consulta, a recuperação.
+    quando: Até 7 dias depois da consulta; se não responder, a mensagem da recuperação 10 dias depois.
+    mensagens:
+      refrativa:
+        - id: p2-refrativa-1
+          titulo: O passo mais difícil já foi dado
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Na sua consulta o médico confirmou: a cirurgia é segura e eficaz para o seu caso, com margem de segurança.
+            Esse é o passo mais difícil, e ele já está dado. Quer que eu te mostre como ficaria o investimento e as datas ainda este ano?
+        - id: p2-refrativa-2
+          titulo: A agenda de dezembro
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Seus exames continuam válidos e a indicação está registrada.
+            Entre novembro e dezembro a agenda cirúrgica costuma fechar rápido, então quis te avisar antes: quem opera este ano fica com as condições de investimento de hoje.
+            Te passo as opções?
+        - id: p2-refrativa-3
+          titulo: E a recuperação?
+          texto: |
+            Oi, {{nome}}! Da CEVICO. A pergunta que mais ouvimos depois da consulta: "e a recuperação?"
+            No LASIK, em geral 24 a 48 horas. No PRK, de 3 a 7 dias para voltar ao trabalho. Dá para encaixar antes das férias.
+            Quer que eu veja uma data com você?
+      lentes:
+        - id: p2-lentes-1
+          titulo: Existe um caminho para o seu grau
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. O médico indicou a lente intraocular para o seu grau, e isso quer dizer que existe um caminho seguro e eficaz para você depender menos dos óculos.
+            Posso te explicar como funciona o investimento por olho e as datas deste ano?
+        - id: p2-lentes-2
+          titulo: Primeiro olho ainda este ano
+          texto: |
+            Oi, {{nome}}, é da CEVICO. A lente intraocular é feita um olho de cada vez, com retorno no dia seguinte.
+            Muita gente opera o primeiro olho ainda este ano e o segundo logo depois. Quer que eu te mostre como fica a sequência e o investimento?
+        - id: p2-lentes-3
+          titulo: A dúvida sobre a lente
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Depois da consulta é normal ficar uma dúvida sobre a lente: se é definitiva, como é a adaptação, como é o dia da cirurgia.
+            Me conta a sua que eu respondo com calma. E se fizer sentido, vemos uma data ainda em 2026.
+      catarata:
+        - id: p2-catarata-1
+          titulo: Lente definitiva, equipe experiente
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Na sua consulta ficou indicada a cirurgia de catarata. A lente que entra no lugar da catarata é definitiva, e a nossa equipe usa lentes importadas Rayner.
+            Posso te explicar como fica o investimento por olho e as datas ainda este ano?
+        - id: p2-catarata-2
+          titulo: Recuperação tranquila
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. A recuperação da cirurgia de catarata costuma ser tranquila: no dia seguinte você já vem para o retorno, sem custo.
+            Se quiser operar antes das festas, ainda temos datas. Quer que eu veja com você?
+        - id: p2-catarata-3
+          titulo: Chame a família para a conversa
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se alguém da família for te acompanhar na decisão, me passa o contato ou chama a pessoa aqui na conversa: a gente explica tudo de novo, sem pressa.
+            Combinado?
+
+  - key: nao_foi
+    prioridade: 3
+    coluna: Não Foi a Consulta
+    coluna_regex: "n[aã]o foi"
+    titulo: Não foi à consulta
+    quem: Marcou a avaliação e não apareceu.
+    estrategia: >-
+      Zero cobrança. Remarcar é simples, os exames continuam inclusos, as duas
+      unidades estão à disposição. A terceira mensagem abre a dúvida que fez a
+      pessoa não ir.
+    quando: 2 a 3 dias depois da falta; a da dúvida 1 semana depois.
+    mensagens:
+      refrativa:
+        - id: p3-refrativa-1
+          titulo: A vida corre, a gente remarca
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Vi que a sua avaliação não aconteceu. Acontece, a vida corre.
+            Os exames (biometria, microscopia, fundo de olho e tomografia da córnea) continuam inclusos nos 150 reais.
+            Quer escolher um novo dia? Tenho horários na Paulista e no Tatuapé.
+        - id: p3-refrativa-2
+          titulo: Manhã ou tarde?
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Sem cobrança nenhuma: se o dia não deu certo, a gente remarca.
+            A avaliação é o que mostra se a cirurgia é segura e eficaz para você, e quem decide ainda este ano fica com as condições de investimento de hoje.
+            Que período fica melhor: manhã ou tarde?
+        - id: p3-refrativa-3
+          titulo: A dúvida que impediu
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Às vezes a pessoa não vai porque ficou uma dúvida antes: "será que eu posso?", "quanto é?", "dói?".
+            Me conta qual é a sua que eu te respondo por aqui. Depois, se quiser, a gente vê um dia que caiba na sua rotina.
+      lentes:
+        - id: p3-lentes-1
+          titulo: O seu caso continua tendo caminho
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. A sua avaliação ficou para trás, mas o seu caso continua tendo caminho: para grau alto ou vista cansada, a lente intraocular pode ser a solução segura.
+            Quer remarcar? Tenho horários na Paulista e no Tatuapé, com os exames inclusos nos 150 reais.
+        - id: p3-lentes-2
+          titulo: "Não sabia que era possível"
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Quando o grau é alto, muita gente desiste antes de saber se pode, e depois nos conta: "não sabia que era possível".
+            É a avaliação que responde isso. Posso te passar as datas desta semana?
+        - id: p3-lentes-3
+          titulo: Um dia que caiba na rotina
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se o que pesou foi o tempo, me diz qual dia da semana é mais tranquilo para você que eu encaixo a avaliação, com todos os exames inclusos.
+            E se quiser decidir ainda este ano, você fica com as condições de investimento de hoje.
+      catarata:
+        - id: p3-catarata-1
+          titulo: Está tudo bem?
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. A sua consulta de catarata não aconteceu e queria saber se está tudo bem.
+            Podemos remarcar para um horário mais fácil, na Paulista ou no Tatuapé. Se alguém for te acompanhar, é só avisar que a gente organiza.
+            Qual dia fica melhor?
+        - id: p3-catarata-2
+          titulo: O embaçado vira "normal"
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. A catarata piora devagar, e a visão embaçada vai virando "normal" sem a gente perceber.
+            Vale fazer a avaliação antes do fim do ano: os exames já estão inclusos nos 150 reais. Quer que eu veja um novo dia?
+        - id: p3-catarata-3
+          titulo: Pergunte o investimento antes
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se a dúvida for o investimento da cirurgia, pode perguntar por aqui: a gente explica o valor por olho e as formas de pagamento antes de você marcar qualquer coisa.
+            Fica à vontade.
+
+  - key: desmarcou
+    prioridade: 4
+    coluna: Desmarcou a Consulta
+    coluna_regex: "desmarcou"
+    titulo: Desmarcou a consulta
+    quem: Marcou a avaliação e desmarcou (às vezes sem remarcar).
+    estrategia: >-
+      Retomar o que a pessoa mesma pediu, com um jeito fácil de remarcar
+      (período + unidade). Acolher a insegurança, que é o motivo mais comum.
+    quando: 1 semana depois de desmarcar; a da insegurança 10 dias depois.
+    mensagens:
+      refrativa:
+        - id: p4-refrativa-1
+          titulo: Fechar o ano com a resposta
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você desmarcou a avaliação e eu fiquei de te chamar quando ficasse melhor.
+            Que tal fechar o ano com essa resposta? A avaliação de 150 reais, com os exames inclusos, mostra se a cirurgia é segura e eficaz para você.
+            Tenho horários nesta e na próxima semana.
+        - id: p4-refrativa-2
+          titulo: Remarcar é simples
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Remarcar é simples: me diz o período (manhã ou tarde) e a unidade (Paulista ou Tatuapé) que eu te passo as opções.
+            E um detalhe que vale saber: quem decide ainda este ano fica com as condições de investimento de hoje.
+        - id: p4-refrativa-3
+          titulo: Se bateu uma insegurança
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se desmarcou porque bateu uma insegurança, é normal: o medo mais comum é "e se não der certo?".
+            A avaliação existe justamente para isso. Só indicamos a cirurgia quando é segura e eficaz, com margem; se não for, você entende o porquê e sai sabendo as suas alternativas.
+            Quer que eu te explique como ela funciona antes de remarcar?
+      lentes:
+        - id: p4-lentes-1
+          titulo: Retomar a avaliação
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Fiquei de retomar com você a avaliação para a lente intraocular.
+            Posso te passar os horários desta e da próxima semana, na Paulista ou no Tatuapé? Os exames estão inclusos nos 150 reais.
+        - id: p4-lentes-2
+          titulo: Qual lente é a sua
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Para grau alto ou vista cansada, a avaliação é o passo que define qual lente é a sua e se o caminho é seguro para o seu olho.
+            Dá para fazer ainda este ano. Que dia é mais tranquilo para você?
+        - id: p4-lentes-3
+          titulo: Vale a pena para o meu grau?
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se a dúvida é se vale a pena para o seu grau, me conta por aqui o que você usa hoje (óculos, lente de contato, os dois) que eu te oriento antes de remarcar.
+            Sem compromisso.
+      catarata:
+        - id: p4-catarata-1
+          titulo: Um novo dia antes do fim do ano
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você precisou desmarcar a consulta de catarata, e eu quis voltar para ver se conseguimos um novo dia antes do fim do ano.
+            Pode ser na Paulista ou no Tatuapé, no horário que for melhor para você ou para quem te acompanha.
+        - id: p4-catarata-2
+          titulo: Dirigir à noite, ler de novo
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Quando a catarata avança, dirigir à noite e ler ficam mais difíceis. A cirurgia devolve nitidez com uma lente definitiva.
+            A consulta de avaliação é o primeiro passo, com os exames inclusos. Quer que eu veja uma data com você?
+        - id: p4-catarata-3
+          titulo: Por ligação, se preferir
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se preferir, posso ligar para combinar a consulta com calma, ou falar com a pessoa da família que te ajuda nessas coisas.
+            Me diz o que é mais fácil para você.
+
+  - key: orcamento
+    prioridade: 5
+    coluna: Envio de Orçamento
+    coluna_regex: "or[çc]amento"
+    titulo: Envio de orçamento
+    quem: Recebeu o investimento pelo WhatsApp e não marcou a avaliação.
+    estrategia: >-
+      O orçamento já foi dado; o próximo passo é a avaliação. Lembrar o
+      investimento (com unidade) e que ele será atualizado em janeiro, explicar o
+      que a avaliação inclui, e abrir a conversa sobre o que segurou.
+    quando: Primeira rodada em novembro para quem recebeu o orçamento há mais de 7 dias; segunda 15 dias depois.
+    mensagens:
+      refrativa:
+        - id: p5-refrativa-1
+          titulo: O investimento de hoje
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você recebeu o nosso investimento há um tempo: PRK 4.900 ou LASIK 5.700 reais para os dois olhos, em até 10x sem juros.
+            Em janeiro esses valores serão atualizados. Quem faz a avaliação e opera ainda este ano fica com as condições de hoje.
+            Quer que eu veja um dia para a sua avaliação?
+        - id: p5-refrativa-2
+          titulo: O próximo passo
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. O próximo passo depois do orçamento é a avaliação de 150 reais, com biometria, microscopia, fundo de olho e tomografia da córnea inclusos.
+            É ela que diz se a cirurgia é segura e eficaz para você. Tenho horários nesta semana na Paulista e no Tatuapé. Qual fica melhor?
+        - id: p5-refrativa-3
+          titulo: O que te segurou?
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Pensando no seu caso: se o investimento pesou, podemos ver juntos a opção que cabe (PRK ou LASIK, em até 10x sem juros). Se ficou dúvida sobre o procedimento, eu explico.
+            Me conta o que te segurou que a gente resolve por aqui.
+      lentes:
+        - id: p5-lentes-1
+          titulo: Por olho, um de cada vez
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você recebeu o investimento da lente intraocular, que é por olho e pode ser feito um olho de cada vez.
+            Em janeiro os valores serão atualizados; quem decide ainda este ano fica com as condições de hoje. Quer que eu veja uma data para a sua avaliação?
+        - id: p5-lentes-2
+          titulo: A avaliação confirma a lente
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. A avaliação (150 reais, exames inclusos) é o que confirma qual lente é a sua e se o caminho é seguro.
+            Tenho horários nesta semana. Qual unidade é melhor: Paulista ou Tatuapé?
+        - id: p5-lentes-3
+          titulo: Se ficou acima do esperado
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se o orçamento ficou acima do que você esperava, me conta: às vezes existe outra técnica indicada para o seu grau, e só a avaliação diz.
+            Sem compromisso, só para você decidir com clareza.
+      catarata:
+        - id: p5-catarata-1
+          titulo: Condições de hoje
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você recebeu o investimento da cirurgia de catarata (por olho). Em janeiro os valores serão atualizados, e quem opera ainda este ano fica com as condições de hoje.
+            O próximo passo é a consulta de avaliação, de 150 reais com os exames inclusos. Posso te passar as datas?
+        - id: p5-catarata-2
+          titulo: Como é o dia da cirurgia
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. A cirurgia de catarata é feita pela nossa equipe de cirurgiões, com mais de 30.000 cirurgias cada um, e lentes importadas Rayner, definitivas.
+            Quer que eu explique como funciona o dia da cirurgia e o pós?
+        - id: p5-catarata-3
+          titulo: Explicar para a família
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se a decisão envolve a família, podemos explicar o investimento e as formas de pagamento para quem vai te acompanhar, por aqui ou por ligação.
+            Me diz como prefere.
+
+  - key: novos
+    prioridade: 6
+    coluna: Novos Contatos
+    coluna_regex: "novos contatos"
+    titulo: Novos contatos
+    quem: Chegou pelo WhatsApp, trocou poucas mensagens e sumiu.
+    estrategia: >-
+      Começar do zero com leveza: a pergunta "será que eu posso?", a cena do
+      fim de ano, a autoridade da equipe. Sem orçamento na mensagem (o processo
+      de vendas entrega o investimento na conversa).
+    quando: Para quem chegou há mais de 3 dias e não respondeu; só 1 mensagem por quinzena.
+    mensagens:
+      refrativa:
+        - id: p6-refrativa-1
+          titulo: Será que eu posso?
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você falou com a gente sobre a cirurgia de miopia e eu fiquei de te acompanhar.
+            A primeira pergunta de quase todo mundo é "será que eu posso?", e a resposta vem da avaliação de 150 reais, com os exames inclusos.
+            Quer que eu te explique como funciona?
+        - id: p6-refrativa-2
+          titulo: Dezembro para operar, janeiro para curtir
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Fim de ano é quando muita gente decide fechar o ciclo dos óculos: dezembro para operar, janeiro para a praia sem lente de contato.
+            Quem decide ainda este ano fica com as condições de investimento de hoje. Quer que eu te conte como funciona?
+        - id: p6-refrativa-3
+          titulo: O passo zero
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Nossos cirurgiões somam mais de 25.000 cirurgias e o laser é o Schwind Amaris 1050. Mas o que mais importa é o passo zero: só indicamos a cirurgia quando é segura e eficaz para você.
+            Me conta: você usa óculos ou lente há quanto tempo?
+      lentes:
+        - id: p6-lentes-1
+          titulo: Quando o grau é alto
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você nos procurou sobre o seu grau. Quando ele é alto, ou quando a vista cansada chegou, a lente intraocular costuma ser o caminho.
+            A avaliação de 150 reais, com os exames inclusos, é o que diz se é o seu caso. Quer que eu te explique como funciona?
+        - id: p6-lentes-2
+          titulo: Existe lente para o seu caso
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. Muita gente nos conta que "não sabia que era possível" para o grau dela. Hoje existem lentes para grau alto e para a vista cansada, e a nossa equipe avalia caso a caso.
+            Me conta qual é o seu grau que eu te oriento?
+        - id: p6-lentes-3
+          titulo: Tirar a dúvida do papel
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Antes do fim do ano, vale tirar essa dúvida do papel: a avaliação mostra se existe um caminho seguro e eficaz para você, e quem decide ainda em 2026 fica com as condições de investimento de hoje.
+            Qual unidade fica melhor, Paulista ou Tatuapé?
+      catarata:
+        - id: p6-catarata-1
+          titulo: O primeiro passo
+          texto: |
+            Oi, {{nome}}! Aqui é da CEVICO. Você nos procurou sobre catarata e eu fiquei de te acompanhar.
+            A consulta de avaliação é de 150 reais, com os exames inclusos, e é ela que mostra o melhor caminho para o seu caso. Posso te passar os horários na Paulista e no Tatuapé?
+        - id: p6-catarata-2
+          titulo: Equipe e lentes
+          texto: |
+            Oi, {{nome}}, tudo bem? É da CEVICO. A cirurgia de catarata é feita pela nossa equipe de cirurgiões, com mais de 30.000 cirurgias cada um, com lentes importadas Rayner.
+            Se quiser, explico como é o dia da cirurgia e a recuperação. Pode ser?
+        - id: p6-catarata-3
+          titulo: Para o pai, a mãe, a família
+          texto: |
+            Oi, {{nome}}! Da CEVICO. Se for para um pai, uma mãe ou alguém da família, pode trazer a pessoa para esta conversa que a gente explica tudo com calma.
+            E quem opera ainda este ano fica com as condições de investimento de hoje.

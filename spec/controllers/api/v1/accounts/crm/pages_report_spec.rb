@@ -48,6 +48,8 @@ RSpec.describe 'CEVICO Resultados de tráfego', type: :request do
     body = report
     expect(body['totals']).to include('views' => 100, 'cta' => 15, 'leads' => 2, 'booked' => 1)
     expect(body['previous']['totals']).to include('views' => 20, 'cta' => 1, 'leads' => 0)
+    # 19/10: a ficha da página compara com a linha dela no período anterior
+    expect(body['previous']['rows'].find { |r| r['page_id'] == page.id }).to include('views' => 20, 'cta' => 1)
     expect(body['series']).to include('granularity' => 'day')
     expect(body['series']['labels'].size).to eq(7)
     expect(body['series']['views'].last(2)).to eq([40, 60])

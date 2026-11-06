@@ -91,7 +91,7 @@ const COLS = [
   },
   {
     key: 'surgeries',
-    label: 'Cirurgias realizadas',
+    label: 'Pacientes operados', // ponta 5: pessoas (os dois olhos contam 1), só cirurgia
     fmt: v => fmtNum(v),
     get: r => r.funnel.surgeries,
     xl: true,

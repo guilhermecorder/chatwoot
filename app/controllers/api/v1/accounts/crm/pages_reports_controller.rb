@@ -24,10 +24,12 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
       since: since_date,
       until: until_date,
       sources: Cevico::TrafficSource::SOURCES,
+      source_rules: Cevico::TrafficSource.rules_for(Current.account), # 🧭 item 385
       rows: report.rows,
       protocol: report.protocol,
       totals: report.totals,
-      previous: { since: previous.since_date, until: previous.until_date, totals: previous.totals },
+      # 19/10: rows do período anterior — a ficha de cada página compara "antes × agora"
+      previous: { since: previous.since_date, until: previous.until_date, totals: previous.totals, rows: previous.rows },
       series: report.series,
       campaigns: campaign_roi,
       insights: insights,
@@ -56,6 +58,15 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
 
     Crm::SearchConsoleSyncJob.perform_later(Current.account.id)
     render json: { queued: true }
+  end
+
+  # GET /crm/pages_report/leads?preset=&source=&page_id= — QUEM SÃO os leads
+  # do período (02/11): nome, página, origem, data, caixa e a conversa, para
+  # a equipe achar quem veio do linktree, de um guia ou da busca do Google
+  def leads
+    roster = Cevico::LeadRoster.new(Current.account, since_date, until_date,
+                                    source: params[:source].to_s.presence, page_id: params[:page_id].to_i.nonzero?)
+    render json: { since: since_date, until: until_date, leads: roster.call }
   end
 
   # POST /crm/pages_report/remove_insight
@@ -121,7 +132,7 @@ class Api::V1::Accounts::Crm::PagesReportsController < Api::V1::Accounts::BaseCo
   def pages_json
     Current.account.cevico_pages.order(:title).map do |page|
       { id: page.id, title: page.title, slug: page.slug, emoji: page.emoji, status: page.status,
-        public_url: Cevico::PublicSite.page_url(page.slug),
+        public_url: page.library? ? Cevico::PublicSite.library_url : Cevico::PublicSite.page_url(page.slug),
         # token de RETOQUE só para quem EDITA páginas (quem só vê resultados fica sem)
         builder_url: builder_url_for(page) }
     end
