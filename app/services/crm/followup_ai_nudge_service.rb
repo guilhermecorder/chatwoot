@@ -43,6 +43,27 @@ class Crm::FollowupAiNudgeService
     Responda em JSON: {"mensagem": "<texto que vai ao paciente>", "motivo": "<em 1 frase, por que esta mensagem>"}.
   TXT
 
+  # 🏢 06/11/2026 (LIFE): empresa que NÃO é clínica (ramo ótica/outro em
+  # Identidade da empresa) usa esta versão sem paciente/médico/cirurgia; o
+  # nome vem da empresa e o tom vem do Roteiro da própria conta.
+  GENERIC_PROMPT = <<~TXT.freeze
+    Você escreve UMA mensagem curta de follow-up no WhatsApp para um cliente da %<empresa>s que PAROU de responder.
+    A conversa até aqui e a orientação do robô estão abaixo. Sua tarefa: retomar exatamente o ponto em que a conversa
+    parou (o que o cliente perguntou, o que a empresa ofereceu, o que ficou faltando) e reabrir com leveza.
+    REGRAS:
+    - Português do Brasil, tom humano, simples e curto, do jeito do Roteiro abaixo (sem jargão, sem "prezado").
+    - No máximo 2 frases curtas + UMA pergunta simples no fim. Sem listas, sem títulos, sem emoji.
+    - Use o primeiro nome do cliente se ele aparecer na conversa; se não aparecer, não invente nome.
+    - A mensagem precisa fazer sentido SOZINHA: cite o que o cliente procurou quando isso aparecer na conversa ou
+      nas etiquetas, e feche com uma pergunta simples.
+    - NÃO repita a última mensagem da empresa; NÃO envie uma segunda cobrança igual às cutucadas anteriores.
+    - NÃO ofereça horário, NÃO fale de preço ou valor que não esteja na conversa, NÃO prometa resultado.
+    - Se a ORIENTAÇÃO DO ADMIN trouxer um exemplo de mensagem, siga o jeito dele (tamanho, palavras, tom), adaptado
+      ao que aconteceu nesta conversa.
+    - Se a conversa já terminou com o cliente recusando, respeite: uma mensagem gentil deixando a porta aberta.
+    Responda em JSON: {"mensagem": "<texto que vai ao cliente>", "motivo": "<em 1 frase, por que esta mensagem>"}.
+  TXT
+
   def initialize(conversation:, bot: nil, step: {})
     @conversation = conversation
     @account = conversation.account
@@ -77,7 +98,12 @@ class Crm::FollowupAiNudgeService
   def system_prompt
     version = Crm::CevicoScript.normalize_version(nil)
     tone = %w[persona form_rules].map { |key| Crm::CevicoScript.section_text(@account, key, version) }.join("\n\n")
-    "#{SYSTEM_PROMPT}\n\n== ROTEIRO CEVICO (quem fala e como) ==\n#{tone}#{RESPONDER_GUARDRAIL}"
+    base = if Crm::CevicoScript.company_script?(@account)
+             format(GENERIC_PROMPT, empresa: Cevico::Company.for(@account).name)
+           else
+             SYSTEM_PROMPT
+           end
+    "#{base}\n\n== ROTEIRO (quem fala e como) ==\n#{tone}#{RESPONDER_GUARDRAIL}"
   end
 
   # cutucada curta: 30 s bastam — o cliente padrão espera até 300 s (páginas

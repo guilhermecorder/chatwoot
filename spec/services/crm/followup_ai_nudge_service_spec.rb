@@ -57,4 +57,18 @@ RSpec.describe Crm::FollowupAiNudgeService do
     vazia = create(:conversation, account: account, inbox: inbox, contact: create(:contact, account: account))
     expect(described_class.new(conversation: vazia, step: step).call[:error]).to eq('Conversa vazia.')
   end
+
+  describe 'empresa que não é clínica (06/11 · LIFE)' do
+    it 'usa o texto neutro com o nome da empresa, sem paciente nem CEVICO', :aggregate_failures do
+      Cevico::Company.save!(account, { 'name' => 'Life Energia Solar', 'segment' => 'outro' })
+      prompt = described_class.new(conversation: conversation, step: step).system_prompt
+      expect(prompt).to include('cliente da Life Energia Solar')
+      expect(prompt).not_to include('clínica CEVICO')
+    end
+
+    it 'clínica continua com o texto de sempre' do
+      prompt = described_class.new(conversation: conversation, step: step).system_prompt
+      expect(prompt).to include('paciente da clínica CEVICO')
+    end
+  end
 end
