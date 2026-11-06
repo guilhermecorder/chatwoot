@@ -7,7 +7,12 @@ logos:
   logo_dark: '/brand-assets/otica/logo_dark.png'          # letras brancas, óculos verde vivo
   logo_thumbnail: '/brand-assets/otica/logo_thumbnail.png' # óculos brancos no quadrado verde (legível em 16px)
 marca_dagua: '/brand-assets/otica/marca-dagua.png'          # óculos no canto dos cabeçalhos (no lugar do olho da CEVICO)
-favicons_dir: '/brand-assets/otica'   # favicon-16x16.png / 32 / 96 (só os óculos)
+favicons_dir: '/brand-assets/otica'   # favicon-16x16.png / 32 / 96 (só os óculos) + favicon-badge-* (com bolinha de aviso)
+# 📱 atalho na tela do celular (06/11): ícones apple-/android-/ms- nesta pasta e
+# o manifest com o nome do app. Sem estas chaves o sistema usa os da raiz (CEVICO).
+icones_dir: '/brand-assets/otica'
+manifest: '/brand-assets/otica/manifest.json'
+app_curto: 'ÓTICA S.Un'              # nome embaixo do ícone no iPhone
 cores:
   primaria: '#018544'   # verde das letras
   destaque: '#05EA05'   # verde vivo dos óculos

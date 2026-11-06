@@ -47,7 +47,22 @@ class DashboardController < ActionController::Base
   end
 
   def set_global_config
-    @global_config = GlobalConfig.get(*GLOBAL_CONFIG_KEYS).merge(app_config)
+    @global_config = GlobalConfig.get(*GLOBAL_CONFIG_KEYS).merge(app_config).merge(marca_config)
+  end
+
+  # 🏷️ 06/11 (ótica): numa VPS com pacote de marca (MARCA=otica, life…) o nome e
+  # os logos do PACOTE valem na tela, mesmo que o banco tenha voltado para os de
+  # fábrica (a VPS da ótica mostrava "Chatwoot" na aba). CEVICO segue pelo banco.
+  def marca_config
+    return {} if MARCA['id'].blank? || MARCA['id'] == 'cevico'
+
+    {
+      'INSTALLATION_NAME' => MARCA['nome'],
+      'BRAND_NAME' => MARCA['brand_name'],
+      'LOGO' => MARCA.dig('logos', 'logo'),
+      'LOGO_DARK' => MARCA.dig('logos', 'logo_dark'),
+      'LOGO_THUMBNAIL' => MARCA.dig('logos', 'logo_thumbnail')
+    }.compact_blank
   end
 
   def set_dashboard_scripts
