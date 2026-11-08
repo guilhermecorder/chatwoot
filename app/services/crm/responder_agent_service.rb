@@ -131,6 +131,8 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
     result = JSON.parse(text).symbolize_keys
     result[:acoes] = tools ? tools.acoes : []
+    # 💬 08/11: texto espaçado (uma linha em branco entre as frases) quando a conta liga
+    result[:mensagens] = Array(result[:mensagens]).map { |m| Crm::TextSpacing.space(m) } if Crm::TextSpacing.enabled?(@account)
     result
   rescue JSON::ParserError
     { error: 'Resposta da IA fora do formato.' }
@@ -273,7 +275,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
   SURGERY_UNKNOWN = 'não encontrada na Agenda (pergunte qual cirurgia e quando foi)'.freeze
 
-  def surgery_text # rubocop:disable Metrics/AbcSize
+  def surgery_text
     task = last_surgery_task
     return SURGERY_UNKNOWN if task.blank?
 

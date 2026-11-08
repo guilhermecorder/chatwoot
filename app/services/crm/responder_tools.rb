@@ -516,7 +516,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   def fake_motivo?(motivo, urgencia)
-    urgencia != 'alta' && (motivo.match?(FAKE_TASK_RE) || motivo.scan(/\p{L}/).size < 4)
+    texto = motivo.tr('_', ' ')
+    urgencia != 'alta' && (texto.match?(FAKE_TASK_RE) || texto.scan(/\p{L}/).size < 4)
   end
 
   # ⏰ prazo da tarefa de retorno: dia (YYYY-MM-DD, de hoje até 60 dias) + hora (HH:MM, padrão 09:00).

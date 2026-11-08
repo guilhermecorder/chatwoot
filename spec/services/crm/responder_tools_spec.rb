@@ -190,6 +190,7 @@ RSpec.describe Crm::ResponderTools do
       expect(t.call('abrir_tarefa', { 'motivo' => 'nunca mind', 'urgencia' => 'normal' })[:ok]).to be(false)
       expect(t.call('abrir_tarefa', { 'motivo' => 'x', 'urgencia' => 'normal' })[:ok]).to be(false)
       expect(t.call('abrir_tarefa', { 'motivo' => 'dummy', 'urgencia' => 'normal' })[:ok]).to be(false)
+      expect(t.call('abrir_tarefa', { 'motivo' => 'nao_usar', 'urgencia' => 'normal' })[:ok]).to be(false)
       expect(t.call('abrir_tarefa', { 'motivo' => 'não aplicável ainda', 'urgencia' => 'normal' })[:ok]).to be(false)
       expect(account.tasks.count).to eq(0)
       expect(t.call('abrir_tarefa', { 'motivo' => 'dor', 'urgencia' => 'alta' })[:ok]).to be(true) # urgência nunca é barrada
