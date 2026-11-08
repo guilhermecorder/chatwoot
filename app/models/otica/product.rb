@@ -7,33 +7,39 @@
 #
 # Table name: otica_products
 #
-#  id             :bigint           not null, primary key
-#  active         :boolean          default(TRUE), not null
-#  barcode        :string           default("")
-#  brand          :string           default("")
-#  color          :string           default("")
-#  cost           :decimal(12, 2)   default(0.0), not null
-#  kind           :string           default("armacao"), not null
-#  lab_days       :integer          default(0), not null
-#  lens_material  :string           default("")
-#  lens_treatment :string           default("")
-#  lens_type      :string           default("")
-#  line           :string           default("")
-#  list_price     :decimal(12, 2)   default(0.0), not null
-#  min_quantity   :integer          default(0), not null
-#  model          :string           default("")
-#  name           :string           default(""), not null
-#  ncm            :string           default("")
-#  notes          :string           default("")
-#  promo_price    :decimal(12, 2)
-#  promo_until    :date
-#  quantity       :integer          default(0), not null
-#  size           :string           default("")
-#  sku            :string           default("")
-#  created_at     :datetime         not null
-#  updated_at     :datetime         not null
-#  account_id     :bigint           not null
-#  supplier_id    :bigint
+#  id               :bigint           not null, primary key
+#  active           :boolean          default(TRUE), not null
+#  barcode          :string           default("")
+#  brand            :string           default("")
+#  color            :string           default("")
+#  cost             :decimal(12, 2)   default(0.0), not null
+#  frame_fit        :string           default(""), not null
+#  frame_shape      :string           default(""), not null
+#  kind             :string           default("armacao"), not null
+#  lab_days         :integer          default(0), not null
+#  lens_material    :string           default("")
+#  lens_treatment   :string           default("")
+#  lens_type        :string           default("")
+#  line             :string           default("")
+#  list_price       :decimal(12, 2)   default(0.0), not null
+#  max_discount_pct :decimal(5, 2)    default(0.0), not null
+#  min_quantity     :integer          default(0), not null
+#  model            :string           default("")
+#  name             :string           default(""), not null
+#  ncm              :string           default("")
+#  notes            :string           default("")
+#  pitch            :string           default(""), not null
+#  promo_price      :decimal(12, 2)
+#  promo_until      :date
+#  quantity         :integer          default(0), not null
+#  size             :string           default("")
+#  sku              :string           default("")
+#  try_on           :boolean          default(TRUE), not null
+#  visagismo_notes  :string           default(""), not null
+#  created_at       :datetime         not null
+#  updated_at       :datetime         not null
+#  account_id       :bigint           not null
+#  supplier_id      :bigint
 #
 # Indexes
 #
@@ -53,6 +59,9 @@ class Otica::Product < ApplicationRecord
   belongs_to :supplier, class_name: 'Otica::Supplier', optional: true, inverse_of: :products
   has_many :order_items, class_name: 'Otica::OrderItem', dependent: :nullify, inverse_of: :product
   has_many :stock_moves, class_name: 'Otica::StockMove', dependent: :destroy, inverse_of: :product
+  # 🪞 prova virtual (08/11): foto da armação (de frente, fundo branco ou transparente) — é ela que o
+  # Gemini coloca no rosto da cliente. Entra no plano de backup do storage como os anexos.
+  has_one_attached :photo
 
   KINDS = {
     'armacao' => 'Armação',
@@ -64,6 +73,10 @@ class Otica::Product < ApplicationRecord
   }.freeze
   LENS_TYPES = { 'visao_simples' => 'Visão simples', 'multifocal' => 'Multifocal', 'bifocal' => 'Bifocal' }.freeze
   LENS_KINDS = %w[lente lente_contato].freeze
+  # 🪞 prova virtual (08/11): só armação e óculos de sol vão ao rosto da cliente
+  FRAME_KINDS = %w[armacao solar].freeze
+  FRAME_SHAPES = Otica::Visagismo::FRAME_SHAPES
+  FRAME_FITS = Otica::Visagismo::FRAME_FITS
   # 📦 fase 2: o que tem SALDO na loja (lente de grau vem do laboratório por
   # pedido; serviço não é peça)
   STOCK_KINDS = %w[armacao solar lente_contato outro].freeze
@@ -73,6 +86,10 @@ class Otica::Product < ApplicationRecord
   validates :kind, inclusion: { in: KINDS.keys }
   validates :name, presence: true
   validates :lens_type, inclusion: { in: LENS_TYPES.keys }, allow_blank: true
+  validates :frame_shape, inclusion: { in: FRAME_SHAPES.keys }, allow_blank: true
+  validates :frame_fit, inclusion: { in: FRAME_FITS.keys }, allow_blank: true
+  # 💬 venda pelo WhatsApp (08/11): desconto máximo por produto, 0 a 90%
+  validates :max_discount_pct, numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 90 }
   # 📦 fase 2: o saldo PODE ficar negativo (vendeu peça que o sistema não conhecia; o inventário acerta)
   validates :quantity, numericality: { only_integer: true }
   validates :min_quantity, :lab_days, numericality: { greater_than_or_equal_to: 0, only_integer: true }
@@ -96,6 +113,31 @@ class Otica::Product < ApplicationRecord
 
   def lens?
     LENS_KINDS.include?(kind)
+  end
+
+  def frame?
+    FRAME_KINDS.include?(kind)
+  end
+
+  # 💬 o menor valor que a loja aceita neste produto (preço de hoje − desconto máximo);
+  # fallback: desconto padrão da loja (config), quando o produto não tem o seu
+  def floor_price(default_pct = 0)
+    pct = max_discount_pct.to_f.positive? ? max_discount_pct.to_f : default_pct.to_f
+    (price * (1 - (pct.clamp(0, 90) / 100.0))).round(2)
+  end
+
+  # pode ir à prova virtual agora? (armação ativa, marcada, com foto e saldo)
+  def try_on_ready?
+    frame? && active && try_on && quantity.to_i.positive? && photo.attached?
+  end
+
+  # endereço da foto para a tela (mesmo host); o Gemini recebe os bytes direto
+  def photo_url
+    return nil unless photo.attached?
+
+    Rails.application.routes.url_helpers.rails_blob_path(photo, only_path: true)
+  rescue StandardError
+    nil
   end
 
   def stock_tracked?
@@ -131,6 +173,11 @@ class Otica::Product < ApplicationRecord
       active: active, quantity: quantity, min_quantity: min_quantity, low: low_stock?, stock_tracked: stock_tracked?,
       lens_type: lens_type, lens_type_label: LENS_TYPES[lens_type], lens_material: lens_material,
       lens_treatment: lens_treatment, lab_days: lab_days,
+      # 🪞 prova virtual
+      frame_shape: frame_shape, frame_shape_label: FRAME_SHAPES[frame_shape], frame_fit: frame_fit,
+      try_on: try_on, visagismo_notes: visagismo_notes, photo_url: photo_url, try_on_ready: try_on_ready?,
+      # 💬 venda pelo WhatsApp
+      max_discount_pct: max_discount_pct.to_f, pitch: pitch,
       supplier_id: supplier_id, supplier_name: supplier&.name, notes: notes,
       updated_at: updated_at&.iso8601
     }

@@ -189,6 +189,14 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
         'escrever o que precisa; se já pediu antes, peça de novo com outras palavras]'
     when 'image'
       if media['status'] == 'done'
+        # 🪞 08/11: selfie na ótica diz o que o rosto tem e lembra a ferramenta da prova virtual
+        if media['tipo'] == 'selfie' && media['rosto'].is_a?(Hash)
+          ok, motivo = Otica::FaceReading.usable(media['rosto'])
+          parts = ["foto do rosto (#{Otica::FaceReading.summary(media['rosto'])}): #{media['descricao'].to_s.strip.presence || 'sem descrição'}"]
+          parts << (ok ? 'serve para a prova virtual: use a ferramenta experimentar_armacoes quando a cliente quiser ver armações no rosto dela' : "NÃO serve para a prova virtual: #{motivo}")
+          return "[#{parts.join(' · ')}]"
+        end
+
         parts = ["imagem (#{media['tipo'].presence || 'outro'}): #{media['descricao'].to_s.strip.presence || 'sem descrição'}"]
         parts << "texto na imagem: \"#{media['texto'].to_s.strip.truncate(900)}\"" if media['texto'].to_s.strip.present?
         return "[#{parts.join(' · ')}]"
@@ -271,11 +279,22 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
     kind == 'audio' ? 'audio/ogg' : 'image/jpeg'
   end
 
+  # 🪞 08/11: no ramo ÓTICA a foto é lida com o prompt da ótica (tipos selfie /
+  # receita / óculos atual… + o bloco "rosto" do visagismo, Otica::FaceReading)
+  # e o áudio fala em cliente/ótica em vez de paciente/clínica
   def prompt
-    return AUDIO_PROMPT if kind == 'audio'
+    return (otica? ? OTICA_AUDIO_PROMPT : AUDIO_PROMPT) if kind == 'audio'
 
+    base = otica? ? Otica::FaceReading::IMAGE_PROMPT : IMAGE_PROMPT
     caption = @message.content.to_s.strip
-    caption.present? ? "#{IMAGE_PROMPT}\nLegenda que o paciente escreveu junto: \"#{caption.truncate(300)}\"" : IMAGE_PROMPT
+    caption.present? ? "#{base}\nLegenda que #{otica? ? 'o cliente' : 'o paciente'} escreveu junto: \"#{caption.truncate(300)}\"" : base
+  end
+
+  OTICA_AUDIO_PROMPT = AUDIO_PROMPT.sub('um paciente ao WhatsApp de uma clínica de oftalmologia', 'um cliente ao WhatsApp de uma ótica').freeze
+
+  def otica?
+    @otica = Otica::VirtualTryOn.otica?(@account) if @otica.nil?
+    @otica
   end
 
   def ask_gemini(bytes, mime_type)
@@ -318,7 +337,11 @@ class Crm::MediaReadingService # rubocop:disable Metrics/ClassLength
       descricao = parsed['descricao'].to_s.strip.truncate(600)
       texto = parsed['texto'].to_s.strip.truncate(3000)
       fields.merge!('tipo' => parsed['tipo'].to_s.strip.downcase.presence || 'outro', 'descricao' => descricao, 'texto' => texto)
-      summary = [descricao.presence, (texto.present? ? "Texto: #{texto}" : nil)].compact.join(' · ')
+      # 🪞 08/11: selfie na ótica guarda o bloco do rosto (formato, pessoas, de frente…) para a prova virtual
+      rosto = fields['tipo'] == 'selfie' ? Otica::FaceReading.normalize(parsed['rosto']) : nil
+      fields['rosto'] = rosto if rosto
+      summary = [descricao.presence, (rosto ? "Rosto: #{Otica::FaceReading.summary(rosto)}" : nil),
+                 (texto.present? ? "Texto: #{texto}" : nil)].compact.join(' · ')
       write!(fields, summary)
     end
   end

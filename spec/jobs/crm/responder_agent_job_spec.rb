@@ -493,6 +493,17 @@ RSpec.describe Crm::ResponderAgentJob do
       expect(settings.reload.ai_config.dig('atendente_agendamento_state', 'events').first).to include('type' => 'orientacao_urgencia')
     end
 
+    it 'na ótica não existe urgência clínica: tarefa normal, sem marca de urgência e sem o texto fixo de pronto atendimento', :aggregate_failures do
+      # 04/11: reclamação de óculos (tarefa alta) caía na urgência da clínica
+      Cevico::Company.save!(account, 'segment' => 'otica', 'name' => account.name)
+      stub_ai(handoff_reply)
+      run
+      expect(account.tasks.find_by(task_type: 'pos_op').priority).to eq('high')
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).not_to include('urgente')
+      conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true, 'reason' => 'chamou_humano', 'urgente' => true } })
+      expect { run(new_incoming('e aí?')) }.not_to(change { conversation.messages.where(message_type: :outgoing).count })
+    end
+
     it 'pausado sem urgência, a mensagem seguinte fica em silêncio (a equipe assume)' do
       conversation.update!(additional_attributes: { 'cevico_atendente_wa' => { 'paused' => true, 'reason' => 'chamou_humano' } })
       stub_ai(ai_reply)

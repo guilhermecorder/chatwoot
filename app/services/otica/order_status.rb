@@ -13,6 +13,9 @@ class Otica::OrderStatus
     end
 
     attrs = { status: new_status }
+    # 📦 08/11: a hora em que ficou pronta (para o vigia e para a Val virtual)
+    attrs[:ready_at] = Time.zone.now if new_status == 'pronta' && order.ready_at.nil?
+    attrs[:ready_at] = nil if %w[aberta em_producao cancelada].include?(new_status)
     attrs[:delivered_at] = delivered_time(delivered_at) if new_status == 'entregue'
     attrs[:delivered_at] = nil if order.delivered? && new_status != 'entregue'
     order.update!(attrs)

@@ -158,27 +158,56 @@ const pickVersion = async key => {
   await start();
 };
 
+// 🪞 08/11: foto junto da fala (ótica: a prova virtual roda de verdade no simulador)
+const photoFile = ref(null);
+const photoUrl = ref('');
+const photoInput = ref(null);
+const pickPhoto = event => {
+  const f = event?.target?.files?.[0] || null;
+  photoFile.value = f;
+  if (photoUrl.value) URL.revokeObjectURL(photoUrl.value);
+  photoUrl.value = f ? URL.createObjectURL(f) : '';
+};
+const clearPhoto = () => {
+  photoFile.value = null;
+  if (photoUrl.value) URL.revokeObjectURL(photoUrl.value);
+  photoUrl.value = '';
+  if (photoInput.value) photoInput.value.value = '';
+};
+
 const send = async text => {
   const content = (text ?? draft.value).trim();
-  if (!content || isSending.value) return;
+  const photo = text === undefined ? photoFile.value : null;
+  if ((!content && !photo) || isSending.value) return;
   draft.value = '';
   errorText.value = '';
   // otimista: o balão do paciente aparece na hora, o agente "digita"
   turns.value.push({
     role: 'patient',
     text: content,
+    images: photoUrl.value ? [photoUrl.value] : [],
     at: new Date().toISOString(),
     id: `tmp-${Date.now()}`,
   });
   isSending.value = true;
   await scrollToEnd();
   try {
-    const { data } = await CrmAPI.simulateAgent({
+    let payload = {
       agent: props.agentKey,
       conversation_id: conversationId.value,
       script_version: scriptVersion.value,
       text: content,
-    });
+    };
+    if (photo) {
+      const form = new FormData();
+      Object.entries(payload).forEach(([k, v]) => {
+        if (v !== null && v !== undefined && v !== '') form.append(k, v);
+      });
+      form.append('photo', photo);
+      payload = form;
+      clearPhoto();
+    }
+    const { data } = await CrmAPI.simulateAgent(payload);
     conversationId.value = data.conversation_id;
     turns.value = data.turns || [];
     if (data.error) errorText.value = data.error;
@@ -353,11 +382,32 @@ const guide = turn => {
             <!-- paciente (você) à direita -->
             <div v-if="t.role === 'patient'" class="flex justify-end">
               <div class="cv-bubble cv-bubble-me">
-                <p class="whitespace-pre-wrap">{{ t.text }}</p>
+                <img
+                  v-for="(src, i) in t.images || []"
+                  :key="`${t.id}-img-${i}`"
+                  :src="src"
+                  alt="foto"
+                  class="rounded-lg max-w-[220px] mb-1"
+                />
+                <p v-if="t.text" class="whitespace-pre-wrap">{{ t.text }}</p>
                 <span class="cv-bubble-time">{{ fmtTime(t.at) }} ·
                   {{
                     isVoice ? 'você (lead, ao telefone)' : `você (${who})`
                   }}</span>
+              </div>
+            </div>
+            <!-- 🪞 08/11: o que as ferramentas da ótica mandaram (prova virtual, lentes, "me dá um instante") -->
+            <div v-else-if="t.role === 'media'" class="flex justify-start">
+              <div class="cv-bubble cv-bubble-agent">
+                <img
+                  v-for="(src, i) in t.images || []"
+                  :key="`${t.id}-img-${i}`"
+                  :src="src"
+                  alt="imagem"
+                  class="rounded-lg max-w-[260px] mb-1"
+                />
+                <p v-if="t.text" class="whitespace-pre-wrap">{{ t.text }}</p>
+                <span class="cv-bubble-time">{{ fmtTime(t.at) }} · {{ agentName }} · ferramenta</span>
               </div>
             </div>
             <!-- agente à esquerda: um balão por mensagem -->
@@ -462,7 +512,27 @@ class="cv-chip cv-slate"
               {{ s }}
             </button>
           </div>
+          <div v-if="photoUrl" class="flex items-center gap-2 mb-1">
+            <img :src="photoUrl" alt="foto" class="h-12 w-12 object-cover rounded-lg" />
+            <span class="text-[11px] text-n-slate-10">foto vai junto da próxima fala</span>
+            <button class="cv-chip" @click="clearPhoto">tirar</button>
+          </div>
           <div class="flex items-end gap-2">
+            <label
+              v-if="!isVoice"
+              class="cv-btn cv-btn-lg cursor-pointer"
+              title="Mandar uma foto (ótica: prova virtual)"
+            >
+              <span class="i-lucide-camera text-sm" />
+              <input
+                ref="photoInput"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                class="hidden"
+                :disabled="isSending || isStarting"
+                @change="pickPhoto"
+              />
+            </label>
             <textarea
               ref="inputEl"
               v-model="draft"
@@ -478,7 +548,7 @@ class="cv-chip cv-slate"
             />
             <button
               class="cv-btn cv-btn-lg"
-              :disabled="isSending || isStarting || !draft.trim()"
+              :disabled="isSending || isStarting || (!draft.trim() && !photoFile)"
               @click="send()"
             >
               <span class="i-lucide-send text-sm" /> Enviar

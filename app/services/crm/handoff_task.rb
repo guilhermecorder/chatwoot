@@ -58,7 +58,7 @@ class Crm::HandoffTask
   # aviso no Radar do Meu Painel: 'atendimento_atencao' para os Atendentes de
   # Agendamento / Pós-agendamento (#458); pós-operatório e ligação (item 333)
   # seguem com 'pos_op_atencao', como já estava
-  WHATSAPP_ATTENTION_KEYS = %w[atendente_agendamento atendente_pos].freeze
+  WHATSAPP_ATTENTION_KEYS = %w[atendente_agendamento atendente_pos atendente_visagista].freeze
   def alert!(task)
     kind = WHATSAPP_ATTENTION_KEYS.include?(@agent_key) ? 'atendimento_atencao' : 'pos_op_atencao'
     Crm::AgentAlert.push(account: @account, kind: kind, task: task, conversation: @conversation, agent_key: @agent_key)
@@ -79,8 +79,8 @@ class Crm::HandoffTask
 
   # item 333: a tarefa aberta pelo Agente de Ligação diz que veio da ligação;
   # #458: a dos Atendentes de Agendamento/Pós-agendamento diz "Atendimento"
-  TITLE_LABELS = { 'voice' => 'Ligação', 'atendente_pos_op' => 'Pós-op' }.freeze
-  TITLE_ICONS = { 'voice' => '📞', 'atendente_pos_op' => '🩺' }.freeze
+  TITLE_LABELS = { 'voice' => 'Ligação', 'atendente_pos_op' => 'Pós-op', 'atendente_visagista' => 'Visagista' }.freeze
+  TITLE_ICONS = { 'voice' => '📞', 'atendente_pos_op' => '🩺', 'atendente_visagista' => '🪞' }.freeze
   def title_label = TITLE_LABELS[@agent_key] || 'Atendimento'
   def title_icon = TITLE_ICONS[@agent_key] || '🙋'
 

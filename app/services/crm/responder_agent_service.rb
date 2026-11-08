@@ -65,7 +65,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # cancelar/confirmar presença — Crm::ResponderTools); os demais seguem iguais.
   # 🎙️ 195: o simulador por texto do Agente de Ligação também (é sempre sombra).
   # 🩺 item 251: o Atendente de Pós-operatório também (retorno pela Agenda + abrir_tarefa)
-  RESPONDER_TOOLS_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op voice].freeze
+  RESPONDER_TOOLS_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op atendente_visagista voice].freeze
 
   # 👪 item 346 (pedido dele 15/10): vale SEMPRE, mesmo com os passos do
   # atendente personalizados na tela — por isso fica no contexto e não no roteiro
@@ -85,12 +85,16 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # interruptor desligado — o teste é justamente para antes de ligar (pedido 21/09)
   # script_version (22/09): 'v1' (oficial) ou 'v2' (Roteiro paralelo). Sem
   # informar, vale o que a conversa de teste guardou ao nascer; conversa real = v1.
-  def initialize(conversation:, agent_key:, live: false, simulation: false, script_version: nil)
+  # 🪞 08/11: otica_live = no SIMULADOR (Testar agente) as ferramentas da ótica rodam de
+  # verdade (foto → imagem no Gemini, lentes com imagem, conferência de desconto) dentro
+  # da conversa de teste; a Agenda continua só simulando e nenhuma tarefa nasce
+  def initialize(conversation:, agent_key:, live: false, simulation: false, script_version: nil, otica_live: false)
     @conversation = conversation
     @account = conversation.account
     @agent_key = agent_key.to_s
     @live = live == true
     @simulation = simulation == true
+    @otica_live = otica_live == true
     @script_version = Crm::CevicoScript.normalize_version(
       script_version.presence || conversation.additional_attributes&.[]('cevico_simulado_script')
     )
@@ -107,7 +111,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     # no gem anthropic 1.55, 21/09): o JSON vale para a resposta final em texto
     params = {
       model: model, max_tokens: 2048, system_: cached_system,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      output_config: output_config_for({ type: 'json_schema', schema: output_schema }),
       messages: [{ role: 'user', content: user_content(transcript) }]
     }
     params[:tools] = tools.definitions if tools
@@ -137,6 +141,19 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   rescue StandardError => e
     Rails.logger.error "[Crm::ResponderAgent##{@agent_key}] #{e.class}: #{e.message}"
     { error: e.message }
+  end
+
+  # 👓 08/11: o esquema da resposta com as UNIDADES DESTA CONTA (a ótica tem a
+  # sua loja; a clínica segue com tatuape/paulista)
+  def output_schema
+    schema = OUTPUT_SCHEMA.deep_dup
+    schema[:properties][:agendamento][:properties][:unidade] = { type: 'string', enum: Crm::AgendaSlots.unit_labels(@account).keys }
+    schema
+  end
+
+  def otica?
+    @otica = Crm::AgendaSlots.otica?(@account) if @otica.nil?
+    @otica
   end
 
   # o prompt completo, visível na tela do agente ("o que ele lê")
@@ -181,7 +198,8 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   def tools
     return nil unless RESPONDER_TOOLS_KEYS.include?(@agent_key)
 
-    @tools ||= Crm::ResponderTools.new(conversation: @conversation, agent_key: @agent_key, live: @live)
+    @tools ||= Crm::ResponderTools.new(conversation: @conversation, agent_key: @agent_key, live: @live,
+                                       otica_live: @otica_live, simulation: @simulation)
   end
 
   # a resposta da IA volta como turno do assistente: texto e tool_use viram
@@ -213,9 +231,10 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
       #{OTHER_PERSON_RULE unless voice?}
-      #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{pos_op_context if pos_op?}
+      #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{pos_op? ? (otica? ? otica_order_context : pos_op_context) : ''}
       HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):#{slots_note}
       #{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 3, modality: slots_modality)}
+      #{otica_slots_block}
 
       #{Crm::AgendaSlots.rules_block(@account)}
     CTX
@@ -236,6 +255,35 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       { type: 'text', text: "#{header}\n#{transcript}", cache_control: { type: 'ephemeral' } },
       { type: 'text', text: "#{context_block}\nResponda à ÚLTIMA mensagem do PACIENTE da conversa acima, seguindo o Roteiro." }
     ]
+  end
+
+  # 👓 08/11: na ótica a visita COM EXAME tem faixa própria (sábado, Fabi) e a
+  # RETIRADA do óculos (pós-compra) também — cada uma com a sua lista de vagas
+  def otica_slots_block
+    return '' unless otica?
+
+    parts = []
+    if Crm::AgendaSlots.dedicated_windows?(@account, 'exame')
+      parts << "HORÁRIOS DE EXAME DE VISTA (faixa exclusiva do exame; toda visita COM exame é marcada SÓ nestes horários, com procedimento \"Visita com exame\"; " \
+               "a lista de cima serve só para visita SEM exame):\n" \
+               "#{Crm::AgendaSlots.free_slots_text(@account, days: 28, per_window: 4, modality: 'exame')}"
+    end
+    if pos_op?
+      parts << "HORÁRIOS PARA RETIRADA DO ÓCULOS (marque com procedimento \"Retirada do óculos\"):\n" \
+               "#{Crm::AgendaSlots.free_slots_text(@account, days: 14, per_window: 3, modality: 'entrega')}"
+    end
+    parts.join("\n\n")
+  end
+
+  # 👓 08/11: o Atendente Pós-compra da ótica precisa saber do PEDIDO (O.S.):
+  # em que etapa está, prazo, lentes no laboratório, pronto desde quando
+  def otica_order_context
+    cfg = Crm::NpsSurvey.config(@account)
+    lines = ["- Pedido do cliente (O.S.): #{Otica::OrderWatch.summary_for(@conversation.contact)}"]
+    nps = Crm::NpsSurvey.context_text(@conversation.contact)
+    lines << "- Pesquisa de satisfação (NPS): #{nps}" if nps
+    lines << "- Link para avaliar no Google: #{cfg['google_review_url']}" if cfg['google_review_url'].present?
+    "#{lines.join("\n")}\n"
   end
 
   # 🩺 item 251: o Atendente de Pós-operatório precisa saber QUAL cirurgia e há
@@ -264,7 +312,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     at = task.due_at.in_time_zone(Crm::AgendaSlots::TZ)
     days = (Crm::AgendaSlots::TZ.now.to_date - at.to_date).to_i
     parts = ["#{at.strftime('%d/%m/%Y')} (há #{days} dia#{'s' unless days == 1})", task.procedure.presence, task.doctor.presence,
-             Crm::AgendaSlots::UNIT_LABELS[task.unit.to_s] || task.unit.presence]
+             Crm::AgendaSlots.unit_label(@account, task.unit.to_s) || task.unit.presence]
     parts << "presença: #{task.attendance == 'attended' ? 'realizada' : task.attendance}" if task.attendance.present?
     parts.compact.join(' · ')
   end
@@ -310,7 +358,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     return 'nenhuma' if task.blank?
 
     when_at = task.due_at.in_time_zone(Crm::AgendaSlots::TZ)
-    unit = Crm::AgendaSlots::UNIT_LABELS[task.unit] || task.unit
+    unit = Crm::AgendaSlots.unit_label(@account, task.unit) || task.unit
     # o id entra para as ferramentas (remarcar/cancelar/confirmar) sem precisar buscar
     "#{Crm::AgendaSlots::WEEKDAYS[when_at.wday]} #{when_at.strftime('%d/%m/%Y às %H:%M')} · #{unit} · " \
       "#{task.doctor.presence || 'médico a definir'} (id #{task.id})"

@@ -327,7 +327,19 @@ namespace :crm do
   # 👓 SUA ÓTICA (fase 1, 22/10): produtos, fornecedores, O.S. e laboratório
   namespace :otica do
     resources :products, only: [:index, :create, :update, :destroy] do
-      collection { post :import_csv }
+      collection do
+        post :import_csv
+        post :photos_bulk # 🪞 08/11: fotos em lote, nome do arquivo = código
+      end
+      # 🪞 prova virtual (08/11): foto da armação
+      member do
+        post :photo
+        delete :photo, action: :delete_photo
+      end
+    end
+    # 🪞 prova virtual (08/11): status + prévia pela tela de Produtos (equipe testa sem WhatsApp)
+    resource :visagismo, only: [:show, :update], controller: 'visagismo' do
+      post :preview
     end
     resources :suppliers, only: [:index, :create, :update, :destroy]
     resources :orders, only: [:index, :show, :create, :update, :destroy] do

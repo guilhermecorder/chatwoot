@@ -13,6 +13,7 @@ export const GUIDANCE_AGENT_LABEL = {
   atendente_agendamento: 'Atendente de Agendamento',
   atendente_pos: 'Atendente Pós-agendamento',
   atendente_pos_op: 'Atendente de Pós-operatório',
+  atendente_visagista: 'Agente Visagista Vendedor',
 };
 
 export const sectionLabel = key =>

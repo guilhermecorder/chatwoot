@@ -332,6 +332,25 @@ const aiAgents = ref({
     hours_end: '',
     live_days: [],
   },
+  // 🪞 08/11 (ótica): Agente Visagista Vendedor — mesma estrutura do Atendente de Agendamento
+  atendente_visagista: {
+    enabled: false,
+    prompt: '',
+    model: '',
+    effort: '',
+    has_draft: false,
+    default_prompt: '',
+    mode: 'shadow',
+    inbox_ids: [],
+    stage_ids: [],
+    no_card: true,
+    after_booking_stage_id: '',
+    shadow_daily_cap: 30,
+    reply_delay_seconds: 6,
+    hours_start: '',
+    hours_end: '',
+    live_days: [],
+  },
   // 🗣️ agente B: suporte a quem já marcou (dúvidas, remarcar, cancelar) — mesmas peças, sem "sem card"
   atendente_pos: {
     enabled: false,
@@ -495,16 +514,20 @@ const instagramStats = () => {
   };
 };
 // 🗣️ rodada 188: atendentes do WhatsApp (A = agendamento, B = pós-agendamento)
+// 🪞 08/11: o Visagista Vendedor agenda como o de Agendamento (sem card, coluna ao agendar)
+const BOOKING_LIKE_KEYS = ['atendente_agendamento', 'atendente_visagista'];
 const RESPONDER_WA_KEYS = [
   'atendente_agendamento',
   'atendente_pos',
   'atendente_pos_op',
+  'atendente_visagista',
 ];
 // quem CONVERSA com o paciente não "analisa": cada chamada à IA é uma resposta
 const RESPONDER_NOUN_KEYS = [
   'atendente_agendamento',
   'atendente_pos',
   'atendente_pos_op',
+  'atendente_visagista',
   'instagram',
   'comments',
   'voice',
@@ -2238,6 +2261,29 @@ const AGENT_META = {
     suggestion:
       'Conversa ao vivo — Sonnet no esforço médio equilibra qualidade e custo. Compare na tela Sombra antes de ligar.',
   },
+  // 🪞 08/11 (ótica): a venda inteira pela conversa
+  atendente_visagista: {
+    title: 'Agente Visagista Vendedor',
+    icon: 'i-lucide-scan-face',
+    gradient: 'linear-gradient(135deg, #7C3AED, #C084FC)',
+    color: '#7C3AED',
+    tag: 'WhatsApp · ótica · venda pela conversa',
+    description:
+      'A cliente manda a foto e ele mostra 2 ou 3 armações do estoque NO ROSTO DELA (visagismo + Gemini), explica as lentes com imagem, passa o valor cheio, negocia dentro do desconto máximo de cada produto ("me dá um instante que vou conferir") e fecha: abre a tarefa para a loja e envia o Pix ou o link. Mesmo número e mesma caixa dos outros atendentes; responde nas colunas dele ("Visagismo em conversa" e "Teste da equipe"). Nasce em SOMBRA.',
+    triggers: [
+      {
+        icon: 'i-lucide-message-square',
+        label:
+          'Mensagem da cliente numa caixa de WhatsApp escolhida, com o card numa coluna dele',
+      },
+      {
+        icon: 'i-lucide-image',
+        label: 'Foto do rosto → prova virtual (até 3 armações, 2 vezes por dia por cliente)',
+      },
+    ],
+    suggestion:
+      'Conversa ao vivo com imagem — Sonnet no esforço médio. Teste primeiro na coluna "Teste da equipe".',
+  },
   // 🩺 item 251: pós-operatório 24h — orientações oficiais + tarefa para a equipe
   atendente_pos_op: {
     title: 'Atendente de Pós-operatório',
@@ -2640,6 +2686,7 @@ const AGENT_GROUPS = [
       'atendente_agendamento',
       'atendente_pos',
       'atendente_pos_op',
+      'atendente_visagista',
       'conversation',
       'scheduler',
       'instagram',
@@ -2797,7 +2844,7 @@ const loadAgents = async () => {
       inbox_ids: [...((draft?.inbox_ids ?? real.inbox_ids) || [])],
       stage_ids: [...((draft?.stage_ids ?? real.stage_ids) || [])],
       no_card:
-        key === 'atendente_agendamento'
+        BOOKING_LIKE_KEYS.includes(key)
           ? (draft?.no_card ?? real.no_card ?? true)
           : false,
       after_booking_stage_id:
@@ -2837,6 +2884,7 @@ const loadAgents = async () => {
     atendente_agendamento: loadResponder('atendente_agendamento'),
     atendente_pos: loadResponder('atendente_pos'),
     atendente_pos_op: loadResponder('atendente_pos_op'),
+    atendente_visagista: loadResponder('atendente_visagista'),
     opportunity: {
       ...load('opportunity'),
       watchers: oppDraft?.watchers?.length
@@ -4880,7 +4928,7 @@ onUnmounted(() => {
                           <p class="text-sm font-bold text-n-slate-12">
                             {{
                               atendStageNames(agent).length +
-                              (key === 'atendente_agendamento' &&
+                              (BOOKING_LIKE_KEYS.includes(key) &&
                               agent.no_card !== false
                                 ? 1
                                 : 0)
@@ -4916,7 +4964,7 @@ onUnmounted(() => {
                           <b>🕶️ Sombra, em uma frase:</b> o agente lê cada
                           mensagem do paciente e escreve numa
                           <b>nota interna</b> o que responderia{{
-                            key === 'atendente_agendamento'
+                            BOOKING_LIKE_KEYS.includes(key)
                               ? ' (e se agendaria, com vaga real)'
                               : ' (e se remarcaria ou cancelaria)'
                           }}. <b>O paciente não recebe nada.</b> É um estágio de
@@ -5112,7 +5160,7 @@ onUnmounted(() => {
                         </div>
                         <div v-else class="flex flex-wrap gap-1.5">
                           <button
-                            v-if="key === 'atendente_agendamento'"
+                            v-if="BOOKING_LIKE_KEYS.includes(key)"
                             class="cv-chip cv-chip-lg"
                             :class="agent.no_card !== false ? 'cv-chip-on' : ''"
                             :style="
@@ -5165,6 +5213,8 @@ onUnmounted(() => {
                           {{
                             key === 'atendente_agendamento'
                               ? 'Sugestão inicial: Sem card + Novos Contatos + Envio de Orçamento.'
+                              : key === 'atendente_visagista'
+                                ? 'Sugestão inicial: Visagismo em conversa + Teste da equipe (sem "sem card": o de Agendamento recebe quem chega).'
                               : key === 'atendente_pos_op'
                                 ? 'Sugestão inicial: Cirurgia Realizada + Pós Operatório (e a janela de cirurgia recente abaixo cobre quem está fora da coluna).'
                                 : 'Sugestão inicial: Agendamento de Consulta + Consulta Confirmada + Desmarcou a Consulta.'
@@ -5249,7 +5299,7 @@ onUnmounted(() => {
 
                       <!-- ao agendar → coluna / teto da sombra / responde em / horário -->
                       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div v-if="key === 'atendente_agendamento'">
+                        <div v-if="BOOKING_LIKE_KEYS.includes(key)">
                           <label
                             class="text-xs font-medium text-n-slate-11 block mb-1.5"
                             >Ao agendar (ao vivo), mover o card para</label
@@ -5402,6 +5452,8 @@ onUnmounted(() => {
                           a passo deste agente{{
                             key === 'atendente_agendamento'
                               ? ' (recepção → agendamento)'
+                              : key === 'atendente_visagista'
+                                ? ' (prova virtual → lentes → valor → fechamento)'
                               : ' (suporte a quem já marcou)'
                           }}.</span
                         >

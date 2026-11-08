@@ -18,6 +18,10 @@ funis:
       - ['Visita realizada', '#22C55E']
       - ['Pedido fechado (1ª compra)', '#10B981']
       - ['Não fechou ainda', '#F97316']
+      # 🧪 08/11: coluna de TESTE da equipe — mesmo agente, mesmo número; o card do sócio fica aqui
+      # para testar a prova virtual e a venda pela conversa sem misturar com os leads
+      - ['Visagismo em conversa', '#7C3AED']
+      - ['Teste da equipe', '#A855F7']
   - nome: 'Pós-venda e relacionamento'
     descricao: 'Cliente da base: do pedido fechado para sempre (NPS, ajuste, segundo óculos, nova oferta) e a base importada do SavWin por segmento. Agente: Atendente Pós-compra.'
     colunas:
@@ -33,6 +37,22 @@ funis:
       - ['Nova oferta em conversa', '#8B5CF6']
       - ['Comprou de novo', '#10B981']
       - ['Sem resposta', '#94A3B8']
+
+# 👓 08/11: a LOJA como unidade da Agenda e as FAIXAS de atendimento. Só entram
+# quando a conta ainda não tem unidade/faixa (o que a loja editar na tela fica).
+#   Val: seg–sex 8h–17h e sáb 8h–12h, de 30 em 30 min (visita, retirada);
+#   Fabi: sáb 8h–11h, de 10 em 10 min, SÓ exame de vista (faixa reservada).
+empresa:
+  unidades:
+    - { key: 'loja', label: 'Loja Jardim Cachoeira', address: 'R. Brg. Vilela Júnior, 100 – Jardim Cachoeira, São Paulo – SP' }
+janelas:
+  - { dow: 1, unit: 'loja', doctor: 'Val', start: '08:00', end: '17:00', block: 30 }
+  - { dow: 2, unit: 'loja', doctor: 'Val', start: '08:00', end: '17:00', block: 30 }
+  - { dow: 3, unit: 'loja', doctor: 'Val', start: '08:00', end: '17:00', block: 30 }
+  - { dow: 4, unit: 'loja', doctor: 'Val', start: '08:00', end: '17:00', block: 30 }
+  - { dow: 5, unit: 'loja', doctor: 'Val', start: '08:00', end: '17:00', block: 30 }
+  - { dow: 6, unit: 'loja', doctor: 'Val', start: '08:00', end: '12:00', block: 30 }
+  - { dow: 6, unit: 'loja', doctor: 'Fabi', start: '08:00', end: '11:00', block: 10, only: ['exame'] }
 
 # a Agenda e o reflexo de comparecimento ligados às colunas (pelo nome)
 agenda:
@@ -51,6 +71,11 @@ agentes:
     colunas: ['Novos contatos', 'Orçamento prévio enviado', 'Visita realizada', 'Não fechou ainda', 'Nova oferta em conversa']
     sem_card: true
     depois_de_agendar: 'Agendamento da visita'
+  # 🪞 08/11: Agente Visagista Vendedor — prova virtual, lentes, negociação e fechamento pela conversa.
+  # Mesmo número, mesma caixa: responde nas colunas dele (mova o card para "Visagismo em conversa";
+  # "Teste da equipe" é a coluna dos sócios para testar).
+  atendente_visagista:
+    colunas: ['Visagismo em conversa', 'Teste da equipe']
   atendente_pos:
     colunas: ['Agendamento da visita', 'Visita confirmada', 'Desmarcou ou não veio']
   atendente_pos_op:

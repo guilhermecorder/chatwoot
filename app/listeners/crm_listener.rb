@@ -449,7 +449,8 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   # respondendo pausa o agente e 👍 reativa — igual ao Atendente Instagram,
   # mas com estado próprio (cevico_atendente_wa).
   # 🩺 item 251: + Atendente de Pós-operatório (colunas de cirurgia realizada / pós-op)
-  RESPONDER_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op].freeze
+  # 🪞 08/11: Agente Visagista Vendedor (ótica) — prova virtual, lentes, negociação e fechamento pela conversa
+  RESPONDER_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op atendente_visagista].freeze
   RESPONDER_STATE_KEY = Crm::ResponderAgentJob::STATE_KEY
 
   def handle_responder_agents(message)

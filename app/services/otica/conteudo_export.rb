@@ -12,7 +12,7 @@ class Otica::ConteudoExport
     {
       'exportado_em' => Time.current.iso8601, 'conta' => @account.name,
       'script' => (ai['script'] || {}).slice(*Otica::Preparo::SCRIPT_KEYS),
-      'prompts' => (ai['agents'] || {}).slice('atendente_agendamento', 'atendente_pos', 'atendente_pos_op')
+      'prompts' => (ai['agents'] || {}).slice('atendente_agendamento', 'atendente_pos', 'atendente_pos_op', 'atendente_visagista')
                                        .transform_values { |a| a['prompt'].to_s }.compact_blank,
       'journey' => Crm::JourneyMessage.where(account: @account, name: names)
                                       .to_h { |m| [m.name, m.content&.dig('text').to_s] }.compact_blank

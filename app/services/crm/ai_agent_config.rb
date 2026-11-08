@@ -47,6 +47,8 @@ module Crm::AiAgentConfig
     'atendente_pos' => { 'model' => 'claude-haiku-4-5', 'effort' => nil }, # suporte a quem já agendou (dúvidas, remarcar)
     # 🩺 item 251: pós-operatório é o de MAIOR risco clínico — Sonnet, esforço médio
     'atendente_pos_op' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' },
+    # 🪞 08/11 (ótica): o Visagista Vendedor conduz a venda inteira pela conversa — Sonnet, esforço médio
+    'atendente_visagista' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' },
     # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação (a voz real roda na ElevenLabs)
     'voice' => { 'model' => 'claude-sonnet-5', 'effort' => 'medium' }
   ).freeze
@@ -55,7 +57,7 @@ module Crm::AiAgentConfig
   # (Instagram/comentários nas caixas escolhidas; atendentes do WhatsApp; e o
   # Agente de Ligação, cujo simulador por texto usa o mesmo motor — 195).
   # Todos os demais seguem a trava operacional de leitura.
-  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos atendente_pos_op voice].freeze
+  RESPONDER_AGENTS = %w[instagram comments atendente_agendamento atendente_pos atendente_pos_op atendente_visagista voice].freeze
 
   # preço US$ por milhão de tokens (entrada / saída) — preço de LISTA da API
   # da Anthropic (não é a fatura: imposto/câmbio ficam de fora).

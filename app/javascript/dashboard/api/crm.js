@@ -267,6 +267,13 @@ class CrmAPI extends ApiClient {
   }
 
   simulateAgent(payload) {
+    // 🪞 08/11: com foto vai como multipart (FormData)
+    if (payload instanceof FormData) {
+      return axios.post(`${this.url}/settings/ai_simulate`, payload, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
+      });
+    }
     return axios.post(`${this.url}/settings/ai_simulate`, payload);
   }
 
@@ -1958,6 +1965,48 @@ class CrmAPI extends ApiClient {
 
   importOticaProductsCsv(payload) {
     return axios.post(`${this.url}/otica/products/import_csv`, payload);
+  }
+
+  // 🪞 prova virtual (08/11): foto da armação + status/prévia do visagismo
+  uploadOticaProductPhoto(id, file) {
+    const form = new FormData();
+    form.append('photo', file);
+    return axios.post(`${this.url}/otica/products/${id}/photo`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  }
+
+  uploadOticaProductPhotosBulk(files) {
+    const form = new FormData();
+    [...files].forEach(f => form.append('photos[]', f));
+    return axios.post(`${this.url}/otica/products/photos_bulk`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    });
+  }
+
+  deleteOticaProductPhoto(id) {
+    return axios.delete(`${this.url}/otica/products/${id}/photo`);
+  }
+
+  getOticaVisagismo() {
+    return axios.get(`${this.url}/otica/visagismo`);
+  }
+
+  updateOticaVisagismo(payload) {
+    return axios.patch(`${this.url}/otica/visagismo`, payload);
+  }
+
+  previewOticaVisagismo({ selfie, productIds = [], quantidade = 2, preferencia = '' }) {
+    const form = new FormData();
+    form.append('selfie', selfie);
+    productIds.forEach(id => form.append('product_ids[]', id));
+    form.append('quantidade', quantidade);
+    form.append('preferencia', preferencia);
+    return axios.post(`${this.url}/otica/visagismo/preview`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000,
+    });
   }
 
   getOticaSuppliers() {

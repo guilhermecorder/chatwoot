@@ -609,6 +609,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
                                                                        :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
                                                                        :task_assignee_id,
                                                                        { inbox_ids: [], stage_ids: [], live_days: [] }],
+                                # 🪞 08/11 (ótica): Agente Visagista Vendedor — mesma estrutura do Atendente de Agendamento
+                                atendente_visagista: agent_fields + [:mode, :no_card, :after_booking_stage_id,
+                                                                     :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
+                                                                     :task_assignee_id,
+                                                                     { inbox_ids: [], stage_ids: [], live_days: [] }],
                                 # 🗣️ Atendente Pós-agendamento (agente B): suporte a quem já marcou
                                 atendente_pos: agent_fields + [:mode, :shadow_daily_cap, :hours_start, :hours_end, :reply_delay_seconds,
                                                                :task_assignee_id,
@@ -736,8 +741,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     conversation ||= sim.start!
     sim.objective!(conversation) if params[:objective].present?
     error = nil
-    if params[:text].present?
-      outcome = sim.say!(conversation, params[:text])
+    # 🪞 08/11: foto junto da fala (ótica: prova virtual no simulador)
+    photo = params[:photo].respond_to?(:read) ? params[:photo] : nil
+    if params[:text].present? || photo
+      outcome = sim.say!(conversation, params[:text], photo: photo)
       error = outcome[:error]
     end
     render json: { agent: agent_key, conversation_id: conversation.id, display_id: conversation.display_id,
@@ -2603,7 +2610,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       # 🗣️ rodada 188: o prompt do Atendente é o BLOCO DA ETAPA; o Roteiro vai à parte (script)
       'atendente_agendamento' => Crm::CevicoScript.default_stage_prompt('atendente_agendamento', 'v1', account: s.account),
       'atendente_pos' => Crm::CevicoScript.default_stage_prompt('atendente_pos', 'v1', account: s.account),
-      'atendente_pos_op' => Crm::CevicoScript.default_stage_prompt('atendente_pos_op', 'v1', account: s.account)
+      'atendente_pos_op' => Crm::CevicoScript.default_stage_prompt('atendente_pos_op', 'v1', account: s.account),
+      'atendente_visagista' => Crm::CevicoScript.default_stage_prompt('atendente_visagista', 'v1', account: s.account)
     }
     {
       api_key_set: cfg['api_key'].present?,

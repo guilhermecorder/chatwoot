@@ -245,4 +245,48 @@ RSpec.describe Crm::MediaReadingService do
     expect(done.reload.meta['transcribed_text']).to eq('já lido')
     expect(described_class.pending_attachments(conversation)).to be_empty
   end
+
+  # 🪞 08/11: no ramo ÓTICA a foto do rosto vira "selfie" com o bloco do rosto para a prova virtual
+  describe 'ótica: foto do rosto (selfie)' do
+    before { Cevico::Company.save!(account, 'segment' => 'otica') }
+
+    it 'usa o prompt da ótica, guarda o rosto normalizado e avisa o Atendente da ferramenta', :aggregate_failures do
+      image = attach(incoming(content: 'olha minha foto'), :image)
+      gemini_answers({ 'tipo' => 'selfie', 'descricao' => 'Mulher sorrindo, de frente', 'texto' => '',
+                                  'rosto' => { 'pessoas' => 1, 'frontal' => true, 'formato' => 'Coração', 'usa_oculos' => false,
+                                               'adulto' => true, 'qualidade' => 'ok', 'observacao' => 'testa larga e queixo fino' } })
+      expect(described_class.new(image).perform).to be(true)
+
+      image.reload
+      media = image.meta['cevico_media']
+      expect(media).to include('status' => 'done', 'tipo' => 'selfie')
+      expect(media['rosto']).to eq('pessoas' => 1, 'frontal' => true, 'formato' => 'coracao', 'usa_oculos' => false, 'adulto' => true,
+                                   'qualidade' => 'ok', 'observacao' => 'testa larga e queixo fino')
+      expect(image.meta['transcribed_text']).to include('Rosto: rosto coração, de frente')
+      label = described_class.transcript_label(image)
+      expect(label).to include('[foto do rosto (rosto coração, de frente): Mulher sorrindo, de frente')
+      expect(label).to include('experimentar_armacoes')
+    end
+
+    it 'foto com duas pessoas: guarda, mas avisa que NÃO serve para a prova virtual' do
+      image = attach(incoming, :image)
+      gemini_answers({ 'tipo' => 'selfie', 'descricao' => 'Duas amigas', 'texto' => '',
+                       'rosto' => { 'pessoas' => 2, 'frontal' => true, 'formato' => 'oval', 'adulto' => true, 'qualidade' => 'ok' } })
+      described_class.new(image).perform
+      expect(described_class.transcript_label(image.reload)).to include('NÃO serve para a prova virtual: a foto tem mais de uma pessoa')
+    end
+
+    it 'o prompt enviado ao Gemini é o da ótica (fala em cliente e pede o bloco rosto)' do
+      image = attach(incoming, :image)
+      expect(HTTParty).to receive(:post) do |_url, opts|
+        body = JSON.parse(opts[:body])
+        text = body['contents'][0]['parts'][0]['text']
+        expect(text).to include('ÓTICA').and include('"rosto"').and include('selfie')
+        double('gemini', success?: true, code: 200, # rubocop:disable RSpec/VerifiedDoubles
+                         parsed_response: { 'candidates' => [{ 'content' => { 'parts' => [{ 'text' => { 'tipo' => 'outro', 'descricao' => 'x', 'texto' => '' }.to_json }] } }] })
+      end
+      expect(described_class.new(image).perform).to be(true)
+      expect(image.reload.meta['cevico_media']).not_to have_key('rosto')
+    end
+  end
 end

@@ -435,7 +435,10 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
   # a passagem para humano foi por urgência clínica? (tarefa alta aberta pela
   # IA, ou os balões/leitura falam de pronto atendimento, dor forte, perda de visão)
-  def clinical_urgency?(result)
+  # Só no ramo CLÍNICA: na ótica (04/11) a tarefa alta é reclamação de óculos e
+  # caía aqui — a cliente recebia o texto fixo de pronto atendimento da clínica
+  def clinical_urgency?(result, account)
+    return false unless Cevico::Company.for(account).clinic?
     return true if Array(result[:acoes]).any? { |a| a['ferramenta'] == 'abrir_tarefa' && a['ok'] && a['resumo'].to_s.include?('(alta)') }
 
     [*Array(result[:mensagens]), result[:leitura]].join(' ').match?(URGENCY_RE)
@@ -446,6 +449,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   # 'urgente' quando uma pessoa responde; esta conferência é a segunda camada
   # (resposta humana depois da pausa = a equipe assumiu = silêncio).
   def urgent_orientation!(account, conversation, trigger_message_id, agent_key, state)
+    return unless Cevico::Company.for(account).clinic?
+
     last = Time.zone.parse(state['orientacao_at'].to_s)
     return if last && last > ORIENTATION_GAP.ago
     return if human_replied_since?(conversation, state['at'])
@@ -471,7 +476,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   OUTSIDE_WINDOW_NOTE = 'urgência clínica fora da janela ao vivo: tarefa 🔴 aberta; o paciente NÃO recebeu resposta do agente'.freeze
 
   def urgent_outside_window!(account, conversation, cfg, agent_key, result)
-    return unless live_but_outside_window?(cfg) && result[:chamar_humano] && clinical_urgency?(result)
+    return unless live_but_outside_window?(cfg) && result[:chamar_humano] && clinical_urgency?(result, account)
 
     detalhes = "Fora da janela ao vivo: o agente NÃO respondeu ao paciente. O que teria dito: #{Array(result[:mensagens]).join(' ')}"
     Crm::HandoffTask.open!(account: account, contact: conversation.contact, conversation: conversation, agent_key: agent_key,
@@ -538,10 +543,13 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     return false unless lock_manager.lock(lock_key, 30.seconds)
 
     begin
-      return false unless Crm::AgendaSlots.slot_available?(account, date: date, time: time, unit: ag[:unidade])
+      # 👓 08/11: na ótica "visita com exame" só cabe na faixa do exame (sábado, Fabi)
+      # e "retirada do óculos" na faixa da entrega; o tipo sai do procedimento
+      modality = Crm::AgendaSlots.booking_modality(account, ag[:procedimento])
+      return false unless Crm::AgendaSlots.slot_available?(account, date: date, time: time, unit: ag[:unidade], modality: modality)
 
       starts_at = Crm::AgendaSlots::TZ.parse("#{date} #{time}")
-      doctor = Crm::AgendaSlots.doctor_at(account, date, time, ag[:unidade]) # item 311: o médico da faixa do horário
+      doctor = Crm::AgendaSlots.doctor_at(account, date, time, ag[:unidade], modality: modality) # item 311: o médico da faixa do horário
       requester = conversation.contact
       # 👪 item 346: consulta de OUTRA pessoa → cadastro e card DELA (nunca o de
       # quem conversa); sem telefone próprio, a consulta leva o de quem agendou
@@ -562,6 +570,11 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       unless %i[created rescheduled already].include?(outcome)
         log_event(account, agent_key, conversation, 'erro', "#{ag[:dia]} #{ag[:hora]} não entrou na Agenda (#{outcome})")
         return false
+      end
+      # 👓 08/11: o tipo do horário fica gravado no agendamento (exame / retirada)
+      if modality != Crm::AgendaSlots::AI_MODALITY
+        account.tasks.where(contact_id: patient.id, task_type: 'consulta', due_at: starts_at, canceled_at: nil)
+               .update_all(modality: modality) # rubocop:disable Rails/SkipsModelValidations
       end
 
       # item 200: etiqueta + card na coluna (a do card do agente ou a da tela Agendamentos)
@@ -632,7 +645,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   def hand_over!(conversation, result, agent_key, task_opened: false)
     task_opened = ensure_handoff_task(conversation, result, agent_key) || task_opened if result[:chamar_humano]
     handoff_note(conversation, agent_key, task_opened: task_opened)
-    pause!(conversation, 'chamou_humano', agent_key, urgente: clinical_urgency?(result))
+    pause!(conversation, 'chamou_humano', agent_key, urgente: clinical_urgency?(result, conversation.account))
   end
 
   # devolve true se a tarefa existe (aberta agora, complementada, ou aberta
@@ -644,7 +657,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
     Crm::HandoffTask.open!(account: conversation.account, contact: conversation.contact, conversation: conversation,
                            agent_key: agent_key, motivo: result[:leitura].to_s.presence || 'Paciente pediu atenção da equipe',
-                           detalhes: Array(result[:mensagens]).join(' '), urgencia: clinical_urgency?(result) ? 'alta' : 'normal')
+                           detalhes: Array(result[:mensagens]).join(' '), urgencia: clinical_urgency?(result, conversation.account) ? 'alta' : 'normal')
     true
   rescue StandardError => e
     Rails.logger.warn "[Crm::ResponderAgentJob] tarefa de passagem: #{e.message}"
@@ -679,7 +692,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   def slot_valid?(account, agendamento)
     ag = (agendamento || {}).symbolize_keys
     date = Date.parse(ag[:dia].to_s)
-    Crm::AgendaSlots.slot_available?(account, date: date, time: ag[:hora].to_s.strip, unit: ag[:unidade])
+    Crm::AgendaSlots.slot_available?(account, date: date, time: ag[:hora].to_s.strip, unit: ag[:unidade],
+                                              modality: Crm::AgendaSlots.booking_modality(account, ag[:procedimento]))
   rescue ArgumentError, TypeError
     false
   end

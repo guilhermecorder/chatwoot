@@ -14,6 +14,7 @@ module Crm::FlowMap::Registry
     Crm::FlowMap::Flows::AtendenteAgendamento,
     Crm::FlowMap::Flows::AtendentePos,
     Crm::FlowMap::Flows::AtendentePosOp,
+    Crm::FlowMap::Flows::AtendenteVisagista, # 🪞 08/11 (ótica)
     Crm::FlowMap::Flows::Comments,
     Crm::FlowMap::Flows::Nps,
     Crm::FlowMap::Flows::Conversation,

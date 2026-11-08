@@ -21,7 +21,7 @@ RSpec.describe Otica::Preparo do
     described_class.new(account, content: content).call
 
     expect(Crm::Pipeline.where(account_id: account.id).order(:position).pluck(:name)).to eq(['Aquisição', 'Pós-venda e relacionamento'])
-    expect(Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: account.id }).count).to eq(20)
+    expect(Crm::Stage.joins(:pipeline).where(crm_pipelines: { account_id: account.id }).count).to eq(22)
     expect(Cevico::Company.for(account).segment).to eq('otica')
 
     setting = CrmSetting.find_by(account: account)
@@ -76,5 +76,20 @@ RSpec.describe Otica::Preparo do
     other = create(:account)
     described_class.new(other, content: JSON.parse(exported.to_json)).call
     expect(CrmSetting.find_by(account: other).ai_config['script']['objections']).to eq('Objeções da loja')
+  end
+
+  # 👓 08/11: a loja vira unidade da Agenda e as faixas (Val seg–sáb, Fabi sábado só exame) entram uma vez só
+  it 'monta a unidade e as faixas da Agenda sem sobrescrever o que a loja editar' do
+    described_class.new(account).call
+    expect(Cevico::Company.for(account).unit_keys).to eq(['loja'])
+    windows = CrmSetting.find_by(account: account).agenda_config['windows']
+    expect(windows.size).to eq(7)
+    expect(windows.last).to include('dow' => 6, 'doctor' => 'Fabi', 'only' => ['exame'], 'block' => 10)
+
+    cfg = CrmSetting.find_by(account: account).agenda_config
+    cfg['windows'] = [cfg['windows'].first]
+    CrmSetting.find_by(account: account).update!(agenda_config: cfg)
+    described_class.new(account).call
+    expect(CrmSetting.find_by(account: account).agenda_config['windows'].size).to eq(1)
   end
 end

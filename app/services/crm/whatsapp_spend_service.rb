@@ -34,6 +34,7 @@ class Crm::WhatsappSpendService # rubocop:disable Metrics/ClassLength
     'ia:atendente_agendamento' => { label: 'Atendente de Agendamento (IA)', kind: 'robo', color: '#059669', icon: 'i-lucide-message-square-heart' },
     'ia:atendente_pos' => { label: 'Atendente Pós-agendamento (IA)', kind: 'robo', color: '#0F5FA6', icon: 'i-lucide-life-buoy' },
     'ia:atendente_pos_op' => { label: 'Atendente de Pós-operatório (IA)', kind: 'robo', color: '#BE123C', icon: 'i-lucide-heart-pulse' },
+    'ia:atendente_visagista' => { label: 'Agente Visagista Vendedor (IA)', kind: 'robo', color: '#7C3AED', icon: 'i-lucide-scan-face' },
     'followup' => { label: 'Follow-up (robô por coluna)', kind: 'automacao', color: '#7C3AED', icon: 'i-lucide-timer' },
     'jornada' => { label: 'Jornada do paciente', kind: 'automacao', color: '#FF2D55', icon: 'i-lucide-route' },
     'campanha' => { label: 'Campanha WhatsApp', kind: 'automacao', color: '#25D366', icon: 'i-lucide-send' },

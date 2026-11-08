@@ -16,6 +16,7 @@
 #  net               :decimal(12, 2)   default(0.0), not null
 #  notes             :text
 #  number            :integer          not null
+#  ready_at          :datetime
 #  sold_on           :date             not null
 #  status            :string           default("aberta"), not null
 #  created_at        :datetime         not null
@@ -81,6 +82,9 @@ class Otica::Order < ApplicationRecord
   }.freeze
 
   before_validation :assign_number, on: :create
+  # 📦 08/11: prazo prometido padrão = 7 dias da venda ("mais ou menos uma semana")
+  before_validation :default_due_on, on: :create
+  DEFAULT_DUE_DAYS = 7
   validates :status, inclusion: { in: STATUSES.keys }
   validates :number, presence: true, uniqueness: { scope: :account_id }
   validates :sold_on, presence: true
@@ -132,7 +136,18 @@ class Otica::Order < ApplicationRecord
     "O.S. #{number}"
   end
 
+  # 📦 08/11: há quantos dias o óculos pronto espera o cliente
+  def days_ready(today = Otica.today)
+    return nil if ready_at.blank? || status != 'pronta'
+
+    (today - ready_at.in_time_zone(Otica::TZ).to_date).to_i
+  end
+
   private
+
+  def default_due_on
+    self.due_on ||= sold_on + DEFAULT_DUE_DAYS if sold_on.present? && status != 'orcamento'
+  end
 
   # nº sequencial por conta (uma loja; a numeração é a da conta)
   def assign_number

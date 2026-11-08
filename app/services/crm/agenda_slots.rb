@@ -26,12 +26,59 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # 🗂️ item 307 (01/10): FAIXA RESERVADA. Cada janela pode aceitar só alguns
   # tipos de atendimento (`only`); sem `only` aceita tudo. A IA marca CONSULTA
   # NOVA (avaliação) — então ela só enxerga as faixas que aceitam avaliação.
-  RESERVABLE = %w[avaliacao retorno pos_op].freeze
+  # 👓 08/11: a ótica reserva faixas para o EXAME DE VISTA (sábado, Fabi) e para a
+  # RETIRADA DO ÓCULOS; na clínica nenhuma faixa usa esses dois, nada muda lá
+  RESERVABLE = %w[avaliacao retorno pos_op exame entrega].freeze
   AI_MODALITY = 'avaliacao'.freeze
   MODALITY_LABELS = { 'avaliacao' => 'avaliação (consulta nova)', 'retorno' => 'retorno',
-                      'pos_op' => 'retorno de pós-operatório' }.freeze
+                      'pos_op' => 'retorno de pós-operatório', 'exame' => 'exame', 'entrega' => 'entrega' }.freeze
+  OTICA_MODALITY_LABELS = { 'avaliacao' => 'visita na loja', 'retorno' => 'retorno', 'pos_op' => 'retorno de pós-compra',
+                            'exame' => 'exame de vista', 'entrega' => 'retirada do óculos' }.freeze
 
   module_function
+
+  # ── 👓 08/11: vocabulário POR CONTA ──────────────────────────────────────
+  # A ótica tem a sua loja (unidades da Identidade da empresa, Cevico::Company)
+  # e fala em visita/exame/retirada; a clínica segue com as unidades fixas.
+  def otica?(account)
+    Cevico::Company.for(account).segment == 'otica'
+  rescue StandardError
+    false
+  end
+
+  def unit_labels(account)
+    units = Cevico::Company.for(account).units
+    return UNIT_LABELS if units.blank?
+
+    units.to_h { |u| [u['key'], u['label']] }
+  rescue StandardError
+    UNIT_LABELS
+  end
+
+  def unit_label(account, key)
+    unit_labels(account)[key.to_s] || key.to_s.presence
+  end
+
+  def modality_label(account, key)
+    (otica?(account) ? OTICA_MODALITY_LABELS : MODALITY_LABELS)[key.to_s] || key.to_s
+  end
+
+  # tipo de horário que um agendamento da IA pede, pelo texto do procedimento:
+  # na ótica "visita com exame" cai na faixa do exame e "retirada" na da entrega
+  def booking_modality(account, procedure)
+    return AI_MODALITY unless otica?(account)
+
+    text = I18n.transliterate(procedure.to_s).downcase
+    return 'exame' if text.match?(/exame/)
+    return 'entrega' if text.match?(/retir|entrega|buscar o oculos|pegar o oculos/)
+
+    AI_MODALITY
+  end
+
+  # a conta tem faixa dedicada a este tipo? (ex.: sábado 8h–11h só exame)
+  def dedicated_windows?(account, modality)
+    (windows(account) + open_days(account)).any? { |w| reserved_for(w).include?(modality.to_s) }
+  end
 
   # janelas em vigor: as salvas na tela (ou o padrão), SEM os médicos com a
   # agenda fechada — antes do item 307 o "Fechar agenda" só valia na tela e a
@@ -246,6 +293,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       now: TZ.now,
       # item 307: só as faixas deste tipo de atendimento
       wins: windows_for(account, modality),
+      # 👓 08/11: a ótica atende no sábado pelas faixas da semana (Val e Fabi)
+      weekend_ok: otica?(account),
       # item 375: aberturas pontuais (com 'date') — somam às faixas da semana
       open: open_windows_for(account, modality),
       blocked: Array(cfg['blocked']).to_set { |b| "#{b['date']}|#{b['time']}|#{b['unit']}" },
@@ -270,7 +319,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # faixas em vigor NESTE dia: as da semana (nunca no fim de semana) + as
   # aberturas pontuais com esta data (item 375 — um sábado aberto de propósito vale)
   def windows_on(ctx, day)
-    weekly = day.saturday? || day.sunday? ? [] : ctx[:wins].select { |w| w['dow'] == day.wday }
+    skip_weekend = (day.saturday? || day.sunday?) && !ctx[:weekend_ok]
+    weekly = skip_weekend ? [] : ctx[:wins].select { |w| w['dow'] == day.wday }
     weekly + Array(ctx[:open]).select { |w| w['date'] == day.to_s }
   end
 
@@ -346,7 +396,7 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     return 'NENHUM horário livre nos próximos dias — diga que vai verificar com a equipe.' if grouped.empty?
 
     grouped.map do |(date, unit, doctor), list|
-      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{UNIT_LABELS[unit] || unit} · #{doctor}: " +
+      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{unit_label(account, unit) || unit} · #{doctor}: " +
         list.map { |s| s[:time] }.join(', ')
     end.join("\n")
   end
@@ -388,18 +438,20 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   def open_day_rules(account)
     future_open_days(account).map do |w|
       date = Date.iso8601(w['date'])
-      "- ABERTURA EXTRA em #{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
+      "- ABERTURA EXTRA em #{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{unit_label(account, w['unit']) || w['unit']} · #{w['doctor']}: " \
         "atende das #{w['start']} às #{w['end']} SÓ neste dia (fora da rotina da semana). Pode oferecer e marcar " \
         'esses horários normalmente, como em qualquer dia de atendimento.'
     end
   end
 
   def reserved_rules(account)
+    new_word = otica?(account) ? 'visita comum' : 'consulta nova'
+    verb = otica?(account) ? 'marcar' : 'remarcar'
     windows(account).reject { |w| accepts?(w, AI_MODALITY) }.map do |w|
-      kinds = reserved_for(w).map { |k| MODALITY_LABELS[k] }.join(' e ')
-      "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
-        "faixa reservada para #{kinds}. NÃO ofereça nem marque consulta nova nesta faixa " \
-        "(ela só serve para remarcar #{kinds})."
+      kinds = reserved_for(w).map { |k| modality_label(account, k) }.join(' e ')
+      "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']} · #{unit_label(account, w['unit']) || w['unit']} · #{w['doctor']}: " \
+        "faixa reservada para #{kinds}. NÃO ofereça nem marque #{new_word} nesta faixa " \
+        "(ela só serve para #{verb} #{kinds})."
     end
   end
 
@@ -408,8 +460,10 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # ao paciente e oferecer outra, em vez de só dizer que não está livre
   def hourly_rule(account)
     cap = hourly_cap(account)
-    "- Cada unidade recebe no máximo #{cap} avaliações (consultas novas) por hora, para o atendimento fluir " \
-      'sem fila. Se a hora que o paciente pedir estiver completa, diga com naturalidade que esse horário já está ' \
+    what = otica?(account) ? 'visitas novas' : 'avaliações (consultas novas)'
+    who = otica?(account) ? 'cliente' : 'paciente'
+    "- Cada unidade recebe no máximo #{cap} #{what} por hora, para o atendimento fluir " \
+      "sem fila. Se a hora que o #{who} pedir estiver completa, diga com naturalidade que esse horário já está " \
       'completo e ofereça os mais próximos da lista HORÁRIOS DISPONÍVEIS — de preferência espalhando ao longo do dia.'
   end
 
@@ -418,7 +472,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     text = rules_text(account)
     return '' if text.blank?
 
-    "REGRAS DA AGENDA (definidas pela clínica — valem acima de qualquer horário que o paciente peça):\n#{text}\n"
+    who = otica?(account) ? 'pela loja — valem acima de qualquer horário que o cliente peça' : 'pela clínica — valem acima de qualquer horário que o paciente peça'
+    "REGRAS DA AGENDA (definidas #{who}):\n#{text}\n"
   end
 
   def each_slot(win)

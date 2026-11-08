@@ -53,22 +53,33 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   TASK_TOOL_NAME = 'abrir_tarefa'.freeze
   ALL_NAMES = (NAMES + [TASK_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
-                  'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
+                  'atendente_pos_op' => 'Atendente de Pós-operatório', 'atendente_visagista' => 'Agente Visagista Vendedor',
+                  'voice' => 'Agente de Ligação' }.freeze
   # 🩺 item 251: o Atendente de Pós-operatório abre tarefa para a equipe.
   # 🙋 auditoria 10/2026 (#458): os três atendentes do WhatsApp abrem tarefa —
   # urgência clínica ou pedido fora do roteiro num paciente novo também
   # precisa de alguém da equipe avisado, não só de uma nota na conversa.
-  TASK_TOOL_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op].freeze
+  TASK_TOOL_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op atendente_visagista].freeze
+  # 🪞 08/11 (ideia do Henrique): PROVA VIRTUAL da ótica — a cliente manda a foto,
+  # a ferramenta escolhe armações do estoque pelo formato do rosto, gera a foto
+  # dela usando cada uma e envia na conversa (Otica::VirtualTryOn). Só no ramo
+  # ótica, só nos atendentes de texto (agendamento e pós).
+  OTICA_TOOL_NAME = 'experimentar_armacoes'.freeze
+  OTICA_TOOL_KEYS = %w[atendente_agendamento atendente_pos atendente_visagista].freeze
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
 
   attr_reader :acoes
 
-  def initialize(conversation:, agent_key:, live:)
+  # 🪞 08/11: otica_live = ferramentas da ótica de verdade no simulador (imagens na conversa de
+  # teste); simulation = é o Testar agente (sem espera de 30 s, sem tarefa real no fechamento)
+  def initialize(conversation:, agent_key:, live:, otica_live: false, simulation: false)
     @conversation = conversation
     @account = conversation.account
     @contact = conversation.contact
     @agent_key = agent_key.to_s
     @live = live == true
+    @otica_live = otica_live == true
+    @simulation = simulation == true
     @acoes = []
   end
 
@@ -76,7 +87,47 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def definitions
     list = base_definitions
     list << task_definition if TASK_TOOL_KEYS.include?(@agent_key)
+    list << otica_definition if otica_tool?
+    # 💬 08/11: consultoria de lentes, negociação e fechamento (Otica::SalesTools)
+    list.concat(Otica::SalesTools.definitions(@agent_key)) if otica_account? && TASK_TOOL_KEYS.include?(@agent_key)
     list
+  end
+
+  # 🪞 a prova virtual existe só na ótica (ramo da conta) e nos atendentes de texto
+  def otica_tool?
+    OTICA_TOOL_KEYS.include?(@agent_key) && otica_account?
+  end
+
+  def otica_account?
+    @otica_account = Otica::VirtualTryOn.otica?(@account) if @otica_account.nil?
+    @otica_account
+  end
+
+  # 👓 08/11: as unidades desta conta (a loja, na ótica)
+  def unit_keys
+    Crm::AgendaSlots.unit_labels(@account).keys
+  end
+
+  def otica_definition
+    {
+      name: OTICA_TOOL_NAME,
+      description: 'PROVA VIRTUAL: gera e ENVIA à cliente, nesta conversa, fotos dela usando armações do estoque da loja ' \
+                   'que combinam com o formato do rosto dela (visagismo). Use SÓ depois que a cliente mandou uma foto do ' \
+                   'rosto marcada como "serve para a prova virtual" e disse (ou aceitou) que quer ver armações nela. ' \
+                   'Devolve ok=true com as armações enviadas (as fotos já chegaram a ela: só comente), ou ok=false com o ' \
+                   'motivo (foto não serve, limite do dia, sem armação pronta): aí peça outra foto ou convide para a loja. ' \
+                   'Limite: até 3 armações por vez e 2 vezes por dia por cliente.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          quantidade: { type: 'integer', minimum: 1, maximum: Otica::VirtualTryOn::MAX_PER_CALL,
+                        description: 'Quantas armações mostrar (padrão 2; 3 só se a cliente pedir várias)' },
+          preferencia: { type: 'string', description: 'O que a cliente disse que gosta, em poucas palavras: cor, material, ' \
+                                                      'estilo ("preta e fininha", "dourada", "grande"). Vazio se não disse.' }
+        },
+        additionalProperties: false
+      }
+    }
   end
 
   # 🩺 item 251: tarefa para a pessoa responsável (Meu Painel) — dúvida do caso,
@@ -134,7 +185,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
             id: { type: 'integer', description: 'id da consulta (de buscar_consulta ou do contexto)' },
             dia: { type: 'string', description: 'Novo dia, YYYY-MM-DD' },
             hora: { type: 'string', description: 'Nova hora, HH:MM' },
-            unidade: { type: 'string', enum: %w[tatuape paulista] }
+            unidade: { type: 'string', enum: unit_keys }
           }.merge(PROOF_FIELDS),
           required: %w[id dia hora unidade],
           additionalProperties: false
@@ -176,8 +227,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
           type: 'object',
           properties: {
             dia: { type: 'string', description: 'Dia pedido, YYYY-MM-DD' },
-            unidade: { type: 'string', enum: %w[tatuape paulista], description: 'Só desta unidade (opcional)' }
-          },
+            unidade: { type: 'string', enum: unit_keys, description: 'Só desta unidade (opcional)' }
+          }.merge(otica_account? ? { tipo: { type: 'string', enum: %w[visita exame entrega],
+                                             description: 'visita = horário comum da loja; exame = faixa do exame de vista; ' \
+                                                          'entrega = retirada do óculos pronto' } } : {}),
           required: %w[dia],
           additionalProperties: false
         }
@@ -195,6 +248,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when 'confirmar_presenca' then confirmar(args)
     when 'horarios_do_dia' then horarios_do_dia(args)
     when 'abrir_tarefa' then abrir_tarefa(args)
+    when OTICA_TOOL_NAME then experimentar(args)
+    when *Otica::SalesTools::NAMES then venda(name.to_s, args)
     else
       { ok: false, motivo: "Ferramenta desconhecida: #{name}" }
     end
@@ -320,8 +375,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     date = parse_date(args['dia'])
     time = args['hora'].to_s.strip
     unit = args['unidade'].to_s.strip
-    if date.nil? || !time.match?(/\A\d{2}:\d{2}\z/) || !Crm::AgendaSlots::UNIT_LABELS.key?(unit)
-      return refuse('remarcar_consulta', 'Informe dia (YYYY-MM-DD), hora (HH:MM) e unidade (tatuape ou paulista) de um horário da lista.')
+    if date.nil? || !time.match?(/\A\d{2}:\d{2}\z/) || !unit_keys.include?(unit)
+      return refuse('remarcar_consulta', "Informe dia (YYYY-MM-DD), hora (HH:MM) e unidade (#{unit_keys.join(' ou ')}) de um horário da lista.")
     end
 
     label = "#{WEEKDAYS_SHORT[date.wday]} #{date.strftime('%d/%m')} #{time} · #{unit_label(unit)}"
@@ -423,6 +478,33 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
   # ── vagas de um dia específico (item 200: agendamento futuro liberado) ──
   # Só lê a Agenda: vale igual em sombra e ao vivo.
+  # ── 🪞 prova virtual (ótica) ────────────────────────────────────────────
+  def experimentar(args)
+    return refuse(OTICA_TOOL_NAME, 'A prova virtual não está disponível neste atendimento.') unless otica_tool?
+
+    outcome = Otica::VirtualTryOn.new(account: @account, conversation: @conversation, live: @live || @otica_live, agent_key: @agent_key)
+                                 .run(quantidade: args['quantidade'].presence || 2, preferencia: args['preferencia'])
+    resumo = if outcome[:ok]
+               names = Array(outcome[:armacoes]).map { |a| a[:armacao] }.join(', ')
+               outcome[:simulado] ? "simulado (rosto #{outcome[:rosto_label]}): #{names}" : "#{outcome[:enviadas]} foto(s) enviada(s): #{names}"
+             else
+               outcome[:motivo].to_s
+             end
+    log_acao(OTICA_TOOL_NAME, outcome[:ok] == true, resumo.truncate(140), 'simulado' => outcome[:simulado] == true)
+    activity_note!("🪞 Prova virtual (#{agent_name}, #{stamp}): #{resumo}") if outcome[:ok] && !outcome[:simulado]
+    outcome
+  end
+
+  # 💬 venda pelo WhatsApp (ótica): lentes, desconto, fechamento
+  def venda(name, args)
+    return refuse(name, 'Esta ferramenta não está disponível neste atendimento.') unless otica_account? && TASK_TOOL_KEYS.include?(@agent_key)
+
+    outcome, resumo = Otica::SalesTools.new(conversation: @conversation, agent_key: @agent_key, live: @live || @otica_live,
+                                            simulation: @simulation).call(name, args)
+    log_acao(name, outcome[:ok] == true, resumo.to_s.truncate(140), 'simulado' => outcome[:simulado] == true)
+    outcome
+  end
+
   def horarios_do_dia(args)
     date = parse_date(args['dia'])
     return refuse('horarios_do_dia', 'Informe o dia no formato YYYY-MM-DD.') if date.nil?
@@ -430,7 +512,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     # item 307: quem tem retorno/pós-operatório marcado vê as vagas das faixas desse tipo
     booked = Crm::AppointmentRecorder.future_appointment(@account, @contact&.phone_number, nil, @contact)
     modality = Crm::AgendaSlots.slot_modality(booked)
-    slots = Crm::AgendaSlots.free_slots_on(@account, date, unit: args['unidade'].to_s.strip.presence, per_window: 8, modality: modality)
+    slots = Crm::AgendaSlots.free_slots_on(@account, date, unit: args['unidade'].to_s.strip.presence, per_window: 8, modality: day_modality(args, modality))
     log_acao('horarios_do_dia', true, "vagas de #{WEEKDAYS_SHORT[date.wday]} #{date.strftime('%d/%m')}: #{slots_count_text(slots)}")
     result = { dia: date.to_s, dia_semana: Crm::AgendaSlots::WEEKDAYS[date.wday], vagas: group_slots(slots) }
     result[:aviso] = 'Nenhuma vaga nesse dia (sem atendimento, fechado ou lotado). Ofereça o dia de atendimento mais próximo.' if slots.empty?
@@ -578,7 +660,15 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   def unit_label(unit)
-    Crm::AgendaSlots::UNIT_LABELS[unit] || unit.presence || 'unidade a definir'
+    Crm::AgendaSlots.unit_label(@account, unit) || unit.presence || 'unidade a definir'
+  end
+
+  # 👓 08/11: na ótica o dia pode ser pedido por TIPO (visita, exame, entrega)
+  def day_modality(args, modality)
+    tipo = args['tipo'].to_s
+    return modality unless otica_account? && tipo.present?
+
+    { 'exame' => 'exame', 'entrega' => 'entrega' }[tipo] || Crm::AgendaSlots::AI_MODALITY
   end
 
   def when_label(task)

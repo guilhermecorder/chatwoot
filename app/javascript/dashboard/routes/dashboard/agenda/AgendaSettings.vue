@@ -19,7 +19,7 @@ import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, TYPE_BY_KEY, RESERVABLE, AI_MODALITY,
+  DOCTORS as CLINIC_DOCTORS, TYPE_BY_KEY, RESERVABLE, RESERVABLE_LABELS, AI_MODALITY, companyHasUnits,
   resolveAllWindows, resolveClosedDoctors, resolveBlocked, resolveBlockedDays, resolveOpenDays, resolveOpenWindows,
   reservedFor, windowAccepts, windowAt, sameBlock, dateKey, patientNameOf, hexToRgbSpaced,
   PRICE_TYPE_LABELS, priceLabel,
@@ -27,11 +27,14 @@ import {
 
 const props = defineProps({
   units: { type: Object, required: true }, // { tatuape: { label, color }, … }
+  doctors: { type: Array, default: () => CLINIC_DOCTORS }, // 👓 08/11: quem atende (Val/Fabi na ótica)
   initialTab: { type: String, default: 'abrir' },
 });
 const emit = defineEmits(['close', 'reschedule', 'openExamWindows', 'openSurgeryWindows']);
 
 const store = useStore();
+// 👓 08/11: a ótica fala em loja
+const isStore = computed(() => companyHasUnits(store.getters['crm/getCompany']));
 const { isAdmin } = useAdmin();
 // item 366: fechar/reabrir médico e horário = nó "Fechar e reabrir dias";
 // quem só tem esse nó vê só a aba "Abrir e fechar"
@@ -54,9 +57,9 @@ const tab = ref(canConfigure.value ? props.initialTab : 'abrir');
 const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const WEEKDAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const unitLabel = key => props.units[key]?.label || key;
-const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
-const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
-const typeLabel = key => TYPE_BY_KEY[key]?.label || key;
+const doctorColor = name => props.doctors.find(d => d.name === name)?.color || '#64748B';
+const doctorShort = name => props.doctors.find(d => d.name === name)?.short || name;
+const typeLabel = key => TYPE_BY_KEY[key]?.label || RESERVABLE_LABELS[key] || key;
 const typeVars = key => {
   const t = TYPE_BY_KEY[key] || {};
   return {
@@ -113,9 +116,9 @@ const futureClosings = computed(() =>
     .sort((a, b) => dayOf(a).localeCompare(dayOf(b)))
 );
 const closeScopes = computed(() => [
-  { key: 'all', label: 'Dia inteiro (clínica toda)' },
+  { key: 'all', label: `Dia inteiro (${isStore.value ? 'loja toda' : 'clínica toda'})` },
   ...Object.keys(props.units).map(u => ({ key: `u:${u}`, label: `Só ${unitLabel(u)}` })),
-  ...DOCTORS.map(d => ({ key: `d:${d.name}`, label: `Só ${d.name}` })),
+  ...props.doctors.map(d => ({ key: `d:${d.name}`, label: `Só ${d.name}` })),
 ]);
 const newClose = ref({ date: '', scope: 'all' });
 const saveBlockedDays = async (next, message) => {
@@ -165,7 +168,7 @@ const usualBlock = (doctor, unit) => {
   return Number((wins.find(w => w.unit === unit) || wins[0])?.block) || 15;
 };
 const firstUnit = () => Object.keys(props.units)[0] || 'paulista';
-const newOpen = ref({ date: '', doctor: DOCTORS[0].name, unit: firstUnit(), start: '08:00', end: '12:00', block: usualBlock(DOCTORS[0].name, firstUnit()) });
+const newOpen = ref({ date: '', doctor: props.doctors[0].name, unit: firstUnit(), start: '08:00', end: '12:00', block: usualBlock(props.doctors[0].name, firstUnit()) });
 watch(() => [newOpen.value.doctor, newOpen.value.unit], ([d, u]) => { newOpen.value.block = usualBlock(d, u); });
 const openValid = computed(() => {
   const o = newOpen.value;
@@ -300,7 +303,7 @@ const resetDraft = () => {
 const byDow = dow =>
   draft.value.filter(w => Number(w.dow) === dow).sort((a, b) => a.start.localeCompare(b.start));
 const addWindow = dow => {
-  draft.value.push({ dow, unit: 'paulista', doctor: DOCTORS[0].name, start: '08:00', end: '11:00', block: 15, only: [], uid: nextUid() });
+  draft.value.push({ dow, unit: firstUnit(), doctor: props.doctors[0].name, start: '08:00', end: '11:00', block: 15, only: [], uid: nextUid() });
 };
 const removeWindow = w => {
   draft.value = draft.value.filter(x => x.uid !== w.uid);
@@ -505,7 +508,7 @@ onMounted(() => {
           <section class="space-y-2">
             <p class="cv-ag-block-title">Médicos</p>
             <p class="text-[11px] text-n-slate-10">Fechar tira o médico da grade inteira na hora, e a IA para de oferecer os horários dele. Reabrir devolve tudo como estava.</p>
-            <div v-for="d in DOCTORS" :key="d.name" class="cv-sub flex items-center gap-3 flex-wrap px-3.5 py-3">
+            <div v-for="d in props.doctors" :key="d.name" class="cv-sub flex items-center gap-3 flex-wrap px-3.5 py-3">
               <span class="w-3 h-3 rounded-full flex-shrink-0" :style="{ backgroundColor: d.color }" />
               <div class="flex-1 min-w-[180px]">
                 <p class="text-sm font-semibold text-n-slate-12 flex items-center gap-2 flex-wrap">
@@ -523,7 +526,7 @@ onMounted(() => {
 
           <section class="space-y-2">
             <p class="cv-ag-block-title">Dias fechados</p>
-            <p class="text-[11px] text-n-slate-10">Feriado, congresso, folga: o dia some da grade e a IA não oferece. Pode ser a clínica toda, só uma unidade ou só um médico.</p>
+            <p class="text-[11px] text-n-slate-10">Feriado, congresso, folga: o dia some da grade e a IA não oferece. Pode ser {{ isStore ? 'a loja toda' : 'a clínica toda' }}, só uma unidade ou só {{ isStore ? 'uma pessoa' : 'um médico' }}.</p>
             <div class="cv-sub flex items-end gap-2 flex-wrap p-3">
               <label class="flex-1 min-w-[130px]">
                 <span class="cv-label block mb-0.5">Dia</span>
@@ -559,7 +562,7 @@ onMounted(() => {
                 <label class="flex-1 min-w-[170px]">
                   <span class="cv-label block mb-0.5">Médico</span>
                   <select v-model="newOpen.doctor" class="cv-input w-full !h-9 text-xs">
-                    <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
+                    <option v-for="d in props.doctors" :key="d.name" :value="d.name">{{ d.name }}</option>
                   </select>
                 </label>
                 <label class="flex-1 min-w-[130px]">
@@ -641,7 +644,7 @@ onMounted(() => {
                 <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: doctorColor(w.doctor) }" />
                 <template v-if="isAdmin">
                   <select v-model="w.doctor" class="cv-input !h-8 text-xs !w-auto">
-                    <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
+                    <option v-for="d in props.doctors" :key="d.name" :value="d.name">{{ d.name }}</option>
                   </select>
                   <select v-model="w.unit" class="cv-input !h-8 text-xs !w-auto">
                     <option v-for="(u, key) in units" :key="key" :value="key">{{ u.label }}</option>
@@ -712,7 +715,7 @@ onMounted(() => {
             </p>
           </section>
           <section class="space-y-2">
-            <p class="cv-ag-block-title">Regras da clínica</p>
+            <p class="cv-ag-block-title">{{ isStore ? 'Regras da loja' : 'Regras da clínica' }}</p>
             <p class="text-[11px] text-n-slate-10">Escreva aqui o que a IA precisa saber sobre a agenda e que não cabe nas faixas. Este texto entra num bloco próprio do roteiro dos atendentes, só sobre agenda.</p>
             <textarea
               v-model="aiRules"
@@ -766,7 +769,7 @@ onMounted(() => {
             <p class="cv-ag-block-title">Consulta particular, por médico</p>
             <p class="text-[11px] text-n-slate-10">Vale quando o card do agendamento está marcado como "Particular". Médico sem valor aqui usa o valor do tipo.</p>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div v-for="d in DOCTORS" :key="d.name" class="cv-sub p-3" :style="{ borderColor: d.color }">
+              <div v-for="d in props.doctors" :key="d.name" class="cv-sub p-3" :style="{ borderColor: d.color }">
                 <span class="cv-label block mb-1">{{ d.name }}</span>
                 <input v-model="prices.particular[d.name]" class="cv-input w-full" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
               </div>

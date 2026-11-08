@@ -38,6 +38,7 @@ const pal = useCevicoPalette({
   blocks: [
     { id: 'resumo', label: 'Resumo', icon: 'i-lucide-gauge' },
     { id: 'produtos', label: 'Produtos', icon: 'i-lucide-glasses' },
+    { id: 'prova', label: 'Prova virtual', icon: 'i-lucide-scan-face' },
     { id: 'importar', label: 'Importar do SavWin', icon: 'i-lucide-file-up' },
     { id: 'fornecedores', label: 'Fornecedores', icon: 'i-lucide-truck' },
   ],
@@ -67,7 +68,10 @@ const load = async () => {
     isLoading.value = false;
   }
 };
-onMounted(load);
+onMounted(() => {
+  load();
+  loadProva();
+});
 
 const num = v => (parseMoneyBR(v) ?? Number(v)) || 0;
 
@@ -138,6 +142,10 @@ const lensLine = p =>
     .filter(Boolean)
     .join(' · ');
 const isLens = kind => ['lente', 'lente_contato'].includes(kind);
+// 🪞 prova virtual (08/11): armação e óculos de sol vão ao rosto da cliente
+const isFrame = kind => ['armacao', 'solar'].includes(kind);
+const frameShapes = computed(() => data.value?.frame_shapes || {});
+const frameFits = computed(() => data.value?.frame_fits || {});
 const promoValid = p =>
   p.promo_price > 0 && (!p.promo_until || !isPast(p.promo_until));
 
@@ -166,6 +174,13 @@ const blankProduct = () => ({
   lab_days: '',
   supplier_id: null,
   notes: '',
+  frame_shape: '',
+  frame_fit: '',
+  try_on: true,
+  visagismo_notes: '',
+  photo_url: null,
+  max_discount_pct: '',
+  pitch: '',
 });
 const productForm = ref(blankProduct());
 const editingId = ref(null);
@@ -239,6 +254,15 @@ const saveProduct = async () => {
       payload.lens_treatment = f.lens_treatment.trim();
       payload.lab_days = f.lab_days === '' ? null : Number(f.lab_days);
     }
+    payload.max_discount_pct =
+      f.max_discount_pct === '' ? 0 : Number(f.max_discount_pct);
+    payload.pitch = (f.pitch || '').trim();
+    if (isFrame(f.kind)) {
+      payload.frame_shape = f.frame_shape || '';
+      payload.frame_fit = f.frame_fit || '';
+      payload.try_on = Boolean(f.try_on);
+      payload.visagismo_notes = (f.visagismo_notes || '').trim();
+    }
     if (editingId.value)
       await CrmAPI.updateOticaProduct(editingId.value, payload);
     else await CrmAPI.createOticaProduct(payload);
@@ -270,6 +294,147 @@ const removeProduct = async p => {
       e?.response?.data?.error ||
         'Não consegui excluir. Se o produto já foi vendido, desative em vez de excluir.'
     );
+  }
+};
+
+// ── 🪞 foto da armação (prova virtual) ──
+const uploadingPhoto = ref(false);
+const photoInput = ref(null);
+const uploadPhoto = async event => {
+  const file = event?.target?.files?.[0];
+  if (!file || !editingId.value) return;
+  uploadingPhoto.value = true;
+  try {
+    const { data: updated } = await CrmAPI.uploadOticaProductPhoto(
+      editingId.value,
+      file
+    );
+    productForm.value.photo_url = updated.photo_url;
+    useAlert('Foto da armação salva.');
+    await load();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui salvar a foto.');
+  } finally {
+    uploadingPhoto.value = false;
+    if (photoInput.value) photoInput.value.value = '';
+  }
+};
+const removePhoto = async () => {
+  if (!editingId.value) return;
+  try {
+    await CrmAPI.deleteOticaProductPhoto(editingId.value);
+    productForm.value.photo_url = null;
+    await load();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui tirar a foto.');
+  }
+};
+
+// ── 🪞 fotos em lote (nome do arquivo = código do SavWin) ──
+const bulkUploading = ref(false);
+const bulkResult = ref(null);
+const uploadPhotosBulk = async event => {
+  const files = event?.target?.files;
+  if (!files?.length) return;
+  bulkUploading.value = true;
+  bulkResult.value = null;
+  try {
+    const { data: r } = await CrmAPI.uploadOticaProductPhotosBulk(files);
+    bulkResult.value = r;
+    useAlert(`${r.entraram.length} foto(s) entraram, ${r.pularam.length} pularam.`);
+    await load();
+    await loadProva();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui enviar as fotos.');
+  } finally {
+    bulkUploading.value = false;
+    if (event?.target) event.target.value = '';
+  }
+};
+
+// ── 🪞 prova virtual (teste pela equipe) ──
+const prova = ref(null);
+const provaLoading = ref(false);
+const provaSelfie = ref(null);
+const provaSelfieUrl = ref('');
+const provaPref = ref('');
+const provaQtd = ref(2);
+const provaManual = ref([]);
+const provaResult = ref(null);
+const provaError = ref('');
+const loadProva = async () => {
+  try {
+    const { data: d } = await CrmAPI.getOticaVisagismo();
+    prova.value = d;
+    venda.value = {
+      pix_key: d.venda?.pix_key || '',
+      payment_link: d.venda?.payment_link || '',
+      default_discount_pct: d.venda?.default_discount_pct ?? '',
+    };
+  } catch (e) {
+    prova.value = null;
+  }
+};
+const readyFrames = computed(() =>
+  (data.value?.products || []).filter(p => p.try_on_ready)
+);
+const pickSelfie = event => {
+  const file = event?.target?.files?.[0];
+  provaSelfie.value = file || null;
+  provaResult.value = null;
+  provaError.value = '';
+  if (provaSelfieUrl.value) URL.revokeObjectURL(provaSelfieUrl.value);
+  provaSelfieUrl.value = file ? URL.createObjectURL(file) : '';
+};
+const toggleManual = id => {
+  const i = provaManual.value.indexOf(id);
+  if (i >= 0) provaManual.value.splice(i, 1);
+  else if (provaManual.value.length < (prova.value?.max_por_vez || 3))
+    provaManual.value.push(id);
+};
+const runProva = async () => {
+  if (!provaSelfie.value) {
+    useAlert('Escolha uma foto do rosto primeiro.');
+    return;
+  }
+  provaLoading.value = true;
+  provaError.value = '';
+  provaResult.value = null;
+  try {
+    const { data: r } = await CrmAPI.previewOticaVisagismo({
+      selfie: provaSelfie.value,
+      productIds: provaManual.value,
+      quantidade: provaQtd.value,
+      preferencia: provaPref.value,
+    });
+    provaResult.value = r;
+    await loadProva();
+  } catch (e) {
+    provaError.value =
+      e?.response?.data?.error || 'Não consegui gerar a prévia.';
+  } finally {
+    provaLoading.value = false;
+  }
+};
+const faceLabel = shape => prova.value?.face_shapes?.[shape] || shape || '—';
+
+// ── 💬 venda pelo WhatsApp (config) ──
+const venda = ref({ pix_key: '', payment_link: '', default_discount_pct: '' });
+const savingVenda = ref(false);
+const saveVenda = async () => {
+  savingVenda.value = true;
+  try {
+    const { data: r } = await CrmAPI.updateOticaVisagismo({
+      pix_key: venda.value.pix_key || '',
+      payment_link: venda.value.payment_link || '',
+      default_discount_pct: venda.value.default_discount_pct || 0,
+    });
+    venda.value = { ...venda.value, ...(r.venda || {}) };
+    useAlert('Venda pelo WhatsApp salva.');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui salvar.');
+  } finally {
+    savingVenda.value = false;
   }
 };
 
@@ -657,6 +822,95 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
                   />
                 </label>
               </template>
+              <template v-if="isFrame(productForm.kind)">
+                <label class="block">
+                  <span :class="LABEL">Formato da armação (visagismo)</span>
+                  <select v-model="productForm.frame_shape" :class="INPUT">
+                    <option value="">—</option>
+                    <option v-for="(label, k) in frameShapes" :key="k" :value="k">
+                      {{ label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="block">
+                  <span :class="LABEL">Público</span>
+                  <select v-model="productForm.frame_fit" :class="INPUT">
+                    <option value="">—</option>
+                    <option v-for="(label, k) in frameFits" :key="k" :value="k">
+                      {{ label }}
+                    </option>
+                  </select>
+                </label>
+                <label class="block" style="grid-column: span 2">
+                  <span :class="LABEL">Dica de visagismo (a Val virtual lê)</span>
+                  <input
+                    v-model="productForm.visagismo_notes"
+                    type="text"
+                    :class="INPUT"
+                    placeholder="Ex.: leve, boa para grau alto, cor quente"
+                  />
+                </label>
+              </template>
+              <label class="block">
+                <span :class="LABEL">Desconto máximo (%) na negociação</span>
+                <input
+                  v-model="productForm.max_discount_pct"
+                  type="number"
+                  min="0"
+                  max="90"
+                  step="0.5"
+                  :class="INPUT"
+                  class="text-right"
+                  placeholder="0 = usa o padrão da loja"
+                />
+              </label>
+              <label class="block" style="grid-column: span 2">
+                <span :class="LABEL">
+                  {{ isLens(productForm.kind) ? 'Pra quem é esta lente (a Val virtual explica assim)' : 'Diferencial em 1 frase (a Val virtual usa)' }}
+                </span>
+                <input
+                  v-model="productForm.pitch"
+                  type="text"
+                  :class="INPUT"
+                  :placeholder="isLens(productForm.kind) ? 'Ex.: pra quem vive na tela: menos cansaço no fim do dia' : 'Ex.: leve e resistente, ótima pra quem usa o dia todo'"
+                />
+              </label>
+              <template v-if="isFrame(productForm.kind) || isLens(productForm.kind)">
+                <div class="block" style="grid-column: 1 / -1">
+                  <span :class="LABEL">
+                    {{ isLens(productForm.kind) ? 'Imagem explicativa da lente (como ela funciona; vai pro WhatsApp)' : 'Foto da armação (de frente, fundo branco ou transparente)' }}
+                  </span>
+                  <div class="flex items-center gap-3 mt-1 flex-wrap">
+                    <img
+                      v-if="productForm.photo_url"
+                      :src="productForm.photo_url"
+                      alt="armação"
+                      class="h-14 w-24 object-contain rounded-lg bg-white border border-n-weak"
+                    />
+                    <template v-if="editingId">
+                      <input
+                        ref="photoInput"
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        class="text-xs"
+                        :disabled="uploadingPhoto"
+                        @change="uploadPhoto"
+                      />
+                      <button
+                        v-if="productForm.photo_url"
+                        class="cv-btn cv-btn-ghost cv-btn-sm"
+                        @click="removePhoto"
+                      >
+                        Tirar foto
+                      </button>
+                      <span v-if="uploadingPhoto" class="text-[11px] text-n-slate-10">enviando…</span>
+                    </template>
+                    <span v-else class="text-[11px] text-n-slate-10">
+                      salve o produto primeiro; depois envie a foto aqui
+                    </span>
+                  </div>
+                </div>
+              </template>
               <label class="block" style="grid-column: 1 / -1">
                 <span :class="LABEL">Observação</span>
                 <input v-model="productForm.notes" type="text" :class="INPUT" />
@@ -666,6 +920,14 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
               <label class="flex items-center gap-1.5 text-xs text-n-slate-11">
                 <input v-model="productForm.active" type="checkbox" />
                 ativo (aparece na venda e na busca)
+              </label>
+              <label
+                v-if="isFrame(productForm.kind)"
+                class="flex items-center gap-1.5 text-xs text-n-slate-11"
+                title="Entra na prova virtual do WhatsApp (precisa de foto e saldo)"
+              >
+                <input v-model="productForm.try_on" type="checkbox" />
+                prova virtual
               </label>
               <span class="flex-1" />
               <button class="cv-btn cv-btn-ghost" @click="cancelProduct">
@@ -737,7 +999,15 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
               class="cv-sub px-3 py-2.5 flex items-center gap-3 flex-wrap"
               :class="p.active ? '' : 'opacity-60'"
             >
+              <img
+                v-if="p.photo_url"
+                :src="p.photo_url"
+                alt=""
+                class="w-8 h-8 rounded-lg object-contain bg-white flex-shrink-0"
+                :title="p.try_on_ready ? 'Na prova virtual' : 'Com foto (fora da prova virtual)'"
+              />
               <span
+                v-else
                 class="w-8 h-8 rounded-lg grid place-items-center flex-shrink-0"
                 :style="{ background: `${KIND_META[p.kind]?.color}1A` }"
               >
@@ -894,6 +1164,260 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
                 </button>
               </div>
             </article>
+          </div>
+        </section>
+
+        <!-- bloco 🪞 · prova virtual (teste pela equipe) -->
+        <section id="otica-prova-virtual" class="cv-ag-block p-5 sm:p-7 mb-8">
+          <h2 class="cv-ag-block-title">Prova virtual</h2>
+          <span class="cv-ag-block-sub">
+            o que a Val virtual faz no WhatsApp: lê o formato do rosto, escolhe
+            armações do estoque que combinam e mostra a foto da cliente usando
+            cada uma. Teste aqui com uma foto antes de ligar.
+          </span>
+          <div class="flex flex-wrap gap-2 mt-4">
+            <span
+              class="text-[11px] font-bold px-2.5 py-1 rounded-full"
+              :style="
+                prova?.gemini_key_set
+                  ? { background: '#0596691A', color: VERDE }
+                  : { background: '#DC26261A', color: VERMELHO }
+              "
+            >
+              {{
+                prova?.gemini_key_set
+                  ? 'chave do Gemini ok'
+                  : 'falta a chave do Gemini (Integrações → IA)'
+              }}
+            </span>
+            <span
+              class="text-[11px] font-bold px-2.5 py-1 rounded-full"
+              :style="
+                (prova?.prontas || 0) > 0
+                  ? { background: '#0596691A', color: VERDE }
+                  : { background: '#D977061A', color: AMBAR }
+              "
+            >
+              {{ prova?.prontas || 0 }} armação(ões) prontas (foto + saldo + marca)
+            </span>
+            <span
+              class="text-[11px] font-bold px-2.5 py-1 rounded-full"
+              style="background: rgba(100, 116, 139, 0.14)"
+              :style="{ color: CINZA }"
+            >
+              hoje {{ prova?.hoje || 0 }} / {{ prova?.teto_dia || '—' }} imagens ·
+              modelo {{ prova?.model || '—' }}
+            </span>
+          </div>
+          <!-- 🪞 fotos das armações em lote -->
+          <div v-if="editable" class="ot-form cv-sub p-4 mt-4">
+            <p class="text-xs font-bold text-n-slate-12 mb-1">Fotos das armações em lote</p>
+            <p class="text-[11px] text-n-slate-10 mb-2">
+              o estoque vem do CSV do SavWin (bloco Importar); as fotos entram aqui, várias de uma
+              vez: cada arquivo com o nome do <b>código do SavWin</b> (ex.: ARM-003.jpg), do código
+              de barras ou do nome exato do produto. De frente, fundo branco, até 8 MB cada.
+            </p>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              class="text-xs max-w-full"
+              :disabled="bulkUploading"
+              @change="uploadPhotosBulk"
+            />
+            <span v-if="bulkUploading" class="text-[11px] text-n-slate-10 ml-2">enviando…</span>
+            <div v-if="bulkResult" class="mt-2 text-[11px] text-n-slate-11">
+              <p v-for="e in bulkResult.entraram" :key="'ok' + e.product_id">✓ {{ e.arquivo }} → {{ e.produto }}</p>
+              <p v-for="e in bulkResult.pularam" :key="'no' + e.arquivo" :style="{ color: AMBAR }">
+                ✗ {{ e.arquivo }}: {{ e.motivo }}
+              </p>
+            </div>
+          </div>
+          <div v-if="editable" class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+            <div class="ot-form cv-sub p-4 flex flex-col gap-3">
+              <label class="block">
+                <span :class="LABEL">Foto do rosto (de frente, com luz, só a pessoa)</span>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  class="text-xs mt-1 max-w-full"
+                  @change="pickSelfie"
+                />
+              </label>
+              <img
+                v-if="provaSelfieUrl"
+                :src="provaSelfieUrl"
+                alt="foto"
+                class="h-40 w-40 object-cover rounded-xl border border-n-weak"
+              />
+              <label class="block">
+                <span :class="LABEL">O que a cliente gosta (opcional)</span>
+                <input
+                  v-model="provaPref"
+                  type="text"
+                  :class="INPUT"
+                  placeholder="Ex.: preta e fininha · dourada · grande"
+                />
+              </label>
+              <label class="block">
+                <span :class="LABEL">Quantas armações (escolha automática pelo rosto)</span>
+                <select v-model.number="provaQtd" :class="INPUT">
+                  <option :value="1">1</option>
+                  <option :value="2">2</option>
+                  <option :value="3">3</option>
+                </select>
+              </label>
+              <div v-if="readyFrames.length">
+                <span :class="LABEL">
+                  ou escolha à mão (até {{ prova?.max_por_vez || 3 }}):
+                </span>
+                <div class="flex flex-wrap gap-1.5 mt-1">
+                  <button
+                    v-for="p in readyFrames"
+                    :key="p.id"
+                    class="text-[11px] px-2 py-1 rounded-full border"
+                    :class="
+                      provaManual.includes(p.id)
+                        ? 'cv-tag-solid'
+                        : 'cv-tag-ghost'
+                    "
+                    @click="toggleManual(p.id)"
+                  >
+                    {{ p.name }}
+                  </button>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  class="h-9 px-4 rounded-lg text-xs font-bold text-white disabled:opacity-60"
+                  style="background: linear-gradient(135deg, #065f46, #10b981)"
+                  :disabled="provaLoading || !provaSelfie"
+                  @click="runProva"
+                >
+                  {{ provaLoading ? 'Gerando (até 1 min)…' : 'Gerar prévia' }}
+                </button>
+                <span class="text-[11px] text-n-slate-10">
+                  cada imagem gasta ~US$ 0,07 no Gemini; a foto de teste não fica guardada
+                </span>
+              </div>
+              <p v-if="provaError" class="text-xs" :style="{ color: VERMELHO }">
+                {{ provaError }}
+              </p>
+            </div>
+            <div class="cv-sub p-4 flex flex-col gap-3">
+              <template v-if="provaResult">
+                <p class="text-xs text-n-slate-12">
+                  <b>Leitura do rosto:</b>
+                  {{ faceLabel(provaResult.rosto?.formato) }}
+                  <template v-if="provaResult.rosto?.observacao">
+                    · {{ provaResult.rosto.observacao }}
+                  </template>
+                  <template v-if="!provaResult.utilizavel">
+                    · <span :style="{ color: VERMELHO }">{{ provaResult.motivo }}</span>
+                  </template>
+                </p>
+                <p v-if="provaResult.visagismo" class="text-[11px] text-n-slate-11">
+                  {{ provaResult.visagismo }}
+                </p>
+                <div
+                  v-if="provaResult.imagens?.length"
+                  class="grid grid-cols-1 sm:grid-cols-2 gap-3"
+                >
+                  <figure
+                    v-for="img in provaResult.imagens"
+                    :key="img.product_id"
+                    class="flex flex-col gap-1"
+                  >
+                    <img
+                      v-if="img.data_url"
+                      :src="img.data_url"
+                      alt="prova virtual"
+                      class="w-full rounded-xl border border-n-weak"
+                    />
+                    <p v-else class="text-xs" :style="{ color: VERMELHO }">
+                      {{ img.erro }}
+                    </p>
+                    <figcaption class="text-[11px] text-n-slate-11">
+                      {{ img.produto?.armacao }}
+                      <template v-if="img.produto?.formato"> · {{ img.produto.formato }}</template>
+                      <template v-if="img.model"> · {{ img.model }}</template>
+                      <a
+                        v-if="img.data_url"
+                        :href="img.data_url"
+                        :download="`prova-virtual-${img.product_id}.png`"
+                        class="ml-1 underline"
+                      >
+                        baixar
+                      </a>
+                    </figcaption>
+                  </figure>
+                </div>
+                <p
+                  v-else-if="provaResult.motivo && provaResult.utilizavel"
+                  class="text-xs"
+                  :style="{ color: AMBAR }"
+                >
+                  {{ provaResult.motivo }}
+                </p>
+              </template>
+              <p v-else class="text-[11px] text-n-slate-10">
+                O resultado aparece aqui: a leitura do rosto (formato) e a foto com
+                cada armação. No WhatsApp a Val virtual faz a mesma coisa quando a
+                cliente manda a foto e pede para ver armações.
+              </p>
+            </div>
+          </div>
+          <!-- 💬 venda pelo WhatsApp: Pix, link e desconto padrão -->
+          <div v-if="editable" class="ot-form cv-sub p-4 mt-4">
+            <p class="text-xs font-bold text-n-slate-12 mb-1">Venda pelo WhatsApp</p>
+            <p class="text-[11px] text-n-slate-10 mb-3">
+              depois da prova virtual a Val virtual mostra as lentes
+              ({{ prova?.lentes_com_imagem || 0 }} com imagem), passa o preço
+              cheio, negocia dentro do desconto máximo de cada produto e, no sim,
+              abre a tarefa para a loja e envia o Pix ou o link.
+            </p>
+            <div
+              class="grid gap-3"
+              style="grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr))"
+            >
+              <label class="block">
+                <span :class="LABEL">Chave Pix da loja</span>
+                <input v-model="venda.pix_key" type="text" :class="INPUT" />
+              </label>
+              <label class="block">
+                <span :class="LABEL">Link de pagamento parcelado</span>
+                <input
+                  v-model="venda.payment_link"
+                  type="url"
+                  :class="INPUT"
+                  placeholder="https://…"
+                />
+              </label>
+              <label class="block">
+                <span :class="LABEL">Desconto máximo padrão (%)</span>
+                <input
+                  v-model="venda.default_discount_pct"
+                  type="number"
+                  min="0"
+                  max="90"
+                  step="0.5"
+                  :class="INPUT"
+                  class="text-right"
+                />
+              </label>
+            </div>
+            <div class="flex items-center gap-3 mt-3">
+              <span class="text-[11px] text-n-slate-10 flex-1">
+                produto com desconto máximo próprio manda; 0 = usa este padrão
+              </span>
+              <button
+                class="cv-btn cv-btn-sm"
+                :disabled="savingVenda"
+                @click="saveVenda"
+              >
+                {{ savingVenda ? 'Salvando…' : 'Salvar' }}
+              </button>
+            </div>
           </div>
         </section>
 

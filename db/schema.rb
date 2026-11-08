@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_11_02_010000) do
+ActiveRecord::Schema[7.2].define(version: 2026_11_08_030000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -2211,6 +2211,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_02_010000) do
     t.integer "created_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "ready_at"
     t.index ["account_id", "number"], name: "index_otica_orders_on_account_id_and_number", unique: true
     t.index ["account_id", "sold_on"], name: "index_otica_orders_on_account_id_and_sold_on"
     t.index ["account_id", "status"], name: "index_otica_orders_on_account_id_and_status"
@@ -2288,6 +2289,12 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_02_010000) do
     t.string "notes", default: ""
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "frame_shape", default: "", null: false
+    t.string "frame_fit", default: "", null: false
+    t.boolean "try_on", default: true, null: false
+    t.string "visagismo_notes", default: "", null: false
+    t.decimal "max_discount_pct", precision: 5, scale: 2, default: "0.0", null: false
+    t.string "pitch", default: "", null: false
     t.index ["account_id", "barcode"], name: "index_otica_products_on_account_id_and_barcode"
     t.index ["account_id", "kind"], name: "index_otica_products_on_account_id_and_kind"
     t.index ["account_id", "sku"], name: "index_otica_products_on_account_id_and_sku"

@@ -43,15 +43,23 @@ class Crm::AgentSimulator
     Cevico::AttributeMerge.merge!(conversation) { |fresh| fresh.merge('cevico_simulado_objective' => @objective) }
   end
 
-  # uma fala do "paciente" → resposta do agente (IA de verdade) como nota de sombra
-  def say!(conversation, text)
+  # uma fala do "paciente" → resposta do agente (IA de verdade) como nota de sombra.
+  # 🪞 08/11: photo = foto enviada pela tela (ótica): entra como anexo, é lida na hora
+  # (formato do rosto) e as ferramentas da ótica rodam DE VERDADE na conversa de teste
+  # (a imagem da prova virtual aparece no bate-papo); Agenda e tarefas continuam simuladas.
+  def say!(conversation, text, photo: nil)
     message = conversation.messages.create!(
       account_id: @account.id, inbox_id: conversation.inbox_id, message_type: :incoming,
       content: text.to_s.strip, sender: conversation.contact
     )
+    if photo.respond_to?(:read)
+      message.attachments.create!(account_id: @account.id, file_type: :image, file: photo)
+      Crm::MediaReadingService.settle!(message.reload) # lê o rosto antes de a IA responder
+    end
     # simulador é sempre SOMBRA: as ferramentas (rodada 192) só simulam, nada escreve na Agenda
     result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: @agent_key, live: false, simulation: true,
-                                            script_version: self.class.script_version(conversation)).call
+                                            script_version: self.class.script_version(conversation),
+                                            otica_live: Otica::VirtualTryOn.otica?(@account)).call
     return { error: result[:error] } if result[:error]
 
     Crm::ResponderAgentJob.write_shadow_note!(conversation, @agent_key, result, message.id)
@@ -59,15 +67,25 @@ class Crm::AgentSimulator
   end
 
   # a conversa como balões: paciente (incoming) e agente (notas de sombra)
+  # 🪞 08/11: as mensagens que as ferramentas da ótica mandam na conversa de teste (fotos da
+  # prova virtual, imagens de lente, "me dá um instante") entram como balões 'media' do agente
   def transcript(conversation)
-    conversation.messages.where(message_type: %i[incoming activity]).reorder(:id).filter_map do |m|
+    conversation.messages.where(message_type: %i[incoming activity outgoing]).includes(:attachments).reorder(:id).filter_map do |m|
       if m.incoming?
-        { role: 'patient', text: m.content.to_s, at: m.created_at.iso8601, id: m.id }
+        { role: 'patient', text: m.content.to_s, at: m.created_at.iso8601, id: m.id, images: image_urls(m) }
+      elsif m.outgoing?
+        { role: 'media', text: m.content.to_s, at: m.created_at.iso8601, id: m.id, images: image_urls(m) }
       elsif (shadow = m.additional_attributes&.[]('cevico_ia_shadow'))
         { role: 'agent', id: m.id, at: m.created_at.iso8601, messages: Array(shadow['mensagens']),
           meta: shadow.slice('etapa', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura', 'acoes') }
       end
     end
+  end
+
+  def image_urls(message)
+    message.attachments.select { |a| a.file_type.to_s == 'image' && a.file.attached? }.map(&:file_url)
+  rescue StandardError
+    []
   end
 
   def self.simulated?(conversation)

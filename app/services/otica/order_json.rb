@@ -9,6 +9,7 @@ module Otica::OrderJson
       seller: order.seller ? { id: order.seller.id, name: order.seller.name } : nil,
       doctor_name: order.doctor_name,
       sold_on: order.sold_on&.iso8601, due_on: order.due_on&.iso8601, delivered_at: order.delivered_at&.iso8601,
+      ready_at: order.ready_at&.iso8601, days_ready: order.days_ready, # 📦 08/11
       gross: order.gross.to_f, discount: order.discount.to_f, net: order.net.to_f, paid: order.paid, balance: order.balance,
       notes: order.notes,
       second_pair_of_id: order.second_pair_of_id,

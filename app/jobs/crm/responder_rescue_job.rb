@@ -16,7 +16,7 @@ class Crm::ResponderRescueJob < ApplicationJob
   LIMIT = 40
   RESCUE_KEY = 'cevico:responder:rescue:%<id>s'.freeze
   CERCA_KEY = 'cevico:responder:rescue:cerca:%<id>s'.freeze
-  KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op].freeze
+  KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op atendente_visagista].freeze
 
   def perform
     # 🚨 #217: com os robôs desligados a rodada também conta (o cron está vivo)

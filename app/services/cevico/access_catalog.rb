@@ -208,6 +208,8 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/strategy' => { node: 'estrategia', view: %w[show] },
     # ── 👓 Sua Ótica (fase 1) ──
     'crm/otica/products' => { node: 'otica.produtos', view: %w[index] },
+    # 🪞 prova virtual (08/11): ver = status/prévia; a prévia gasta imagem do Gemini, então é EDITAR
+    'crm/otica/visagismo' => { node: 'otica.produtos', view: %w[show] }, # update/preview = editar
     'crm/otica/suppliers' => { node: 'otica.produtos', view: %w[index] },
     # a O.S.: quem só tem Produção também vê e mexe no laboratório/retirada — o
     # controller confere "vendas OU produção" nessas ações (skip aqui)

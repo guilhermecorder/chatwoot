@@ -52,6 +52,9 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
     # 🩺 item 251: pós-operatório 24h com as orientações oficiais; o resto vira tarefa
     'atendente_pos_op' => { name: 'Atendente de Pós-operatório', icon: 'i-lucide-heart-pulse', color: '#BE123C',
                             what: 'responde 24h as dúvidas simples de quem operou (colírio, ardência, banho) e abre tarefa para a equipe no resto' },
+    # 🪞 08/11 (ótica): a venda inteira pela conversa — prova virtual, lentes, negociação, fechamento
+    'atendente_visagista' => { name: 'Agente Visagista Vendedor', icon: 'i-lucide-scan-face', color: '#7C3AED',
+                               what: 'mostra armações no rosto da cliente (foto), explica as lentes, passa o valor cheio, negocia dentro do desconto máximo e fecha pelo WhatsApp' },
     # 🤖 item 315: etapa "IA" dos robôs de follow-up — a cutucada escrita a partir da conversa
     'followup_ia' => { name: 'Lembrete com IA (follow-up)', icon: 'i-lucide-bot-message-square', color: '#0F5FA6',
                        what: 'escreve a cutucada do robô de follow-up retomando o ponto em que a conversa parou' },

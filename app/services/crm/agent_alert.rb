@@ -20,7 +20,8 @@ class Crm::AgentAlert
   TZ = Crm::AgendaSlots::TZ
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
-                  'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
+                  'atendente_pos_op' => 'Atendente de Pós-operatório', 'atendente_visagista' => 'Agente Visagista Vendedor',
+                  'voice' => 'Agente de Ligação' }.freeze
 
   def self.push(account:, kind:, task:, conversation:, agent_key:)
     raise ArgumentError, "kind inválido: #{kind}" unless KINDS.include?(kind.to_s)

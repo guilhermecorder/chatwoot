@@ -32,6 +32,7 @@ module Crm::CompanyScript # rubocop:disable Metrics/ModuleLength
     when 'atendente_agendamento' then stage_sales(company)
     when 'atendente_pos' then stage_after_booking(company)
     when 'atendente_pos_op' then stage_after_sale(company)
+    when 'atendente_visagista' then Crm::CevicoScript::STAGE_PROMPTS['atendente_visagista'] # 🪞 08/11: o mesmo texto da ótica
     when 'voice' then stage_voice_outbound(company)
     when 'voice_inbound' then stage_voice_inbound(company)
     else ''

@@ -29,6 +29,8 @@ class Otica::Preparo
   def call
     ActiveRecord::Base.transaction do
       company!
+      units!
+      windows!
       funnels!
       agenda!
       agents!
@@ -49,6 +51,24 @@ class Otica::Preparo
 
     Cevico::Company.save!(@account, 'segment' => 'otica', 'name' => @account.name)
     @lines << 'Identidade da empresa: ramo ótica (vocabulário de cliente, óculos e loja).'
+  end
+
+  # 👓 08/11: a loja como unidade da Agenda (só se a conta ainda não tem unidade)
+  def units!
+    return if Cevico::Company.for(@account).units.any?
+
+    Cevico::Company.save!(@account, 'units' => @spec['empresa']['unidades'])
+    @lines << "Unidade da Agenda: #{@spec['empresa']['unidades'].map { |u| u['label'] }.join(', ')}."
+  end
+
+  # 👓 08/11: faixas de atendimento (só se a conta ainda não tem faixa salva)
+  def windows!
+    cfg = (setting.agenda_config || {}).deep_dup
+    return if Array(cfg['windows']).any?
+
+    cfg['windows'] = @spec['janelas'].map { |w| w.transform_keys(&:to_s) }
+    setting.update!(agenda_config: cfg)
+    @lines << "Faixas da Agenda: #{cfg['windows'].size} (Val seg–sáb, Fabi sábado só exame)."
   end
 
   def funnels! # rubocop:disable Metrics/AbcSize

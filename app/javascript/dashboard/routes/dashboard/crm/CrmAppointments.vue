@@ -241,10 +241,22 @@ const SOURCES = [
   { key: 'equipe', label: 'Equipe', icon: 'i-lucide-user', countKey: 'equipe' },
 ];
 const source = ref('');
-const UNITS = [
+const CLINIC_UNITS = [
   { key: 'paulista', label: 'Av. Paulista', color: '#EA580C' },
   { key: 'tatuape', label: 'Tatuapé', color: '#2563EB' },
 ];
+// 👓 08/11: as unidades da Identidade da empresa mandam (a ótica tem a sua loja);
+// sem lista própria, as da clínica
+const UNIT_COLORS = ['#EA580C', '#2563EB', '#16A34A', '#7C3AED', '#0891B2'];
+const UNITS = computed(() => {
+  const own = store.getters['crm/getCompany']?.units || [];
+  if (!own.length) return CLINIC_UNITS;
+  return own.map((u, i) => ({
+    key: u.key,
+    label: u.label,
+    color: UNIT_COLORS[i % UNIT_COLORS.length],
+  }));
+});
 // teleconsulta é online (sem unidade física): o filtro de unidade some
 const showUnitFilter = computed(
   () => track.value === 'consultas' || track.value === 'exames'

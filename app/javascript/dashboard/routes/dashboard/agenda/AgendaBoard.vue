@@ -25,7 +25,7 @@ import CrmAPI from 'dashboard/api/crm';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 import {
-  DOCTORS, MODALITIES, ONLINE_UNIT,
+  DOCTORS as CLINIC_DOCTORS, MODALITIES, ONLINE_UNIT, unitsFor, doctorsFor, companyHasUnits, resolveAllWindows,
   TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
   kindFor, kindOf, kindVars, hexToRgbSpaced, isAppointmentTask as isAppointment,
   resolveWindows, resolveOpenWindows, windowOnDay, resolveBlocked, resolveBlockedDays, resolveExamWindows,
@@ -280,10 +280,19 @@ const VIEW_MODES = [
 ];
 
 // Unidades da clínica (+ "online" da teleconsulta)
-const UNITS = {
+const CLINIC_UNITS = {
   tatuape:  { label: 'Tatuapé',      short: 'TAT', color: '#2563EB' },
   paulista: { label: 'Av. Paulista', short: 'PAU', color: '#EA580C' },
 };
+// 👓 08/11: unidades da Identidade da empresa (a loja, na ótica); sem lista, as da clínica
+const UNITS = computed(() => unitsFor(store.getters['crm/getCompany'], CLINIC_UNITS));
+// 👓 08/11: "toda a clínica" vira "toda a loja" quando a empresa tem a sua unidade
+const everyone = computed(() => (companyHasUnits(store.getters['crm/getCompany']) ? 'toda a loja' : 'toda a clínica'));
+const everyoneLabel = computed(() => (companyHasUnits(store.getters['crm/getCompany']) ? 'Toda a loja' : 'Toda a clínica'));
+// quem atende: na ótica sai das faixas salvas (Val, Fabi); na clínica, os médicos
+const DOCTORS = computed(() =>
+  doctorsFor(store.getters['crm/getCompany'], resolveAllWindows(crmSettings.value), CLINIC_DOCTORS)
+);
 const ONLINE = { label: 'Online', short: 'ON', color: '#7C3AED' };
 
 const PROBLEMAS = [
@@ -316,8 +325,8 @@ const procedureLabel = computed(() => {
 });
 
 // ── Médicos e janelas de avaliação da clínica ───────────────
-const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
-const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
+const doctorColor = name => DOCTORS.value.find(d => d.name === name)?.color || '#64748B';
+const doctorShort = name => DOCTORS.value.find(d => d.name === name)?.short || name;
 // item 375: as aberturas pontuais (data fixa) somam às faixas da semana
 const windows = computed(() =>
   [...resolveWindows(crmSettings.value), ...resolveOpenWindows(crmSettings.value)].filter(w => unitAllowed(w.unit))
@@ -363,7 +372,7 @@ const blockOptions = day => {
   const doctors = [...new Set(wins.map(w => w.doctor))];
   return [
     { key: 'all', label: 'Dia inteiro', part: dateKey(day), on: isDayBlocked(day), icon: 'i-lucide-calendar-off' },
-    ...units.map(u => ({ key: 'u:' + u, label: `Só ${(UNITS[u]?.label || u)}`, part: { date: dateKey(day), unit: u }, on: isPartBlocked(day, { date: dateKey(day), unit: u }), icon: 'i-lucide-building-2' })),
+    ...units.map(u => ({ key: 'u:' + u, label: `Só ${(UNITS.value[u]?.label || u)}`, part: { date: dateKey(day), unit: u }, on: isPartBlocked(day, { date: dateKey(day), unit: u }), icon: 'i-lucide-building-2' })),
     ...doctors.map(d => ({ key: 'd:' + d, label: `Só ${doctorShort(d)}`, part: { date: dateKey(day), doctor: d }, on: isPartBlocked(day, { date: dateKey(day), doctor: d }), icon: 'i-lucide-stethoscope' })),
   ];
 };
@@ -371,11 +380,15 @@ const dayBlockSummary = day => {
   if (isDayBlocked(day)) return 'fechado';
   const parts = partialBlocksFor(day);
   if (!parts.length) return '';
-  return parts.map(b => (b.unit ? (UNITS[b.unit]?.label || b.unit) : doctorShort(b.doctor))).join(', ') + ' fechado';
+  return parts.map(b => (b.unit ? (UNITS.value[b.unit]?.label || b.unit) : doctorShort(b.doctor))).join(', ') + ' fechado';
 };
 // teleconsulta pode acontecer em qualquer dia útil, mesmo sem janela
 // item 375: sábado/domingo com abertura pontual é dia de agenda
-const hasOpenWindow = day => windows.value.some(w => w.date === dateKey(day));
+// 👓 08/11: na ótica (empresa com a sua unidade) o sábado com faixa da semana também é dia de agenda
+const isStoreAgenda = computed(() => companyHasUnits(store.getters['crm/getCompany']));
+const hasOpenWindow = day =>
+  windows.value.some(w => w.date === dateKey(day)) ||
+  (isStoreAgenda.value && windows.value.some(w => !w.date && Number(w.dow) === day.getDay()));
 const isDayOff = day => (isWeekend(day) && !hasOpenWindow(day)) || isDayBlocked(day);
 
 const toggleBlockDay = async (day, part = null) => {
@@ -389,7 +402,7 @@ const toggleBlockDay = async (day, part = null) => {
     await CrmAPI.updateAgendaBlockedDays(next);
     await store.dispatch('crm/fetchSettings');
     blockMenu.value = null;
-    const what = typeof key === 'string' ? 'Dia' : key.unit ? (UNITS[key.unit]?.label || key.unit) : doctorShort(key.doctor);
+    const what = typeof key === 'string' ? 'Dia' : key.unit ? (UNITS.value[key.unit]?.label || key.unit) : doctorShort(key.doctor);
     useAlert(exists ? `${what} reaberto ✓` : `${what} fechado 🔒`);
   } catch {
     useAlert('Erro ao atualizar o dia.');
@@ -575,9 +588,9 @@ const activeDoctor = computed(() => (view.value.startsWith('doctor:') ? view.val
 const isPersonalView = computed(() => view.value === 'me' || /^\d+$/.test(view.value));
 
 // tudo o que está no calendário (canceladas ficam fora; continuam no banco)
-const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at).filter(x => !UNITS[x.unit] || unitAllowed(x.unit)));
+const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at).filter(x => !UNITS.value[x.unit] || unitAllowed(x.unit)));
 // unidades que a pessoa pode ver (chips e seletor); vazio no servidor = todas
-const visibleUnits = computed(() => Object.fromEntries(Object.entries(UNITS).filter(([key]) => unitAllowed(key))));
+const visibleUnits = computed(() => Object.fromEntries(Object.entries(UNITS.value).filter(([key]) => unitAllowed(key))));
 const inKind = t => layers.value.has(typeOf(t)); // item 234: camadas por tipo
 
 // 🏥 item 228: origem do agendamento — 'all' | 'cevico' (nasceu aqui) | 'oftalmofacil'
@@ -737,6 +750,14 @@ const MONTH_MAX = 4;
 
 // dias da semana da visão semanal — "esconder sáb/dom" (item 76)
 const hideWeekend = ref(localStorage.getItem('cevico_agenda_hide_weekend') !== '0');
+// 👓 08/11: a loja abre no sábado — sem preferência salva, a ótica já vê o fim de semana
+watch(
+  () => companyHasUnits(store.getters['crm/getCompany']),
+  v => {
+    if (v && localStorage.getItem('cevico_agenda_hide_weekend') === null) hideWeekend.value = false;
+  },
+  { immediate: true }
+);
 const toggleWeekend = () => {
   hideWeekend.value = !hideWeekend.value;
   localStorage.setItem('cevico_agenda_hide_weekend', hideWeekend.value ? '1' : '0');
@@ -832,7 +853,7 @@ const chipTime = task =>
   new Date(task.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const unitOf = task => {
   if (task.unit === ONLINE_UNIT) return ONLINE;
-  if (task.unit && UNITS[task.unit]) return UNITS[task.unit];
+  if (task.unit && UNITS.value[task.unit]) return UNITS.value[task.unit];
   if (isSurgeryTask(task)) {
     const loc = surgeryLocationOf(task);
     if (loc) return { label: loc.label, color: loc.color };
@@ -882,6 +903,7 @@ const occScan = (from, days) =>
     tasks: occTasks.value,
     blockedSet: blockedSet.value,
     blockedDays: blockedDays.value,
+    weekendOk: isStoreAgenda.value,
     from,
     days,
     freeLimit: 0,
@@ -932,10 +954,10 @@ const winColor = win => {
   return win.doctor ? doctorColor(win.doctor) : surgeryLocations.value.find(l => l.key === win.unit)?.color || k.value.color;
 };
 const winTitle = win => {
-  if (win.exam) return `Exames — ${UNITS[win.unit]?.label || win.unit}`;
+  if (win.exam) return `Exames — ${UNITS.value[win.unit]?.label || win.unit}`;
   return win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
 };
-const winUnitLabel = win => (win.doctor || win.exam ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
+const winUnitLabel = win => (win.doctor || win.exam ? UNITS.value[win.unit]?.label : surgeryLocationLabel(win.unit));
 const winVars = win => ({ '--w': winColor(win), '--w-rgb': hexToRgbSpaced(winColor(win)), '--w-deep': winColor(win) });
 // item 307: para que serve a faixa ("Pós-operatório", "Retorno + Pós-operatório"; '' = tudo)
 const reservedLabelOf = win => reservedFor(win).map(key => TYPE_BY_KEY[key]?.label).join(' + ');
@@ -1179,7 +1201,7 @@ const formSummary = computed(() => {
   }
   if (f.doctor) parts.push(doctorShort(f.doctor));
   if (f.unit === ONLINE_UNIT) parts.push('Online');
-  else if (UNITS[f.unit]) parts.push(UNITS[f.unit].label);
+  else if (UNITS.value[f.unit]) parts.push(UNITS.value[f.unit].label);
   else if (f.kind === 'cirurgias' && f.unit) parts.push(surgeryLocations.value?.find(l => l.key === f.unit)?.label || '');
   return parts.filter(Boolean).join(' · ');
 });
@@ -1332,7 +1354,7 @@ const save = async () => {
   if (form.value.kind === 'consultas' && !NOT_EVALUATION.includes(modality) && (timeChanged || typeChanged)) {
     const hh = (form.value.time || '09:00').slice(0, 2);
     const n = evaluationsInHour(form.value.date, hh, form.value.unit, editingTask.value?.id);
-    const where = UNITS[form.value.unit]?.label || form.value.unit;
+    const where = UNITS.value[form.value.unit]?.label || form.value.unit;
     // eslint-disable-next-line no-alert
     if (n >= hourlyCap.value && !window.confirm(`Às ${hh}h, ${where} já tem ${n} avaliações (o limite é ${hourlyCap.value} por hora). Marcar mesmo assim, como encaixe?`)) return;
   }
@@ -1504,7 +1526,7 @@ const scheduleFollowUpFrom = task => {
     phone: task.phone || '',
     doctor: task.doctor || '',
     modality: 'retorno',
-    unit: task.unit && UNITS[task.unit] ? task.unit : 'tatuape',
+    unit: task.unit && UNITS.value[task.unit] ? task.unit : 'tatuape',
     description: `Origem: ${kindLabelOf(task)} de ${format(new Date(task.due_at), 'dd/MM')} às ${chipTime(task)}.`,
   });
   showDeleteConfirm.value = false;
@@ -2312,7 +2334,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       :class="view === 'clinic' ? 'cv-chip-on' : ''"
                       @click="view = 'clinic'"
                     >
-                      {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
+                      {{ isSurgeryMode ? 'Todos os locais' : everyoneLabel }}
                     </button>
                     <template v-if="!isSurgeryMode">
                       <button
@@ -2368,7 +2390,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   </div>
                   <div class="flex items-center gap-1.5 ml-auto flex-wrap">
                     <select v-model="view" class="cv-input !h-8 text-xs !w-auto max-w-[160px]" title="Ver a agenda de…">
-                      <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}</option>
+                      <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : everyoneLabel }}</option>
                       <optgroup v-if="!isSurgeryMode && !isTele" label="Unidades">
                         <option v-for="(u, key) in visibleUnits" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
                       </optgroup>
@@ -2425,7 +2447,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button class="w-full flex items-center gap-2.5 text-left" @click="showOccDetail = !showOccDetail">
             <span class="i-lucide-gauge text-sm text-n-slate-10" />
             <p class="text-xs font-semibold text-n-slate-12 whitespace-nowrap">Ocupação</p>
-            <span class="cv-chip">{{ activeDoctor ? doctorShort(activeDoctor) : activeUnit ? (UNITS[activeUnit]?.label || surgeryLocationLabel(activeUnit)) : (isSurgeryMode ? 'todos os locais' : 'toda a clínica') }}</span>
+            <span class="cv-chip">{{ activeDoctor ? doctorShort(activeDoctor) : activeUnit ? (UNITS[activeUnit]?.label || surgeryLocationLabel(activeUnit)) : (isSurgeryMode ? 'todos os locais' : everyone) }}</span>
             <div class="cv-track cv-track-sm flex-1 min-w-[80px] flex">
               <template v-if="occCurrent.total && occSegments(occCurrent)">
                 <div v-for="s in occSegments(occCurrent)" :key="s.key" class="h-full" :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }" :title="`${s.label}: ${s.count} bloco(s)`" />
@@ -3332,6 +3354,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
     <AgendaSettings
       v-if="showSettings"
       :units="UNITS"
+      :doctors="DOCTORS"
       :initial-tab="settingsTab"
       @close="showSettings = false"
       @reschedule="rescheduleFromSettings"

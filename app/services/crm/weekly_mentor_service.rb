@@ -234,6 +234,7 @@ class Crm::WeeklyMentorService # rubocop:disable Metrics/ClassLength
     { 'atendente_agendamento' => 'Atendente de Agendamento (IA responde leads no WhatsApp até marcar a consulta)',
       'atendente_pos' => 'Atendente Pós-agendamento (IA confirma/remarca/cancela consultas)',
       'atendente_pos_op' => 'Atendente de Pós-operatório (IA tira dúvidas do pós-op e conduz o NPS)',
+      'atendente_visagista' => 'Agente Visagista Vendedor (IA mostra armações no rosto da cliente, lentes, valor e fecha pelo WhatsApp)',
       'instagram' => 'Atendente do Instagram (IA responde o direct)' }.each do |key, label|
       cfg = agents[key] || {}
       next unless cfg['enabled'] == true

@@ -1,6 +1,28 @@
 // Dados e helpers da agenda da CEVICO — usados pela Agenda, pelo painel de
 // Agendamentos e pelos indicadores do Meu Painel.
 
+// 👓 08/11: a ÓTICA não tem médicos nem Tatuapé/Paulista — quem atende (Val, Fabi)
+// sai das próprias faixas salvas e a unidade (a loja) da Identidade da empresa.
+// Clínica (sem unidade própria cadastrada): tudo como antes.
+const PEOPLE_COLORS = ['#0F5FA6', '#B8860B', '#7C3AED', '#0F766E', '#DB2777', '#EA580C'];
+const UNIT_COLORS = ['#EA580C', '#2563EB', '#16A34A', '#7C3AED', '#0891B2'];
+export const companyHasUnits = company => Array.isArray(company?.units) && company.units.length > 0;
+export const unitsFor = (company, fallback) => {
+  if (!companyHasUnits(company)) return fallback;
+  return Object.fromEntries(
+    company.units.map((u, i) => [
+      u.key,
+      { label: u.label, short: String(u.label || u.key).slice(0, 3).toUpperCase(), color: UNIT_COLORS[i % UNIT_COLORS.length] },
+    ])
+  );
+};
+export const doctorsFor = (company, windows, fallback) => {
+  if (!companyHasUnits(company)) return fallback;
+  const names = [...new Set((windows || []).map(w => w.doctor).filter(Boolean))];
+  if (!names.length) return fallback;
+  return names.map((name, i) => ({ name, short: name.split(' ')[0], color: PEOPLE_COLORS[i % PEOPLE_COLORS.length] }));
+};
+
 export const DOCTORS = [
   { name: 'Dr. Gustavo Bittar', short: 'Gustavo', color: '#0F5FA6' },
   { name: 'Dr. Henrique Gemelli', short: 'Henrique', color: '#B8860B' },
@@ -262,7 +284,9 @@ export const resolveOpenWindows = settings => {
 // de atendimento (`only`); sem `only` aceita tudo. A IA marca consulta nova
 // (avaliação): faixa que não aceita avaliação ela não oferece. Espelho de
 // Crm::AgendaSlots (RESERVABLE / accepts?).
-export const RESERVABLE = ['avaliacao', 'retorno', 'pos_op'];
+// 👓 08/11: exame (de vista) e entrega (retirada do óculos) são os tipos da ótica
+export const RESERVABLE = ['avaliacao', 'retorno', 'pos_op', 'exame', 'entrega'];
+export const RESERVABLE_LABELS = { exame: 'exame de vista', entrega: 'retirada do óculos' };
 export const AI_MODALITY = 'avaliacao';
 export const reservedFor = win =>
   Array.isArray(win?.only) ? win.only.filter(k => RESERVABLE.includes(k)) : [];
@@ -749,6 +773,7 @@ export const scanAgenda = ({
   tasks,
   blockedSet,
   blockedDays = new Set(),
+  weekendOk = false, // 👓 08/11: a ótica atende no sábado pelas faixas da semana
   from,
   days,
   freeLimit = 3,
@@ -779,7 +804,7 @@ export const scanAgenda = ({
     day.setDate(day.getDate() + i);
     const dow = day.getDay();
     // fim de semana bloqueado — salvo abertura pontual naquela data (item 375)
-    if ((dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day))) continue;
+    if (!weekendOk && (dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day))) continue;
     if (blockedDays.has(dateKey(day))) continue; // dia fechado inteiro
 
     windows
