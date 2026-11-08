@@ -8,6 +8,7 @@ RSpec.describe Otica::VirtualTryOn do
   let(:inbox) { create(:inbox, account: account) }
   let(:contact) { create(:contact, account: account, name: 'Maria Silva', phone_number: '+5511999990000') }
   let(:conversation) { create(:conversation, account: account, inbox: inbox, contact: contact) }
+  let(:png) { File.binread(Rails.root.join('spec/assets/sample.png')) }
   let(:rosto) { { 'pessoas' => 1, 'frontal' => true, 'formato' => 'redondo', 'usa_oculos' => false, 'adulto' => true, 'qualidade' => 'ok', 'observacao' => '' } }
 
   before do
@@ -27,8 +28,6 @@ RSpec.describe Otica::VirtualTryOn do
                             file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.png'), 'image/png'),
                             meta: { 'cevico_media' => { 'status' => 'done', 'tipo' => tipo, 'descricao' => 'mulher sorrindo', 'rosto' => rosto_meta } })
   end
-
-  let(:png) { File.binread(Rails.root.join('spec/assets/sample.png')) }
 
   def service(live: true)
     described_class.new(account: account, conversation: conversation, live: live, agent_key: 'atendente_agendamento')
@@ -76,10 +75,10 @@ RSpec.describe Otica::VirtualTryOn do
     expect(sent).to all(satisfy { |m| m.attachments.one? && m.attachments.first.file_type == 'image' && m.attachments.first.file.attached? })
     expect(out[:armacoes].first).to include(motivo: 'no seu rosto redondo, a retangular dá definição e alonga o olhar')
     expect(out[:aviso]).to include('Qual dessas você gostou mais?')
-    expect(out[:fotos]).to eq(['de frente'])
-    # o cartão: 1 foto = 1080×1440 JPEG, foto inteira (sem marca: a loja ainda não subiu o logo)
+    expect(out[:foto_usada]).to eq('de frente')
+    # o cartão: ANTES e DEPOIS lado a lado = 1080×720 JPEG (sem marca: a loja ainda não subiu o logo)
     card = MiniMagick::Image.read(sent.first.attachments.first.file.blob.open(&:read))
-    expect([card.width, card.height, card.type]).to eq([1080, 1440, 'JPEG'])
+    expect([card.width, card.height, card.type]).to eq([1080, 720, 'JPEG'])
     expect(sent.first.additional_attributes['cevico_ia_agent']).to eq('atendente_agendamento')
     expect(sent.first.additional_attributes.dig('cevico_visagismo', 'product_id')).to eq(retangular.id)
     expect(sent.map { |m| m.additional_attributes.dig('cevico_visagismo', 'lote') }.uniq.size).to eq(1)
@@ -163,29 +162,31 @@ RSpec.describe Otica::VirtualTryOn do
     expect(service.run(quantidade: 3, parecida_com: 999_999)[:motivo]).to include('Não achei')
   end
 
-  it 'com foto de frente e de 3/4: gera as duas, lê o formato na de frente e manda UM cartão com a marca; perfil (lado) não serve', :aggregate_failures do
+  it 'com foto de frente e de 3/4: lê o formato na de frente, prova na de 3/4 e manda ANTES/DEPOIS com a marca; perfil (lado) não serve', :aggregate_failures do
     armacao('Retangular', 'retangular')
-    frente = selfie!(rosto.merge('angulo' => 'frente', 'formato' => 'redondo'))
-    selfie!(rosto.merge('angulo' => 'tres_quartos', 'formato' => 'oval'))
+    selfie!(rosto.merge('angulo' => 'frente', 'formato' => 'redondo'))
+    tres_quartos = selfie!(rosto.merge('angulo' => 'tres_quartos', 'formato' => 'oval'))
     CrmSetting.find_by(account: account).otica_logo.attach(io: File.open(Rails.root.join('spec/assets/sample.png')), filename: 'logo.png', content_type: 'image/png')
     fake = instance_double(Otica::TryOnImage, generate: { bytes: png, mime: 'image/png', model: 'm' })
     allow(Otica::TryOnImage).to receive(:new).and_return(fake)
     allow(Otica::TryOnCard).to receive(:compose).and_call_original
 
     out = service.run(quantidade: 1)
-    expect(out).to include(ok: true, rosto: 'redondo', fotos: ['de frente', 'de 3/4'])
-    expect(fake).to have_received(:generate).twice # uma imagem por ângulo
-    expect(Otica::TryOnCard).to have_received(:compose).with(images: [hash_including(mime: 'image/png')] * 2, logo: png, tom: 'branco')
+    expect(out).to include(ok: true, rosto: 'redondo', foto_usada: 'de 3/4')
+    expect(fake).to have_received(:generate).once # uma imagem por armação (o "depois")
+    expect(fake).to have_received(:generate).with(hash_including(selfie: tres_quartos.file.blob.open(&:read)))
+    expect(Otica::TryOnCard).to have_received(:compose).with(images: [hash_including(bytes: tres_quartos.file.blob.open(&:read)),
+                                                                      hash_including(model: 'm')], logo: png, tom: 'vidro')
     Otica::SalesTools.save_config!(account, 'selo_tom' => 'verde')
     expect(Otica::SalesTools.config(account)['selo_tom']).to eq('verde')
     Otica::SalesTools.save_config!(account, 'selo_tom' => 'roxo')
-    expect(Otica::SalesTools.config(account)['selo_tom']).to eq('branco') # só os tons conhecidos
+    expect(Otica::SalesTools.config(account)['selo_tom']).to eq('vidro') # só os tons conhecidos (senão o padrão)
     cards = conversation.messages.outgoing.joins(:attachments)
     expect(cards.count).to eq(1) # as duas visões num cartão só
     pair = MiniMagick::Image.read(cards.last.attachments.first.file.blob.open(&:read))
-    expect([pair.width, pair.height]).to eq([1080, 720]) # lado a lado, selo de vidro com a marca embaixo
+    expect([pair.width, pair.height]).to eq([1080, 720]) # antes | depois, selo de vidro com a marca embaixo
     stamp = cards.last.additional_attributes['cevico_visagismo']
-    expect(stamp['selfie_attachment_id']).to eq(frente.id)
+    expect(stamp['selfie_attachment_id']).to eq(tres_quartos.id)
 
     selfie!(rosto.merge('frontal' => false, 'angulo' => 'lado'))
     expect(Otica::FaceReading.usable(rosto.merge('frontal' => true, 'angulo' => 'lado')).first).to be(false)

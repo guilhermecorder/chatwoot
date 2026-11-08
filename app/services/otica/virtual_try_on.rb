@@ -16,8 +16,8 @@
 #   estou aplicando o visagismo…") antes das imagens; cada legenda traz o MOTIVO
 #   curto; `parecida_com` manda 3 do mesmo estilo em 3 faixas (top de linha /
 #   custo-benefício / mais acessível) com o valor da armação; se houver foto de
-#   3/4 na conversa, a geração usa ela (o óculos aparece melhor) e o formato do
-#   rosto vem da foto de frente;
+#   3/4 na conversa, a prova é feita nela (o óculos aparece melhor) e o formato do
+#   rosto vem da foto de frente; o cartão é ANTES (a foto dela) e DEPOIS (com a armação);
 # - teto de imagens por dia na conta (ai_config['visagismo_daily_cap'], padrão 150)
 #   para o gasto nunca fugir;
 # - em SOMBRA/simulador nada é gerado nem enviado: devolve `simulado` com a escolha;
@@ -95,11 +95,12 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     usable = all.select { |a| Otica::FaceReading.usable(media(a)['rosto']).first }
     return [all.first, media(all.first)['rosto'], {}] if usable.empty?
 
-    # 🪞 08/11: a de FRENTE lê o formato (1ª do cartão); a de 3/4 é a 2ª do cartão (o óculos aparece melhor)
+    # 🪞 08/11: a de FRENTE lê o formato do rosto; a prova é feita na de 3/4 (o óculos aparece melhor),
+    # ou na de frente se ela só mandou essa. O cartão é ANTES e DEPOIS da MESMA foto (sem e com a armação).
     front = usable.find { |a| media(a)['rosto']['angulo'] != 'tres_quartos' }
     three = usable.find { |a| media(a)['rosto']['angulo'] == 'tres_quartos' }
-    main = front || three
-    [main, media(main)['rosto'], { 'frente' => front, 'tres_quartos' => three }.compact]
+    photo = three || front
+    [photo, media(front || three)['rosto'], photo]
   end
 
   def media(attachment)
@@ -112,7 +113,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   def run(quantidade: 2, preferencia: nil, parecida_com: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     return refuse('A prova virtual só existe no ramo ótica.') unless self.class.otica?(account)
 
-    attachment, rosto, angles = pick_selfie
+    attachment, rosto, = pick_selfie
     return refuse('Ainda não há foto do rosto da cliente nesta conversa. Peça uma foto de frente, com boa luz, só ela na foto.') if attachment.nil?
 
     ok, motivo = Otica::FaceReading.usable(rosto)
@@ -144,7 +145,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     end
 
     base = { rosto: rosto['formato'], rosto_label: Otica::Visagismo.face_label(rosto['formato']),
-             fotos: angles.keys.map { |k| k == 'tres_quartos' ? 'de 3/4' : 'de frente' },
+             foto_usada: (media(attachment).dig('rosto', 'angulo') == 'tres_quartos' ? 'de 3/4' : 'de frente'),
              visagismo: Otica::Visagismo.explain(rosto['formato']), parecidas: parecida_com.present? }
 
     unless @live
@@ -168,19 +169,17 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     return refuse('Configure a chave do Gemini em Integrações → IA.') unless Otica::TryOnImage.configured?(account)
 
     send_aviso!(parecida_com.present?)
-    selfies_bytes = angles.values.map { |a| [a.file.blob.open(&:read), mime_of(a.file, 'image/jpeg')] }
+    before = { bytes: attachment.file.blob.open(&:read), mime: mime_of(attachment.file, 'image/jpeg') }
     logo = brand_logo
     sent = []
     failures = []
     chosen.each_with_index do |product, index|
-      # 🪞 08/11: uma imagem por ângulo (de frente e de 3/4) → UM cartão com as duas e a marca da loja
-      frame = product.photo.blob.open(&:read)
-      generated = selfies_bytes.map do |bytes, mime|
-        Otica::TryOnImage.new(account).generate(selfie: bytes, selfie_mime: mime, frame: frame,
-                                                frame_mime: mime_of(product.photo, 'image/png'), product: product)
-      end
-      card = Otica::TryOnCard.compose(images: generated, logo: logo, tom: brand_tone)
-      send_image!(product, card.merge(model: generated.first[:model]), index + 1, chosen.size, attachment,
+      # 🪞 08/11: ANTES (a foto dela, sem óculos) | DEPOIS (a mesma foto com a armação) → UM cartão com a marca
+      after = Otica::TryOnImage.new(account).generate(selfie: before[:bytes], selfie_mime: before[:mime],
+                                                      frame: product.photo.blob.open(&:read),
+                                                      frame_mime: mime_of(product.photo, 'image/png'), product: product)
+      card = Otica::TryOnCard.compose(images: [before, after], logo: logo, tom: brand_tone)
+      send_image!(product, card.merge(model: after[:model]), index + 1, chosen.size, attachment,
                   caption: caption_for(product, index + 1, chosen.size, rosto, tiers[product.id]))
       sent << describe(product, rosto, tiers[product.id]).merge(opcao: index + 1)
     rescue Otica::TryOnImage::Error, ActiveStorage::FileNotFoundError, MiniMagick::Error => e
@@ -230,7 +229,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
       image = Otica::TryOnImage.new(account).generate(selfie: selfie, selfie_mime: selfie_mime,
                                                      frame: product.photo.blob.open(&:read), frame_mime: mime_of(product.photo, 'image/png'),
                                                      product: product)
-      card = Otica::TryOnCard.compose(images: [image], logo: logo, tom: brand_tone)
+      card = Otica::TryOnCard.compose(images: [{ bytes: selfie, mime: selfie_mime }, image], logo: logo, tom: brand_tone)
       result[:imagens] << { produto: describe(product), product_id: product.id, model: image[:model],
                             data_url: "data:#{card[:mime]};base64,#{Base64.strict_encode64(card[:bytes])}" }
     rescue Otica::TryOnImage::Error => e

@@ -1,12 +1,10 @@
 require 'mini_magick'
 
-# 🪞 CARTÃO DA PROVA VIRTUAL (08/11/2026, pedido do Guilherme): a foto gerada ocupa
-# a imagem inteira, sem moldura, e a marca da loja (logo verde) fica POR CIMA, num
-# selo de vidro fosco estilo "Liquid Glass" (o fundo desfocado aparece através,
-# cantos arredondados, borda e brilho finos). Com 2 fotos (de frente e de 3/4) elas
-# ficam lado a lado, separadas por um fio branco. Sem texto: a legenda vai na
-# mensagem e a imagem do servidor não tem fontes. O selo é uma pílula embaixo,
-# centralizada e pequena (≈ 1/5 da largura), para não atrapalhar a foto.
+# 🪞 CARTÃO DA PROVA VIRTUAL (08/11/2026, pedido do Guilherme: "o mais simples possível"):
+# ANTES e DEPOIS da mesma foto, lado a lado e sem nada escrito: à esquerda a foto da cliente
+# como ela mandou, à direita a mesma foto com a armação (a única diferença é o óculos), fio
+# branco no meio. Por cima, só a marca da loja numa pílula de vidro "Liquid Glass" embaixo,
+# centralizada e pequena (≈ 1/5 da largura), que vira marca quando ela compartilhar.
 #
 # Tamanhos: 1 foto = 1080×1440 (3:4, igual à geração); 2 fotos = 1080×720.
 # Composição com o ImageMagick da imagem (MiniMagick), tudo em arquivos temporários.
@@ -14,13 +12,17 @@ class Otica::TryOnCard
   WIDTH = 1080
   GAP = 4
   GLASS = { width_ratio: 0.21, height_ratio: 0.40, bottom_ratio: 0.035, logo_w: 0.62, logo_h: 0.56, blur: 16 }.freeze
-  # 08/11 (Guilherme: "o contraste do logo não ficou bom"): o vidro ganha um tom forte por trás do logo.
-  # branco = vidro forçado pro branco + logo verde original · verde = vidro no verde da marca + logo em branco
+  # 08/11 (Guilherme: "o contraste do logo não ficou bom"): o vidro ganha um tom forte por trás do conteúdo.
+  # branco = vidro forçado pro branco + logo verde e texto escuro · verde = vidro no verde da marca + logo e texto brancos
+  # vidro = o "Liquid Glass" escuro dos vídeos (ESTUDIO CRIATIVO/ferramentas/video/otica/beyonce5.html, classe .lg):
+  # fumê translúcido rgba(20,20,24,.34) sobre desfoque 22px com saturação 185%, brilho .2 no alto, conteúdo branco
+  # (o logo vira a versão branca com os óculos verdes). Padrão desde 08/11 ("esta transparente, glass como no vídeo").
   TONES = {
-    'branco' => { fill: 'white', veil: '80%', sat: 100, logo_white: false },
-    'verde' => { fill: '#1E7A4C', veil: '78%', sat: 100, logo_white: true }
+    'vidro' => { fill: '#141418', veil: '40%', sat: 185, content_white: true, sheen: 0.2, blur: 22 },
+    'branco' => { fill: 'white', veil: '80%', sat: 100, content_white: false, sheen: 0.38, blur: 16 },
+    'verde' => { fill: '#1E7A4C', veil: '78%', sat: 100, content_white: true, sheen: 0.38, blur: 16 }
   }.freeze
-  DEFAULT_TONE = 'branco'.freeze
+  DEFAULT_TONE = 'vidro'.freeze
 
   # images: [{ bytes:, mime: }] (1 ou 2); logo: bytes PNG ou nil. Devolve { bytes:, mime: 'image/jpeg' }
   def self.compose(images:, logo: nil, tom: DEFAULT_TONE)
@@ -38,7 +40,7 @@ class Otica::TryOnCard
     raise ArgumentError, 'sem imagem' if @images.empty?
 
     base = @images.size == 2 ? pair : single
-    base = glass_badge(base) if @logo
+    base = logo_badge(base) if @logo
     out = temp('jpg')
     magick { |m| m << base << '-strip' << '-quality' << '90' << out }
     { bytes: File.binread(out), mime: 'image/jpeg' }
@@ -47,6 +49,10 @@ class Otica::TryOnCard
   end
 
   private
+
+  def half
+    (WIDTH - GAP) / 2
+  end
 
   # uma foto: 1080×1440, preenchendo tudo
   def single
@@ -59,7 +65,6 @@ class Otica::TryOnCard
 
   # duas fotos: lado a lado (1080×720), fio branco no meio
   def pair # rubocop:disable Metrics/AbcSize
-    half = (WIDTH - GAP) / 2
     out = temp('png')
     magick do |m|
       m << '-size' << "#{WIDTH}x720" << 'xc:white'
@@ -72,41 +77,45 @@ class Otica::TryOnCard
     out
   end
 
-  # o selo de vidro (pílula) com o logo verde, embaixo e centralizado, pequeno pra não atrapalhar a foto.
-  # Receita do "Liquid Glass" claro aprovado nos vídeos (ESTUDIO CRIATIVO/ferramentas/video/otica/beyonce5.html):
-  # véu branco · desfoque 16px + brilho 1,12 · borda em degradê diagonal (forte nas pontas,
-  # some no meio) · brilho no terço de cima · sombra 0 12px 32px. O véu é forte (ver TONES) para o logo ter contraste
-  # em qualquer roupa; o desfoque da foto ainda aparece através, por isso continua "vidro".
-  def glass_badge(base) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  # a marca da loja numa pílula embaixo, centralizada
+  def logo_badge(base)
     w, h = MiniMagick::Image.open(base).dimensions
     bw = (w * GLASS[:width_ratio]).round
     bh = (bw * GLASS[:height_ratio]).round
-    x = (w - bw) / 2
-    y = h - bh - (w * GLASS[:bottom_ratio]).round
-    r = bh / 2
-    rr = "roundrectangle 0,0,#{bw - 1},#{bh - 1},#{r},#{r}"
+    glass_at(base, x: (w - bw) / 2, y: h - bh - (w * GLASS[:bottom_ratio]).round, w: bw, h: bh,
+                   content: write(bytes: @logo, mime: 'image/png'), logo: true,
+                   box: "#{(bw * GLASS[:logo_w]).round}x#{(bh * GLASS[:logo_h]).round}")
+  end
+
+  # Pílula de vidro na receita do "Liquid Glass" claro aprovado nos vídeos
+  # (ESTUDIO CRIATIVO/ferramentas/video/otica/beyonce5.html): o pedaço da foto desfocado com véu
+  # (ver TONES) · brilho no terço de cima · borda em degradê diagonal (forte nas pontas, some no
+  # meio) · sombra suave · logo centralizado. Devolve o caminho da nova base.
+  def glass_at(base, x:, y:, w:, h:, content:, box:, logo: false) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Naming/MethodParameterName
+    bw, bh = MiniMagick::Image.open(base).dimensions
+    r = h / 2
+    rr = "roundrectangle 0,0,#{w - 1},#{h - 1},#{r},#{r}"
     pill = temp('png')
-    magick { |m| m << '-size' << "#{bw}x#{bh}" << 'xc:none' << '-fill' << 'white' << '-draw' << rr << pill }
-    # borda: anel de 2,5px com alfa em degradê diagonal (0,95 nas pontas → 0,04 no meio)
-    ring = temp('png')
+    magick { |m| m << '-size' << "#{w}x#{h}" << 'xc:none' << '-fill' << 'white' << '-draw' << rr << pill }
     mask = temp('png')
     magick do |m|
-      m << '-size' << "#{bw}x#{bh}" << 'xc:black' << '-fill' << 'none' << '-stroke' << 'white' << '-strokewidth' << '2.5' << '-draw' << rr
+      m << '-size' << "#{w}x#{h}" << 'xc:black' << '-fill' << 'none' << '-stroke' << 'white' << '-strokewidth' << '2.5' << '-draw' << rr
       m << '-fx' << 'u*(0.04+0.91*pow(abs((i/w+j/h)/2-0.5)*2,1.3))' << '-alpha' << 'off' << mask
     end
-    magick { |m| m << '-size' << "#{bw}x#{bh}" << 'xc:white' << mask << '-alpha' << 'off' << '-compose' << 'CopyOpacity' << '-composite' << ring }
+    ring = temp('png')
+    magick { |m| m << '-size' << "#{w}x#{h}" << 'xc:white' << mask << '-alpha' << 'off' << '-compose' << 'CopyOpacity' << '-composite' << ring }
     glass = temp('png')
     magick do |m|
-      m << base << '-crop' << "#{bw}x#{bh}+#{x}+#{y}" << '+repage' << '-alpha' << 'set'
-      m << '-blur' << "0x#{GLASS[:blur]}" << '-modulate' << "108,#{@tone[:sat]}" << '-fill' << @tone[:fill] << '-colorize' << @tone[:veil]
-      # brilho no terço de cima
-      m << '(' << '-size' << "#{bw}x#{(bh * 0.45).round}" << 'gradient:rgba(255,255,255,0.38)-rgba(255,255,255,0)' << ')'
+      m << base << '-crop' << "#{w}x#{h}+#{x}+#{y}" << '+repage' << '-alpha' << 'set'
+      m << '-blur' << "0x#{@tone[:blur]}" << '-modulate' << "104,#{@tone[:sat]}" << '-fill' << @tone[:fill] << '-colorize' << @tone[:veil]
+      m << '(' << '-size' << "#{w}x#{(h * 0.45).round}" << "gradient:rgba(255,255,255,#{@tone[:sheen]})-rgba(255,255,255,0)" << ')'
       m << '-gravity' << 'north' << '-compose' << 'Over' << '-composite'
       m << ring << '-compose' << 'Over' << '-composite'
-      # o logo: verde original no vidro branco; branco no vidro verde
-      logo_box = "#{(bw * GLASS[:logo_w]).round}x#{(bh * GLASS[:logo_h]).round}"
-      m << '(' << write(bytes: @logo, mime: 'image/png') << '-trim' << '+repage' << '-resize' << logo_box
-      m << '-fill' << 'white' << '-colorize' << '100%' if @tone[:logo_white]
+      m << '(' << content << '-trim' << '+repage' << '-resize' << box
+      # conteúdo branco no vidro escuro/verde; no logo, os óculos verde-claros da marca ficam verdes
+      if @tone[:content_white]
+        m << '-channel' << 'RGB' << '-fx' << (logo ? '(u.g>0.75&&u.r<0.3)?u:1' : '1') << '+channel'
+      end
       m << ')'
       m << '-gravity' << 'center' << '-compose' << 'Over' << '-composite'
       m << pill << '-gravity' << 'northwest' << '-compose' << 'DstIn' << '-composite' << glass
@@ -114,8 +123,8 @@ class Otica::TryOnCard
     out = temp('png')
     magick do |m|
       m << base
-      m << '(' << '-size' << "#{w}x#{h}" << 'xc:none' << '-fill' << 'rgba(0,0,0,0.38)' \
-        << '-draw' << "roundrectangle #{x + 8},#{y + 14},#{x + bw - 8},#{y + bh + 4},#{r},#{r}" << '-blur' << '0x14' << ')'
+      m << '(' << '-size' << "#{bw}x#{bh}" << 'xc:none' << '-fill' << 'rgba(0,0,0,0.30)' \
+        << '-draw' << "roundrectangle #{x + 6},#{y + 10},#{x + w - 6},#{y + h + 3},#{r},#{r}" << '-blur' << '0x10' << ')'
       m << '-gravity' << 'northwest' << '-compose' << 'Over' << '-composite'
       m << glass << '-geometry' << "+#{x}+#{y}" << '-compose' << 'Over' << '-composite' << out
     end

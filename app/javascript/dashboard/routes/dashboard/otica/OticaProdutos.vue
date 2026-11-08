@@ -373,7 +373,7 @@ const loadProva = async () => {
       aviso_prova: d.venda?.aviso_prova || '',
       aviso_parecidas: d.venda?.aviso_parecidas || '',
       orientacao_foto: d.venda?.orientacao_foto || '',
-      selo_tom: d.venda?.selo_tom || 'branco',
+      selo_tom: d.venda?.selo_tom || 'vidro',
     };
   } catch (e) {
     prova.value = null;
@@ -430,7 +430,7 @@ const venda = ref({
   aviso_prova: '',
   aviso_parecidas: '',
   orientacao_foto: '',
-  selo_tom: 'branco',
+  selo_tom: 'vidro',
 });
 // 🪞 08/11: marca nas fotos da prova + cartão-exemplo "como tirar as fotos"
 const brandBusy = ref('');
@@ -471,7 +471,7 @@ const saveVenda = async () => {
       aviso_prova: venda.value.aviso_prova || '',
       aviso_parecidas: venda.value.aviso_parecidas || '',
       orientacao_foto: venda.value.orientacao_foto || '',
-      selo_tom: venda.value.selo_tom || 'branco',
+      selo_tom: venda.value.selo_tom || 'vidro',
     });
     venda.value = { ...venda.value, ...(r.venda || {}) };
     useAlert('Venda pelo WhatsApp salva.');
@@ -1487,6 +1487,7 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
             <label class="block mt-3" style="max-width: 22rem">
               <span :class="LABEL">Selo da marca nas fotos da prova</span>
               <select v-model="venda.selo_tom" :class="INPUT">
+                <option value="vidro">Vidro fumê (dos vídeos) · logo branco</option>
                 <option value="branco">Vidro branco · logo verde</option>
                 <option value="verde">Vidro verde · logo branco</option>
               </select>
