@@ -22,11 +22,9 @@
 # Em SOMBRA nada é enviado, nada espera e nenhuma tarefa nasce: tudo `simulado`.
 class Otica::SalesTools
   NAMES = %w[pedir_fotos mostrar_lentes conferir_desconto registrar_fechamento status_do_pedido].freeze
-  # 🪞 08/11: o pedido das 2 fotos (de frente + 3/4) sai com o cartão-exemplo da loja (Produtos → Venda pelo WhatsApp)
-  DEFAULT_PHOTO_GUIDE = 'Pra ficar bem parecido, me manda duas fotos, como no exemplo: uma de frente, olhando pra câmera, e ' \
-                        'uma de 3/4 (rosto um pouquinho virado). Fica de frente pra uma janela, com a luz do dia no rosto, ' \
-                        'celular com o braço esticado na altura dos olhos, sem óculos e sem boné, só você na foto. Pode mandar ' \
-                        'uma de cada vez.'.freeze
+  # 🪞 08/11: o pedido da foto (uma só: "quanto mais fácil, melhor") sai com o cartão-exemplo da loja (Produtos → Venda pelo WhatsApp)
+  DEFAULT_PHOTO_GUIDE = 'Me manda uma foto sua, assim fica bem parecido: de frente pra uma janela, com a luz do dia no rosto, ' \
+                        'celular com o braço esticado na altura dos olhos, sem óculos e sem boné, só você na foto.'.freeze
   # as 3 de venda são dos atendentes de aquisição; o status do pedido é de todos (o pós-compra vive dele)
   SALES_KEYS = %w[atendente_agendamento atendente_pos atendente_visagista].freeze
   CONFIG_KEY = 'otica_venda'.freeze
@@ -80,15 +78,14 @@ class Otica::SalesTools
     }
   end
 
-  def self.sales_definitions
+  def self.sales_definitions # rubocop:disable Metrics/MethodLength
     [
       {
         name: 'pedir_fotos',
-        description: 'PEDIDO DAS FOTOS PARA A PROVA VIRTUAL: envia à cliente, nesta conversa, o cartão-exemplo da loja ' \
-                     '("como tirar as fotos": uma de frente e uma de 3/4) junto com a orientação em palavras simples. Use UMA vez, ' \
-                     'no momento em que ela aceita ver armações no rosto dela (ou logo ao convidar). Depois do ok=true você não ' \
-                     'repete a orientação: só espera as fotos. Se chegar uma só, agradeça e peça a outra em 1 linha (uma vez); ' \
-                     'com as duas (ou se ela não mandar a segunda), chame experimentar_armacoes.',
+        description: 'PEDIDO DA FOTO PARA A PROVA VIRTUAL: envia à cliente, nesta conversa, a sugestão de como tirar a foto ' \
+                     '(com o cartão-exemplo da loja, se houver). Use UMA vez, no momento em que ela aceita ver armações no rosto ' \
+                     'dela (ou logo ao convidar). Depois do ok=true você não repete a orientação: só espera a foto. Qualquer ' \
+                     'foto boa serve; vale sempre a última que ela mandar.',
         input_schema: { type: 'object', properties: {}, additionalProperties: false }
       },
       {
@@ -172,20 +169,20 @@ class Otica::SalesTools
     end
   end
 
-  # ── pedido das 2 fotos (cartão-exemplo + orientação) ──────────────────────
+  # ── pedido da foto (cartão-exemplo + orientação) ──────────────────────────
   def pedir_fotos # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     cfg = self.class.config(@account)
-    text = cfg['orientacao_foto'].presence || DEFAULT_PHOTO_GUIDE
+    text = Otica::TextSpacing.space(cfg['orientacao_foto'].presence || DEFAULT_PHOTO_GUIDE)
     example = CrmSetting.find_by(account: @account)&.otica_photo_example
     # já pediu hoje nesta conversa (o agente às vezes chama de novo no "topo!"): não repete, só espera
     if @live && @conversation.messages.where(message_type: :outgoing).where('created_at > ?', Otica::TZ.now.beginning_of_day)
                              .where("additional_attributes ? 'cevico_pedir_fotos'").exists?
-      return [{ ok: true, repetido: true, aviso: 'A orientação JÁ tinha sido enviada hoje: não repita nada, só espere as fotos.' }, 'já enviada hoje']
+      return [{ ok: true, repetido: true, aviso: 'A orientação JÁ tinha sido enviada hoje: não repita nada, só espere a foto.' }, 'já enviada hoje']
     end
 
     unless @live
       return [{ ok: true, simulado: true, com_exemplo: example&.attached? == true,
-                aviso: 'SIMULAÇÃO: ao vivo a cliente receberia o cartão-exemplo com a orientação das 2 fotos. Agora só espere as fotos.' },
+                aviso: 'SIMULAÇÃO: ao vivo a cliente receberia a sugestão de como tirar a foto. Agora só espere a foto.' },
               'simulado']
     end
 
@@ -202,7 +199,7 @@ class Otica::SalesTools
     end
     [{ ok: true, com_exemplo: example&.attached? == true,
        aviso: 'A orientação JÁ FOI ENVIADA à cliente (com o cartão-exemplo, se a loja tem um). Não repita a orientação: escreva no ' \
-              'máximo 1 linha ou nada, e espere as fotos.' },
+              'máximo 1 linha ou nada, e espere a foto.' },
      "orientação enviada#{' + cartão-exemplo' if example&.attached?}"]
   end
 
@@ -373,10 +370,11 @@ class Otica::SalesTools
 
   def checks_today
     @conversation.messages.where(message_type: :outgoing).where('created_at > ?', Otica::TZ.now.beginning_of_day)
-                 .where(content: CHECK_TEXT).count
+                 .where(content: [CHECK_TEXT, Otica::TextSpacing.space(CHECK_TEXT)]).count
   end
 
   def send_text!(text)
+    text = Otica::TextSpacing.space(text) # 💬 linha em branco entre as frases
     @conversation.messages.create!(account_id: @account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing, content: text,
                                    additional_attributes: { 'cevico_ia_agent' => @agent_key })
   end

@@ -34,7 +34,7 @@ RSpec.describe Otica::SalesTools do
       out, resumo = tools(live: true).call('pedir_fotos', {})
       expect(out).to include(ok: true, com_exemplo: false)
       expect(resumo).to eq('orientação enviada')
-      expect(conversation.messages.outgoing.last.content).to eq(described_class::DEFAULT_PHOTO_GUIDE)
+      expect(conversation.messages.outgoing.last.content).to eq(Otica::TextSpacing.space(described_class::DEFAULT_PHOTO_GUIDE))
       expect(conversation.messages.outgoing.last.attachments).to be_empty
 
       # chamou de novo no mesmo dia ("topo!"): não repete o envio
@@ -100,7 +100,7 @@ RSpec.describe Otica::SalesTools do
       out, = sales.call('conferir_desconto', { 'armacao_id' => frame.id, 'lente_id' => mono.id, 'valor_pedido' => 500 })
       expect(out).to include(aprovado: false, melhor_valor: 620.0, simulado: false)
       expect(sales).to have_received(:sleep).with(described_class::CHECK_WAIT)
-      expect(conversation.messages.outgoing.last.content).to eq(described_class::CHECK_TEXT)
+      expect(conversation.messages.outgoing.last.content).to eq(Otica::TextSpacing.space(described_class::CHECK_TEXT)) # espaçado
       expect(conversation.messages.where(message_type: :activity).last.content).to include('contraproposta R$ 620,00')
 
       sales.call('conferir_desconto', { 'armacao_id' => frame.id, 'lente_id' => mono.id, 'valor_pedido' => 500 })

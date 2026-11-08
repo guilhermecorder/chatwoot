@@ -1474,7 +1474,7 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
               </label>
               <label class="block" style="grid-column: 1 / -1">
                 <span :class="LABEL">
-                  Pedido das 2 fotos (sai junto com o cartão-exemplo)
+                  Pedido da foto (sai junto com o cartão-exemplo)
                 </span>
                 <textarea
                   v-model="venda.orientacao_foto"
@@ -1525,7 +1525,7 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
                     {{
                       kind === 'logo'
                         ? 'entra pequena, num quadradinho branco, em todo cartão da prova virtual.'
-                        : 'a cliente recebe junto do pedido das 2 fotos (de frente e de 3/4).'
+                        : 'a cliente recebe junto da sugestão de como tirar a foto.'
                     }}
                   </p>
                   <div class="flex items-center gap-2 mt-1">

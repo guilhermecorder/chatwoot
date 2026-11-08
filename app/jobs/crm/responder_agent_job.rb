@@ -629,6 +629,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       clean = text.to_s.tr('—', ',').gsub(/\s?😊/, '').strip # sem travessão nem a carinha que pausa (o sistema garante)
       next if clean.blank?
 
+      clean = Otica::TextSpacing.for_account(conversation.account, clean) # 💬 ótica: linha em branco entre as frases
+
       sleep BALLOON_GAP if index.positive?
       break if last_incoming_id(conversation) != trigger_message_id
 

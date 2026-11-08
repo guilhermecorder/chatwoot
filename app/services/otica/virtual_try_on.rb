@@ -15,9 +15,8 @@
 # - 08/11 (Guilherme): a cliente recebe um AVISO na hora ("recebi sua foto, já
 #   estou aplicando o visagismo…") antes das imagens; cada legenda traz o MOTIVO
 #   curto; `parecida_com` manda 3 do mesmo estilo em 3 faixas (top de linha /
-#   custo-benefício / mais acessível) com o valor da armação; se houver foto de
-#   3/4 na conversa, a prova é feita nela (o óculos aparece melhor) e o formato do
-#   rosto vem da foto de frente; o cartão é ANTES (a foto dela) e DEPOIS (com a armação);
+#   custo-benefício / mais acessível) com o valor da armação; vale sempre a ÚLTIMA
+#   foto boa que ela mandou; o cartão é ANTES (a foto dela) e DEPOIS (com a armação);
 # - teto de imagens por dia na conta (ai_config['visagismo_daily_cap'], padrão 150)
 #   para o gasto nunca fugir;
 # - em SOMBRA/simulador nada é gerado nem enviado: devolve `simulado` com a escolha;
@@ -27,11 +26,21 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   MAX_PER_CALL = 3
   MAX_IMAGES_PER_DAY = 12
   AVISO_KEY = 'cevico_visagismo_aviso'.freeze
+  # {opcoes} vira "2 opções" / "uma opção" (quantas vão sair agora)
   DEFAULT_AVISO = 'Recebi sua foto! Já estou aplicando as técnicas de visagismo no seu rosto pra escolher as armações ' \
-                  'que mais combinam com você. Em alguns segundos te mando as opções.'.freeze
-  DEFAULT_AVISO_PARECIDAS = 'Boa escolha! Vou separar mais 3 nesse mesmo estilo: uma top de linha, uma de melhor ' \
-                            'custo-benefício e uma mais acessível. Só um instante.'.freeze
+                  'que mais combinam com você. Em alguns segundos te mando {opcoes} pra você comparar.'.freeze
+  # {faixas} só aparece quando saem as 3 (top de linha, custo-benefício, mais acessível)
+  DEFAULT_AVISO_PARECIDAS = 'Boa escolha! Vou te mandar {opcoes} nesse mesmo estilo pra você comparar{faixas}. Só um instante.'.freeze
+  FAIXAS_TEXTO = ': uma top de linha, uma de melhor custo-benefício e uma mais acessível'.freeze
   TIERS = { 'top' => 'Top de linha', 'custo_beneficio' => 'Melhor custo-benefício', 'acessivel' => 'Mais acessível' }.freeze
+  # 08/11 (Guilherme: "enviou duplicado"): o agente chamou a prova 2 vezes na MESMA resposta e cada chamada mandou
+  # aviso + imagem. Agora: uma prova por mensagem da cliente (a 2ª chamada sem mensagem nova dela é recusada) e trava
+  # por conversa enquanto uma prova está sendo montada (2 chamadas ao mesmo tempo).
+  RECENT_WINDOW = 5.minutes
+  LOCK_TTL = 180
+  JA_ENVIADAS = 'As fotos da prova virtual ACABARAM de ser enviadas a ela nesta resposta. Não chame a ferramenta de novo agora: ' \
+                'só comente e feche com uma pergunta. Para mais opções, espere ela responder.'.freeze
+  DEFAULT_AVISO_MAIS = 'Boa! Vou te mandar mais {opcoes} no seu rosto pra você comparar. Em alguns segundos chegam.'.freeze
   DEFAULT_DAILY_CAP = 150
   CAP_KEY = 'visagismo_daily_cap'.freeze
   STAMP_KEY = 'cevico_visagismo'.freeze
@@ -85,9 +94,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     selfies.first
   end
 
-  # [foto para a geração, rosto para escolher]: entre as selfies utilizáveis, a
-  # geração prefere a de 3/4 mais recente (o óculos aparece melhor); o formato do
-  # rosto vem da de frente mais recente (lê melhor). Sem foto utilizável: [última, rosto dela].
+  # [foto da prova, rosto dela, foto da prova]: a última selfie utilizável; sem nenhuma, a última recebida
   def pick_selfie
     all = selfies
     return [nil, nil, {}] if all.empty?
@@ -95,12 +102,10 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     usable = all.select { |a| Otica::FaceReading.usable(media(a)['rosto']).first }
     return [all.first, media(all.first)['rosto'], {}] if usable.empty?
 
-    # 🪞 08/11: a de FRENTE lê o formato do rosto; a prova é feita na de 3/4 (o óculos aparece melhor),
-    # ou na de frente se ela só mandou essa. O cartão é ANTES e DEPOIS da MESMA foto (sem e com a armação).
-    front = usable.find { |a| media(a)['rosto']['angulo'] != 'tres_quartos' }
-    three = usable.find { |a| media(a)['rosto']['angulo'] == 'tres_quartos' }
-    photo = three || front
-    [photo, media(front || three)['rosto'], photo]
+    # 🪞 08/11 (Guilherme: "quanto mais fácil, melhor"): UMA foto. Vale sempre a ÚLTIMA foto boa que ela
+    # mandou (de frente ou de 3/4); o formato do rosto é lido nela mesma. O cartão é ANTES e DEPOIS dessa foto.
+    photo = usable.first
+    [photo, media(photo)['rosto'], photo]
   end
 
   def media(attachment)
@@ -137,6 +142,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
       end
 
       chosen, tiers = pick_tiers(pool, quantidade)
+      tiers = {} if chosen.size < 2 # faixa só faz sentido comparando (1 parecida sai sem "top de linha")
     else
       quantidade = (quantidade.presence || 2).to_i.clamp(1, MAX_PER_CALL)
       pool = products.reject { |p| already.include?(p.id) }
@@ -155,6 +161,14 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
                         armacoes: chosen.map { |p| describe(p, rosto, tiers[p.id]) })
     end
 
+    return refuse(JA_ENVIADAS) if just_sent?
+
+    @lock_key = "otica:prova_virtual:#{@conversation.id}"
+    unless Redis::Alfred.set(@lock_key, Time.current.to_i, nx: true, ex: LOCK_TTL)
+      @lock_key = nil
+      return refuse(JA_ENVIADAS)
+    end
+
     today = images_today
     if today >= MAX_IMAGES_PER_DAY
       return refuse("A cliente já recebeu #{today} imagens da prova virtual hoje (limite #{MAX_IMAGES_PER_DAY}). " \
@@ -168,7 +182,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     chosen = chosen.first([cap - used, MAX_IMAGES_PER_DAY - today, quantidade].min)
     return refuse('Configure a chave do Gemini em Integrações → IA.') unless Otica::TryOnImage.configured?(account)
 
-    send_aviso!(parecida_com.present?)
+    send_aviso!(parecida_com.present?, again: selfie_used_before?(attachment), count: chosen.size)
     before = { bytes: attachment.file.blob.open(&:read), mime: mime_of(attachment.file, 'image/jpeg') }
     logo = brand_logo
     sent = []
@@ -192,17 +206,18 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
                     'na loja; não prometa a foto.')
     end
 
-    pergunta = if parecida_com.present?
-                 'Dessas, qual você prefere?'
-               elsif sent.size > 1
-                 'Qual dessas você gostou mais?'
-               else
-                 'O que achou? Quer ver mais alguma nesse estilo?'
+    # 08/11 (Guilherme): a pergunta que faz ela se ver com o óculos
+    pergunta = case sent.size
+               when 1 then 'Você já se imagina usando esse?'
+               when 2 then 'Qual dos dois você já se imagina usando?'
+               else "Qual desses #{sent.size} você já se imagina usando?"
                end
     base.merge(ok: true, enviadas: sent.size, armacoes: sent, falhas: failures, imagens_hoje: today + sent.size,
                aviso: 'As fotos JÁ FORAM ENVIADAS à cliente nesta conversa (uma por armação, com legenda e o motivo). Agora escreva ' \
                       "1 balão curto, sem repetir os nomes nem os motivos (já estão nas legendas), e FECHE com a pergunta: \"#{pergunta}\" " \
-                      '(lembre em meia frase que é uma simulação por computador).')
+                      '(lembre em meia frase que é uma simulação por computador). NÃO chame experimentar_armacoes de novo nesta resposta.')
+  ensure
+    Redis::Alfred.delete(@lock_key) if @lock_key
   end
 
   # ── teste pela tela de Produtos (equipe) ─────────────────────────────────
@@ -328,10 +343,38 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
                  .pluck(Arel.sql("additional_attributes -> '#{STAMP_KEY}' ->> 'product_id'")).map(&:to_i)
   end
 
-  # o balão de "recebi sua foto, já estou montando" sai ANTES das imagens (texto editável em Produtos → Venda pelo WhatsApp)
-  def send_aviso!(parecidas)
+  # já saiu imagem de prova depois da última mensagem da cliente (e há pouco)? então esta chamada é repetida
+  # (falha do Gemini não conta: o aviso sai mas nenhuma imagem; chamadas simultâneas ficam com a trava)
+  def just_sent?
+    last_lot = @conversation.messages.where(message_type: :outgoing).where('created_at > ?', RECENT_WINDOW.ago)
+                            .where("additional_attributes ? '#{STAMP_KEY}'")
+                            .maximum(:created_at)
+    return false if last_lot.nil?
+
+    last_from_her = @conversation.messages.where(message_type: :incoming).maximum(:created_at)
+    last_from_her.nil? || last_lot >= last_from_her
+  end
+
+  # esta foto já foi usada numa prova antes? (aí o aviso não diz "recebi sua foto")
+  def selfie_used_before?(attachment)
+    @conversation.messages.where(message_type: :outgoing).where("additional_attributes ? '#{STAMP_KEY}'")
+                 .exists?(["(additional_attributes -> '#{STAMP_KEY}' ->> 'selfie_attachment_id')::bigint = ?", attachment.id])
+  end
+
+  # o balão de "recebi sua foto, já estou montando" sai ANTES das imagens (texto editável em Produtos → Venda pelo WhatsApp);
+  # se a foto já foi usada antes, sai "já estou montando mais uma opção"
+  def send_aviso!(parecidas, again: false, count: 2) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     cfg = Otica::SalesTools.config(account)
-    text = parecidas ? cfg['aviso_parecidas'].presence || DEFAULT_AVISO_PARECIDAS : cfg['aviso_prova'].presence || DEFAULT_AVISO
+    text = if parecidas
+             cfg['aviso_parecidas'].presence || DEFAULT_AVISO_PARECIDAS
+           elsif again
+             DEFAULT_AVISO_MAIS
+           else
+             cfg['aviso_prova'].presence || DEFAULT_AVISO
+           end
+    # "te mando 2 opções" / "mais uma opção": a cliente já sabe quantas vêm
+    text = text.gsub('{opcoes}', count == 1 ? 'uma opção' : "#{count} opções").gsub('{faixas}', count == 3 ? FAIXAS_TEXTO : '')
+    text = Otica::TextSpacing.space(text)
     @conversation.messages.create!(account_id: account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing, content: text,
                                    additional_attributes: { 'cevico_ia_agent' => @agent_key.presence || Otica::TryOnImage::AGENT_KEY,
                                                             AVISO_KEY => true })

@@ -124,7 +124,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
         type: 'object',
         properties: {
           quantidade: { type: 'integer', minimum: 1, maximum: Otica::VirtualTryOn::MAX_PER_CALL,
-                        description: 'Quantas armações mostrar (padrão 2; 3 nas parecidas ou se a cliente pedir várias)' },
+                        description: 'Quantas armações mostrar: 2 (padrão, pra ela comparar, também no "mais uma"); 3 só nas parecidas' },
           preferencia: { type: 'string', description: 'O que a cliente disse que gosta, em poucas palavras: cor, material, ' \
                                                       'estilo ("preta e fininha", "dourada", "grande"). Vazio se não disse.' },
           parecida_com: { type: 'integer', description: 'id da armação que a cliente gostou (do resultado anterior) para ver ' \

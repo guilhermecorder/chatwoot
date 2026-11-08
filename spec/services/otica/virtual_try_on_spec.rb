@@ -29,6 +29,11 @@ RSpec.describe Otica::VirtualTryOn do
                             meta: { 'cevico_media' => { 'status' => 'done', 'tipo' => tipo, 'descricao' => 'mulher sorrindo', 'rosto' => rosto_meta } })
   end
 
+  # a cliente responde (uma prova por mensagem dela)
+  def ela_responde!(conv = conversation)
+    create(:message, account: account, inbox: inbox, conversation: conv, message_type: :incoming, content: 'quero ver mais')
+  end
+
   def service(live: true)
     described_class.new(account: account, conversation: conversation, live: live, agent_key: 'atendente_agendamento')
   end
@@ -65,6 +70,7 @@ RSpec.describe Otica::VirtualTryOn do
     # 08/11: o AVISO sai antes das imagens ("recebi sua foto…"), sem carimbo de imagem
     aviso = all_out.first
     expect(aviso.content).to include('Recebi sua foto')
+    expect(aviso.content).to include("\n\nEm alguns segundos te mando 2 opções pra você comparar.") # anuncia quantas vêm, espaçado
     expect(aviso.attachments).to be_empty
     expect(aviso.additional_attributes).to include('cevico_visagismo_aviso' => true)
     expect(aviso.additional_attributes).not_to have_key('cevico_visagismo')
@@ -74,7 +80,7 @@ RSpec.describe Otica::VirtualTryOn do
                                        'Opção 2 de 2 · Gatinho (gatinho): no seu rosto redondo, a gatinho levanta o olhar e valoriza as maçãs do rosto.'])
     expect(sent).to all(satisfy { |m| m.attachments.one? && m.attachments.first.file_type == 'image' && m.attachments.first.file.attached? })
     expect(out[:armacoes].first).to include(motivo: 'no seu rosto redondo, a retangular dá definição e alonga o olhar')
-    expect(out[:aviso]).to include('Qual dessas você gostou mais?')
+    expect(out[:aviso]).to include('Qual dos dois você já se imagina usando?')
     expect(out[:foto_usada]).to eq('de frente')
     # o cartão: ANTES e DEPOIS lado a lado = 1080×720 JPEG (sem marca: a loja ainda não subiu o logo)
     card = MiniMagick::Image.read(sent.first.attachments.first.file.blob.open(&:read))
@@ -103,7 +109,11 @@ RSpec.describe Otica::VirtualTryOn do
     fake = instance_double(Otica::TryOnImage, generate: { bytes: png, mime: 'image/png', model: 'm' })
     allow(Otica::TryOnImage).to receive(:new).and_return(fake)
     # 08/11: limite de 12 IMAGENS por cliente por dia, contando todas as conversas dela
-    12.times { expect(service.run(quantidade: 1)[:ok]).to be(true) }
+    12.times do
+      ela_responde!
+      expect(service.run(quantidade: 1)[:ok]).to be(true)
+    end
+    ela_responde!
     third = service.run(quantidade: 1)
     expect(third[:ok]).to be(false)
     expect(third[:motivo]).to include('já recebeu 12')
@@ -146,15 +156,18 @@ RSpec.describe Otica::VirtualTryOn do
     fake = instance_double(Otica::TryOnImage, generate: { bytes: png, mime: 'image/png', model: 'm' })
     allow(Otica::TryOnImage).to receive(:new).and_return(fake)
 
+    ela_responde!
     first = service.run(quantidade: 2)
     expect(first[:armacoes].pluck(:id)).to eq([ref.id, cara.id])
 
+    ela_responde!
     out = service.run(quantidade: 3, parecida_com: ref.id)
     expect(out).to include(ok: true, enviadas: 3, parecidas: true)
     expect(out[:armacoes].map { |a| [a[:id], a[:faixa]] }).to eq([[media.id, 'Top de linha'], [boa.id, 'Melhor custo-benefício'], [barata.id, 'Mais acessível']])
-    expect(out[:aviso]).to include('Dessas, qual você prefere?')
+    expect(out[:aviso]).to include('Qual desses 3 você já se imagina usando?')
     texts = conversation.messages.outgoing.order(:id).pluck(:content)
-    expect(texts).to include(a_string_including('Boa escolha'))
+    expect(texts).to include("Boa escolha!\n\nVou te mandar 3 opções nesse mesmo estilo pra você comparar: uma top de linha, uma de melhor " \
+                             "custo-benefício e uma mais acessível.\n\nSó um instante.")
     expect(texts.last(3)).to eq(['Top de linha · R$ 450 · Meio (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.',
                                  'Melhor custo-benefício · R$ 250,50 · Boa (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.',
                                  'Mais acessível · R$ 199 · Básica (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.'])
@@ -162,7 +175,7 @@ RSpec.describe Otica::VirtualTryOn do
     expect(service.run(quantidade: 3, parecida_com: 999_999)[:motivo]).to include('Não achei')
   end
 
-  it 'com foto de frente e de 3/4: lê o formato na de frente, prova na de 3/4 e manda ANTES/DEPOIS com a marca; perfil (lado) não serve', :aggregate_failures do
+  it 'vale sempre a ÚLTIMA foto boa (o formato é lido nela) e sai ANTES/DEPOIS com a marca; perfil (lado) não serve', :aggregate_failures do
     armacao('Retangular', 'retangular')
     selfie!(rosto.merge('angulo' => 'frente', 'formato' => 'redondo'))
     tres_quartos = selfie!(rosto.merge('angulo' => 'tres_quartos', 'formato' => 'oval'))
@@ -172,7 +185,7 @@ RSpec.describe Otica::VirtualTryOn do
     allow(Otica::TryOnCard).to receive(:compose).and_call_original
 
     out = service.run(quantidade: 1)
-    expect(out).to include(ok: true, rosto: 'redondo', foto_usada: 'de 3/4')
+    expect(out).to include(ok: true, rosto: 'oval', foto_usada: 'de 3/4') # a última que ela mandou
     expect(fake).to have_received(:generate).once # uma imagem por armação (o "depois")
     expect(fake).to have_received(:generate).with(hash_including(selfie: tres_quartos.file.blob.open(&:read)))
     expect(Otica::TryOnCard).to have_received(:compose).with(images: [hash_including(bytes: tres_quartos.file.blob.open(&:read)),
@@ -188,10 +201,47 @@ RSpec.describe Otica::VirtualTryOn do
     stamp = cards.last.additional_attributes['cevico_visagismo']
     expect(stamp['selfie_attachment_id']).to eq(tres_quartos.id)
 
+    # ela manda outra (de frente): passa a valer essa
+    nova = selfie!(rosto.merge('angulo' => 'frente', 'formato' => 'quadrado'))
+    expect(service.run(quantidade: 1)).to include(ok: true, rosto: 'quadrado', foto_usada: 'de frente')
+    expect(conversation.messages.outgoing.joins(:attachments).last.additional_attributes.dig('cevico_visagismo', 'selfie_attachment_id')).to eq(nova.id)
+
+    # de lado não serve: continua valendo a última boa
     selfie!(rosto.merge('frontal' => false, 'angulo' => 'lado'))
     expect(Otica::FaceReading.usable(rosto.merge('frontal' => true, 'angulo' => 'lado')).first).to be(false)
     expect(Otica::FaceReading.summary(rosto.merge('angulo' => 'tres_quartos'))).to include('de 3/4')
-    expect(service.run(quantidade: 1)[:ok]).to be(true) # a de lado é ignorada: usa a 3/4 anterior
+    expect(service.run(quantidade: 1)).to include(ok: true, rosto: 'quadrado')
+  end
+
+  it 'uma prova por mensagem da cliente: a 2ª chamada na mesma resposta é recusada; com a prova em andamento também; "mais uma" não diz "recebi sua foto"', :aggregate_failures do
+    armacao('Retangular', 'retangular')
+    armacao('Gatinho', 'gatinho')
+    selfie!
+    fake = instance_double(Otica::TryOnImage, generate: { bytes: png, mime: 'image/png', model: 'm' })
+    allow(Otica::TryOnImage).to receive(:new).and_return(fake)
+
+    expect(service.run(quantidade: 1)[:ok]).to be(true)
+    avisos = -> { conversation.messages.outgoing.where("additional_attributes ? 'cevico_visagismo_aviso'").order(:id).pluck(:content) }
+    expect(avisos.call.last).to include('Recebi sua foto')
+
+    # o caso do Guilherme (08/11 18:34): o agente chama de novo sem ela ter dito nada → nada sai
+    count = conversation.messages.outgoing.count
+    again = service.run(quantidade: 1)
+    expect(again[:ok]).to be(false)
+    expect(again[:motivo]).to include('ACABARAM de ser enviadas')
+    expect(conversation.messages.outgoing.count).to eq(count)
+
+    # ela pede "mais uma": sai, com o aviso de "mais uma opção" (a foto é a mesma)
+    ela_responde!
+    expect(service.run(quantidade: 1)[:ok]).to be(true)
+    expect(avisos.call.last).to eq("Boa!\n\nVou te mandar mais uma opção no seu rosto pra você comparar.\n\nEm alguns segundos chegam.")
+
+    # duas chamadas ao mesmo tempo: a trava da conversa recusa a segunda
+    ela_responde!
+    Redis::Alfred.set("otica:prova_virtual:#{conversation.id}", 1, nx: true, ex: 60)
+    expect(service.run(quantidade: 1)[:motivo]).to include('ACABARAM de ser enviadas')
+    Redis::Alfred.delete("otica:prova_virtual:#{conversation.id}")
+    expect(service.run(quantidade: 1)[:ok]).to be(true) # e a trava some no fim de cada prova
   end
 
   describe 'ferramenta do agente (Crm::ResponderTools)' do
