@@ -111,6 +111,9 @@ RSpec.describe Crm::ResponderTools do
                                                                 'imagens_roteiro' => [
                                                                   { 'chave' => 'Telhados', 'quando' => 'na pergunta do telhado',
                                                                     'arquivo' => 'brand-assets/life/roteiro/telhados.jpg', 'legenda' => legenda },
+                                                                  { 'chave' => 'google', 'quando' => 'quando a pessoa desconfiar',
+                                                                    'arquivo' => 'brand-assets/life/roteiro/google.jpg',
+                                                                    'legenda' => 'Pode conferir: essa é a Life no Google.', 'faz_pergunta' => false },
                                                                   { 'chave' => 'sumiu', 'quando' => 'nunca',
                                                                     'arquivo' => 'brand-assets/nao-existe.jpg' },
                                                                   { 'chave' => 'fora', 'quando' => 'nunca', 'arquivo' => '../config/database.yml' }
@@ -124,8 +127,10 @@ RSpec.describe Crm::ResponderTools do
 
     it 'aparece só com imagem configurada e arquivo de verdade dentro de public/', :aggregate_failures do
       image = image_tools.definitions.find { |d| d[:name] == 'enviar_imagem' }
-      expect(image.dig(:input_schema, :properties, :imagem, :enum)).to eq(%w[telhados])
+      expect(image.dig(:input_schema, :properties, :imagem, :enum)).to eq(%w[telhados google])
       expect(image[:description]).to include('telhados = na pergunta do telhado', legenda)
+      expect(image[:description]).to include('google = quando a pessoa desconfiar').and include('[é prova:')
+      expect(image[:description].scan('[é prova:').size).to eq(1)
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).not_to include('enviar_imagem')
       CrmSetting.find_by(account: account).update!(ai_config: {})
       expect(described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: false)
@@ -157,6 +162,15 @@ RSpec.describe Crm::ResponderTools do
       reply_jobs = enqueued_jobs.select { |j| j[:job] == SendReplyJob && j[:args].first == message.id }
       expect(reply_jobs.size).to eq(1)
       expect(reply_jobs).to all(satisfy { |j| j['scheduled_at'].present? })
+    end
+
+    it 'imagem de prova (print do Google): a IA segue a conversa no balão, sem a trava de "não pergunte"', :aggregate_failures do
+      prova = image_tools(live: true).call('enviar_imagem', { 'imagem' => 'google' })
+      expect(prova).to include(ok: true, enviada: true)
+      expect(prova[:aviso]).to include('é prova').and include('siga a conversa')
+      expect(conversation.messages.outgoing.last.attachments.first.file.filename.to_s).to eq('google.jpg')
+      telhado = image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados' })
+      expect(telhado[:aviso]).to include('NÃO repita a pergunta')
     end
 
     it 'reenvia uma vez quando o cliente diz que não chegou; depois só em texto', :aggregate_failures do

@@ -109,13 +109,14 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def image_definition
     guia = script_images.map do |i|
       legenda = i['legenda'].present? ? " (vai com a legenda: \"#{i['legenda']}\")" : ''
-      "#{i['chave']} = #{i['quando']}#{legenda}"
+      prova = i['faz_pergunta'] ? '' : ' [é prova: a legenda não pergunta nada; siga a conversa no balão]'
+      "#{i['chave']} = #{i['quando']}#{legenda}#{prova}"
     end.join('; ')
     {
       name: IMAGE_TOOL_NAME,
       description: 'Envia ao cliente uma IMAGEM PRONTA da empresa, no momento do roteiro descrito para ela, uma vez por ' \
                    "conversa: #{guia}. A imagem sai ANTES dos seus balões. Se ela tem legenda, a pergunta já vai na " \
-                   'legenda: não repita a pergunta nos balões.',
+                   'legenda: não repita a pergunta nos balões (menos nas marcadas como prova).',
       input_schema: {
         type: 'object',
         properties: {
@@ -596,7 +597,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     message = Crm::ScriptImages.send!(@conversation, image, @agent_key)
     log_acao(IMAGE_TOOL_NAME, true, "enviou a imagem #{chave}#{' (conversa de teste)' if test_conversation}")
     { ok: true, enviada: true, mensagem_id: message.id, legenda_enviada: image['legenda'].presence,
-      aviso: if image['legenda'].present?
+      aviso: if !image['faz_pergunta']
+               'A imagem JÁ FOI ENVIADA com a legenda acima (é prova, não pergunta nada). Não repita o que ela diz: ' \
+                 'siga a conversa no balão, como o roteiro manda para este momento.'
+             elsif image['legenda'].present?
                'A imagem JÁ FOI ENVIADA com a legenda acima, que já faz a pergunta. NÃO repita a pergunta: no máximo um ' \
                  'balão curto comentando a resposta anterior do cliente, sem nova pergunta.'
              else

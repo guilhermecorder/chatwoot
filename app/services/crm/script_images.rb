@@ -9,6 +9,8 @@
 #   [{ 'chave' => 'telhados', 'quando' => 'na pergunta do tipo de telhado',
 #      'arquivo' => 'brand-assets/life/roteiro/telhados.jpg',   # dentro de public/
 #      'legenda' => 'O seu telhado se parece com qual destas opções? ...' }]
+# 'faz_pergunta' => false (08/11 noite · print do Google para quem desconfia): a
+# legenda NÃO pergunta nada — é prova; a IA segue a conversa no balão depois dela.
 # Sem lista (ou arquivo inexistente), a ferramenta nem aparece para a IA.
 #
 # A mensagem leva o carimbo MEDIA_STAMP: a trava de "já respondi esta
@@ -34,7 +36,7 @@ class Crm::ScriptImages
     return if key.blank? || path.nil?
 
     { 'chave' => key, 'quando' => e['quando'].to_s.strip[0, 200], 'legenda' => e['legenda'].to_s.strip[0, 900],
-      'caminho' => path }
+      'faz_pergunta' => e['faz_pergunta'] != false, 'caminho' => path }
   end
 
   # só arquivos de imagem dentro de public/ (nada de ../ para fora dela)
