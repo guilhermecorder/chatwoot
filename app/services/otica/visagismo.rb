@@ -99,6 +99,33 @@ module Otica::Visagismo
     'grande' => %w[grande oversized borboleta], 'pequena' => %w[pequena pequeno slim]
   }.freeze
 
+  # 🪞 08/11: o "por quê" de cada formato de armação, em 1 frase simples (vai na legenda da foto)
+  FRAME_WHY = {
+    'retangular' => 'dá definição e alonga o olhar',
+    'quadrada' => 'traz estrutura e deixa o rosto mais marcado',
+    'redonda' => 'suaviza os traços e deixa o rosto mais leve',
+    'oval' => 'acompanha as curvas do rosto sem pesar',
+    'gatinho' => 'levanta o olhar e valoriza as maçãs do rosto',
+    'aviador' => 'equilibra a testa com o queixo',
+    'geometrica' => 'dá personalidade sem pesar no rosto',
+    'browline' => 'destaca a parte de cima do rosto e os olhos',
+    'borboleta' => 'dá presença e cobre bem',
+    'sem_aro' => 'fica leve e quase some, deixando o rosto em evidência'
+  }.freeze
+
+  # "No seu rosto oval, a retangular dá definição e alonga o olhar." (sem termo técnico)
+  def reason(face_shape, frame_shape)
+    why = FRAME_WHY[frame_shape.to_s]
+    return 'combina com o seu rosto' if why.nil?
+
+    r = rule(face_shape)
+    if r['recomendadas'].include?(frame_shape.to_s)
+      "no seu rosto #{face_label(face_shape)}, a #{frame_label(frame_shape)} #{why}"
+    else
+      "a #{frame_label(frame_shape)} #{why}"
+    end
+  end
+
   def face_label(shape)
     FACE_SHAPES[shape.to_s] || shape.to_s
   end

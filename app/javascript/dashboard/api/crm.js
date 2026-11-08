@@ -1997,6 +1997,19 @@ class CrmAPI extends ApiClient {
     return axios.patch(`${this.url}/otica/visagismo`, payload);
   }
 
+  // 🪞 08/11: marca nas fotos da prova e cartão-exemplo "como tirar as fotos"
+  uploadOticaBrandFile(kind, file) {
+    const form = new FormData();
+    form.append(kind, file);
+    return axios.post(`${this.url}/otica/visagismo/${kind}`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  }
+
+  deleteOticaBrandFile(kind) {
+    return axios.delete(`${this.url}/otica/visagismo/${kind}`);
+  }
+
   previewOticaVisagismo({ selfie, productIds = [], quantidade = 2, preferencia = '' }) {
     const form = new FormData();
     form.append('selfie', selfie);

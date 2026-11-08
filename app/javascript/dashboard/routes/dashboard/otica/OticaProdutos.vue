@@ -370,6 +370,10 @@ const loadProva = async () => {
       pix_key: d.venda?.pix_key || '',
       payment_link: d.venda?.payment_link || '',
       default_discount_pct: d.venda?.default_discount_pct ?? '',
+      aviso_prova: d.venda?.aviso_prova || '',
+      aviso_parecidas: d.venda?.aviso_parecidas || '',
+      orientacao_foto: d.venda?.orientacao_foto || '',
+      selo_tom: d.venda?.selo_tom || 'branco',
     };
   } catch (e) {
     prova.value = null;
@@ -419,7 +423,43 @@ const runProva = async () => {
 const faceLabel = shape => prova.value?.face_shapes?.[shape] || shape || '—';
 
 // ── 💬 venda pelo WhatsApp (config) ──
-const venda = ref({ pix_key: '', payment_link: '', default_discount_pct: '' });
+const venda = ref({
+  pix_key: '',
+  payment_link: '',
+  default_discount_pct: '',
+  aviso_prova: '',
+  aviso_parecidas: '',
+  orientacao_foto: '',
+  selo_tom: 'branco',
+});
+// 🪞 08/11: marca nas fotos da prova + cartão-exemplo "como tirar as fotos"
+const brandBusy = ref('');
+const uploadBrandFile = async (kind, event) => {
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+  brandBusy.value = kind;
+  try {
+    const { data: r } = await CrmAPI.uploadOticaBrandFile(kind, file);
+    prova.value = { ...(prova.value || {}), [`${kind}_url`]: r[`${kind}_url`] };
+    useAlert(kind === 'logo' ? 'Marca salva: entra em todo cartão da prova.' : 'Cartão-exemplo salvo.');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui enviar a imagem.');
+  } finally {
+    brandBusy.value = '';
+    if (event?.target) event.target.value = '';
+  }
+};
+const removeBrandFile = async kind => {
+  brandBusy.value = kind;
+  try {
+    await CrmAPI.deleteOticaBrandFile(kind);
+    prova.value = { ...(prova.value || {}), [`${kind}_url`]: null };
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui remover.');
+  } finally {
+    brandBusy.value = '';
+  }
+};
 const savingVenda = ref(false);
 const saveVenda = async () => {
   savingVenda.value = true;
@@ -428,6 +468,10 @@ const saveVenda = async () => {
       pix_key: venda.value.pix_key || '',
       payment_link: venda.value.payment_link || '',
       default_discount_pct: venda.value.default_discount_pct || 0,
+      aviso_prova: venda.value.aviso_prova || '',
+      aviso_parecidas: venda.value.aviso_parecidas || '',
+      orientacao_foto: venda.value.orientacao_foto || '',
+      selo_tom: venda.value.selo_tom || 'branco',
     });
     venda.value = { ...venda.value, ...(r.venda || {}) };
     useAlert('Venda pelo WhatsApp salva.');
@@ -1405,6 +1449,104 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
                   class="text-right"
                 />
               </label>
+              <label class="block" style="grid-column: 1 / -1">
+                <span :class="LABEL">
+                  Balão que sai na hora em que a foto chega (antes das imagens)
+                </span>
+                <textarea
+                  v-model="venda.aviso_prova"
+                  rows="2"
+                  :class="INPUT"
+                  :placeholder="prova?.aviso_padrao || ''"
+                />
+              </label>
+              <label class="block" style="grid-column: 1 / -1">
+                <span :class="LABEL">
+                  Balão das "3 parecidas" (top de linha · custo-benefício ·
+                  mais acessível)
+                </span>
+                <textarea
+                  v-model="venda.aviso_parecidas"
+                  rows="2"
+                  :class="INPUT"
+                  :placeholder="prova?.aviso_parecidas_padrao || ''"
+                />
+              </label>
+              <label class="block" style="grid-column: 1 / -1">
+                <span :class="LABEL">
+                  Pedido das 2 fotos (sai junto com o cartão-exemplo)
+                </span>
+                <textarea
+                  v-model="venda.orientacao_foto"
+                  rows="3"
+                  :class="INPUT"
+                  :placeholder="prova?.orientacao_padrao || ''"
+                />
+              </label>
+            </div>
+            <label class="block mt-3" style="max-width: 22rem">
+              <span :class="LABEL">Selo da marca nas fotos da prova</span>
+              <select v-model="venda.selo_tom" :class="INPUT">
+                <option value="branco">Vidro branco · logo verde</option>
+                <option value="verde">Vidro verde · logo branco</option>
+              </select>
+            </label>
+            <!-- 🪞 marca nas fotos + cartão-exemplo -->
+            <div
+              class="grid gap-3 mt-3"
+              style="grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr))"
+            >
+              <div
+                v-for="kind in ['logo', 'exemplo']"
+                :key="kind"
+                class="flex items-center gap-3"
+              >
+                <div
+                  class="w-16 h-16 rounded-xl border border-n-slate-5 bg-white flex items-center justify-center overflow-hidden shrink-0"
+                >
+                  <img
+                    v-if="prova?.[`${kind}_url`]"
+                    :src="prova[`${kind}_url`]"
+                    class="max-w-full max-h-full object-contain"
+                    :alt="kind"
+                  />
+                  <span v-else class="text-[10px] text-n-slate-9">vazio</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs font-bold text-n-slate-12">
+                    {{
+                      kind === 'logo'
+                        ? 'Marca nas fotos (PNG com fundo transparente)'
+                        : 'Cartão-exemplo "como tirar as fotos"'
+                    }}
+                  </p>
+                  <p class="text-[11px] text-n-slate-10">
+                    {{
+                      kind === 'logo'
+                        ? 'entra pequena, num quadradinho branco, em todo cartão da prova virtual.'
+                        : 'a cliente recebe junto do pedido das 2 fotos (de frente e de 3/4).'
+                    }}
+                  </p>
+                  <div class="flex items-center gap-2 mt-1">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      class="text-[11px]"
+                      :disabled="brandBusy === kind"
+                      @change="uploadBrandFile(kind, $event)"
+                    />
+                    <button
+                      v-if="prova?.[`${kind}_url`]"
+                      type="button"
+                      class="text-[11px] text-n-ruby-11 underline"
+                      :disabled="brandBusy === kind"
+                      @click="removeBrandFile(kind)"
+                    >
+                      remover
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="flex items-center gap-3 mt-3">
               <span class="text-[11px] text-n-slate-10 flex-1">

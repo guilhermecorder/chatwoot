@@ -21,7 +21,12 @@
 # pelo WhatsApp): pix_key, payment_link, default_discount_pct.
 # Em SOMBRA nada é enviado, nada espera e nenhuma tarefa nasce: tudo `simulado`.
 class Otica::SalesTools
-  NAMES = %w[mostrar_lentes conferir_desconto registrar_fechamento status_do_pedido].freeze
+  NAMES = %w[pedir_fotos mostrar_lentes conferir_desconto registrar_fechamento status_do_pedido].freeze
+  # 🪞 08/11: o pedido das 2 fotos (de frente + 3/4) sai com o cartão-exemplo da loja (Produtos → Venda pelo WhatsApp)
+  DEFAULT_PHOTO_GUIDE = 'Pra ficar bem parecido, me manda duas fotos, como no exemplo: uma de frente, olhando pra câmera, e ' \
+                        'uma de 3/4 (rosto um pouquinho virado). Fica de frente pra uma janela, com a luz do dia no rosto, ' \
+                        'celular com o braço esticado na altura dos olhos, sem óculos e sem boné, só você na foto. Pode mandar ' \
+                        'uma de cada vez.'.freeze
   # as 3 de venda são dos atendentes de aquisição; o status do pedido é de todos (o pós-compra vive dele)
   SALES_KEYS = %w[atendente_agendamento atendente_pos atendente_visagista].freeze
   CONFIG_KEY = 'otica_venda'.freeze
@@ -37,19 +42,27 @@ class Otica::SalesTools
     (CrmSetting.find_by(account: account)&.ai_config&.dig(CONFIG_KEY) || {}).to_h
   end
 
-  def self.save_config!(account, attrs)
+  def self.save_config!(account, attrs) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     setting = CrmSetting.find_or_create_by!(account: account)
     cfg = (setting.ai_config || {}).dup
     current = (cfg[CONFIG_KEY] || {}).to_h
     current['pix_key'] = attrs['pix_key'].to_s.strip[0, 120] if attrs.key?('pix_key')
     current['payment_link'] = attrs['payment_link'].to_s.strip[0, 300] if attrs.key?('payment_link')
     current['default_discount_pct'] = attrs['default_discount_pct'].to_s.tr(',', '.').to_f.clamp(0, 90).round(2) if attrs.key?('default_discount_pct')
+    # 🪞 08/11: balões que saem ANTES das imagens da prova virtual (vazio = texto padrão)
+    current['aviso_prova'] = attrs['aviso_prova'].to_s.strip[0, 400] if attrs.key?('aviso_prova')
+    current['aviso_parecidas'] = attrs['aviso_parecidas'].to_s.strip[0, 400] if attrs.key?('aviso_parecidas')
+    current['orientacao_foto'] = attrs['orientacao_foto'].to_s.strip[0, 600] if attrs.key?('orientacao_foto')
+    if attrs.key?('selo_tom')
+      tone = attrs['selo_tom'].to_s
+      current['selo_tom'] = Otica::TryOnCard::TONES.key?(tone) ? tone : Otica::TryOnCard::DEFAULT_TONE
+    end
     cfg[CONFIG_KEY] = current
     setting.update!(ai_config: cfg)
     current
   end
 
-  def self.definitions(agent_key = nil) # rubocop:disable Metrics/MethodLength
+  def self.definitions(agent_key = nil)
     list = agent_key.nil? || SALES_KEYS.include?(agent_key.to_s) ? sales_definitions : []
     list + [status_definition]
   end
@@ -67,8 +80,17 @@ class Otica::SalesTools
     }
   end
 
-  def self.sales_definitions # rubocop:disable Metrics/MethodLength
+  def self.sales_definitions
     [
+      {
+        name: 'pedir_fotos',
+        description: 'PEDIDO DAS FOTOS PARA A PROVA VIRTUAL: envia à cliente, nesta conversa, o cartão-exemplo da loja ' \
+                     '("como tirar as fotos": uma de frente e uma de 3/4) junto com a orientação em palavras simples. Use UMA vez, ' \
+                     'no momento em que ela aceita ver armações no rosto dela (ou logo ao convidar). Depois do ok=true você não ' \
+                     'repete a orientação: só espera as fotos. Se chegar uma só, agradeça e peça a outra em 1 linha (uma vez); ' \
+                     'com as duas (ou se ela não mandar a segunda), chame experimentar_armacoes.',
+        input_schema: { type: 'object', properties: {}, additionalProperties: false }
+      },
       {
         name: 'mostrar_lentes',
         description: 'CONSULTORIA DE LENTES: devolve as lentes que a loja trabalha (nome, pra quem é, o que resolve, valor ' \
@@ -141,12 +163,47 @@ class Otica::SalesTools
   # devolve [outcome (tool_result), resumo (para a ação)]
   def call(name, args)
     case name
+    when 'pedir_fotos' then pedir_fotos
     when 'mostrar_lentes' then mostrar_lentes(args)
     when 'conferir_desconto' then conferir_desconto(args)
     when 'registrar_fechamento' then registrar_fechamento(args)
     when 'status_do_pedido' then status_do_pedido
     else [{ ok: false, motivo: "Ferramenta desconhecida: #{name}" }, 'desconhecida']
     end
+  end
+
+  # ── pedido das 2 fotos (cartão-exemplo + orientação) ──────────────────────
+  def pedir_fotos # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    cfg = self.class.config(@account)
+    text = cfg['orientacao_foto'].presence || DEFAULT_PHOTO_GUIDE
+    example = CrmSetting.find_by(account: @account)&.otica_photo_example
+    # já pediu hoje nesta conversa (o agente às vezes chama de novo no "topo!"): não repete, só espera
+    if @live && @conversation.messages.where(message_type: :outgoing).where('created_at > ?', Otica::TZ.now.beginning_of_day)
+                             .where("additional_attributes ? 'cevico_pedir_fotos'").exists?
+      return [{ ok: true, repetido: true, aviso: 'A orientação JÁ tinha sido enviada hoje: não repita nada, só espere as fotos.' }, 'já enviada hoje']
+    end
+
+    unless @live
+      return [{ ok: true, simulado: true, com_exemplo: example&.attached? == true,
+                aviso: 'SIMULAÇÃO: ao vivo a cliente receberia o cartão-exemplo com a orientação das 2 fotos. Agora só espere as fotos.' },
+              'simulado']
+    end
+
+    if example&.attached?
+      message = @conversation.messages.new(account_id: @account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing,
+                                           content: text, additional_attributes: { 'cevico_ia_agent' => @agent_key, 'cevico_pedir_fotos' => true })
+      message.attachments.build(account_id: @account.id, file_type: :image,
+                                file: { io: StringIO.new(example.blob.open(&:read)), filename: 'como-tirar-as-fotos.jpg',
+                                        content_type: example.content_type.presence || 'image/jpeg' })
+      message.save!
+    else
+      @conversation.messages.create!(account_id: @account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing, content: text,
+                                     additional_attributes: { 'cevico_ia_agent' => @agent_key, 'cevico_pedir_fotos' => true })
+    end
+    [{ ok: true, com_exemplo: example&.attached? == true,
+       aviso: 'A orientação JÁ FOI ENVIADA à cliente (com o cartão-exemplo, se a loja tem um). Não repita a orientação: escreva no ' \
+              'máximo 1 linha ou nada, e espere as fotos.' },
+     "orientação enviada#{' + cartão-exemplo' if example&.attached?}"]
   end
 
   # ── consultoria de lentes ─────────────────────────────────────────────────

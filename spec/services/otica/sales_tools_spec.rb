@@ -25,6 +25,38 @@ RSpec.describe Otica::SalesTools do
     described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: live)
   end
 
+  describe 'pedir_fotos' do
+    it 'em sombra só simula; ao vivo manda a orientação (texto padrão ou da loja) com o cartão-exemplo quando ele existe', :aggregate_failures do
+      out, = tools(live: false).call('pedir_fotos', {})
+      expect(out).to include(ok: true, simulado: true, com_exemplo: false)
+      expect(conversation.messages.outgoing.count).to eq(0)
+
+      out, resumo = tools(live: true).call('pedir_fotos', {})
+      expect(out).to include(ok: true, com_exemplo: false)
+      expect(resumo).to eq('orientação enviada')
+      expect(conversation.messages.outgoing.last.content).to eq(described_class::DEFAULT_PHOTO_GUIDE)
+      expect(conversation.messages.outgoing.last.attachments).to be_empty
+
+      # chamou de novo no mesmo dia ("topo!"): não repete o envio
+      out, resumo = tools(live: true).call('pedir_fotos', {})
+      expect(out).to include(ok: true, repetido: true)
+      expect(resumo).to eq('já enviada hoje')
+      expect(conversation.messages.outgoing.count).to eq(1)
+
+      # outra conversa, com texto da loja e cartão-exemplo cadastrados
+      described_class.save_config!(account, 'orientacao_foto' => 'Manda duas fotos, assim como no exemplo!')
+      CrmSetting.find_by(account: account).otica_photo_example.attach(io: File.open(Rails.root.join('spec/assets/sample.png')), filename: 'exemplo.png', content_type: 'image/png')
+      outra = create(:conversation, account: account, inbox: inbox, contact: contact)
+      out, resumo = described_class.new(conversation: outra, agent_key: 'atendente_visagista', live: true).call('pedir_fotos', {})
+      expect(out).to include(ok: true, com_exemplo: true)
+      expect(resumo).to include('cartão-exemplo')
+      last = outra.messages.outgoing.last
+      expect(last.content).to eq('Manda duas fotos, assim como no exemplo!')
+      expect(last.attachments.one? && last.attachments.first.file_type == 'image').to be(true)
+      expect(last.additional_attributes).to include('cevico_pedir_fotos' => true)
+    end
+  end
+
   describe 'mostrar_lentes' do
     it 'em sombra lista (rotina puxa a multifocal) sem enviar; ao vivo envia a imagem da lente que tem foto', :aggregate_failures do
       out, resumo = tools(live: false).call('mostrar_lentes', { 'rotina' => 'perto e longe', 'quantidade' => 3 })

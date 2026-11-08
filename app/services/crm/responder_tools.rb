@@ -116,14 +116,19 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
                    'rosto marcada como "serve para a prova virtual" e disse (ou aceitou) que quer ver armações nela. ' \
                    'Devolve ok=true com as armações enviadas (as fotos já chegaram a ela: só comente), ou ok=false com o ' \
                    'motivo (foto não serve, limite do dia, sem armação pronta): aí peça outra foto ou convide para a loja. ' \
-                   'Limite: até 3 armações por vez e 2 vezes por dia por cliente.',
+                   'O sistema avisa a cliente sozinho ("recebi sua foto, já estou montando") antes das imagens, e cada legenda ' \
+                   'já traz o motivo da escolha. Com parecida_com (id da armação que ela gostou) manda 3 do mesmo estilo em ' \
+                   'faixas de valor (top de linha, custo-benefício, mais acessível), com o valor da armação na legenda. ' \
+                   "Limite: até #{Otica::VirtualTryOn::MAX_PER_CALL} por vez e #{Otica::VirtualTryOn::MAX_IMAGES_PER_DAY} imagens por dia por cliente.",
       input_schema: {
         type: 'object',
         properties: {
           quantidade: { type: 'integer', minimum: 1, maximum: Otica::VirtualTryOn::MAX_PER_CALL,
-                        description: 'Quantas armações mostrar (padrão 2; 3 só se a cliente pedir várias)' },
+                        description: 'Quantas armações mostrar (padrão 2; 3 nas parecidas ou se a cliente pedir várias)' },
           preferencia: { type: 'string', description: 'O que a cliente disse que gosta, em poucas palavras: cor, material, ' \
-                                                      'estilo ("preta e fininha", "dourada", "grande"). Vazio se não disse.' }
+                                                      'estilo ("preta e fininha", "dourada", "grande"). Vazio se não disse.' },
+          parecida_com: { type: 'integer', description: 'id da armação que a cliente gostou (do resultado anterior) para ver ' \
+                                                        '3 parecidas em faixas de valor. Só depois de ela escolher uma.' }
         },
         additionalProperties: false
       }
@@ -483,7 +488,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     return refuse(OTICA_TOOL_NAME, 'A prova virtual não está disponível neste atendimento.') unless otica_tool?
 
     outcome = Otica::VirtualTryOn.new(account: @account, conversation: @conversation, live: @live || @otica_live, agent_key: @agent_key)
-                                 .run(quantidade: args['quantidade'].presence || 2, preferencia: args['preferencia'])
+                                 .run(quantidade: args['quantidade'].presence || (args['parecida_com'].present? ? 3 : 2),
+                                      preferencia: args['preferencia'], parecida_com: args['parecida_com'].presence)
     resumo = if outcome[:ok]
                names = Array(outcome[:armacoes]).map { |a| a[:armacao] }.join(', ')
                outcome[:simulado] ? "simulado (rosto #{outcome[:rosto_label]}): #{names}" : "#{outcome[:enviadas]} foto(s) enviada(s): #{names}"

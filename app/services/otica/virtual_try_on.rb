@@ -10,16 +10,28 @@
 #
 # Travas (todas aqui, nunca no modelo):
 # - só ramo ÓTICA, só conversa com foto utilizável (1 pessoa adulta, de frente, nítida);
-# - no máximo MAX_PER_CALL armações por chamada e MAX_CALLS_PER_DAY chamadas
-#   por conversa por dia (a cliente pode pedir "outra" uma vez; depois é na loja);
+# - no máximo MAX_PER_CALL armações por chamada e MAX_IMAGES_PER_DAY imagens
+#   por CLIENTE por dia (todas as conversas dela); depois é na loja;
+# - 08/11 (Guilherme): a cliente recebe um AVISO na hora ("recebi sua foto, já
+#   estou aplicando o visagismo…") antes das imagens; cada legenda traz o MOTIVO
+#   curto; `parecida_com` manda 3 do mesmo estilo em 3 faixas (top de linha /
+#   custo-benefício / mais acessível) com o valor da armação; se houver foto de
+#   3/4 na conversa, a geração usa ela (o óculos aparece melhor) e o formato do
+#   rosto vem da foto de frente;
 # - teto de imagens por dia na conta (ai_config['visagismo_daily_cap'], padrão 150)
 #   para o gasto nunca fugir;
 # - em SOMBRA/simulador nada é gerado nem enviado: devolve `simulado` com a escolha;
 # - a foto da cliente só vai ao Gemini para gerar a imagem (não é guardada em
 #   lugar nenhum além da própria conversa, como qualquer anexo do WhatsApp).
-class Otica::VirtualTryOn
+class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   MAX_PER_CALL = 3
-  MAX_CALLS_PER_DAY = 2
+  MAX_IMAGES_PER_DAY = 12
+  AVISO_KEY = 'cevico_visagismo_aviso'.freeze
+  DEFAULT_AVISO = 'Recebi sua foto! Já estou aplicando as técnicas de visagismo no seu rosto pra escolher as armações ' \
+                  'que mais combinam com você. Em alguns segundos te mando as opções.'.freeze
+  DEFAULT_AVISO_PARECIDAS = 'Boa escolha! Vou separar mais 3 nesse mesmo estilo: uma top de linha, uma de melhor ' \
+                            'custo-benefício e uma mais acessível. Só um instante.'.freeze
+  TIERS = { 'top' => 'Top de linha', 'custo_beneficio' => 'Melhor custo-benefício', 'acessivel' => 'Mais acessível' }.freeze
   DEFAULT_DAILY_CAP = 150
   CAP_KEY = 'visagismo_daily_cap'.freeze
   STAMP_KEY = 'cevico_visagismo'.freeze
@@ -57,15 +69,37 @@ class Otica::VirtualTryOn
   end
 
   # ── a foto da cliente nesta conversa ──────────────────────────────────────
-  # a selfie mais recente já lida (tipo selfie + bloco rosto)
-  def selfie_attachment
-    return nil if @conversation.nil?
+  # selfies já lidas (tipo selfie + bloco rosto), a mais recente primeiro
+  def selfies # rubocop:disable Metrics/CyclomaticComplexity
+    return [] if @conversation.nil?
 
     messages = @conversation.messages.where(message_type: :incoming).includes(:attachments)
                             .reorder(created_at: :desc).limit(LOOKBACK_MESSAGES)
     messages.flat_map { |m| m.attachments.select { |a| a.file_type.to_s == 'image' && a.file.attached? } }
             .sort_by(&:created_at).reverse
-            .find { |a| media(a)['tipo'] == 'selfie' && media(a)['rosto'].is_a?(Hash) }
+            .select { |a| media(a)['tipo'] == 'selfie' && media(a)['rosto'].is_a?(Hash) }
+  end
+
+  # a selfie mais recente (compatibilidade com a tela e os testes)
+  def selfie_attachment
+    selfies.first
+  end
+
+  # [foto para a geração, rosto para escolher]: entre as selfies utilizáveis, a
+  # geração prefere a de 3/4 mais recente (o óculos aparece melhor); o formato do
+  # rosto vem da de frente mais recente (lê melhor). Sem foto utilizável: [última, rosto dela].
+  def pick_selfie
+    all = selfies
+    return [nil, nil, {}] if all.empty?
+
+    usable = all.select { |a| Otica::FaceReading.usable(media(a)['rosto']).first }
+    return [all.first, media(all.first)['rosto'], {}] if usable.empty?
+
+    # 🪞 08/11: a de FRENTE lê o formato (1ª do cartão); a de 3/4 é a 2ª do cartão (o óculos aparece melhor)
+    front = usable.find { |a| media(a)['rosto']['angulo'] != 'tres_quartos' }
+    three = usable.find { |a| media(a)['rosto']['angulo'] == 'tres_quartos' }
+    main = front || three
+    [main, media(main)['rosto'], { 'frente' => front, 'tres_quartos' => three }.compact]
   end
 
   def media(attachment)
@@ -73,53 +107,83 @@ class Otica::VirtualTryOn
   end
 
   # ── chamada do agente ─────────────────────────────────────────────────────
-  # devolve o Hash que vai ao modelo como tool_result
-  def run(quantidade: 2, preferencia: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  # devolve o Hash que vai ao modelo como tool_result.
+  # parecida_com: id da armação que a cliente gostou → 3 do mesmo estilo em faixas de valor
+  def run(quantidade: 2, preferencia: nil, parecida_com: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     return refuse('A prova virtual só existe no ramo ótica.') unless self.class.otica?(account)
 
-    attachment = selfie_attachment
+    attachment, rosto, angles = pick_selfie
     return refuse('Ainda não há foto do rosto da cliente nesta conversa. Peça uma foto de frente, com boa luz, só ela na foto.') if attachment.nil?
 
-    rosto = media(attachment)['rosto']
     ok, motivo = Otica::FaceReading.usable(rosto)
     return refuse("A foto recebida não serve para a prova virtual: #{motivo}.") unless ok
 
-    quantidade = quantidade.to_i.clamp(1, MAX_PER_CALL)
     products = self.class.candidates(account)
     return refuse('Nenhuma armação do estoque está pronta para a prova virtual (precisa de foto e saldo). Convide para a loja.') if products.empty?
 
-    chosen = Otica::Visagismo.recommend(products, face_shape: rosto['formato'], preference: preferencia, limit: quantidade)
+    already = sent_product_ids
+    tiers = {}
+    if parecida_com.present?
+      ref = products.find { |p| p.id == parecida_com.to_i } || Otica::Product.find_by(account_id: account.id, id: parecida_com.to_i)
+      return refuse('Não achei essa armação. Use o id devolvido na prova anterior.') if ref.nil?
+
+      quantidade = (quantidade.presence || 3).to_i.clamp(1, MAX_PER_CALL)
+      others = products.select { |p| p.id != ref.id && p.kind == ref.kind && already.exclude?(p.id) }
+      pool = others.select { |p| p.frame_shape.to_s == ref.frame_shape.to_s }
+      pool = others if pool.empty?
+      if pool.empty?
+        return refuse("Não há outras armações prontas parecidas com \"#{ref.name}\". Diga que essa é a escolha certa e siga para as lentes.")
+      end
+
+      chosen, tiers = pick_tiers(pool, quantidade)
+    else
+      quantidade = (quantidade.presence || 2).to_i.clamp(1, MAX_PER_CALL)
+      pool = products.reject { |p| already.include?(p.id) }
+      pool = products if pool.empty?
+      chosen = Otica::Visagismo.recommend(pool, face_shape: rosto['formato'], preference: preferencia, limit: quantidade)
+    end
+
     base = { rosto: rosto['formato'], rosto_label: Otica::Visagismo.face_label(rosto['formato']),
-             visagismo: Otica::Visagismo.explain(rosto['formato']) }
+             fotos: angles.keys.map { |k| k == 'tres_quartos' ? 'de 3/4' : 'de frente' },
+             visagismo: Otica::Visagismo.explain(rosto['formato']), parecidas: parecida_com.present? }
 
     unless @live
       return base.merge(ok: true, simulado: true,
                         aviso: 'SIMULAÇÃO (sombra/teste): nenhuma imagem foi gerada nem enviada. Ao vivo, estas armações ' \
                                'seriam enviadas como fotos da cliente usando cada uma. Comente como se as fotos tivessem chegado.',
-                        armacoes: chosen.map { |p| describe(p) })
+                        armacoes: chosen.map { |p| describe(p, rosto, tiers[p.id]) })
     end
 
-    calls = calls_today
-    return refuse("A cliente já recebeu #{calls} prova(s) virtual(is) hoje (limite #{MAX_CALLS_PER_DAY}). Convide para ver o resto na loja.") if calls >= MAX_CALLS_PER_DAY
+    today = images_today
+    if today >= MAX_IMAGES_PER_DAY
+      return refuse("A cliente já recebeu #{today} imagens da prova virtual hoje (limite #{MAX_IMAGES_PER_DAY}). " \
+                    'Diga que o resto fica para ver na loja e convide.')
+    end
 
     cap = self.class.daily_cap(account)
     used = self.class.generated_today(account)
     return refuse('O limite diário de imagens da loja foi atingido. Convide para ver as armações na loja.') if used >= cap
 
-    chosen = chosen.first([cap - used, quantidade].min)
+    chosen = chosen.first([cap - used, MAX_IMAGES_PER_DAY - today, quantidade].min)
     return refuse('Configure a chave do Gemini em Integrações → IA.') unless Otica::TryOnImage.configured?(account)
 
-    selfie_bytes = attachment.file.blob.open(&:read)
-    selfie_mime = mime_of(attachment.file, 'image/jpeg')
+    send_aviso!(parecida_com.present?)
+    selfies_bytes = angles.values.map { |a| [a.file.blob.open(&:read), mime_of(a.file, 'image/jpeg')] }
+    logo = brand_logo
     sent = []
     failures = []
     chosen.each_with_index do |product, index|
-      image = Otica::TryOnImage.new(account).generate(selfie: selfie_bytes, selfie_mime: selfie_mime,
-                                                     frame: product.photo.blob.open(&:read), frame_mime: mime_of(product.photo, 'image/png'),
-                                                     product: product)
-      send_image!(product, image, index + 1, chosen.size, attachment)
-      sent << describe(product)
-    rescue Otica::TryOnImage::Error, ActiveStorage::FileNotFoundError => e
+      # 🪞 08/11: uma imagem por ângulo (de frente e de 3/4) → UM cartão com as duas e a marca da loja
+      frame = product.photo.blob.open(&:read)
+      generated = selfies_bytes.map do |bytes, mime|
+        Otica::TryOnImage.new(account).generate(selfie: bytes, selfie_mime: mime, frame: frame,
+                                                frame_mime: mime_of(product.photo, 'image/png'), product: product)
+      end
+      card = Otica::TryOnCard.compose(images: generated, logo: logo, tom: brand_tone)
+      send_image!(product, card.merge(model: generated.first[:model]), index + 1, chosen.size, attachment,
+                  caption: caption_for(product, index + 1, chosen.size, rosto, tiers[product.id]))
+      sent << describe(product, rosto, tiers[product.id]).merge(opcao: index + 1)
+    rescue Otica::TryOnImage::Error, ActiveStorage::FileNotFoundError, MiniMagick::Error => e
       Rails.logger.warn("[Otica::VirtualTryOn] armação #{product.id} falhou: #{e.class}: #{e.message}")
       failures << product.name
     end
@@ -129,10 +193,17 @@ class Otica::VirtualTryOn
                     'na loja; não prometa a foto.')
     end
 
-    base.merge(ok: true, enviadas: sent.size, armacoes: sent, falhas: failures,
-               aviso: 'As fotos JÁ FORAM ENVIADAS à cliente nesta conversa (uma por armação, com legenda). Agora comente em 1 ou 2 ' \
-                      'balões: diga por que essas armações combinam com o rosto dela (sem termo técnico), lembre que é uma simulação por ' \
-                      'computador e convide para experimentar na loja. Não repita os nomes das armações (já estão nas legendas).')
+    pergunta = if parecida_com.present?
+                 'Dessas, qual você prefere?'
+               elsif sent.size > 1
+                 'Qual dessas você gostou mais?'
+               else
+                 'O que achou? Quer ver mais alguma nesse estilo?'
+               end
+    base.merge(ok: true, enviadas: sent.size, armacoes: sent, falhas: failures, imagens_hoje: today + sent.size,
+               aviso: 'As fotos JÁ FORAM ENVIADAS à cliente nesta conversa (uma por armação, com legenda e o motivo). Agora escreva ' \
+                      "1 balão curto, sem repetir os nomes nem os motivos (já estão nas legendas), e FECHE com a pergunta: \"#{pergunta}\" " \
+                      '(lembre em meia frase que é uma simulação por computador).')
   end
 
   # ── teste pela tela de Produtos (equipe) ─────────────────────────────────
@@ -154,12 +225,14 @@ class Otica::VirtualTryOn
     return result if !ok && product_ids.blank?
     return result.merge(motivo: 'Nenhuma armação pronta para a prova virtual (precisa de foto, saldo e a marca "prova virtual").') if chosen.empty?
 
+    logo = brand_logo
     chosen.each do |product|
       image = Otica::TryOnImage.new(account).generate(selfie: selfie, selfie_mime: selfie_mime,
                                                      frame: product.photo.blob.open(&:read), frame_mime: mime_of(product.photo, 'image/png'),
                                                      product: product)
+      card = Otica::TryOnCard.compose(images: [image], logo: logo, tom: brand_tone)
       result[:imagens] << { produto: describe(product), product_id: product.id, model: image[:model],
-                            data_url: "data:#{image[:mime]};base64,#{Base64.strict_encode64(image[:bytes])}" }
+                            data_url: "data:#{card[:mime]};base64,#{Base64.strict_encode64(card[:bytes])}" }
     rescue Otica::TryOnImage::Error => e
       result[:imagens] << { produto: describe(product), product_id: product.id, erro: e.message.truncate(200) }
     end
@@ -186,9 +259,83 @@ class Otica::VirtualTryOn
     nil
   end
 
-  def describe(product)
+  def describe(product, rosto = nil, tier = nil)
     { id: product.id, armacao: product.name, formato: Otica::Visagismo.frame_label(product.frame_shape),
-      cor: product.color, valor: product.price, observacao: product.visagismo_notes.presence }.compact
+      cor: product.color, valor: product.price, faixa: (tier ? TIERS[tier] : nil),
+      motivo: (rosto ? Otica::Visagismo.reason(rosto['formato'], product.frame_shape) : nil),
+      observacao: product.visagismo_notes.presence }.compact
+  end
+
+  # tom do selo de vidro (branco = logo verde; verde = logo branco), escolhido em Produtos → Venda pelo WhatsApp
+  def brand_tone
+    Otica::SalesTools.config(account)['selo_tom'].presence || Otica::TryOnCard::DEFAULT_TONE
+  end
+
+  # a marca da loja (PNG transparente em Produtos → Venda pelo WhatsApp); nil = cartão sem marca
+  def brand_logo
+    logo = CrmSetting.find_by(account: account)&.otica_logo
+    logo&.attached? ? logo.blob.open(&:read) : nil
+  rescue StandardError
+    nil
+  end
+
+  # 3 faixas de valor: a mais cara (top de linha), a do meio (custo-benefício) e a mais barata (acessível)
+  def pick_tiers(pool, quantidade)
+    sorted = pool.sort_by { |p| [-p.price, p.id] }
+    picks = { 'top' => sorted.first, 'acessivel' => sorted.last, 'custo_beneficio' => sorted[sorted.size / 2] }
+    chosen = []
+    tiers = {}
+    %w[top custo_beneficio acessivel].each do |tier|
+      p = picks[tier]
+      next if p.nil? || chosen.include?(p) || chosen.size >= quantidade
+
+      chosen << p
+      tiers[p.id] = tier
+    end
+    [chosen, tiers]
+  end
+
+  # legenda da foto: "Opção 1 de 2 · HB Switch (retangular): no seu rosto oval, a retangular dá definição…"
+  # nas faixas: "Top de linha · R$ 450 · HB Switch (retangular): …"
+  def caption_for(product, index, total, rosto, tier)
+    head = tier ? "#{TIERS[tier]} · #{money(product.price)}" : "Opção #{index} de #{total}"
+    shape = product.frame_shape.present? ? " (#{Otica::Visagismo.frame_label(product.frame_shape)})" : ''
+    "#{head} · #{product.name}#{shape}: #{Otica::Visagismo.reason(rosto['formato'], product.frame_shape)}.".truncate(600)
+  end
+
+  # "R$ 450" ou "R$ 450,50"
+  def money(value)
+    v = value.to_f
+    v == v.to_i ? "R$ #{v.to_i}" : "R$ #{format('%.2f', v).tr('.', ',')}"
+  end
+
+  # imagens que ESTA CLIENTE já recebeu hoje (todas as conversas dela), pelo carimbo das mensagens
+  def images_today
+    scope = Message.where(account_id: account.id, message_type: :outgoing).where('created_at > ?', Otica::TZ.now.beginning_of_day)
+                   .where("additional_attributes ? '#{STAMP_KEY}'")
+    contact_id = @conversation.contact_id
+    scope = if contact_id
+              scope.where(conversation_id: Conversation.where(account_id: account.id, contact_id: contact_id).select(:id))
+            else
+              scope.where(conversation_id: @conversation.id)
+            end
+    scope.count
+  end
+
+  # armações já mostradas nesta conversa hoje (para "outra" trazer novas)
+  def sent_product_ids
+    @conversation.messages.where(message_type: :outgoing).where('created_at > ?', Otica::TZ.now.beginning_of_day)
+                 .where("additional_attributes ? '#{STAMP_KEY}'")
+                 .pluck(Arel.sql("additional_attributes -> '#{STAMP_KEY}' ->> 'product_id'")).map(&:to_i)
+  end
+
+  # o balão de "recebi sua foto, já estou montando" sai ANTES das imagens (texto editável em Produtos → Venda pelo WhatsApp)
+  def send_aviso!(parecidas)
+    cfg = Otica::SalesTools.config(account)
+    text = parecidas ? cfg['aviso_parecidas'].presence || DEFAULT_AVISO_PARECIDAS : cfg['aviso_prova'].presence || DEFAULT_AVISO
+    @conversation.messages.create!(account_id: account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing, content: text,
+                                   additional_attributes: { 'cevico_ia_agent' => @agent_key.presence || Otica::TryOnImage::AGENT_KEY,
+                                                            AVISO_KEY => true })
   end
 
   def mime_of(attached, fallback)
@@ -196,17 +343,10 @@ class Otica::VirtualTryOn
     type.present? && type != 'application/octet-stream' ? type : fallback
   end
 
-  # quantas chamadas da prova virtual esta conversa já teve hoje (pelo carimbo das mensagens enviadas)
-  def calls_today
-    @conversation.messages.where(message_type: :outgoing).where('created_at > ?', Otica::TZ.now.beginning_of_day)
-                 .where("additional_attributes ? '#{STAMP_KEY}'")
-                 .pluck(Arel.sql("additional_attributes -> '#{STAMP_KEY}' ->> 'lote'")).uniq.size
-  end
-
   # a foto gerada vira mensagem da loja na conversa (sai pelo WhatsApp como imagem com legenda)
-  def send_image!(product, image, index, total, selfie_attachment)
+  def send_image!(product, image, index, total, selfie_attachment, caption: nil) # rubocop:disable Metrics/ParameterLists
     ext = image[:mime].to_s.include?('jpeg') ? 'jpg' : 'png'
-    caption = "Opção #{index} de #{total}: #{product.name}"
+    caption ||= "Opção #{index} de #{total}: #{product.name}"
     # ⚠️ 08/11: o anexo entra ANTES do save. Se a mensagem nasce sem anexo, o Message dispara o
     # SendReplyJob na hora e o WhatsApp recebe só a legenda em texto (foi o que chegou pro Henrique).
     message = @conversation.messages.new(

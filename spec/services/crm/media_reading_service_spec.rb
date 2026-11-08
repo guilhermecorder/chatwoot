@@ -260,8 +260,8 @@ RSpec.describe Crm::MediaReadingService do
       image.reload
       media = image.meta['cevico_media']
       expect(media).to include('status' => 'done', 'tipo' => 'selfie')
-      expect(media['rosto']).to eq('pessoas' => 1, 'frontal' => true, 'formato' => 'coracao', 'usa_oculos' => false, 'adulto' => true,
-                                   'qualidade' => 'ok', 'observacao' => 'testa larga e queixo fino')
+      expect(media['rosto']).to eq('pessoas' => 1, 'frontal' => true, 'angulo' => 'frente', 'formato' => 'coracao', 'usa_oculos' => false,
+                                   'adulto' => true, 'qualidade' => 'ok', 'observacao' => 'testa larga e queixo fino')
       expect(image.meta['transcribed_text']).to include('Rosto: rosto coração, de frente')
       label = described_class.transcript_label(image)
       expect(label).to include('[foto do rosto (rosto coração, de frente): Mulher sorrindo, de frente')

@@ -340,6 +340,10 @@ namespace :crm do
     # 🪞 prova virtual (08/11): status + prévia pela tela de Produtos (equipe testa sem WhatsApp)
     resource :visagismo, only: [:show, :update], controller: 'visagismo' do
       post :preview
+      post :logo
+      delete :logo, action: :delete_logo
+      post :exemplo
+      delete :exemplo, action: :delete_exemplo
     end
     resources :suppliers, only: [:index, :create, :update, :destroy]
     resources :orders, only: [:index, :show, :create, :update, :destroy] do

@@ -73,6 +73,8 @@ class Otica::TryOnImage
   end
 
   # selfie/frame: bytes; devolve { bytes:, mime:, model: } ou levanta Otica::TryOnImage::Error
+  ASPECT = '3:4'.freeze # retrato: cabe no cartão (frente + 3/4 lado a lado) sem cortar a cabeça
+
   def generate(selfie:, selfie_mime:, frame:, frame_mime:, product:) # rubocop:disable Metrics/AbcSize
     raise Error, 'Configure a chave do Gemini em Integrações → IA.' if @api_key.blank?
     raise Error, 'Foto grande demais (até 8 MB).' if selfie.bytesize > MAX_INPUT_BYTES || frame.bytesize > MAX_INPUT_BYTES
@@ -120,7 +122,7 @@ class Otica::TryOnImage
         { type: 'image', mime_type: frame_mime, data: Base64.strict_encode64(frame) },
         { type: 'text', text: prompt }
       ],
-      response_format: { type: 'image', aspect_ratio: '1:1' }
+      response_format: { type: 'image', aspect_ratio: ASPECT }
     }
     response = HTTParty.post(INTERACTIONS_URL, headers: { 'Content-Type' => 'application/json', 'x-goog-api-key' => @api_key },
                                                body: body.to_json, timeout: TIMEOUT)

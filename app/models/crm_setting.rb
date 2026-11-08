@@ -27,6 +27,11 @@
 #  fk_rails_...  (account_id => accounts.id)
 #
 class CrmSetting < ApplicationRecord
+  # 🪞 08/11: marca da loja (PNG transparente) que entra em todo cartão da prova virtual, e o
+  # cartão-exemplo "como tirar as fotos" que a cliente recebe junto da orientação (ramo ótica)
+  has_one_attached :otica_logo
+  has_one_attached :otica_photo_example
+
   belongs_to :account
 
   def n8n_configured?

@@ -23,6 +23,7 @@ module Otica::FaceReading
     4) "rosto": SÓ quando tipo = selfie (senão null), um objeto:
        {"pessoas": número de pessoas na foto,
         "frontal": true se o rosto principal está de frente ou quase (até 3/4),
+        "angulo": "frente" (olhando para a câmera) | "tres_quartos" (rosto virado um pouco, os dois olhos aparecem) | "lado" (perfil),
         "formato": formato do rosto principal, UMA palavra: oval | redondo | quadrado | coracao | alongado | diamante | triangular,
         "usa_oculos": true se a pessoa já está de óculos na foto,
         "adulto": true se a pessoa principal aparenta ser adulta,
@@ -41,12 +42,24 @@ module Otica::FaceReading
     {
       'pessoas' => raw['pessoas'].to_i,
       'frontal' => raw['frontal'] == true,
+      'angulo' => angle_of(raw),
       'formato' => (Otica::Visagismo::FACE_SHAPES.key?(formato) ? formato : 'oval'),
       'usa_oculos' => raw['usa_oculos'] == true,
       'adulto' => raw['adulto'] != false,
       'qualidade' => (QUALIDADES.include?(raw['qualidade'].to_s) ? raw['qualidade'].to_s : 'ok'),
       'observacao' => raw['observacao'].to_s.strip.truncate(160)
     }
+  end
+
+  ANGULOS = %w[frente tres_quartos lado].freeze
+
+  # 🪞 08/11: de frente lê melhor o formato; a 3/4 mostra melhor o óculos (a geração prefere ela)
+  def angle_of(raw)
+    a = raw['angulo'].to_s.strip.downcase.tr('/ ', '__')
+    a = 'tres_quartos' if %w[3_4 3__4 tres_quartos três_quartos].include?(a)
+    return a if ANGULOS.include?(a)
+
+    raw['frontal'] == true ? 'frente' : 'lado'
   end
 
   # a foto serve para a prova virtual? devolve [true, nil] ou [false, motivo
@@ -56,7 +69,7 @@ module Otica::FaceReading
     return [false, 'a foto está escura, borrada ou o rosto está muito pequeno; peça outra, de frente e com luz'] if rosto['qualidade'] == 'ruim'
     return [false, 'a foto tem mais de uma pessoa; peça uma foto só da cliente'] if rosto['pessoas'].to_i > 1
     return [false, 'a foto não mostra um rosto'] if rosto['pessoas'].to_i < 1
-    return [false, 'o rosto não está de frente; peça uma foto olhando para a câmera'] unless rosto['frontal']
+    return [false, 'o rosto não está de frente; peça uma foto olhando para a câmera'] if !rosto['frontal'] || rosto['angulo'] == 'lado'
     return [false, 'a pessoa da foto parece menor de idade; a prova virtual é só para adultos'] unless rosto['adulto']
 
     [true, nil]
@@ -68,7 +81,7 @@ module Otica::FaceReading
 
     parts = ["rosto #{Otica::Visagismo.face_label(rosto['formato'])}"]
     parts << "#{rosto['pessoas']} pessoa(s)" if rosto['pessoas'].to_i != 1
-    parts << (rosto['frontal'] ? 'de frente' : 'de lado')
+    parts << { 'frente' => 'de frente', 'tres_quartos' => 'de 3/4' }.fetch(rosto['angulo'].to_s, rosto['frontal'] ? 'de frente' : 'de lado')
     parts << 'já de óculos' if rosto['usa_oculos']
     parts << 'foto ruim' if rosto['qualidade'] == 'ruim'
     parts << 'parece menor de idade' unless rosto['adulto']
