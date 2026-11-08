@@ -623,7 +623,7 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
     out = [
       { titulo: 'Caixa por onde chegou',
         rows: rows_by(tasks) { |t| t.contact_id ? origem[t.contact_id]&.dig(:name) || 'sem conversa' : 'sem cadastro' } },
-      { titulo: 'Unidade', rows: rows_by(tasks, vazio: 'sem unidade') { |t| Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit } },
+      { titulo: 'Unidade', rows: rows_by(tasks, vazio: 'sem unidade') { |t| Crm::AgendaSlots.unit_label(account, t.unit) } },
       { titulo: 'Médico', rows: rows_by(tasks, vazio: 'sem médico') { |t| Crm::DoctorNames.canonical(t.doctor) || t.doctor } },
       { titulo: tipo == :modalidade ? 'Tipo' : 'Procedimento', rows: rows_by(tasks, vazio: 'sem tipo') { |t| tipo_de.call(t) } }
     ]

@@ -19,7 +19,7 @@ import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, TYPE_BY_KEY, RESERVABLE, AI_MODALITY,
+  DOCTORS as CLINIC_DOCTORS, RESERVABLE, AI_MODALITY, companyHasUnits, companyWord, typesFor, typeByKeyFor,
   resolveAllWindows, resolveClosedDoctors, resolveBlocked, resolveBlockedDays, resolveOpenDays, resolveOpenWindows,
   reservedFor, windowAccepts, windowAt, sameBlock, dateKey, patientNameOf, hexToRgbSpaced,
   PRICE_TYPE_LABELS, priceLabel,
@@ -27,11 +27,39 @@ import {
 
 const props = defineProps({
   units: { type: Object, required: true }, // { tatuape: { label, color }, … }
+  doctors: { type: Array, default: () => CLINIC_DOCTORS }, // ☀️ 08/11: quem atende (Fernando na LIFE)
   initialTab: { type: String, default: 'abrir' },
 });
 const emit = defineEmits(['close', 'reschedule', 'openExamWindows', 'openSurgeryWindows']);
 
 const store = useStore();
+// ☀️ 08/11 (porte da ótica): empresa que não é clínica fala em "empresa" e "quem
+// atende", e mostra só os tipos dela (LIFE: Visita técnica + Fechamento)
+const company = computed(() => store.getters['crm/getCompany']);
+const isOwnAgenda = computed(() => companyHasUnits(company.value));
+const placeWord = computed(() => companyWord(company.value));
+const whoTitle = computed(() =>
+  isOwnAgenda.value ? 'Quem atende' : 'Médicos'
+);
+const whoLabel = computed(() => (isOwnAgenda.value ? 'Quem atende' : 'Médico'));
+const oneWho = computed(() => (isOwnAgenda.value ? 'uma pessoa' : 'um médico'));
+const DOCTORS = computed(() =>
+  props.doctors?.length ? props.doctors : CLINIC_DOCTORS
+);
+const TYPE_BY_KEY = computed(() => typeByKeyFor(company.value));
+const shownTypeKeys = computed(
+  () => new Set(typesFor(company.value).map(t => t.key))
+);
+const reservableKeys = computed(() =>
+  RESERVABLE.filter(key => shownTypeKeys.value.has(key))
+);
+const priceTypeLabels = computed(() =>
+  Object.fromEntries(
+    Object.entries(PRICE_TYPE_LABELS)
+      .filter(([key]) => shownTypeKeys.value.has(key))
+      .map(([key, label]) => [key, TYPE_BY_KEY.value[key]?.label || label])
+  )
+);
 const { isAdmin } = useAdmin();
 // item 366: fechar/reabrir médico e horário = nó "Fechar e reabrir dias";
 // quem só tem esse nó vê só a aba "Abrir e fechar"
@@ -54,11 +82,11 @@ const tab = ref(canConfigure.value ? props.initialTab : 'abrir');
 const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 const WEEKDAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const unitLabel = key => props.units[key]?.label || key;
-const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
-const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
-const typeLabel = key => TYPE_BY_KEY[key]?.label || key;
+const doctorColor = name => DOCTORS.value.find(d => d.name === name)?.color || '#64748B';
+const doctorShort = name => DOCTORS.value.find(d => d.name === name)?.short || name;
+const typeLabel = key => TYPE_BY_KEY.value[key]?.label || key;
 const typeVars = key => {
-  const t = TYPE_BY_KEY[key] || {};
+  const t = TYPE_BY_KEY.value[key] || {};
   return {
     '--cv': t.color, '--cv-deep': t.deep, '--cv-grad': t.grad,
     '--cv-rgb': hexToRgbSpaced(t.color || '#64748B'), '--cv-deep-rgb': hexToRgbSpaced(t.deep || '#334155'),
@@ -113,9 +141,9 @@ const futureClosings = computed(() =>
     .sort((a, b) => dayOf(a).localeCompare(dayOf(b)))
 );
 const closeScopes = computed(() => [
-  { key: 'all', label: 'Dia inteiro (clínica toda)' },
+  { key: 'all', label: `Dia inteiro (${placeWord.value} toda)` },
   ...Object.keys(props.units).map(u => ({ key: `u:${u}`, label: `Só ${unitLabel(u)}` })),
-  ...DOCTORS.map(d => ({ key: `d:${d.name}`, label: `Só ${d.name}` })),
+  ...DOCTORS.value.map(d => ({ key: `d:${d.name}`, label: `Só ${d.name}` })),
 ]);
 const newClose = ref({ date: '', scope: 'all' });
 const saveBlockedDays = async (next, message) => {
@@ -165,7 +193,7 @@ const usualBlock = (doctor, unit) => {
   return Number((wins.find(w => w.unit === unit) || wins[0])?.block) || 15;
 };
 const firstUnit = () => Object.keys(props.units)[0] || 'paulista';
-const newOpen = ref({ date: '', doctor: DOCTORS[0].name, unit: firstUnit(), start: '08:00', end: '12:00', block: usualBlock(DOCTORS[0].name, firstUnit()) });
+const newOpen = ref({ date: '', doctor: DOCTORS.value[0].name, unit: firstUnit(), start: '08:00', end: '12:00', block: usualBlock(DOCTORS.value[0].name, firstUnit()) });
 watch(() => [newOpen.value.doctor, newOpen.value.unit], ([d, u]) => { newOpen.value.block = usualBlock(d, u); });
 const openValid = computed(() => {
   const o = newOpen.value;
@@ -300,7 +328,7 @@ const resetDraft = () => {
 const byDow = dow =>
   draft.value.filter(w => Number(w.dow) === dow).sort((a, b) => a.start.localeCompare(b.start));
 const addWindow = dow => {
-  draft.value.push({ dow, unit: 'paulista', doctor: DOCTORS[0].name, start: '08:00', end: '11:00', block: 15, only: [], uid: nextUid() });
+  draft.value.push({ dow, unit: isOwnAgenda.value ? firstUnit() : 'paulista', doctor: DOCTORS.value[0].name, start: '08:00', end: '11:00', block: 15, only: [], uid: nextUid() });
 };
 const removeWindow = w => {
   draft.value = draft.value.filter(x => x.uid !== w.uid);
@@ -507,7 +535,7 @@ onMounted(() => {
         <!-- 1. ABRIR E FECHAR -->
         <template v-if="tab === 'abrir'">
           <section class="space-y-2">
-            <p class="cv-ag-block-title">Médicos</p>
+            <p class="cv-ag-block-title">{{ whoTitle }}</p>
             <p class="text-[11px] text-n-slate-10">Fechar tira o médico da grade inteira na hora, e a IA para de oferecer os horários dele. Reabrir devolve tudo como estava.</p>
             <div v-for="d in DOCTORS" :key="d.name" class="cv-sub flex items-center gap-3 flex-wrap px-3.5 py-3">
               <span class="w-3 h-3 rounded-full flex-shrink-0" :style="{ backgroundColor: d.color }" />
@@ -527,7 +555,7 @@ onMounted(() => {
 
           <section class="space-y-2">
             <p class="cv-ag-block-title">Dias fechados</p>
-            <p class="text-[11px] text-n-slate-10">Feriado, congresso, folga: o dia some da grade e a IA não oferece. Pode ser a clínica toda, só uma unidade ou só um médico.</p>
+            <p class="text-[11px] text-n-slate-10">Feriado, congresso, folga: o dia some da grade e a IA não oferece. Pode ser a {{ placeWord }} toda, só uma unidade ou só {{ oneWho }}.</p>
             <div class="cv-sub flex items-end gap-2 flex-wrap p-3">
               <label class="flex-1 min-w-[130px]">
                 <span class="cv-label block mb-0.5">Dia</span>
@@ -561,7 +589,7 @@ onMounted(() => {
                   <input v-model="newOpen.date" type="date" :min="todayKey()" class="cv-input w-full !h-9 text-xs" />
                 </label>
                 <label class="flex-1 min-w-[170px]">
-                  <span class="cv-label block mb-0.5">Médico</span>
+                  <span class="cv-label block mb-0.5">{{ whoLabel }}</span>
                   <select v-model="newOpen.doctor" class="cv-input w-full !h-9 text-xs">
                     <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
                   </select>
@@ -677,7 +705,7 @@ onMounted(() => {
                 <span class="cv-label">Serve para</span>
                 <button class="cv-chip cv-chip-lg" :class="acceptsAll(w) ? 'cv-chip-on' : ''" :disabled="!isAdmin" @click="w.only = []">Tudo</button>
                 <button
-                  v-for="key in RESERVABLE"
+                  v-for="key in reservableKeys"
                   :key="key"
                   class="cv-chip cv-chip-lg"
                   :class="!acceptsAll(w) && w.only.includes(key) ? 'cv-chip-on' : ''"
@@ -689,7 +717,7 @@ onMounted(() => {
                 </button>
                 <span class="text-[11px] ml-auto flex items-center gap-1" :style="{ color: aiOffers(w) ? '#047857' : '#b45309' }">
                   <span :class="aiOffers(w) ? 'i-lucide-sparkles' : 'i-lucide-ban'" class="text-xs" />
-                  {{ aiOffers(w) ? 'a IA oferece consulta nova aqui' : 'a IA não oferece — só a equipe marca' }}
+                  {{ aiOffers(w) ? `a IA oferece ${isOwnAgenda ? (TYPE_BY_KEY[AI_MODALITY]?.noun || 'atendimento novo') : 'consulta nova'} aqui` : 'a IA não oferece — só a equipe marca' }}
                 </span>
               </div>
               <p v-if="rowError(w)" class="text-[11px] font-semibold" style="color: #dc2626">⚠ {{ rowError(w) }}</p>
@@ -716,7 +744,7 @@ onMounted(() => {
             </p>
           </section>
           <section class="space-y-2">
-            <p class="cv-ag-block-title">Regras da clínica</p>
+            <p class="cv-ag-block-title">Regras da {{ placeWord }}</p>
             <p class="text-[11px] text-n-slate-10">Escreva aqui o que a IA precisa saber sobre a agenda e que não cabe nas faixas. Este texto entra num bloco próprio do roteiro dos atendentes, só sobre agenda.</p>
             <textarea
               v-model="aiRules"
@@ -760,7 +788,7 @@ onMounted(() => {
               (150,00) ou um texto (sem custo). Em branco: a avaliação usa o valor padrão do lembrete; retorno e pós-operatório saem "sem custo".
             </p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div v-for="(label, key) in PRICE_TYPE_LABELS" :key="key" class="cv-sub p-3">
+              <div v-for="(label, key) in priceTypeLabels" :key="key" class="cv-sub p-3">
                 <span class="cv-label block mb-1">{{ label }}</span>
                 <input v-model="prices[key]" class="cv-input w-full" maxlength="30" :disabled="!isAdmin" :placeholder="key === 'avaliacao' ? '150,00' : key === 'teleconsulta' ? 'igual à avaliação' : 'sem custo'" />
               </div>

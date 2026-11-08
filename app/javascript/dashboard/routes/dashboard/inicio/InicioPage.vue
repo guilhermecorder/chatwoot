@@ -55,6 +55,7 @@ import {
   KPI_FAMILIES,
 } from 'dashboard/helper/cevicoKpiPalette';
 import MagnetBoard from 'dashboard/routes/dashboard/business/MagnetBoard.vue';
+import { dueCountdown } from 'dashboard/helper/taskDue';
 import {
   mergeLayout,
   place as placeBlock,
@@ -4176,6 +4177,12 @@ const ALERT_KIND_META = {
     label: 'Atendimento: a equipe precisa assumir',
     color: '#be123c',
   },
+  // ⏰ 08/11 (LIFE): chegou o dia/hora de uma tarefa com data marcada pelo atendente ("daqui a 3, 4 dias eu te chamo")
+  tarefa_no_prazo: {
+    icon: 'i-lucide-alarm-clock',
+    label: 'Tarefa: chegou o dia',
+    color: '#d97706',
+  },
   // auditoria 10/2026 (#217): um robô (lembretes, NPS, jornada…) parou ou deu erro 2× seguidas — só o admin vê
   robo_parado: {
     icon: 'i-lucide-bot-off',
@@ -6885,17 +6892,20 @@ onUnmounted(() => {
                               class="text-[10px] text-n-slate-9 flex-shrink-0 hidden sm:inline"
                               >de {{ task.creator_name.split(' ')[0] }}</span
                             >
+                            <!-- ⏰ 08/11: contagem regressiva ("em 3 dias", "amanhã 09:00", "atrasada há 2 dias") -->
                             <span
                               v-if="task.due_at"
                               class="cv-chip !h-5 !px-1.5 text-[10px] flex-shrink-0 tabular-nums"
-                              :class="
-                                new Date(task.due_at) < new Date()
-                                  ? 'cv-red'
-                                  : ''
-                              "
+                              :class="{
+                                'cv-red':
+                                  dueCountdown(task.due_at)?.tone === 'late',
+                                'cv-amber':
+                                  dueCountdown(task.due_at)?.tone === 'soon',
+                              }"
+                              :title="fmtTaskDue(task.due_at)"
                               ><span
                                 class="i-lucide-alarm-clock text-[10px]"
-                              />{{ fmtTaskDue(task.due_at) }}</span
+                              />{{ dueCountdown(task.due_at)?.text }}</span
                             >
                           </button>
                         </div>

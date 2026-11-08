@@ -562,7 +562,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       missed = rows[[unit, 'missed']] || 0
       {
         unit: unit,
-        label: UNIT_LABELS[unit.to_s] || (unit.presence || 'Sem unidade'),
+        label: Crm::AgendaSlots.unit_label(Current.account, unit) || 'Sem unidade',
         consultations: total,
         attended: attended,
         missed: missed,
@@ -1295,7 +1295,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       new_leads: new_leads,
       base: tasks.size - new_leads,
       by_origin_inbox: rows_json(tasks.group_by { |t| t.contact_id ? origin[t.contact_id] || 'sem conversa' : 'sem cadastro' }.transform_values(&:size)),
-      by_unit: rows_json(tasks.group_by { |t| Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit.presence || 'sem unidade' }.transform_values(&:size)),
+      by_unit: rows_json(tasks.group_by { |t| Crm::AgendaSlots.unit_label(Current.account, t.unit) || 'sem unidade' }.transform_values(&:size)),
       by_procedure: rows_json(tasks.group_by { |t| t.procedure.presence || t.indicated_procedure.presence || (t.modality.presence && t.modality.humanize) || 'Consulta' }.transform_values(&:size)),
       by_doctor: rows_json(tasks.group_by { |t| t.doctor.presence || 'sem médico' }.transform_values(&:size)),
       by_source: { ia: tasks.count { |t| Crm::BookingSource.of(t) == 'ia' }, equipe: tasks.count { |t| Crm::BookingSource.of(t) == 'equipe' } },
@@ -1343,7 +1343,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       pending: active.count { |t| t.attendance.blank? && t.status.to_s != 'done' && t.due_at < Time.current },
       from_oftalmofacil: active.count { |t| t.source_detail.present? || t.external_ref.present? },
       by_procedure: rows_json(done.group_by { |t| t.procedure.presence || t.title.to_s.sub(/\ACirurgia:\s*/i, '').split(' - ').first.presence || 'sem procedimento' }.transform_values(&:size)),
-      by_unit: rows_json(done.group_by { |t| Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit.presence || 'sem unidade' }.transform_values(&:size)),
+      by_unit: rows_json(done.group_by { |t| Crm::AgendaSlots.unit_label(Current.account, t.unit) || 'sem unidade' }.transform_values(&:size)),
       by_doctor: rows_json(done.group_by { |t| t.doctor.presence || 'sem médico' }.transform_values(&:size))
     }
   end

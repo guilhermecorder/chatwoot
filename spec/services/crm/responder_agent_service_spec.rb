@@ -51,7 +51,9 @@ RSpec.describe Crm::ResponderAgentService do
     expect(result[:acoes].first['resumo']).to include('1 de outra pessoa oculta')
 
     expect(calls.size).to eq(2)
-    expect(calls.first[:tools].pluck(:name)).to eq(Crm::ResponderTools::ALL_NAMES) # #458: abrir_tarefa nos três atendentes
+    # #458: abrir_tarefa nos três atendentes (marcar_etapa e enviar_imagem só com lista configurada na conta)
+    expect(calls.first[:tools].pluck(:name))
+      .to eq(Crm::ResponderTools::ALL_NAMES - [Crm::ResponderTools::STAGE_TOOL_NAME, Crm::ResponderTools::IMAGE_TOOL_NAME])
     expect(calls.first[:output_config][:format][:type]).to eq('json_schema')
     history = calls.last[:messages]
     expect(history.size).to eq(3)

@@ -58,6 +58,8 @@ class Crm::FollowupAiNudgeService
       nas etiquetas, e feche com uma pergunta simples.
     - NÃO repita a última mensagem da empresa; NÃO envie uma segunda cobrança igual às cutucadas anteriores.
     - NÃO ofereça horário, NÃO fale de preço ou valor que não esteja na conversa, NÃO prometa resultado.
+    - PRAZOS (orçamento, retorno): siga a regra de prazo do Roteiro abaixo, contando o dia da semana de "Agora";
+      nunca prometa "em minutos", "hoje" ou "na hora".
     - Se a ORIENTAÇÃO DO ADMIN trouxer um exemplo de mensagem, siga o jeito dele (tamanho, palavras, tom), adaptado
       ao que aconteceu nesta conversa.
     - Se a conversa já terminou com o cliente recusando, respeite: uma mensagem gentil deixando a porta aberta.
@@ -136,7 +138,7 @@ class Crm::FollowupAiNudgeService
         cache_control: { type: 'ephemeral' } },
       { type: 'text', text: <<~CTX }
         CONTEXTO:
-        - Agora: #{Crm::AgendaSlots::TZ.now.strftime('%d/%m/%Y %H:%M')} (São Paulo).
+        - Agora: #{Crm::AgendaSlots::WEEKDAYS[Crm::AgendaSlots::TZ.now.wday]}, #{Crm::AgendaSlots::TZ.now.strftime('%d/%m/%Y %H:%M')} (São Paulo).
         - Coluna do paciente no CRM: #{stage || 'sem card'}.
         - Etiquetas do paciente: #{patient_labels.presence || 'nenhuma'}.
         - Esta é a cutucada "#{step_label}" do robô "#{@bot&.name || 'follow-up'}" — o paciente está em silêncio desde a última mensagem da clínica.

@@ -58,7 +58,17 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   # sem lista configurada, a ferramenta nem aparece para a IA.
   STAGE_TOOL_NAME = 'marcar_etapa'.freeze
   STAGE_MAX = 12
-  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME]).freeze
+  # 🖼️ 08/11/2026 (LIFE, pedido do Fernando): imagem pronta da empresa num ponto
+  # do roteiro (1ª: os 4 telhados numerados na sondagem). Imagens da conta em
+  # ai_config['imagens_roteiro'] (Crm::ScriptImages); sem lista, não aparece.
+  IMAGE_TOOL_NAME = 'enviar_imagem'.freeze
+  FAKE_TASK_WORDS = [
+    'placeholder', 'ignorar', 'ignore', 'nenhum', 'nenhuma', 'cancelado', 'cancelada', 'não usar', 'nao usar',
+    'não aplic', 'nao aplic', 'não necess', 'nao necess', 'desnecess', 'sem necessidade', 'not needed',
+    'nevermind', 'never mind', 'nunca mind', 'n/a', 'teste', 'test', 'dummy', 'xxx'
+  ].freeze
+  FAKE_TASK_RE = /\A\W*(#{FAKE_TASK_WORDS.map { |w| Regexp.escape(w) }.join('|')})/i
+  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME, IMAGE_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
   # 🩺 item 251: o Atendente de Pós-operatório abre tarefa para a equipe.
@@ -70,12 +80,15 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
   attr_reader :acoes
 
-  def initialize(conversation:, agent_key:, live:)
+  # simulation (08/11): é o "Testar agente" — a imagem do roteiro entra de
+  # verdade na conversa de teste (caixa interna sem canal, nada sai dela)
+  def initialize(conversation:, agent_key:, live:, simulation: false)
     @conversation = conversation
     @account = conversation.account
     @contact = conversation.contact
     @agent_key = agent_key.to_s
     @live = live == true
+    @simulation = simulation == true
     @acoes = []
   end
 
@@ -84,7 +97,35 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     list = base_definitions
     list << task_definition if TASK_TOOL_KEYS.include?(@agent_key)
     list << stage_definition if TASK_TOOL_KEYS.include?(@agent_key) && crm_etapas.any?
+    list << image_definition if TASK_TOOL_KEYS.include?(@agent_key) && script_images.any?
     list
+  end
+
+  # imagens do roteiro desta conta (só as que têm arquivo de verdade)
+  def script_images
+    @script_images ||= Crm::ScriptImages.for(@account)
+  end
+
+  def image_definition
+    guia = script_images.map do |i|
+      legenda = i['legenda'].present? ? " (vai com a legenda: \"#{i['legenda']}\")" : ''
+      "#{i['chave']} = #{i['quando']}#{legenda}"
+    end.join('; ')
+    {
+      name: IMAGE_TOOL_NAME,
+      description: 'Envia ao cliente uma IMAGEM PRONTA da empresa, no momento do roteiro descrito para ela, uma vez por ' \
+                   "conversa: #{guia}. A imagem sai ANTES dos seus balões. Se ela tem legenda, a pergunta já vai na " \
+                   'legenda: não repita a pergunta nos balões.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          imagem: { type: 'string', enum: script_images.pluck('chave'), description: 'Qual imagem enviar' },
+          reenviar: { type: 'boolean', description: 'true SÓ quando o cliente disser que a imagem não chegou ou não abriu' }
+        },
+        required: %w[imagem],
+        additionalProperties: false
+      }
+    }
   end
 
   # etapas configuradas na conta (etiqueta + quando usar), já normalizadas
@@ -118,7 +159,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
   # 🩺 item 251: tarefa para a pessoa responsável (Meu Painel) — dúvida do caso,
   # sintoma de alerta, documento, pedido de humano
-  def task_definition
+  def task_definition # rubocop:disable Metrics/MethodLength
     {
       name: 'abrir_tarefa',
       description: 'Abre uma TAREFA para a pessoa da equipe responsável (aparece no Meu Painel dela) quando a dúvida não ' \
@@ -131,7 +172,11 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
           detalhes: { type: 'string', description: 'O que o paciente relatou, com as palavras dele, e o que você respondeu' },
           urgencia: { type: 'string', enum: %w[alta normal],
                       description: 'alta = sintoma/alerta (tarefa urgente + aviso no painel da equipe, que vê no próximo ' \
-                                   'horário de atendimento); normal = dúvida/documento' }
+                                   'horário de atendimento); normal = dúvida/documento' },
+          quando: { type: 'string', description: 'Só para RETORNO COM DATA (ex.: "daqui a 3, 4 dias eu te chamo"): o DIA em que a ' \
+                                                 'equipe deve agir, YYYY-MM-DD. Vira tarefa separada com contagem no painel ' \
+                                                 'do responsável e aviso no dia. Sem retorno combinado, não informe.' },
+          hora: { type: 'string', description: 'Hora do retorno com data, HH:MM (padrão 09:00)' }
         },
         required: %w[motivo urgencia],
         additionalProperties: false
@@ -171,7 +216,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
             id: { type: 'integer', description: 'id da consulta (de buscar_consulta ou do contexto)' },
             dia: { type: 'string', description: 'Novo dia, YYYY-MM-DD' },
             hora: { type: 'string', description: 'Nova hora, HH:MM' },
-            unidade: { type: 'string', enum: %w[tatuape paulista] }
+            unidade: { type: 'string', enum: Crm::AgendaSlots.unit_keys(@account) }
           }.merge(PROOF_FIELDS),
           required: %w[id dia hora unidade],
           additionalProperties: false
@@ -213,7 +258,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
           type: 'object',
           properties: {
             dia: { type: 'string', description: 'Dia pedido, YYYY-MM-DD' },
-            unidade: { type: 'string', enum: %w[tatuape paulista], description: 'Só desta unidade (opcional)' }
+            unidade: { type: 'string', enum: Crm::AgendaSlots.unit_keys(@account), description: 'Só desta unidade (opcional)' }
           },
           required: %w[dia],
           additionalProperties: false
@@ -233,6 +278,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when 'horarios_do_dia' then horarios_do_dia(args)
     when 'abrir_tarefa' then abrir_tarefa(args)
     when 'marcar_etapa' then marcar_etapa(args)
+    when IMAGE_TOOL_NAME then enviar_imagem(args)
     else
       { ok: false, motivo: "Ferramenta desconhecida: #{name}" }
     end
@@ -358,8 +404,9 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     date = parse_date(args['dia'])
     time = args['hora'].to_s.strip
     unit = args['unidade'].to_s.strip
-    if date.nil? || !time.match?(/\A\d{2}:\d{2}\z/) || !Crm::AgendaSlots::UNIT_LABELS.key?(unit)
-      return refuse('remarcar_consulta', 'Informe dia (YYYY-MM-DD), hora (HH:MM) e unidade (tatuape ou paulista) de um horário da lista.')
+    units = Crm::AgendaSlots.unit_keys(@account)
+    if date.nil? || !time.match?(/\A\d{2}:\d{2}\z/) || units.exclude?(unit)
+      return refuse('remarcar_consulta', "Informe dia (YYYY-MM-DD), hora (HH:MM) e unidade (#{units.join(' ou ')}) de um horário da lista.")
     end
 
     label = "#{WEEKDAYS_SHORT[date.wday]} #{date.strftime('%d/%m')} #{time} · #{unit_label(unit)}"
@@ -439,24 +486,56 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   # ── 🩺 tarefa para a equipe (item 251) ──────────────────────────────────
-  def abrir_tarefa(args) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def abrir_tarefa(args) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return refuse('abrir_tarefa', 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
 
     motivo = args['motivo'].to_s.strip.first(120)
     return refuse('abrir_tarefa', 'Informe o motivo em uma frase.') if motivo.blank?
 
+    # 08/11 (bancada LIFE): com a imagem do roteiro a IA às vezes "chama por chamar"
+    # (motivo "placeholder", "ignorar"…) — isso viraria tarefa-lixo no Meu Painel
     urgencia = args['urgencia'].to_s == 'alta' ? 'alta' : 'normal'
+    # urgência nunca é barrada (na clínica "dor" é motivo de verdade)
+    return refuse('abrir_tarefa', 'Sem motivo real: NÃO abra tarefa. Só responda ao cliente.') if fake_motivo?(motivo, urgencia)
+
+    due_at, erro = task_due_at(args)
+    return refuse('abrir_tarefa', erro) if erro
+
+    quando_txt = due_at ? " para #{WEEKDAYS_SHORT[due_at.wday]} #{due_at.strftime('%d/%m %H:%M')}" : ''
     unless @live
-      log_acao('abrir_tarefa', true, "abriria tarefa (#{urgencia}): #{motivo} (simulado)")
-      return { simulado: true, ok: true, mensagem: 'Em sombra nada foi criado; a tarefa seria aberta para a equipe.' }
+      log_acao('abrir_tarefa', true, "abriria tarefa (#{urgencia})#{quando_txt}: #{motivo} (simulado)")
+      return { simulado: true, ok: true, prazo: due_at&.iso8601, mensagem: 'Em sombra nada foi criado; a tarefa seria aberta para a equipe.' }
     end
 
     outcome = Crm::HandoffTask.open!(account: @account, contact: @contact, conversation: @conversation, agent_key: @agent_key,
-                                     motivo: motivo, detalhes: args['detalhes'], urgencia: urgencia)
+                                     motivo: motivo, detalhes: args['detalhes'], urgencia: urgencia, due_at: due_at)
     task = outcome[:task]
     verb = outcome[:created] ? 'abriu' : 'complementou'
-    log_acao('abrir_tarefa', true, "#{verb} tarefa ##{task.id} (#{urgencia}) p/ #{task.assignee&.name || 'equipe'}: #{motivo}")
-    { ok: true, id: task.id, criada: outcome[:created], responsavel: task.assignee&.name, urgencia: urgencia }
+    log_acao('abrir_tarefa', true, "#{verb} tarefa ##{task.id} (#{urgencia})#{quando_txt} p/ #{task.assignee&.name || 'equipe'}: #{motivo}")
+    { ok: true, id: task.id, criada: outcome[:created], responsavel: task.assignee&.name, urgencia: urgencia, prazo: task.due_at&.iso8601 }
+  end
+
+  def fake_motivo?(motivo, urgencia)
+    urgencia != 'alta' && (motivo.match?(FAKE_TASK_RE) || motivo.scan(/\p{L}/).size < 4)
+  end
+
+  # ⏰ prazo da tarefa de retorno: dia (YYYY-MM-DD, de hoje até 60 dias) + hora (HH:MM, padrão 09:00).
+  # Devolve [due_at, nil] ou [nil, erro]; sem 'quando' = [nil, nil] (tarefa para hoje, como sempre)
+  RETURN_MAX_DAYS = 60
+  def task_due_at(args)
+    return [nil, nil] if args['quando'].blank?
+
+    date = parse_date(args['quando'])
+    return [nil, 'quando deve ser uma data YYYY-MM-DD.'] if date.nil?
+
+    hora = args['hora'].to_s.strip.presence || '09:00'
+    return [nil, 'hora deve ser HH:MM.'] unless hora.match?(/\A([01]\d|2[0-3]):[0-5]\d\z/)
+
+    at = TZ.parse("#{date} #{hora}")
+    return [nil, 'A data do retorno já passou: use hoje ou um dia futuro.'] if at < TZ.now.beginning_of_day
+    return [nil, "Retorno no máximo em #{RETURN_MAX_DAYS} dias."] if at > RETURN_MAX_DAYS.days.from_now
+
+    [at, nil]
   end
 
   # 🏷️ etiqueta da etapa no CONTATO → CrmAutomationTriggerService (após gravar)
@@ -482,6 +561,46 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     activity_note!("🏷️ #{agent_name} marcou a etapa: #{etapa}")
     log_acao(STAGE_TOOL_NAME, true, "marcou a etapa #{etapa}")
     { ok: true, etapa: etapa }
+  end
+
+  # 🖼️ imagem pronta do roteiro → mensagem com anexo na conversa (Crm::ScriptImages).
+  # Ao vivo: vai ao cliente. Testar agente: entra na conversa de teste (sem canal).
+  # Sombra numa conversa real: nada é enviado, só registrado.
+  def enviar_imagem(args) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return refuse(IMAGE_TOOL_NAME, 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
+
+    chave = args['imagem'].to_s.strip.downcase
+    image = script_images.find { |i| i['chave'] == chave }
+    return refuse(IMAGE_TOOL_NAME, 'Imagem fora da lista desta conta: faça a pergunta só em texto.') if image.nil?
+
+    sent = Crm::ScriptImages.sent_count(@conversation, chave)
+    if sent.positive? && args['reenviar'] != true
+      log_acao(IMAGE_TOOL_NAME, true, "imagem #{chave} já tinha ido nesta conversa")
+      return { ok: true, ja_enviada: true,
+               aviso: 'Esta imagem JÁ FOI enviada antes nesta conversa. Só reenvie (reenviar=true) se o cliente disser que ' \
+                      'ela não chegou; senão, retome a pergunta em texto.' }
+    end
+    if sent >= Crm::ScriptImages::MAX_SENDS
+      return refuse(IMAGE_TOOL_NAME, 'A imagem já foi reenviada. Faça a pergunta em texto e, se o cliente não recebe imagens, ' \
+                                     'abra tarefa normal ("cliente não recebe imagens").')
+    end
+
+    test_conversation = @simulation && Crm::AgentSimulator.simulated?(@conversation)
+    unless @live || test_conversation
+      log_acao(IMAGE_TOOL_NAME, true, "enviaria a imagem #{chave} (simulado)")
+      return { simulado: true, ok: true, legenda_enviada: image['legenda'].presence,
+               mensagem: 'Em sombra nada foi enviado; ao vivo a imagem iria ao cliente agora. Siga como se ela tivesse chegado.' }
+    end
+
+    message = Crm::ScriptImages.send!(@conversation, image, @agent_key)
+    log_acao(IMAGE_TOOL_NAME, true, "enviou a imagem #{chave}#{' (conversa de teste)' if test_conversation}")
+    { ok: true, enviada: true, mensagem_id: message.id, legenda_enviada: image['legenda'].presence,
+      aviso: if image['legenda'].present?
+               'A imagem JÁ FOI ENVIADA com a legenda acima, que já faz a pergunta. NÃO repita a pergunta: no máximo um ' \
+                 'balão curto comentando a resposta anterior do cliente, sem nova pergunta.'
+             else
+               'A imagem JÁ FOI ENVIADA. Faça a pergunta dela em um balão curto.'
+             end }
   end
 
   # ── vagas de um dia específico (item 200: agendamento futuro liberado) ──
@@ -641,7 +760,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   def unit_label(unit)
-    Crm::AgendaSlots::UNIT_LABELS[unit] || unit.presence || 'unidade a definir'
+    Crm::AgendaSlots.unit_label(@account, unit) || 'unidade a definir'
   end
 
   def when_label(task)

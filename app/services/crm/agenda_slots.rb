@@ -246,6 +246,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       now: TZ.now,
       # item 307: só as faixas deste tipo de atendimento
       wins: windows_for(account, modality),
+      # ☀️ 08/11: empresa com faixa da semana no sábado atende no sábado
+      weekend_ok: own_agenda?(account),
       # item 375: aberturas pontuais (com 'date') — somam às faixas da semana
       open: open_windows_for(account, modality),
       blocked: Array(cfg['blocked']).to_set { |b| "#{b['date']}|#{b['time']}|#{b['unit']}" },
@@ -270,7 +272,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # faixas em vigor NESTE dia: as da semana (nunca no fim de semana) + as
   # aberturas pontuais com esta data (item 375 — um sábado aberto de propósito vale)
   def windows_on(ctx, day)
-    weekly = day.saturday? || day.sunday? ? [] : ctx[:wins].select { |w| w['dow'] == day.wday }
+    skip_weekend = (day.saturday? || day.sunday?) && !ctx[:weekend_ok]
+    weekly = skip_weekend ? [] : ctx[:wins].select { |w| w['dow'] == day.wday }
     weekly + Array(ctx[:open]).select { |w| w['date'] == day.to_s }
   end
 
@@ -338,12 +341,44 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     end
   end
 
-  # nomes das unidades da CONTA (Personalização/segmento), com os da CEVICO
-  # de reserva — 06/11: a LIFE quebrava com "undefined method unit_labels"
+  # nomes das unidades da CONTA (Personalização/segmento e, por cima, a
+  # Identidade da empresa), com os da CEVICO de reserva — 06/11: a LIFE quebrava
+  # com "undefined method unit_labels"; 08/11: a unidade da Identidade
+  # (Piracicaba · Av. Dr. Morato) vale também nas regras da agenda
   def unit_labels(account)
-    UNIT_LABELS.merge(Crm::SegmentoConta.unit_labels(account))
+    company = Cevico::Company.for(account)
+    own = Array(company.raw['units']).any? ? company.units.to_h { |u| [u['key'], u['label']] } : {}
+    UNIT_LABELS.merge(Crm::SegmentoConta.unit_labels(account)).merge(own)
   rescue StandardError
     UNIT_LABELS
+  end
+
+  def unit_label(account, key)
+    unit_labels(account)[key.to_s] || key.to_s.presence
+  end
+
+  # ── ☀️ 08/11 (porte da ótica): vocabulário POR CONTA ─────────────────────
+  # Empresa que não é clínica e tem as suas unidades (a LIFE) segue as próprias
+  # faixas — inclusive no sábado, se tiver faixa no sábado. Clínica: como antes.
+  # ☀️ 08/11: as unidades que a IA pode citar nos campos "unidade" (esquema da resposta
+  # e ferramentas): as da empresa quando ela tem agenda própria; senão as da clínica
+  def unit_keys(account)
+    own_agenda?(account) ? Cevico::Company.for(account).units.pluck('key') : %w[tatuape paulista]
+  end
+
+  def own_agenda?(account)
+    company = Cevico::Company.for(account)
+    !company.clinic? && company.units.any?
+  rescue StandardError
+    false
+  end
+
+  # nome do tipo de atendimento para a IA: o da Identidade da empresa
+  # (agenda_types — "visita técnica") ou o da clínica
+  def modality_label(account, key)
+    Cevico::Company.for(account).agenda_type_noun(key).presence || MODALITY_LABELS[key.to_s] || key.to_s
+  rescue StandardError
+    MODALITY_LABELS[key.to_s] || key.to_s
   end
 
   # texto compacto p/ entrar no prompt do agente:
@@ -353,8 +388,9 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
               .group_by { |s| [s[:date], s[:unit], s[:doctor]] }
     return 'NENHUM horário livre nos próximos dias — diga que vai verificar com a equipe.' if grouped.empty?
 
+    labels = unit_labels(account)
     grouped.map do |(date, unit, doctor), list|
-      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{unit_labels(account)[unit] || unit} · #{doctor}: " +
+      "#{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{labels[unit] || unit} · #{doctor}: " +
         list.map { |s| s[:time] }.join(', ')
     end.join("\n")
   end
@@ -394,20 +430,24 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # conta própria; a regra escrita é para o robô SABER que aquele dia é uma
   # exceção combinada — e não "estranhar" (nem negar) um dia fora da rotina
   def open_day_rules(account)
+    labels = unit_labels(account)
     future_open_days(account).map do |w|
       date = Date.iso8601(w['date'])
-      "- ABERTURA EXTRA em #{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
+      "- ABERTURA EXTRA em #{WEEKDAYS[date.wday]} #{date.strftime('%d/%m')} · #{labels[w['unit']] || w['unit']} · #{w['doctor']}: " \
         "atende das #{w['start']} às #{w['end']} SÓ neste dia (fora da rotina da semana). Pode oferecer e marcar " \
         'esses horários normalmente, como em qualquer dia de atendimento.'
     end
   end
 
   def reserved_rules(account)
+    labels = unit_labels(account)
+    # ☀️ 08/11: com os tipos da empresa, "consulta nova" vira o nome dela ("visita técnica")
+    own_new = Cevico::Company.for(account).agenda_type_noun(AI_MODALITY)
     windows(account).reject { |w| accepts?(w, AI_MODALITY) }.map do |w|
-      kinds = reserved_for(w).map { |k| MODALITY_LABELS[k] }.join(' e ')
-      "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
-        "faixa reservada para #{kinds}. NÃO ofereça nem marque consulta nova nesta faixa " \
-        "(ela só serve para remarcar #{kinds})."
+      kinds = reserved_for(w).map { |k| modality_label(account, k) }.join(' e ')
+      "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']} · #{labels[w['unit']] || w['unit']} · #{w['doctor']}: " \
+        "faixa reservada para #{kinds}. NÃO ofereça nem marque #{own_new || 'consulta nova'} nesta faixa " \
+        "(ela só serve para #{own_new ? 'marcar' : 'remarcar'} #{kinds})."
     end
   end
 
@@ -416,8 +456,11 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # ao paciente e oferecer outra, em vez de só dizer que não está livre
   def hourly_rule(account)
     cap = hourly_cap(account)
-    "- Cada unidade recebe no máximo #{cap} avaliações (consultas novas) por hora, para o atendimento fluir " \
-      'sem fila. Se a hora que o paciente pedir estiver completa, diga com naturalidade que esse horário já está ' \
+    company = Cevico::Company.for(account)
+    # ☀️ 08/11: na empresa com tipos próprios, "visitas técnicas" e "cliente"
+    what = company.agenda_type_plural(AI_MODALITY) || 'avaliações (consultas novas)'
+    "- Cada unidade recebe no máximo #{cap} #{what} por hora, para o atendimento fluir " \
+      "sem fila. Se a hora que o #{company.word(:paciente)} pedir estiver completa, diga com naturalidade que esse horário já está " \
       'completo e ofereça os mais próximos da lista HORÁRIOS DISPONÍVEIS — de preferência espalhando ao longo do dia.'
   end
 
@@ -426,7 +469,9 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     text = rules_text(account)
     return '' if text.blank?
 
-    "REGRAS DA AGENDA (definidas pela clínica — valem acima de qualquer horário que o paciente peça):\n#{text}\n"
+    company = Cevico::Company.for(account)
+    "REGRAS DA AGENDA (definidas pela #{company.word(:empresa)} — valem acima de qualquer horário que o " \
+      "#{company.word(:paciente)} peça):\n#{text}\n"
   end
 
   def each_slot(win)

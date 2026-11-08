@@ -460,7 +460,7 @@ class Crm::VoiceAgent::ToolsService # rubocop:disable Metrics/ClassLength
   end
 
   def unit_label(unit)
-    Crm::AgendaSlots::UNIT_LABELS[unit.to_s] || unit.to_s
+    Crm::AgendaSlots.unit_label(@account, unit).to_s
   end
 
   # "Tatuapé", "paulista", "Av. Paulista" → código da unidade (nil se desconhecida)

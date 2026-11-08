@@ -18,7 +18,7 @@ import PatientSpaceIcon from './PatientSpaceIcon.vue';
 import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
 import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallButton.vue';
 import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
-import { hexToRgbSpaced } from 'dashboard/helper/cevicoAgenda';
+import { hexToRgbSpaced, unitsFor } from 'dashboard/helper/cevicoAgenda';
 import { PRICE_UNITS } from 'dashboard/routes/dashboard/settings/precos/priceRows';
 
 const route = useRoute();
@@ -230,7 +230,17 @@ const MODALITY_LABELS = {
   exames: 'Exame',
   teleconsulta: 'Teleconsulta',
 };
-const UNIT_LABELS = { tatuape: 'Tatuapé', paulista: 'Av. Paulista', online: 'Online' };
+const CLINIC_UNIT_LABELS = {
+  tatuape: 'Tatuapé',
+  paulista: 'Av. Paulista',
+  online: 'Online',
+};
+// ☀️ 08/11: empresa com unidade própria (LIFE: Piracicaba) usa as suas
+const UNIT_LABELS = computed(() => {
+  const own = unitsFor(store.getters['crm/getCompany'], null);
+  if (!own) return CLINIC_UNIT_LABELS;
+  return Object.fromEntries(Object.entries(own).map(([k, u]) => [k, u.label]));
+});
 const CHANNEL_LABELS = {
   Whatsapp: 'WhatsApp',
   FacebookPage: 'Instagram/Facebook',

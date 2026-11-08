@@ -1,6 +1,70 @@
 // Dados e helpers da agenda da CEVICO — usados pela Agenda, pelo painel de
 // Agendamentos e pelos indicadores do Meu Painel.
 
+// ☀️ 08/11 (porte da ótica, e961a93): empresa que NÃO é clínica e tem as suas
+// unidades na Identidade da empresa (a LIFE: Piracicaba) não usa os médicos nem
+// Tatuapé/Paulista — quem atende sai das próprias faixas salvas (Fernando) e a
+// unidade da Identidade. Clínica (CEVICO): tudo como antes, mesmo com unidades
+// gravadas (a clínica sem lista própria já recebe Tatuapé/Paulista do servidor).
+const PEOPLE_COLORS = [
+  '#0F5FA6',
+  '#B8860B',
+  '#7C3AED',
+  '#0F766E',
+  '#DB2777',
+  '#EA580C',
+];
+const UNIT_COLORS = ['#EA580C', '#2563EB', '#16A34A', '#7C3AED', '#0891B2'];
+export const companyHasUnits = company =>
+  !!company &&
+  (company.segment || 'clinica') !== 'clinica' &&
+  Array.isArray(company.units) &&
+  company.units.length > 0;
+export const unitsFor = (company, fallback) => {
+  if (!companyHasUnits(company)) return fallback;
+  return Object.fromEntries(
+    company.units.map((u, i) => [
+      u.key,
+      {
+        label: u.label,
+        short: String(u.label || u.key)
+          .slice(0, 3)
+          .toUpperCase(),
+        color: UNIT_COLORS[i % UNIT_COLORS.length],
+      },
+    ])
+  );
+};
+export const unitListFor = (company, fallback) => {
+  if (!companyHasUnits(company)) return fallback;
+  return company.units.map((u, i) => ({
+    key: u.key,
+    label: u.label,
+    color: UNIT_COLORS[i % UNIT_COLORS.length],
+  }));
+};
+export const doctorsFor = (company, windows, fallback) => {
+  if (!companyHasUnits(company)) return fallback;
+  const names = [
+    ...new Set((windows || []).map(w => w.doctor).filter(Boolean)),
+  ];
+  if (!names.length) return fallback;
+  return names.map((name, i) => ({
+    name,
+    short: name.split(' ')[0],
+    color: PEOPLE_COLORS[i % PEOPLE_COLORS.length],
+  }));
+};
+// "toda a clínica" / "toda a empresa" (a palavra 'empresa' do vocabulário dela)
+export const companyWord = company =>
+  companyHasUnits(company)
+    ? company.vocabulary?.empresa || 'empresa'
+    : 'clínica';
+// a empresa abre no fim de semana pelas faixas da semana? (só com faixa no sáb/dom)
+export const weekendWindowsFor = (company, windows) =>
+  companyHasUnits(company) &&
+  (windows || []).some(w => !w.date && [0, 6].includes(Number(w.dow)));
+
 export const DOCTORS = [
   { name: 'Dr. Gustavo Bittar', short: 'Gustavo', color: '#0F5FA6' },
   { name: 'Dr. Henrique Gemelli', short: 'Henrique', color: '#B8860B' },
@@ -524,6 +588,47 @@ export const TYPES = [
 ];
 export const TYPE_BY_KEY = Object.fromEntries(TYPES.map(t => [t.key, t]));
 
+// ☀️ 08/11: TIPOS POR EMPRESA. company.agenda_types (Identidade da empresa) =
+// [{ key: 'avaliacao', label: 'Visita técnica', noun, plural, hint, icon }, …]
+// renomeia e LIMITA os tipos da Agenda (a LIFE: Visita técnica + Fechamento).
+// O banco não muda: segue task_type 'consulta' + modality. Sem lista = os 6 tipos.
+const TYPE_OVERRIDES = ['label', 'noun', 'plural', 'hint', 'icon', 'article'];
+export const typesFor = company => {
+  const custom = (
+    Array.isArray(company?.agenda_types) ? company.agenda_types : []
+  ).filter(t => t && TYPE_BY_KEY[t.key]);
+  if (!custom.length) return TYPES;
+  const seen = new Set();
+  return custom
+    .filter(t => !seen.has(t.key) && seen.add(t.key))
+    .map(t => {
+      const over = Object.fromEntries(
+        TYPE_OVERRIDES.filter(f => String(t[f] || '').trim()).map(f => [
+          f,
+          String(t[f]).trim(),
+        ])
+      );
+      return { ...TYPE_BY_KEY[t.key], ...over };
+    });
+};
+// todos os tipos (um agendamento antigo de tipo escondido ainda tem rótulo),
+// com os nomes da empresa por cima
+export const typeByKeyFor = company => ({
+  ...TYPE_BY_KEY,
+  ...Object.fromEntries(typesFor(company).map(t => [t.key, t])),
+});
+// modalidades (ocupação por tipo, "Tipo de consulta" do card) com os nomes da
+// empresa — e só as dos tipos dela, quando ela tem a sua lista
+export const modalitiesFor = company => {
+  const types = typesFor(company);
+  if (types === TYPES) return MODALITIES;
+  const byKey = Object.fromEntries(types.map(t => [t.key, t]));
+  return MODALITIES.filter(m => byKey[m.key]).map(m => ({
+    ...m,
+    label: byKey[m.key].label,
+  }));
+};
+
 // 🎨 item 290 (29/09, pedido dele: "parecido com o Google Agenda, mudar as
 // cores"): as 12 cores que a equipe pode dar a UM agendamento para se
 // organizar. Vale para todos; sem cor = cor padrão do tipo. A lista é a
@@ -749,6 +854,7 @@ export const scanAgenda = ({
   tasks,
   blockedSet,
   blockedDays = new Set(),
+  weekendOk = false, // ☀️ 08/11: empresa com faixa no sábado (porte da ótica)
   from,
   days,
   freeLimit = 3,
@@ -779,7 +885,7 @@ export const scanAgenda = ({
     day.setDate(day.getDate() + i);
     const dow = day.getDay();
     // fim de semana bloqueado — salvo abertura pontual naquela data (item 375)
-    if ((dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day))) continue;
+    if (!weekendOk && (dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day))) continue;
     if (blockedDays.has(dateKey(day))) continue; // dia fechado inteiro
 
     windows

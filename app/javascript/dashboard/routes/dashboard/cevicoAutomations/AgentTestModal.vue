@@ -7,6 +7,7 @@
 import { ref, computed, nextTick, onMounted } from 'vue';
 import { useAlert } from 'dashboard/composables';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CrmAPI from 'dashboard/api/crm';
 import GuidanceModal from './GuidanceModal.vue';
 
@@ -92,9 +93,27 @@ const VOICE_SUGGESTIONS = [
   'você é um robô?',
   'não tenho interesse, obrigado',
 ];
-const suggestions = computed(() =>
-  isVoice.value ? VOICE_SUGGESTIONS : SUGGESTIONS
-);
+// ☀️ 08/11 (como a ótica fez): quem está do outro lado e as falas prontas vêm da
+// empresa — clínica = paciente e as falas da clínica; outra empresa = cliente
+const { isClinic, word } = useCevicoAccess();
+const who = computed(() => (isClinic.value ? 'paciente' : word('cliente')));
+// ☀️ falas típicas de quem chama a LIFE (energia solar) pelo WhatsApp
+const COMPANY_SUGGESTIONS = [
+  'oi, vi o anúncio da conta de luz',
+  'quanto custa pra colocar placa?',
+  'minha conta vem uns 600',
+  'funciona em dia nublado?',
+  'é uma chácara, não tem telhado bom',
+  'vocês são de onde? é confiável?',
+  'vou pensar, preciso ver com minha esposa',
+  'consegue me mandar o orçamento hoje?',
+  'não chegou a foto',
+  'você é um robô?',
+];
+const suggestions = computed(() => {
+  if (isVoice.value) return VOICE_SUGGESTIONS;
+  return isClinic.value ? SUGGESTIONS : COMPANY_SUGGESTIONS;
+});
 
 const scrollToEnd = async () => {
   await nextTick();
@@ -250,7 +269,7 @@ const guide = turn => {
               Caixa interna, sem ligação: ninguém recebe nada.
             </p>
             <p v-else class="text-[11px] opacity-80">
-              Você é o paciente. O agente responde com a IA de verdade e o
+              Você é o {{ who }}. O agente responde com a IA de verdade e o
               {{ isV2 ? 'Roteiro 2 · Otimizado pela análise (só existe neste teste)' : 'Roteiro 1 · Fiel ao N8N (o que os atendentes leem)' }}.
               Caixa interna, sem canal de envio: nada vai para telefone nenhum.
             </p>
@@ -324,7 +343,7 @@ const guide = turn => {
             {{ isVoice ? 'ligação de teste' : 'conversa de teste' }} #{{
               displayId
             }}
-            · {{ isVoice ? 'lead de teste' : 'paciente de teste' }} ·
+            · {{ isVoice ? 'lead de teste' : `${who} de teste` }} ·
             {{ new Date().toLocaleDateString('pt-BR') }}<template v-if="!isVoice">
               · {{ isV2 ? 'Roteiro 2 · Otimizado' : 'Roteiro 1 · Fiel ao N8N' }}</template>
           </p>
@@ -336,8 +355,24 @@ const guide = turn => {
                 <p class="whitespace-pre-wrap">{{ t.text }}</p>
                 <span class="cv-bubble-time">{{ fmtTime(t.at) }} ·
                   {{
-                    isVoice ? 'você (lead, ao telefone)' : 'você (paciente)'
+                    isVoice ? 'você (lead, ao telefone)' : `você (${who})`
                   }}</span>
+              </div>
+            </div>
+            <!-- 🖼️ 08/11 (igual à ótica): o que as ferramentas mandaram (LIFE: foto dos telhados) -->
+            <div v-else-if="t.role === 'media'" class="flex justify-start">
+              <div class="cv-bubble cv-bubble-agent">
+                <img
+                  v-for="(src, i) in t.images || []"
+                  :key="`${t.id}-img-${i}`"
+                  :src="src"
+                  alt="imagem"
+                  class="rounded-lg max-w-[260px] mb-1"
+                />
+                <p v-if="t.text" class="whitespace-pre-wrap">{{ t.text }}</p>
+                <span class="cv-bubble-time"
+                  >{{ fmtTime(t.at) }} · {{ agentName }} · ferramenta</span
+                >
               </div>
             </div>
             <!-- agente à esquerda: um balão por mensagem -->
@@ -451,7 +486,7 @@ class="cv-chip cv-slate"
               :placeholder="
                 isVoice
                   ? 'Escreva o que o lead diria ao telefone… (Enter envia, Shift+Enter quebra linha)'
-                  : 'Escreva como o paciente… (Enter envia, Shift+Enter quebra linha)'
+                  : `Escreva como o ${who}… (Enter envia, Shift+Enter quebra linha)`
               "
               :disabled="isSending || isStarting"
               @keydown.enter.exact.prevent="send()"

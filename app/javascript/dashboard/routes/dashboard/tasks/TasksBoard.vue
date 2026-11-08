@@ -23,6 +23,7 @@ import { isAppointmentTask } from 'dashboard/helper/cevicoAgenda';
 import { useRouter } from 'vue-router';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
+import { dueCountdown } from 'dashboard/helper/taskDue';
 
 ChartJS.register(Title, Tooltip, Legend, ArcElement);
 
@@ -986,11 +987,18 @@ const formatDue = iso => {
                     <span class="i-lucide-check text-[11px]" />Concluída
                   </span>
                   <span v-else-if="isOverdue(task)" class="cv-chip cv-red">
-                    <span class="i-lucide-alert-triangle text-[11px]" />Atrasada
+                    <span class="i-lucide-alert-triangle text-[11px]" />{{
+                      dueCountdown(task.due_at)?.text
+                    }}
                   </span>
-                  <span v-else-if="isDueSoon(task)" class="cv-chip cv-amber">
-                    <span class="i-lucide-clock text-[11px]" />{{
-                      $t('TASKS.STATS.DUE_SOON')
+                  <!-- ⏰ 08/11: contagem regressiva do prazo em todo cartão com data -->
+                  <span
+                    v-else-if="task.due_at"
+                    class="cv-chip"
+                    :class="isDueSoon(task) ? 'cv-amber' : 'cv-slate'"
+                  >
+                    <span class="i-lucide-alarm-clock text-[11px]" />{{
+                      dueCountdown(task.due_at)?.text
                     }}
                   </span>
                   <span v-if="task.task_type" class="cv-chip cv-slate">

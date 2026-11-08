@@ -6,7 +6,14 @@
 // "online" na teleconsulta). Criado à mão aqui ou pelo Atendente de
 // Agendamento (IA). Peças: kit "iMac G3 + vidro" + _cevico-agenda.scss.
 import { openPatientChat } from 'dashboard/composables/useCevicoPatientChat';
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
+import {
+  ref,
+  reactive,
+  computed,
+  watch,
+  onMounted,
+  onBeforeUnmount,
+} from 'vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import AgendaTimeColumn from 'dashboard/components-next/cevico/agenda/AgendaTimeColumn.vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -25,8 +32,10 @@ import CrmAPI from 'dashboard/api/crm';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 import {
-  DOCTORS, MODALITIES, ONLINE_UNIT,
-  TYPES, TYPE_BY_KEY, GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
+  DOCTORS as CLINIC_DOCTORS, ONLINE_UNIT,
+  unitsFor, doctorsFor, companyHasUnits, companyWord, weekendWindowsFor, resolveAllWindows,
+  typesFor, typeByKeyFor, modalitiesFor,
+  GENERAL_TYPE, typeOf, LEGACY_KIND_TO_TYPES,
   kindFor, kindOf, kindVars, hexToRgbSpaced, isAppointmentTask as isAppointment,
   resolveWindows, resolveOpenWindows, windowOnDay, resolveBlocked, resolveBlockedDays, resolveExamWindows,
   wholeBlockedDays, partialBlocksOn, isWindowBlocked, sameBlock,
@@ -52,6 +61,13 @@ const { isAdmin } = useAdmin();
 const { canView, canEdit, unitAllowed } = useCevicoAccess();
 const canEditAgenda = computed(() => canEdit('agenda'));
 const TYPE_NODE = { cirurgia: 'agenda.cirurgias', exames: 'agenda.exames' };
+// ☀️ 08/11: os TIPOS (e as modalidades) da EMPRESA — a LIFE tem só Visita técnica e
+// Fechamento; a clínica, os 6 de sempre. Reativos (mesmo nome de antes) para a
+// Agenda inteira seguir a Identidade da empresa quando ela chegar do servidor.
+const company = computed(() => store.getters['crm/getCompany']);
+const TYPES = reactive([...typesFor(company.value)]);
+const TYPE_BY_KEY = reactive(typeByKeyFor(company.value));
+const MODALITIES = reactive([...modalitiesFor(company.value)]);
 const visibleTypes = computed(() => TYPES.filter(t => !TYPE_NODE[t.key] || canView(TYPE_NODE[t.key])));
 const route = useRoute();
 const router = useRouter();
@@ -82,7 +98,8 @@ const LAYERS_KEY = 'cevico_agenda_layers';
 const loadLayers = () => {
   try {
     const saved = JSON.parse(localStorage.getItem(LAYERS_KEY) || 'null');
-    if (Array.isArray(saved) && saved.some(x => TYPE_BY_KEY[x])) return saved.filter(x => TYPE_BY_KEY[x]);
+    const known = x => TYPES.some(t => t.key === x);
+    if (Array.isArray(saved) && saved.some(known)) return saved.filter(known);
   } catch (e) { /* sem preferência salva */ }
   return TYPES.map(t => t.key);
 };
@@ -104,7 +121,19 @@ const ensureLayer = key => {
   if (!TYPE_BY_KEY[key] || layers.value.has(key)) return;
   const next = new Set(layers.value); next.add(key); layers.value = next; persistLayers();
 };
-const activeTypes = computed(() => TYPES.filter(t => layers.value.has(t.key)));
+// ☀️ 08/11: a Identidade da empresa chegou (ou mudou) → troca os tipos no lugar;
+// camada salva que não existe mais nesta empresa = volta para a Agenda geral
+watch(company, c => {
+  TYPES.splice(0, TYPES.length, ...typesFor(c));
+  Object.assign(TYPE_BY_KEY, typeByKeyFor(c));
+  MODALITIES.splice(0, MODALITIES.length, ...modalitiesFor(c));
+  if (!TYPES.some(t => layers.value.has(t.key)))
+    layers.value = new Set(TYPES.map(t => t.key));
+});
+const activeTypes = computed(() => {
+  const on = TYPES.filter(t => layers.value.has(t.key));
+  return on.length ? on : [...TYPES];
+});
 const isGeneral = computed(() => activeTypes.value.length === TYPES.length);
 const singleType = computed(() => (activeTypes.value.length === 1 ? activeTypes.value[0] : null));
 const k = computed(() => singleType.value || GENERAL_TYPE); // o "tipo" da página (cor, nome, ícone)
@@ -280,10 +309,32 @@ const VIEW_MODES = [
 ];
 
 // Unidades da clínica (+ "online" da teleconsulta)
-const UNITS = {
+const CLINIC_UNITS = {
   tatuape:  { label: 'Tatuapé',      short: 'TAT', color: '#2563EB' },
   paulista: { label: 'Av. Paulista', short: 'PAU', color: '#EA580C' },
 };
+// ☀️ 08/11 (porte da ótica): unidades da Identidade da empresa (Piracicaba, na LIFE);
+// clínica = as de sempre
+const UNITS = computed(() => unitsFor(company.value, CLINIC_UNITS));
+// "toda a clínica" vira "toda a empresa" quando a empresa tem a sua unidade
+const everyone = computed(() => `toda a ${companyWord(company.value)}`);
+const everyoneLabel = computed(
+  () => `Toda a ${companyWord(company.value)}`
+);
+// quem atende: fora da clínica sai das faixas salvas (Fernando); na clínica, os médicos
+const DOCTORS = computed(() =>
+  doctorsFor(
+    company.value,
+    resolveAllWindows(crmSettings.value),
+    CLINIC_DOCTORS
+  )
+);
+const isOwnAgenda = computed(() => companyHasUnits(company.value));
+const whoLabel = computed(() => (isOwnAgenda.value ? 'Quem atende' : 'Médico'));
+// fim de semana só abre pela rotina quando a empresa tem faixa no sábado/domingo
+const weekendOpen = computed(() =>
+  weekendWindowsFor(company.value, resolveAllWindows(crmSettings.value))
+);
 const ONLINE = { label: 'Online', short: 'ON', color: '#7C3AED' };
 
 const PROBLEMAS = [
@@ -310,14 +361,15 @@ const procedureOptions = computed(() => {
   return PROBLEMAS;
 });
 const procedureLabel = computed(() => {
+  if (isOwnAgenda.value) return 'Assunto';
   if (form.value.kind === 'exames') return 'Exame';
   if (form.value.kind === 'cirurgias') return 'Procedimento';
   return 'Problema';
 });
 
 // ── Médicos e janelas de avaliação da clínica ───────────────
-const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
-const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
+const doctorColor = name => DOCTORS.value.find(d => d.name === name)?.color || '#64748B';
+const doctorShort = name => DOCTORS.value.find(d => d.name === name)?.short || name;
 // item 375: as aberturas pontuais (data fixa) somam às faixas da semana
 const windows = computed(() =>
   [...resolveWindows(crmSettings.value), ...resolveOpenWindows(crmSettings.value)].filter(w => unitAllowed(w.unit))
@@ -363,7 +415,7 @@ const blockOptions = day => {
   const doctors = [...new Set(wins.map(w => w.doctor))];
   return [
     { key: 'all', label: 'Dia inteiro', part: dateKey(day), on: isDayBlocked(day), icon: 'i-lucide-calendar-off' },
-    ...units.map(u => ({ key: 'u:' + u, label: `Só ${(UNITS[u]?.label || u)}`, part: { date: dateKey(day), unit: u }, on: isPartBlocked(day, { date: dateKey(day), unit: u }), icon: 'i-lucide-building-2' })),
+    ...units.map(u => ({ key: 'u:' + u, label: `Só ${(UNITS.value[u]?.label || u)}`, part: { date: dateKey(day), unit: u }, on: isPartBlocked(day, { date: dateKey(day), unit: u }), icon: 'i-lucide-building-2' })),
     ...doctors.map(d => ({ key: 'd:' + d, label: `Só ${doctorShort(d)}`, part: { date: dateKey(day), doctor: d }, on: isPartBlocked(day, { date: dateKey(day), doctor: d }), icon: 'i-lucide-stethoscope' })),
   ];
 };
@@ -371,11 +423,14 @@ const dayBlockSummary = day => {
   if (isDayBlocked(day)) return 'fechado';
   const parts = partialBlocksFor(day);
   if (!parts.length) return '';
-  return parts.map(b => (b.unit ? (UNITS[b.unit]?.label || b.unit) : doctorShort(b.doctor))).join(', ') + ' fechado';
+  return parts.map(b => (b.unit ? (UNITS.value[b.unit]?.label || b.unit) : doctorShort(b.doctor))).join(', ') + ' fechado';
 };
 // teleconsulta pode acontecer em qualquer dia útil, mesmo sem janela
 // item 375: sábado/domingo com abertura pontual é dia de agenda
-const hasOpenWindow = day => windows.value.some(w => w.date === dateKey(day));
+// ☀️ 08/11: empresa com faixa da semana no sábado/domingo também tem agenda nesse dia
+const hasOpenWindow = day =>
+  windows.value.some(w => w.date === dateKey(day)) ||
+  (weekendOpen.value && windows.value.some(w => !w.date && Number(w.dow) === day.getDay()));
 const isDayOff = day => (isWeekend(day) && !hasOpenWindow(day)) || isDayBlocked(day);
 
 const toggleBlockDay = async (day, part = null) => {
@@ -389,7 +444,7 @@ const toggleBlockDay = async (day, part = null) => {
     await CrmAPI.updateAgendaBlockedDays(next);
     await store.dispatch('crm/fetchSettings');
     blockMenu.value = null;
-    const what = typeof key === 'string' ? 'Dia' : key.unit ? (UNITS[key.unit]?.label || key.unit) : doctorShort(key.doctor);
+    const what = typeof key === 'string' ? 'Dia' : key.unit ? (UNITS.value[key.unit]?.label || key.unit) : doctorShort(key.doctor);
     useAlert(exists ? `${what} reaberto ✓` : `${what} fechado 🔒`);
   } catch {
     useAlert('Erro ao atualizar o dia.');
@@ -575,9 +630,9 @@ const activeDoctor = computed(() => (view.value.startsWith('doctor:') ? view.val
 const isPersonalView = computed(() => view.value === 'me' || /^\d+$/.test(view.value));
 
 // tudo o que está no calendário (canceladas ficam fora; continuam no banco)
-const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at).filter(x => !UNITS[x.unit] || unitAllowed(x.unit)));
+const liveTasks = computed(() => allTasks.value.filter(x => x.due_at && !x.canceled_at).filter(x => !UNITS.value[x.unit] || unitAllowed(x.unit)));
 // unidades que a pessoa pode ver (chips e seletor); vazio no servidor = todas
-const visibleUnits = computed(() => Object.fromEntries(Object.entries(UNITS).filter(([key]) => unitAllowed(key))));
+const visibleUnits = computed(() => Object.fromEntries(Object.entries(UNITS.value).filter(([key]) => unitAllowed(key))));
 const inKind = t => layers.value.has(typeOf(t)); // item 234: camadas por tipo
 
 // 🏥 item 228: origem do agendamento — 'all' | 'cevico' (nasceu aqui) | 'oftalmofacil'
@@ -737,6 +792,15 @@ const MONTH_MAX = 4;
 
 // dias da semana da visão semanal — "esconder sáb/dom" (item 76)
 const hideWeekend = ref(localStorage.getItem('cevico_agenda_hide_weekend') !== '0');
+// ☀️ 08/11: empresa com faixa no sábado — sem preferência salva, já vê o fim de semana
+watch(
+  weekendOpen,
+  v => {
+    if (v && localStorage.getItem('cevico_agenda_hide_weekend') === null)
+      hideWeekend.value = false;
+  },
+  { immediate: true }
+);
 const toggleWeekend = () => {
   hideWeekend.value = !hideWeekend.value;
   localStorage.setItem('cevico_agenda_hide_weekend', hideWeekend.value ? '1' : '0');
@@ -832,7 +896,7 @@ const chipTime = task =>
   new Date(task.due_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const unitOf = task => {
   if (task.unit === ONLINE_UNIT) return ONLINE;
-  if (task.unit && UNITS[task.unit]) return UNITS[task.unit];
+  if (task.unit && UNITS.value[task.unit]) return UNITS.value[task.unit];
   if (isSurgeryTask(task)) {
     const loc = surgeryLocationOf(task);
     if (loc) return { label: loc.label, color: loc.color };
@@ -882,6 +946,7 @@ const occScan = (from, days) =>
     tasks: occTasks.value,
     blockedSet: blockedSet.value,
     blockedDays: blockedDays.value,
+    weekendOk: weekendOpen.value,
     from,
     days,
     freeLimit: 0,
@@ -907,10 +972,12 @@ const occColor = pct => {
   if (pct >= 50) return '#D4A017';
   return '#22C55E';
 };
-const OCC_MODALITIES = MODALITIES.filter(m => m.key !== 'teleconsulta');
+const OCC_MODALITIES = computed(() =>
+  MODALITIES.filter(m => m.key !== 'teleconsulta')
+);
 const occSegments = scan => {
   if (isSurgeryMode.value || !scan.total) return null;
-  return OCC_MODALITIES
+  return OCC_MODALITIES.value
     .map(m => ({ ...m, count: scan.byModality?.[m.key] || 0 }))
     .filter(s => s.count > 0)
     .map(s => ({ ...s, pct: Math.round((s.count / scan.total) * 100) }));
@@ -932,10 +999,10 @@ const winColor = win => {
   return win.doctor ? doctorColor(win.doctor) : surgeryLocations.value.find(l => l.key === win.unit)?.color || k.value.color;
 };
 const winTitle = win => {
-  if (win.exam) return `Exames — ${UNITS[win.unit]?.label || win.unit}`;
+  if (win.exam) return `Exames — ${UNITS.value[win.unit]?.label || win.unit}`;
   return win.doctor || `Sala cirúrgica — ${surgeryLocationLabel(win.unit)}`;
 };
-const winUnitLabel = win => (win.doctor || win.exam ? UNITS[win.unit]?.label : surgeryLocationLabel(win.unit));
+const winUnitLabel = win => (win.doctor || win.exam ? UNITS.value[win.unit]?.label : surgeryLocationLabel(win.unit));
 const winVars = win => ({ '--w': winColor(win), '--w-rgb': hexToRgbSpaced(winColor(win)), '--w-deep': winColor(win) });
 // item 307: para que serve a faixa ("Pós-operatório", "Retorno + Pós-operatório"; '' = tudo)
 const reservedLabelOf = win => reservedFor(win).map(key => TYPE_BY_KEY[key]?.label).join(' + ');
@@ -1068,7 +1135,10 @@ const defaultModality = key => ({ consultas: 'avaliacao', teleconsultas: 'teleco
 const defaultUnit = key => {
   if (key === 'teleconsultas') return ONLINE_UNIT;
   if (key === 'cirurgias') return surgeryLocations.value[0]?.key || '';
-  return activeUnit.value || 'tatuape';
+  return (
+    activeUnit.value ||
+    (isOwnAgenda.value ? Object.keys(UNITS.value)[0] : 'tatuape')
+  );
 };
 const emptyForm = (day, prefill = {}) => {
   const key = prefill.kind || k.value.kind || 'consultas';
@@ -1142,7 +1212,9 @@ const setFormType = key => {
     if (tt.kind !== 'consultas' && tt.kind !== 'teleconsultas') form.value.procedure = '';
   }
 };
-const consultaModalities = MODALITIES.filter(m => ['avaliacao', 'retorno', 'pos_op'].includes(m.key));
+const consultaModalities = computed(() =>
+  MODALITIES.filter(m => ['avaliacao', 'retorno', 'pos_op'].includes(m.key))
+);
 
 const openCreateOnDay = (day, prefill = {}) => {
   editingTask.value = null;
@@ -1183,7 +1255,7 @@ const formSummary = computed(() => {
   }
   if (f.doctor) parts.push(doctorShort(f.doctor));
   if (f.unit === ONLINE_UNIT) parts.push('Online');
-  else if (UNITS[f.unit]) parts.push(UNITS[f.unit].label);
+  else if (UNITS.value[f.unit]) parts.push(UNITS.value[f.unit].label);
   else if (f.kind === 'cirurgias' && f.unit) parts.push(surgeryLocations.value?.find(l => l.key === f.unit)?.label || '');
   return parts.filter(Boolean).join(' · ');
 });
@@ -1256,7 +1328,8 @@ const hmOf = t => format(new Date(t.due_at), 'HH:mm');
 // item 300: ao CRIAR, a origem é obrigatória; ao editar agendamento antigo (sem
 // origem) continua opcional — o que veio do hub já tem dono e não muda aqui
 const originLocked = computed(() => Boolean(editingTask.value?.source));
-const originMissing = computed(() => !editingTask.value && !form.value.origin);
+// ☀️ 08/11: empresa com agenda própria (LIFE) não tem CEVICO × Oftalmofácil — sem essa escolha
+const originMissing = computed(() => !isOwnAgenda.value && !editingTask.value && !form.value.origin);
 const originHint = computed(() => ORIGIN_BY_KEY[form.value.origin]?.hint || 'Escolha de quem é o paciente — define a etiqueta, o CRM e a caixa do lembrete de confirmação.');
 // 🧭 item 362 (21/10): COMO CHEGOU — obrigatório ao criar paciente NOVO (o que
 // já tem carimbo automático de anúncio/página vem travado; o que já foi informado
@@ -1265,7 +1338,9 @@ const channelAuto = ref(false);
 const channelMissing = computed(() => !editingTask.value && !form.value.contact_id && !form.value.channel);
 const channelHint = computed(() => {
   if (channelAuto.value) return 'Carimbo automático (clique no anúncio ou página): não precisa escolher.';
-  return LEAD_CHANNEL_BY_KEY[form.value.channel] ? 'Vira o rastro deste paciente no Financeiro & CAC e nas Campanhas.' : 'Pergunte: "como você chegou até a gente?" — é o que liga esta consulta ao canal que trouxe o paciente.';
+  const who = isOwnAgenda.value ? 'cliente' : 'paciente';
+  const what = isOwnAgenda.value ? 'este agendamento' : 'esta consulta';
+  return LEAD_CHANNEL_BY_KEY[form.value.channel] ? `Vira o rastro deste ${who} no Financeiro & CAC e nas Campanhas.` : `Pergunte: "como você chegou até a gente?" — é o que liga ${what} ao canal que trouxe o ${who}.`;
 });
 // 📱 item 346: paciente NOVO só nasce com telefone (DDD + número) — sem ele
 // não há como achar o cadastro de quem já existe e o paciente duplica
@@ -1338,7 +1413,7 @@ const save = async () => {
   if (form.value.kind === 'consultas' && !NOT_EVALUATION.includes(modality) && (timeChanged || typeChanged)) {
     const hh = (form.value.time || '09:00').slice(0, 2);
     const n = evaluationsInHour(form.value.date, hh, form.value.unit, editingTask.value?.id);
-    const where = UNITS[form.value.unit]?.label || form.value.unit;
+    const where = UNITS.value[form.value.unit]?.label || form.value.unit;
     // eslint-disable-next-line no-alert
     if (n >= hourlyCap.value && !window.confirm(`Às ${hh}h, ${where} já tem ${n} avaliações (o limite é ${hourlyCap.value} por hora). Marcar mesmo assim, como encaixe?`)) return;
   }
@@ -1372,13 +1447,15 @@ const save = async () => {
     if (form.value.contact_id) payload.contact_id = form.value.contact_id;
     // o ✅ digitado no nome sai do nome e vira o confirmado de verdade
     if (editingTask.value && handConfirmed(editingTask.value) && !editingTask.value.confirmed_at) payload.confirmed = true;
-    const noun = kindFor(fk).noun;
+    // ☀️ 08/11: na agenda da empresa o aviso usa o nome do TIPO ("Visita técnica agendada", "Fechamento agendado")
+    const noun = isOwnAgenda.value ? formType.value.noun || kindFor(fk).noun : kindFor(fk).noun;
+    const art = isOwnAgenda.value ? formType.value.article || kindFor(fk).article : kindFor(fk).article;
     if (editingTask.value) {
       await store.dispatch('tasks/update', { id: editingTask.value.id, ...payload });
-      useAlert(`${cap(noun)} atualizad${kindFor(fk).article}`);
+      useAlert(`${cap(noun)} atualizad${art}`);
     } else {
       await store.dispatch('tasks/create', payload);
-      useAlert(`${cap(noun)} agendad${kindFor(fk).article} ${fk === 'cirurgias' ? '🔪' : '✓'}`);
+      useAlert(`${cap(noun)} agendad${art} ${fk === 'cirurgias' ? '🔪' : '✓'}`);
       ensureLayer(formType.value.key); // mostra onde ficou
     }
     showModal.value = false;
@@ -1510,7 +1587,7 @@ const scheduleFollowUpFrom = task => {
     phone: task.phone || '',
     doctor: task.doctor || '',
     modality: 'retorno',
-    unit: task.unit && UNITS[task.unit] ? task.unit : 'tatuape',
+    unit: task.unit && UNITS.value[task.unit] ? task.unit : defaultUnit('consultas'),
     description: `Origem: ${kindLabelOf(task)} de ${format(new Date(task.due_at), 'dd/MM')} às ${chipTime(task)}.`,
   });
   showDeleteConfirm.value = false;
@@ -2318,7 +2395,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       :class="view === 'clinic' ? 'cv-chip-on' : ''"
                       @click="view = 'clinic'"
                     >
-                      {{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}
+                      {{ isSurgeryMode ? 'Todos os locais' : everyoneLabel }}
                     </button>
                     <template v-if="!isSurgeryMode">
                       <button
@@ -2374,7 +2451,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                   </div>
                   <div class="flex items-center gap-1.5 ml-auto flex-wrap">
                     <select v-model="view" class="cv-input !h-8 text-xs !w-auto max-w-[160px]" title="Ver a agenda de…">
-                      <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : 'Toda a clínica' }}</option>
+                      <option value="clinic">{{ isSurgeryMode ? 'Todos os locais' : everyoneLabel }}</option>
                       <optgroup v-if="!isSurgeryMode && !isTele" label="Unidades">
                         <option v-for="(u, key) in visibleUnits" :key="key" :value="`unit:${key}`">{{ u.label }}</option>
                       </optgroup>
@@ -2431,7 +2508,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button class="w-full flex items-center gap-2.5 text-left" @click="showOccDetail = !showOccDetail">
             <span class="i-lucide-gauge text-sm text-n-slate-10" />
             <p class="text-xs font-semibold text-n-slate-12 whitespace-nowrap">Ocupação</p>
-            <span class="cv-chip">{{ activeDoctor ? doctorShort(activeDoctor) : activeUnit ? (UNITS[activeUnit]?.label || surgeryLocationLabel(activeUnit)) : (isSurgeryMode ? 'todos os locais' : 'toda a clínica') }}</span>
+            <span class="cv-chip">{{ activeDoctor ? doctorShort(activeDoctor) : activeUnit ? (UNITS[activeUnit]?.label || surgeryLocationLabel(activeUnit)) : (isSurgeryMode ? 'todos os locais' : everyone) }}</span>
             <div class="cv-track cv-track-sm flex-1 min-w-[80px] flex">
               <template v-if="occCurrent.total && occSegments(occCurrent)">
                 <div v-for="s in occSegments(occCurrent)" :key="s.key" class="h-full" :style="{ width: Math.max(s.pct, 2) + '%', background: s.color }" :title="`${s.label}: ${s.count} bloco(s)`" />
@@ -2890,7 +2967,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <p class="text-[11px] font-bold uppercase tracking-wider opacity-85">
               {{ editingTask ? `Editar ${formKind.noun}` : (formKind.key === 'cirurgia' ? 'Agendar cirurgia' : `${formKind.article === 'o' ? 'Novo' : 'Nova'} ${formKind.noun}`) }}
             </p>
-            <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : 'Paciente') }}</h2>
+            <h2 class="text-base font-bold leading-tight truncate">{{ form.name.trim() || (editingTask ? formKind.noun : isOwnAgenda ? 'Cliente' : 'Paciente') }}</h2>
             <p class="text-[11px] opacity-90 truncate">{{ formSummary || formKind.hint }}</p>
             <p v-if="ORIGIN_BY_KEY[form.origin] || (editingTask && isConfirmed(editingTask))" class="flex items-center gap-1.5 mt-1 flex-wrap">
               <span v-if="ORIGIN_BY_KEY[form.origin]" class="cv-ag-head-pill"><span :class="ORIGIN_BY_KEY[form.origin].icon" class="text-[10px]" /> {{ ORIGIN_BY_KEY[form.origin].label }}</span>
@@ -2933,10 +3010,10 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <div class="space-y-4 lg:space-y-5 min-w-0">
           <!-- 1 · quem -->
           <section class="cv-ag-sec">
-            <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>Paciente</h3><p>quem vem</p></div></header>
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">1</span><div><h3>{{ isOwnAgenda ? 'Cliente' : 'Paciente' }}</h3><p>{{ isOwnAgenda ? 'com quem é' : 'quem vem' }}</p></div></header>
             <div class="grid grid-cols-1 sm:grid-cols-[1.5fr_1fr] gap-3">
               <div class="relative">
-                <span class="cv-label block mb-1">Nome do paciente *</span>
+                <span class="cv-label block mb-1">{{ isOwnAgenda ? 'Nome do cliente *' : 'Nome do paciente *' }}</span>
                 <!-- 🔎 item 346: paciente do cadastro → nome travado -->
                 <div v-if="form.contact_id" class="cv-input w-full flex items-center gap-2 !bg-n-alpha-1" title="Paciente do cadastro: o nome não se edita aqui">
                   <span class="i-lucide-lock text-xs text-n-slate-10" />
@@ -2959,7 +3036,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
             </div>
             <!-- 🏥 item 300: de quem é o paciente (obrigatório ao criar) -->
-            <div v-if="!originLocked" class="mt-3">
+            <div v-if="!originLocked && !isOwnAgenda" class="mt-3">
               <span class="cv-label block mb-1.5">Paciente de quem? {{ editingTask ? '' : '*' }}</span>
               <div class="cv-ag-origin" :class="originMissing ? 'cv-ag-origin-need' : ''">
                 <button
@@ -3014,7 +3091,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                 <input v-model="form.time" type="time" class="cv-input w-full" />
               </div>
               <div>
-                <span class="cv-label block mb-1">Médico</span>
+                <span class="cv-label block mb-1">{{ whoLabel }}</span>
                 <select v-model="form.doctor" class="cv-input w-full">
                   <option value="">A definir</option>
                   <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
@@ -3063,7 +3140,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
             <div class="space-y-4 lg:space-y-5 min-w-0">
           <!-- 3 · motivo -->
           <section class="cv-ag-sec">
-            <header class="cv-ag-sec-head"><span class="cv-ag-num">3</span><div><h3>Motivo</h3><p>{{ form.kind === 'cirurgias' ? 'procedimento' : form.kind === 'exames' ? 'exame e origem do agendamento' : 'tipo, problema e origem do agendamento' }}</p></div></header>
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">3</span><div><h3>Motivo</h3><p>{{ isOwnAgenda ? 'tipo e assunto' : form.kind === 'cirurgias' ? 'procedimento' : form.kind === 'exames' ? 'exame e origem do agendamento' : 'tipo, problema e origem do agendamento' }}</p></div></header>
             <div class="space-y-3">
               <div v-if="editingTask && form.kind === 'consultas'">
                 <span class="cv-label block mb-1.5">Tipo de consulta</span>
@@ -3073,7 +3150,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <div>
                 <span class="cv-label block mb-1">{{ procedureLabel }}</span>
-                <input v-model="form.procedure" list="agenda-procedimentos" class="cv-input w-full" :placeholder="form.kind === 'exames' ? 'Pentacam, OCT…' : form.kind === 'cirurgias' ? 'Catarata, PRK…' : 'Catarata, refrativa…'" />
+                <input v-model="form.procedure" list="agenda-procedimentos" class="cv-input w-full" :placeholder="isOwnAgenda ? 'Ver telhado e quadro de energia, levar proposta…' : form.kind === 'exames' ? 'Pentacam, OCT…' : form.kind === 'cirurgias' ? 'Catarata, PRK…' : 'Catarata, refrativa…'" />
                 <datalist id="agenda-procedimentos">
                   <option v-for="p in procedureOptions" :key="p" :value="p" />
                 </datalist>
@@ -3090,7 +3167,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           </section>
 
           <!-- 4 · valor (item 324): pré-configurado do tipo + valores lançados à mão -->
-          <section class="cv-ag-sec cv-ag-sec-value">
+          <!-- ☀️ 08/11: o valor da consulta (Padrão/Particular, mensagem de confirmação) é da clínica -->
+          <section v-if="!isOwnAgenda" class="cv-ag-sec cv-ag-sec-value">
             <header class="cv-ag-sec-head"><span class="cv-ag-num">4</span><div><h3>Valor</h3><p>o que vai na mensagem de confirmação</p></div></header>
             <div class="space-y-3">
               <div v-if="form.kind === 'consultas'">
@@ -3123,7 +3201,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
 
           <!-- 5 · situação -->
           <section class="cv-ag-sec">
-            <header class="cv-ag-sec-head"><span class="cv-ag-num">5</span><div><h3>Situação</h3><p>como está e o que anotar</p></div></header>
+            <header class="cv-ag-sec-head"><span class="cv-ag-num">{{ isOwnAgenda ? 4 : 5 }}</span><div><h3>Situação</h3><p>como está e o que anotar</p></div></header>
             <div class="space-y-3">
               <div>
                 <div class="cv-seg cv-seg-sm">
@@ -3135,7 +3213,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               </div>
               <div>
                 <span class="cv-label block mb-1">Observações</span>
-                <textarea v-model="form.description" rows="2" class="cv-input w-full resize-none" placeholder="Convênio, pedido especial, retorno..." />
+                <textarea v-model="form.description" rows="2" class="cv-input w-full resize-none" :placeholder="isOwnAgenda ? 'Ponto de referência, melhor horário, quem vai estar…' : 'Convênio, pedido especial, retorno...'" />
               </div>
             </div>
           </section>
@@ -3338,6 +3416,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
     <AgendaSettings
       v-if="showSettings"
       :units="UNITS"
+      :doctors="DOCTORS"
       :initial-tab="settingsTab"
       @close="showSettings = false"
       @reschedule="rescheduleFromSettings"

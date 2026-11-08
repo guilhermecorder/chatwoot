@@ -226,6 +226,20 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   after_update :stamp_reschedule!, if: :rescheduled_in_this_save?
   # 🩹 21/10: consulta de pós-op marcada/remarcada → card na coluna "Consulta Pós Op"
   after_commit -> { Crm::PosOpReflector.call(self) }, on: %i[create update], if: -> { Crm::PosOpReflector.relevant_change?(self) }
+  # ⏰ 08/11 (LIFE): mudaram o dia/hora de uma tarefa de RETORNO com data → o aviso
+  # "chegou o dia" do Radar passa a valer para o prazo novo (o antigo não dispara antes)
+  after_update_commit :reschedule_due_alert!, if: :due_alert_reschedule?
+
+  DUE_ALERT_MARK = '⏰'.freeze
+
+  def due_alert_reschedule?
+    saved_change_to_due_at? && title.to_s.start_with?(DUE_ALERT_MARK) && due_at.present? &&
+      due_at.future? && canceled_at.nil? && !done?
+  end
+
+  def reschedule_due_alert!
+    Crm::TaskDueAlertJob.set(wait_until: due_at).perform_later(id, nil)
+  end
 
   # 🔁 Auditoria 10/2026 (#2/#133): REMARCAÇÃO com carimbo próprio. Antes o
   # painel usava o updated_at — qualquer toque na consulta (✓ compareceu,

@@ -37,6 +37,7 @@ import {
   kindFor,
   kindVars,
   hexToRgbSpaced,
+  unitListFor,
 } from 'dashboard/helper/cevicoAgenda';
 
 // 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
@@ -241,10 +242,15 @@ const SOURCES = [
   { key: 'equipe', label: 'Equipe', icon: 'i-lucide-user', countKey: 'equipe' },
 ];
 const source = ref('');
-const UNITS = [
+const CLINIC_UNITS = [
   { key: 'paulista', label: 'Av. Paulista', color: '#EA580C' },
   { key: 'tatuape', label: 'Tatuapé', color: '#2563EB' },
 ];
+// ☀️ 08/11 (porte da ótica): as unidades da Identidade da empresa mandam (a LIFE
+// tem Piracicaba); clínica = as de sempre
+const UNITS = computed(() =>
+  unitListFor(store.getters['crm/getCompany'], CLINIC_UNITS)
+);
 // teleconsulta é online (sem unidade física): o filtro de unidade some
 const showUnitFilter = computed(
   () => track.value === 'consultas' || track.value === 'exames'

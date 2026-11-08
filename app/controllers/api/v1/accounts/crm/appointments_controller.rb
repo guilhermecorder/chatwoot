@@ -147,7 +147,7 @@ class Api::V1::Accounts::Crm::AppointmentsController < Api::V1::Accounts::BaseCo
         event_at: at,
         due_at: t.due_at,
         unit: t.unit,
-        unit_label: Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit,
+        unit_label: Crm::AgendaSlots.unit_label(Current.account, t.unit),
         doctor: t.doctor,
         procedure: t.procedure,
         modality: t.modality,

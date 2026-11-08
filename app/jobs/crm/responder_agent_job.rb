@@ -96,8 +96,11 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   # (#100) a mensagem do paciente JÁ ganhou balão do agente? (outro job da
   # mesma mensagem passou antes — resgate, fila repetida) → já foi respondida.
   # O Atendente Instagram usa a mesma conferência.
+  # 🖼️ 08/11: a imagem do roteiro (enviar_imagem) sai ANTES dos balões, dentro da
+  # mesma resposta — não conta como "já respondida", senão o texto seria barrado
   def self.already_replied?(conversation, trigger_message_id)
     conversation.messages.where(message_type: :outgoing).where('id > ?', trigger_message_id.to_i)
+                .where("NOT jsonb_exists(COALESCE(additional_attributes, '{}'::jsonb), ?)", Crm::ScriptImages::MEDIA_STAMP)
                 .exists?(["additional_attributes ->> 'cevico_ia_agent' IN (?)", TEXT_AGENT_KEYS])
   end
 
@@ -575,7 +578,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
         account_id: account.id, inbox_id: conversation.inbox_id, message_type: :activity, private: true,
         content: "📅 #{agent_name(agent_key)} agendou: #{ag[:nome]}#{" (👪 #{Crm::PatientLink.summary(requester, patient)})" if other} — " \
                  "#{starts_at.strftime('%d/%m/%Y às %H:%M')} " \
-                 "(#{Crm::AgendaSlots::UNIT_LABELS[ag[:unidade]] || ag[:unidade]}). " \
+                 "(#{Crm::AgendaSlots.unit_label(account, ag[:unidade])}). " \
                  "[📆 Ver na agenda](/app/accounts/#{account.id}/agenda?date=#{starts_at.strftime('%Y-%m-%d')})" \
                  "#{" #{effects_text}" if effects_text.present?}"
       )

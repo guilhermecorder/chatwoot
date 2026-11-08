@@ -22,7 +22,7 @@ RSpec.describe Crm::ResponderTools do
   describe 'definitions' do
     it 'expõe as ferramentas da Agenda + abrir_tarefa (#458) com input_schema; o Agente de Ligação só as da Agenda' do
       defs = tools.definitions
-      expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES - [described_class::STAGE_TOOL_NAME])
+      expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES - [described_class::STAGE_TOOL_NAME, described_class::IMAGE_TOOL_NAME])
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).to eq(described_class::NAMES)
       expect(defs).to all(include(:description, :input_schema))
       expect(defs.find { |d| d[:name] == 'remarcar_consulta' }.dig(:input_schema, :required)).to eq(%w[id dia hora unidade])
@@ -32,11 +32,11 @@ RSpec.describe Crm::ResponderTools do
   describe 'marcar_etapa (06/11 · LIFE: etiqueta da etapa → cartão anda no CRM)' do
     before do
       CrmSetting.find_or_create_by!(account: account).update!(ai_config: {
-                                                               'crm_etapas' => [
-                                                                 { 'etiqueta' => 'conta_recebida', 'quando' => 'mandou a conta de luz' },
-                                                                 { 'etiqueta' => 'Quer Visita', 'quando' => 'quer a visita técnica' }
-                                                               ]
-                                                             })
+                                                                'crm_etapas' => [
+                                                                  { 'etiqueta' => 'conta_recebida', 'quando' => 'mandou a conta de luz' },
+                                                                  { 'etiqueta' => 'Quer Visita', 'quando' => 'quer a visita técnica' }
+                                                                ]
+                                                              })
     end
 
     it 'só aparece com etapas configuradas e lista as etiquetas normalizadas', :aggregate_failures do
@@ -69,6 +69,153 @@ RSpec.describe Crm::ResponderTools do
       result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'fechou_negocio' })
       expect(result[:ok]).to be(false)
       expect(contact.reload.label_list).to be_empty
+    end
+  end
+
+  describe 'abrir_tarefa com data (⏰ 08/11 · LIFE: retorno em 3, 4 dias)' do
+    let(:t) { described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: true) }
+
+    it 'cria a tarefa no dia e hora pedidos', :aggregate_failures do
+      dia = (Crm::AgendaSlots::TZ.now.to_date + 3).to_s
+      result = t.call('abrir_tarefa', { 'motivo' => 'Retorno: chamar em 3 a 4 dias (cliente vai pensar)', 'urgencia' => 'normal',
+                                        'quando' => dia, 'hora' => '10:30' })
+      expect(result).to include(ok: true, criada: true)
+      task = account.tasks.find(result[:id])
+      expect(task.due_at.in_time_zone(Crm::AgendaSlots::TZ).strftime('%Y-%m-%d %H:%M')).to eq("#{dia} 10:30")
+    end
+
+    it 'sem hora = 09:00; data no passado ou longe demais é recusada', :aggregate_failures do
+      dia = (Crm::AgendaSlots::TZ.now.to_date + 4).to_s
+      result = t.call('abrir_tarefa', { 'motivo' => 'Retorno combinado', 'urgencia' => 'normal', 'quando' => dia })
+      expect(account.tasks.find(result[:id]).due_at.in_time_zone(Crm::AgendaSlots::TZ).strftime('%H:%M')).to eq('09:00')
+      ontem = (Crm::AgendaSlots::TZ.now.to_date - 1).to_s
+      expect(t.call('abrir_tarefa', { 'motivo' => 'Retorno combinado', 'urgencia' => 'normal', 'quando' => ontem })[:ok]).to be(false)
+      longe = (Crm::AgendaSlots::TZ.now.to_date + 90).to_s
+      expect(t.call('abrir_tarefa', { 'motivo' => 'Retorno combinado', 'urgencia' => 'normal', 'quando' => longe })[:ok]).to be(false)
+    end
+
+    it 'em sombra só diz para quando seria' do
+      sombra = described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: false)
+      dia = (Crm::AgendaSlots::TZ.now.to_date + 3).to_s
+      sombra.call('abrir_tarefa', { 'motivo' => 'Retorno combinado', 'urgencia' => 'normal', 'quando' => dia })
+      expect(sombra.acoes.last['resumo']).to include('para', '09:00', '(simulado)')
+      expect(account.tasks.count).to eq(0)
+    end
+  end
+
+  describe 'enviar_imagem (08/11 · LIFE: foto dos telhados na sondagem)' do
+    let(:legenda) { 'O seu telhado se parece com qual destas opções? Me responde só com o número, de 1 a 4.' }
+
+    before do
+      CrmSetting.find_or_create_by!(account: account).update!(ai_config: {
+                                                                'imagens_roteiro' => [
+                                                                  { 'chave' => 'Telhados', 'quando' => 'na pergunta do telhado',
+                                                                    'arquivo' => 'brand-assets/life/roteiro/telhados.jpg', 'legenda' => legenda },
+                                                                  { 'chave' => 'sumiu', 'quando' => 'nunca',
+                                                                    'arquivo' => 'brand-assets/nao-existe.jpg' },
+                                                                  { 'chave' => 'fora', 'quando' => 'nunca', 'arquivo' => '../config/database.yml' }
+                                                                ]
+                                                              })
+    end
+
+    def image_tools(live: false, simulation: false, conv: conversation)
+      described_class.new(conversation: conv, agent_key: 'atendente_agendamento', live: live, simulation: simulation)
+    end
+
+    it 'aparece só com imagem configurada e arquivo de verdade dentro de public/', :aggregate_failures do
+      image = image_tools.definitions.find { |d| d[:name] == 'enviar_imagem' }
+      expect(image.dig(:input_schema, :properties, :imagem, :enum)).to eq(%w[telhados])
+      expect(image[:description]).to include('telhados = na pergunta do telhado', legenda)
+      expect(tools(agent_key: 'voice').definitions.pluck(:name)).not_to include('enviar_imagem')
+      CrmSetting.find_by(account: account).update!(ai_config: {})
+      expect(described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: false)
+                            .definitions.pluck(:name)).not_to include('enviar_imagem')
+    end
+
+    it 'em sombra numa conversa real não envia nada' do
+      result = image_tools.call('enviar_imagem', { 'imagem' => 'telhados' })
+      expect(result).to include(simulado: true, ok: true)
+      expect(conversation.messages.outgoing.count).to eq(0)
+    end
+
+    it 'ao vivo manda a imagem com a legenda, uma vez por conversa', :aggregate_failures do
+      result = image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados' })
+      expect(result).to include(ok: true, enviada: true)
+      message = conversation.messages.outgoing.last
+      expect(message.content).to eq(legenda)
+      expect(message.attachments.first.file_type).to eq('image')
+      expect(message.attachments.first.file.filename.to_s).to eq('telhados.jpg')
+      expect(message.additional_attributes).to include('cevico_ia_agent' => 'atendente_agendamento',
+                                                       Crm::ScriptImages::MEDIA_STAMP => { 'chave' => 'telhados' })
+
+      again = image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados' })
+      expect(again).to include(ok: true, ja_enviada: true)
+      expect(conversation.messages.outgoing.count).to eq(1)
+
+      # igual à ótica (08/11): o anexo existe no commit da mensagem → o envio ao WhatsApp sai agendado
+      # (sem anexo no commit, o SendReplyJob sai na hora e o cliente recebe só a legenda)
+      reply_jobs = enqueued_jobs.select { |j| j[:job] == SendReplyJob && j[:args].first == message.id }
+      expect(reply_jobs.size).to eq(1)
+      expect(reply_jobs).to all(satisfy { |j| j['scheduled_at'].present? })
+    end
+
+    it 'reenvia uma vez quando o cliente diz que não chegou; depois só em texto', :aggregate_failures do
+      image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados' })
+      expect(image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados', 'reenviar' => true })).to include(enviada: true)
+      expect(image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados', 'reenviar' => true })[:ok]).to be(false)
+      expect(conversation.messages.outgoing.count).to eq(2)
+    end
+
+    it 'no Testar agente a imagem aparece como balão da ferramenta' do
+      test_conv = Crm::AgentSimulator.new(account: account, agent_key: 'atendente_agendamento').start!
+      image_tools(simulation: true, conv: test_conv).call('enviar_imagem', { 'imagem' => 'telhados' })
+      media = Crm::AgentSimulator.new(account: account, agent_key: 'atendente_agendamento').transcript(test_conv).find { |t| t[:role] == 'media' }
+      expect(media).to include(text: legenda)
+      expect(media[:images].first).to include('telhados.jpg')
+    end
+
+    it 'no Testar agente entra na conversa de teste (sem canal)' do
+      test_conv = Crm::AgentSimulator.new(account: account, agent_key: 'atendente_agendamento').start!
+      result = image_tools(simulation: true, conv: test_conv).call('enviar_imagem', { 'imagem' => 'telhados' })
+      expect(result).to include(ok: true, enviada: true)
+      expect(test_conv.messages.outgoing.last.attachments.count).to eq(1)
+    end
+
+    it 'abrir_tarefa recusa motivo de mentira (placeholder, ignorar…) e não cria tarefa', :aggregate_failures do
+      t = described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: true)
+      %w[placeholder ignorar].each do |motivo|
+        expect(t.call('abrir_tarefa', { 'motivo' => motivo, 'urgencia' => 'normal' })[:ok]).to be(false)
+      end
+      expect(t.call('abrir_tarefa', { 'motivo' => 'não usar, chamada indevida', 'urgencia' => 'normal' })[:ok]).to be(false)
+      expect(t.call('abrir_tarefa', { 'motivo' => 'nunca mind', 'urgencia' => 'normal' })[:ok]).to be(false)
+      expect(t.call('abrir_tarefa', { 'motivo' => 'x', 'urgencia' => 'normal' })[:ok]).to be(false)
+      expect(t.call('abrir_tarefa', { 'motivo' => 'dummy', 'urgencia' => 'normal' })[:ok]).to be(false)
+      expect(t.call('abrir_tarefa', { 'motivo' => 'não aplicável ainda', 'urgencia' => 'normal' })[:ok]).to be(false)
+      expect(account.tasks.count).to eq(0)
+      expect(t.call('abrir_tarefa', { 'motivo' => 'dor', 'urgencia' => 'alta' })[:ok]).to be(true) # urgência nunca é barrada
+    end
+
+    it 'recusa imagem fora da lista (e arquivo fora de public/)' do
+      result = image_tools(live: true).call('enviar_imagem', { 'imagem' => 'fora' })
+      expect(result[:ok]).to be(false)
+      expect(conversation.messages.outgoing.count).to eq(0)
+    end
+
+    it 'no histórico da IA a imagem aparece como enviada por nós (não como foto ilegível do cliente)', :aggregate_failures do
+      image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados' })
+      transcript = Crm::ResponderAgentService.new(conversation: conversation, agent_key: 'atendente_agendamento').send(:build_transcript)
+      expect(transcript).to include("CLÍNICA: #{legenda} [imagem do roteiro enviada ao cliente: telhados]")
+      expect(transcript).not_to include('não foi possível ler')
+    end
+
+    it 'a imagem não trava os balões de texto da mesma resposta (already_replied?)', :aggregate_failures do
+      incoming = conversation.messages.create!(account_id: account.id, inbox_id: inbox.id, message_type: :incoming,
+                                               content: '600 reais', sender: contact)
+      image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados' })
+      expect(Crm::ResponderAgentJob.already_replied?(conversation, incoming.id)).to be(false)
+      conversation.messages.create!(account_id: account.id, inbox_id: inbox.id, message_type: :outgoing, content: 'Anotado!',
+                                    additional_attributes: { 'cevico_ia_agent' => 'atendente_agendamento' })
+      expect(Crm::ResponderAgentJob.already_replied?(conversation, incoming.id)).to be(true)
     end
   end
 

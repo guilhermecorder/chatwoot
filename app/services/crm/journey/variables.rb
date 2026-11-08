@@ -143,7 +143,7 @@ class Crm::Journey::Variables
     place = @settings.place_for(unit: @source.unit)
     date_values(at&.to_date).merge(
       'hora' => at&.strftime('%H:%M').to_s,
-      'unidade' => place['unidade'].presence || Crm::AgendaSlots::UNIT_LABELS[@source.unit.to_s] || @source.unit.to_s,
+      'unidade' => place['unidade'].presence || Crm::AgendaSlots.unit_label(@source.account, @source.unit).to_s,
       'endereco' => place['endereco'].to_s,
       'procedimento' => @source.procedure.to_s,
       'medico' => @source.doctor.to_s

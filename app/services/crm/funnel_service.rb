@@ -92,7 +92,7 @@ class Crm::FunnelService # rubocop:disable Metrics/ClassLength
       name = t.title.to_s.sub(/\A(Consulta|Teleconsulta):\s*/i, '').strip.presence || t.contact&.name || 'Paciente'
       { id: t.contact_id || -t.id, task_id: t.id, name: name,
         phone: t.phone.presence || t.contact&.phone_number, due_at: t.due_at, doctor: Crm::DoctorNames.canonical(t.doctor) || 'sem médico',
-        unit: Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit.presence || 'sem unidade', origin: origins[t.contact_id]&.dig(:name) || 'sem conversa',
+        unit: Crm::AgendaSlots.unit_label(@account, t.unit) || 'sem unidade', origin: origins[t.contact_id]&.dig(:name) || 'sem conversa',
         modality: t.modality, status: consult_status(t), rescheduled: t.rescheduled_count.to_i, reached: reached }
     end
     {

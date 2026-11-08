@@ -31,7 +31,7 @@ class Crm::StageEntriesReport
         entered_at: log.entered_at, origin: origins[card.contact_id]&.dig(:name) || 'sem conversa',
         origin_id: origins[card.contact_id]&.dig(:id), stage_now: card.stage&.name, stage_now_color: card.stage&.color,
         conversation_id: convs[card.contact_id],
-        consult: t && { task_id: t.id, due_at: t.due_at, unit: Crm::AgendaSlots::UNIT_LABELS[t.unit] || t.unit,
+        consult: t && { task_id: t.id, due_at: t.due_at, unit: Crm::AgendaSlots.unit_label(@account, t.unit),
                         source: Crm::BookingSource.of(t), attendance: t.attendance, canceled: t.canceled_at.present?,
                         confirmed: t.confirmed_at.present? },
         outcome: outcome_of(t)

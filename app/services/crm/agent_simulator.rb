@@ -59,15 +59,25 @@ class Crm::AgentSimulator
   end
 
   # a conversa como balões: paciente (incoming) e agente (notas de sombra)
-  def transcript(conversation)
-    conversation.messages.where(message_type: %i[incoming activity]).reorder(:id).filter_map do |m|
+  # 🖼️ 08/11 (igual à ótica): o que as ferramentas mandam na conversa de teste (a foto dos
+  # telhados da LIFE) entra como balão 'media' do agente, com a imagem
+  def transcript(conversation) # rubocop:disable Metrics/AbcSize
+    conversation.messages.where(message_type: %i[incoming activity outgoing]).includes(:attachments).reorder(:id).filter_map do |m|
       if m.incoming?
         { role: 'patient', text: m.content.to_s, at: m.created_at.iso8601, id: m.id }
+      elsif m.outgoing?
+        { role: 'media', text: m.content.to_s, at: m.created_at.iso8601, id: m.id, images: image_urls(m) }
       elsif (shadow = m.additional_attributes&.[]('cevico_ia_shadow'))
         { role: 'agent', id: m.id, at: m.created_at.iso8601, messages: Array(shadow['mensagens']),
           meta: shadow.slice('etapa', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura', 'acoes') }
       end
     end
+  end
+
+  def image_urls(message)
+    message.attachments.select { |a| a.file_type.to_s == 'image' && a.file.attached? }.map(&:file_url)
+  rescue StandardError
+    []
   end
 
   def self.simulated?(conversation)

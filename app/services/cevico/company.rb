@@ -6,7 +6,7 @@
 # clínica, "paciente", "consulta", "médico") — ninguém sente diferença.
 # A Sua Ótica nasce com ramo 'otica' e fala "cliente", "atendimento",
 # "consultor".
-class Cevico::Company
+class Cevico::Company # rubocop:disable Metrics/ClassLength
   KEY = 'company'.freeze
   SEGMENTS = %w[clinica otica outro].freeze
   SEGMENT_LABELS = { 'clinica' => 'Clínica', 'otica' => 'Ótica', 'outro' => 'Outro ramo' }.freeze
@@ -26,6 +26,15 @@ class Cevico::Company
                  'cirurgia' => 'compra', 'cirurgia_plural' => 'compras', 'empresa' => 'empresa',
                  'unidade' => 'unidade', 'unidade_plural' => 'unidades' }
   }.freeze
+
+  # ☀️ 08/11: TIPOS DA AGENDA por empresa — renomeia e limita os tipos da tela
+  # Agenda (a LIFE: Visita técnica + Fechamento). O banco não muda: a chave é
+  # um dos 6 tipos de sempre (task_type 'consulta' + modality, ou cirurgia).
+  # Lista vazia = os 6 tipos da clínica, como sempre.
+  AGENDA_TYPE_KEYS = %w[avaliacao retorno pos_op exames teleconsulta cirurgia].freeze
+  AGENDA_TYPES_MAX = 6
+  AGENDA_TYPE_ARTICLES = %w[a o].freeze
+  AGENDA_TYPE_TEXT = { 'label' => 40, 'noun' => 40, 'plural' => 40, 'hint' => 120 }.freeze
 
   # módulos que só fazem sentido numa clínica (desligados nos outros ramos)
   CLINIC_MODULES = %w[cirurgias medicos oftalmofacil notas_clinicas pos_operatorio].freeze
@@ -118,6 +127,41 @@ class Cevico::Company
   def unit_keys = units.pluck('key')
   def unit_label(key) = units.find { |u| u['key'] == key.to_s }&.dig('label') || key.to_s
 
+  # ── tipos da agenda (rótulos da empresa) ───────────────────────────────
+  # [{ 'key' => 'avaliacao', 'label' => 'Visita técnica', 'noun' => 'visita técnica', … }]
+  def agenda_types
+    self.class.sanitize_agenda_types(raw['agenda_types'])
+  end
+
+  # "visita técnica" (noun do tipo da empresa) ou nil = vale o nome da clínica
+  def agenda_type_noun(key)
+    type = agenda_types.find { |t| t['key'] == key.to_s }
+    type && (type['noun'].presence || type['label'].presence&.downcase)
+  end
+
+  def agenda_type_plural(key)
+    agenda_types.find { |t| t['key'] == key.to_s }&.dig('plural').presence
+  end
+
+  def self.sanitize_agenda_types(list) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    seen = []
+    Array(list).filter_map do |t|
+      t = t.respond_to?(:to_unsafe_h) ? t.to_unsafe_h : t
+      next unless t.respond_to?(:to_h)
+
+      t = t.to_h.transform_keys(&:to_s)
+      key = t['key'].to_s
+      next if AGENDA_TYPE_KEYS.exclude?(key) || seen.include?(key)
+
+      seen << key
+      out = { 'key' => key }
+      AGENDA_TYPE_TEXT.each { |field, max| out[field] = t[field].to_s.squish[0, max] }
+      out['icon'] = t['icon'].to_s if t['icon'].to_s.match?(/\Ai-lucide-[a-z0-9-]{1,40}\z/)
+      out['article'] = t['article'].to_s if AGENDA_TYPE_ARTICLES.include?(t['article'].to_s)
+      out.compact_blank.merge('key' => key)
+    end.first(AGENDA_TYPES_MAX)
+  end
+
   # ── assistente virtual ─────────────────────────────────────────────────
   def assistant_name = raw.dig('assistant', 'name').to_s.strip.presence
   def assistant_gender = %w[m f].include?(raw.dig('assistant', 'gender').to_s) ? raw.dig('assistant', 'gender').to_s : 'f'
@@ -166,6 +210,7 @@ class Cevico::Company
       vocabulary: vocabulary,
       vocabulary_defaults: VOCABULARY[segment],
       units: units,
+      agenda_types: agenda_types,
       assistant: { name: assistant_name, gender: assistant_gender },
       modules: modules,
       public_host: public_host,
@@ -202,6 +247,7 @@ class Cevico::Company
           'address' => u['address'].to_s.strip[0, 200], 'phone' => u['phone'].to_s.gsub(/\D/, '')[0, 15] }
       end
     end
+    current['agenda_types'] = sanitize_agenda_types(attrs['agenda_types']) if attrs.key?('agenda_types')
     if attrs.key?('assistant')
       a = attrs['assistant'].to_h.transform_keys(&:to_s)
       current['assistant'] = { 'name' => a['name'].to_s.strip[0, 40], 'gender' => %w[m f].include?(a['gender'].to_s) ? a['gender'].to_s : 'f' }

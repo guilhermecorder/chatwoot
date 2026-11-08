@@ -106,13 +106,16 @@ const KIND_LABEL = {
   agente_remarcou: '🔧 Agente remarcou a consulta',
   agente_cancelou: '🔧 Agente cancelou a consulta',
   nao_confirmou: '❌ Respondeu NÃO ao lembrete da consulta',
+  // ⏰ 08/11 (LIFE): chegou o dia/hora de uma tarefa com data (retorno combinado)
+  tarefa_no_prazo: '⏰ Chegou o dia de chamar o cliente',
 };
 const kindLabel = computed(() => KIND_LABEL[alert.value?.kind] || '');
 // item 217: o "não confirmou" usa o mesmo caminho (aviso amarrado à consulta)
 const isAgentAlert = computed(
   () =>
     String(alert.value?.kind || '').startsWith('agente_') ||
-    alert.value?.kind === 'nao_confirmou'
+    alert.value?.kind === 'nao_confirmou' ||
+    alert.value?.kind === 'tarefa_no_prazo'
 );
 
 const attendNow = () => {

@@ -13,7 +13,9 @@ class Crm::AgentAlert
   # auditoria 10/2026 (#217): 'robo_parado' = um robô (cron) parou ou terminou
   # em erro 2× seguidas (Crm::CronWatchdogJob) — aviso para o administrador
   ROBOT_KIND = 'robo_parado'.freeze
-  KINDS = (%w[agente_remarcou agente_cancelou nao_confirmou pos_op_atencao atendimento_atencao] + [ROBOT_KIND]).freeze
+  # ⏰ 08/11 (LIFE): chegou o dia/hora de uma tarefa com data marcada pelo atendente (Crm::TaskDueAlertJob)
+  DUE_KIND = 'tarefa_no_prazo'.freeze
+  KINDS = (%w[agente_remarcou agente_cancelou nao_confirmou pos_op_atencao atendimento_atencao] + [ROBOT_KIND, DUE_KIND]).freeze
   ATTENTION_KINDS = %w[pos_op_atencao atendimento_atencao].freeze
   TTL = 24.hours
   MAX_ALERTS = 30
@@ -136,13 +138,14 @@ class Crm::AgentAlert
   def acao
     case @kind
     when 'nao_confirmou' then 'Ligar para o paciente'
+    when DUE_KIND then 'Chamar o cliente agora'
     when *ATTENTION_KINDS then 'Falar com o paciente agora'
     else 'Conferir na Agenda'
     end
   end
 
   def patient_name
-    return (@task.contact&.name.presence || 'Paciente') if ATTENTION_KINDS.include?(@kind)
+    return (@task.contact&.name.presence || 'Paciente') if ATTENTION_KINDS.include?(@kind) || @kind == DUE_KIND
 
     @task.title.to_s.sub(/\AConsulta:\s*/i, '').strip.presence || 'Paciente'
   end
@@ -153,6 +156,7 @@ class Crm::AgentAlert
     when 'nao_confirmou' then 'Não confirmou a consulta'
     when 'pos_op_atencao' then 'Pós-operatório: atenção'
     when 'atendimento_atencao' then 'Atendimento: a equipe precisa assumir'
+    when DUE_KIND then 'Tarefa: chegou o dia'
     else 'Consulta remarcada'
     end
   end
@@ -160,6 +164,7 @@ class Crm::AgentAlert
   def motivo
     return "#{patient_name}: #{@task.title.to_s.split(' — ').last} — #{agent_label} pediu atenção" if ATTENTION_KINDS.include?(@kind)
     return nao_confirmou_motivo if @kind == 'nao_confirmou'
+    return "Hoje é o dia: #{@task.title.to_s.split(' — ').last} (#{patient_name})" if @kind == DUE_KIND
 
     if @kind == 'agente_cancelou'
       "O #{agent_label} cancelou a consulta de #{patient_name} que era #{when_text}"
@@ -181,6 +186,6 @@ class Crm::AgentAlert
 
   def when_text
     at = @task.due_at.in_time_zone(TZ)
-    "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m %H:%M')} · #{Crm::AgendaSlots::UNIT_LABELS[@task.unit] || @task.unit}"
+    "#{WEEKDAYS_SHORT[at.wday]} #{at.strftime('%d/%m %H:%M')} · #{Crm::AgendaSlots.unit_label(@account, @task.unit)}"
   end
 end

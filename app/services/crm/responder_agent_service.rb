@@ -107,7 +107,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     # no gem anthropic 1.55, 21/09): o JSON vale para a resposta final em texto
     params = {
       model: model, max_tokens: 2048, system_: cached_system,
-      output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
+      output_config: output_config_for({ type: 'json_schema', schema: output_schema }),
       messages: [{ role: 'user', content: user_content(transcript) }]
     }
     params[:tools] = tools.definitions if tools
@@ -137,6 +137,14 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   rescue StandardError => e
     Rails.logger.error "[Crm::ResponderAgent##{@agent_key}] #{e.class}: #{e.message}"
     { error: e.message }
+  end
+
+  # ☀️ 08/11 (como na ótica): o esquema da resposta com as UNIDADES DESTA CONTA
+  # (a LIFE tem Piracicaba; a clínica segue com tatuape/paulista)
+  def output_schema
+    schema = OUTPUT_SCHEMA.deep_dup
+    schema[:properties][:agendamento][:properties][:unidade] = { type: 'string', enum: Crm::AgendaSlots.unit_keys(@account) }
+    schema
   end
 
   # o prompt completo, visível na tela do agente ("o que ele lê")
@@ -189,7 +197,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   def tools
     return nil unless RESPONDER_TOOLS_KEYS.include?(@agent_key)
 
-    @tools ||= Crm::ResponderTools.new(conversation: @conversation, agent_key: @agent_key, live: @live)
+    @tools ||= Crm::ResponderTools.new(conversation: @conversation, agent_key: @agent_key, live: @live, simulation: @simulation)
   end
 
   # a resposta da IA volta como turno do assistente: texto e tool_use viram
@@ -272,7 +280,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     at = task.due_at.in_time_zone(Crm::AgendaSlots::TZ)
     days = (Crm::AgendaSlots::TZ.now.to_date - at.to_date).to_i
     parts = ["#{at.strftime('%d/%m/%Y')} (há #{days} dia#{'s' unless days == 1})", task.procedure.presence, task.doctor.presence,
-             Crm::AgendaSlots::UNIT_LABELS[task.unit.to_s] || task.unit.presence]
+             Crm::AgendaSlots.unit_label(@account, task.unit)]
     parts << "presença: #{task.attendance == 'attended' ? 'realizada' : task.attendance}" if task.attendance.present?
     parts.compact.join(' · ')
   end
@@ -318,7 +326,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     return 'nenhuma' if task.blank?
 
     when_at = task.due_at.in_time_zone(Crm::AgendaSlots::TZ)
-    unit = Crm::AgendaSlots::UNIT_LABELS[task.unit] || task.unit
+    unit = Crm::AgendaSlots.unit_label(@account, task.unit)
     # o id entra para as ferramentas (remarcar/cancelar/confirmar) sem precisar buscar
     "#{Crm::AgendaSlots::WEEKDAYS[when_at.wday]} #{when_at.strftime('%d/%m/%Y às %H:%M')} · #{unit} · " \
       "#{task.doctor.presence || 'médico a definir'} (id #{task.id})"
@@ -344,7 +352,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       next if m.private?
 
       body = m.content.to_s.strip
-      marks = m.attachments.map { |a| Crm::MediaReadingService.transcript_label(a) }
+      marks = transcript_marks(m)
       text = [body.presence, marks.presence&.join(' ')].compact.join(' ')
       next if text.blank?
 
@@ -354,6 +362,20 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       "[#{stamp}] #{author}: #{text.truncate(marks.any? ? 2400 : 600)}"
     end
     lines.empty? ? nil : lines.join("\n")
+  end
+
+  # 🖼️ 08/11: imagem que NÓS mandamos (enviar_imagem do roteiro, ou a equipe) não passa
+  # pela leitura do Gemini — sem isto entrava como "[imagem: não foi possível ler; pergunte
+  # ao paciente o que ele enviou]" e o atendente dizia ao cliente que a imagem não abriu
+  def transcript_marks(message)
+    return message.attachments.map { |a| Crm::MediaReadingService.transcript_label(a) } unless message.outgoing?
+
+    key = message.additional_attributes&.dig(Crm::ScriptImages::MEDIA_STAMP, 'chave')
+    message.attachments.map do |a|
+      next "[imagem do roteiro enviada ao cliente: #{key}]" if key.present?
+
+      a.file_type.to_s == 'image' ? '[imagem enviada ao cliente]' : Crm::MediaReadingService.transcript_label(a)
+    end
   end
 
   def simulated?

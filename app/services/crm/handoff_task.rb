@@ -21,8 +21,13 @@ class Crm::HandoffTask
   # 🔁 343: nome com que os lembretes recusados abrem a tarefa
   CONFIRMATION_KEY = 'Confirmação de consulta'.freeze
 
-  def self.open!(account:, contact:, conversation:, agent_key:, motivo:, detalhes: nil, urgencia: 'normal') # rubocop:disable Metrics/ParameterLists
-    new(account: account, contact: contact, conversation: conversation, agent_key: agent_key).open!(motivo, detalhes, urgencia)
+  # ⏰ 08/11 (LIFE): due_at = DIA E HORA em que a pessoa deve agir ("me chama em 3, 4 dias").
+  # Tarefa com data própria nasce SEPARADA (não complementa a tarefa de hoje), vai para o
+  # responsável do card do agente, mostra contagem no Meu Painel e, no dia e hora, vira
+  # aviso no Radar (Crm::TaskDueAlertJob). Sem due_at: tudo como antes (prazo = fim do dia).
+  def self.open!(account:, contact:, conversation:, agent_key:, motivo:, detalhes: nil, urgencia: 'normal', due_at: nil) # rubocop:disable Metrics/ParameterLists
+    new(account: account, contact: contact, conversation: conversation, agent_key: agent_key)
+      .open!(motivo, detalhes, urgencia, due_at: due_at)
   end
 
   def initialize(account:, contact:, conversation:, agent_key:)
@@ -33,15 +38,17 @@ class Crm::HandoffTask
   end
 
   # devolve { task:, created: true/false }
-  def open!(motivo, detalhes, urgencia)
+  def open!(motivo, detalhes, urgencia, due_at: nil) # rubocop:disable Metrics/CyclomaticComplexity
     motivo = motivo.to_s.strip.first(120).presence || 'Paciente precisa de atenção da equipe'
     urgent = urgencia.to_s == 'alta'
-    existing = open_task
+    @due_at = due_at&.in_time_zone(TZ)
+    existing = @due_at ? open_dated_task : open_task
     return append!(existing, motivo, detalhes, urgent) if existing
 
     task = create!(motivo, detalhes, urgent)
     note!(task, motivo, urgent, created: true)
     alert!(task) if urgent
+    Crm::TaskDueAlertJob.set(wait_until: @due_at).perform_later(task.id, @conversation&.id) if @due_at
     { task: task, created: true }
   end
 
@@ -66,10 +73,10 @@ class Crm::HandoffTask
 
   def create!(motivo, detalhes, urgent)
     @account.tasks.create!(
-      title: "#{urgent ? '🔴' : title_icon} #{title_label} · #{patient_name} — #{motivo}",
+      title: task_title(motivo, urgent),
       description: entry(motivo, detalhes),
       task_type: TASK_TYPE, priority: urgent ? :urgent : :high, status: :todo,
-      due_at: urgent ? TZ.now : TZ.now.end_of_day,
+      due_at: @due_at || (urgent ? TZ.now : TZ.now.end_of_day),
       contact: @contact, phone: @contact&.phone_number,
       creator: @account.administrators.first || @account.users.first,
       assignee: assignee,
@@ -81,13 +88,31 @@ class Crm::HandoffTask
   # #458: a dos Atendentes de Agendamento/Pós-agendamento diz "Atendimento"
   TITLE_LABELS = { 'voice' => 'Ligação', 'atendente_pos_op' => 'Pós-op' }.freeze
   TITLE_ICONS = { 'voice' => '📞', 'atendente_pos_op' => '🩺' }.freeze
+  def task_title(motivo, urgent)
+    return "#{TITLE_DUE_ICON} #{patient_name} — #{motivo}" if @due_at
+
+    "#{urgent ? '🔴' : title_icon} #{title_label} · #{patient_name} — #{motivo}"
+  end
+
+  # ⏰ tarefa com data: "⏰ Nome — motivo" (o motivo já diz o que é: "Orçamento: conta recebida", "Retorno: …")
+  TITLE_DUE_ICON = '⏰'.freeze
   def title_label = TITLE_LABELS[@agent_key] || 'Atendimento'
   def title_icon = TITLE_ICONS[@agent_key] || '🙋'
 
+  # a tarefa aberta "de agora" (prazo até hoje); as com data futura ficam de fora
   def open_task
     return nil if @contact.blank?
 
-    @account.tasks.where(contact_id: @contact.id, task_type: TASK_TYPE, status: %i[todo doing]).order(:created_at).first
+    @account.tasks.where(contact_id: @contact.id, task_type: TASK_TYPE, status: %i[todo doing])
+            .where('due_at IS NULL OR due_at <= ?', TZ.now.end_of_day).order(:created_at).first
+  end
+
+  # ⏰ a tarefa aberta deste contato com prazo NO MESMO DIA (complementa em vez de duplicar)
+  def open_dated_task
+    return nil if @contact.blank?
+
+    @account.tasks.where(contact_id: @contact.id, task_type: TASK_TYPE, status: %i[todo doing])
+            .where(due_at: @due_at.all_day).order(:created_at).first
   end
 
   def entry(motivo, detalhes)
