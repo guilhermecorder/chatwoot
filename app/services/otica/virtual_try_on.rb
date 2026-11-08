@@ -207,14 +207,17 @@ class Otica::VirtualTryOn
   def send_image!(product, image, index, total, selfie_attachment)
     ext = image[:mime].to_s.include?('jpeg') ? 'jpg' : 'png'
     caption = "Opção #{index} de #{total}: #{product.name}"
-    message = @conversation.messages.create!(
+    # ⚠️ 08/11: o anexo entra ANTES do save. Se a mensagem nasce sem anexo, o Message dispara o
+    # SendReplyJob na hora e o WhatsApp recebe só a legenda em texto (foi o que chegou pro Henrique).
+    message = @conversation.messages.new(
       account_id: account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing, content: caption,
       additional_attributes: { 'cevico_ia_agent' => @agent_key.presence || Otica::TryOnImage::AGENT_KEY,
                                STAMP_KEY => { 'lote' => @lote ||= SecureRandom.hex(4), 'product_id' => product.id,
                                               'selfie_attachment_id' => selfie_attachment.id, 'model' => image[:model] } }
     )
-    message.attachments.create!(account_id: account.id, file_type: :image,
-                                file: { io: StringIO.new(image[:bytes]), filename: "prova-virtual-#{product.id}.#{ext}", content_type: image[:mime] })
+    message.attachments.build(account_id: account.id, file_type: :image,
+                              file: { io: StringIO.new(image[:bytes]), filename: "prova-virtual-#{product.id}.#{ext}", content_type: image[:mime] })
+    message.save!
     message
   end
 

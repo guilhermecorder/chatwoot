@@ -19,8 +19,13 @@ class Otica::CsvImport
     'tipo' => :kind,
     'codigo_barras' => :barcode, 'ean' => :barcode, 'barras' => :barcode,
     'ncm' => :ncm,
-    'descricao' => :name, 'nome' => :name, 'produto' => :name
+    'descricao' => :name, 'nome' => :name, 'produto' => :name,
+    # 🪞 08/11: colunas do cadastro do SavWin One (API): público da armação e material
+    'publico' => :frame_fit, 'perfil' => :frame_fit, 'perfil_de_uso' => :frame_fit, 'sexo' => :frame_fit,
+    'material' => :line
   }.freeze
+  FIT_WORDS = { 'feminino' => 'feminina', 'feminina' => 'feminina', 'masculino' => 'masculina', 'masculina' => 'masculina',
+                'unissex' => 'unissex', 'unisex' => 'unissex' }.freeze
   KIND_WORDS = {
     'armacao' => 'armacao', 'armacoes' => 'armacao', 'oculos' => 'armacao', 'receituario' => 'armacao',
     'solar' => 'solar', 'sol' => 'solar',
@@ -98,6 +103,8 @@ class Otica::CsvImport
                      when :cost, :list_price then Cevico::Money.parse(value) || 0.0
                      when :quantity then value.gsub(/\D/, '').to_i
                      when :kind then KIND_WORDS[I18n.transliterate(value).downcase.gsub(/[^a-z]+/, '_')] || 'outro'
+                     # 🪞 'FEMININO' / 'MASCULINO INFANTIL' / 'UNISSEX' → feminina / masculina / unissex (infantil fica em branco)
+                     when :frame_fit then FIT_WORDS[I18n.transliterate(value).downcase.split(/\s+/).first.to_s].to_s
                      else value[0, 120]
                      end
     end

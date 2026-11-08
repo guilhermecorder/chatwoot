@@ -64,6 +64,11 @@ RSpec.describe Otica::VirtualTryOn do
     expect(sent.first.additional_attributes['cevico_ia_agent']).to eq('atendente_agendamento')
     expect(sent.first.additional_attributes.dig('cevico_visagismo', 'product_id')).to eq(retangular.id)
     expect(sent.map { |m| m.additional_attributes.dig('cevico_visagismo', 'lote') }.uniq.size).to eq(1)
+    # 08/11: o anexo tem que existir no commit da mensagem — senão o Message dispara o SendReplyJob sem
+    # espera e o WhatsApp recebe só a legenda (o Message só agenda com wait quando já há anexo)
+    reply_jobs = enqueued_jobs.select { |j| j[:job] == SendReplyJob && sent.map(&:id).include?(j[:args].first) }
+    expect(reply_jobs.size).to eq(2)
+    expect(reply_jobs).to all(satisfy { |j| j['scheduled_at'].present? })
   end
 
   it 'recusa com motivo claro: sem foto, foto que não serve, limite do dia, ramo clínica', :aggregate_failures do

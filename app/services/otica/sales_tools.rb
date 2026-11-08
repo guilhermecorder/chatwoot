@@ -326,14 +326,17 @@ class Otica::SalesTools
 
   def send_image!(lens, caption, index, total)
     ext = lens.photo.content_type.to_s.include?('jpeg') ? 'jpg' : 'png'
-    message = @conversation.messages.create!(
+    # anexo ANTES do save (mensagem sem anexo dispara o envio na hora e sai só o texto)
+    message = @conversation.messages.new(
       account_id: @account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing,
       content: (total > 1 ? "Lente #{index} de #{total}. #{caption}" : caption).truncate(900),
       additional_attributes: { 'cevico_ia_agent' => @agent_key, STAMP_KEY => { 'lente_id' => lens.id } }
     )
-    message.attachments.create!(account_id: @account.id, file_type: :image,
-                                file: { io: StringIO.new(lens.photo.blob.open(&:read)), filename: "lente-#{lens.id}.#{ext}",
-                                        content_type: lens.photo.content_type.presence || 'image/png' })
+    message.attachments.build(account_id: @account.id, file_type: :image,
+                              file: { io: StringIO.new(lens.photo.blob.open(&:read)), filename: "lente-#{lens.id}.#{ext}",
+                                      content_type: lens.photo.content_type.presence || 'image/png' })
+    message.save!
+    message
   end
 
   def stamp_conversation!(frame, lens, value, method)
