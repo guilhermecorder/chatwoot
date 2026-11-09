@@ -374,10 +374,17 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
     key = message.additional_attributes&.dig(Crm::ScriptImages::MEDIA_STAMP, 'chave')
     message.attachments.map do |a|
-      next "[imagem do roteiro enviada ao cliente: #{key}]" if key.present?
+      next script_media_mark(a, key) if key.present?
 
       a.file_type.to_s == 'image' ? '[imagem enviada ao cliente]' : Crm::MediaReadingService.transcript_label(a)
     end
+  end
+
+  # 🔊 09/11: áudio pronto do roteiro (enviar_audio) também é nosso, não passa pelo Gemini
+  def script_media_mark(attachment, key)
+    return "[áudio do roteiro enviado ao cliente: #{key}]" if attachment.file_type.to_s == 'audio'
+
+    "[imagem do roteiro enviada ao cliente: #{key}]"
   end
 
   def simulated?

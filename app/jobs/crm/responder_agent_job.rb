@@ -609,18 +609,28 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     (result[:etapa].to_s == 'encerramento' || result[:pausar] == true) && result[:chamar_humano] != true
   end
 
-  def send_replies(conversation, texts, trigger_message_id, agent_key, encerrou: false)
+  def send_replies(conversation, texts, trigger_message_id, agent_key, encerrou: false) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity
     # 🔁 (#100) última conferência antes de falar: alguém já respondeu esta mensagem?
     return if self.class.already_replied?(conversation, trigger_message_id)
 
     attrs = { 'cevico_ia_agent' => agent_key }
     attrs['cevico_encerrou'] = true if encerrou # carimbo lido pelo Crm::FollowupClosure
+    medias = Crm::ScriptImages.for(conversation.account)
     texts.first(3).each_with_index do |text, index|
       clean = text.to_s.tr('—', ',').gsub(/\s?😊/, '').strip # sem travessão nem a carinha que pausa (o sistema garante)
       next if clean.blank?
 
       sleep BALLOON_GAP if index.positive?
       break if last_incoming_id(conversation) != trigger_message_id
+
+      # 🛟 09/11 (pedido do Guilherme): a IA esqueceu a ferramenta e fez EM TEXTO a pergunta
+      # que a imagem do roteiro faz (ex.: "telha, laje ou metálico?") → vai a imagem com a
+      # legenda no lugar do balão. Uma vez por conversa (Crm::ScriptImages#gatilho).
+      if (media = Crm::ScriptImages.triggered_by(conversation, clean, medias))
+        Crm::ScriptImages.send!(conversation, media, agent_key)
+        Rails.logger.info "[Crm::ResponderAgentJob] balão trocado pela imagem do roteiro #{media['chave']} (gatilho)"
+        next
+      end
 
       conversation.messages.create!(
         account_id: conversation.account_id, inbox_id: conversation.inbox_id,

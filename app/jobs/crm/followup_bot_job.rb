@@ -300,10 +300,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     record_run(item[:bot], **run, events: item[:events])
   end
 
-  def conversations(bot)
+  def conversations(bot) # rubocop:disable Metrics/AbcSize
     scope = bot.account.conversations
                .where(status: :open)
-               .where('conversations.last_activity_at >= ?', LOOKBACK.ago)
+               .where('conversations.last_activity_at >= ?', lookback_for(bot).ago)
 
     # item 315: colunas do CRM em que o robô atua (robô de coluna = a dele;
     # robô global = as marcadas; nenhuma = qualquer coluna, com ou sem card)
@@ -323,6 +323,15 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     partner_ids = Crm::PartnerGuard.excluded_contact_ids(bot.account)
     scope = scope.where.not(contact_id: partner_ids) if partner_ids.any?
     scope
+  end
+
+  # LIFE 09/11: cadência LONGA (orçamento sem resposta: 15 e 60 dias). Antes
+  # só entravam conversas com movimento nos últimos 3 dias e a etapa de 15d
+  # nunca achava ninguém. Agora o robô olha até a etapa mais longa dele + 2
+  # dias de folga (nunca menos que os 3 dias de sempre).
+  def lookback_for(bot)
+    longest = Array(bot.steps).map { |s| Crm::FollowupBot.step_delay_hours(s) }.max.to_f
+    [LOOKBACK, (longest + 48).hours].max
   end
 
   # DECIDE (plan_for, só leitura) e depois AGE: marca as etapas tratadas sem

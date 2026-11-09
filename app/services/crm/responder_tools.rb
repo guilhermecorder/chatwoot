@@ -62,13 +62,17 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   # do roteiro (1ª: os 4 telhados numerados na sondagem). Imagens da conta em
   # ai_config['imagens_roteiro'] (Crm::ScriptImages); sem lista, não aparece.
   IMAGE_TOOL_NAME = 'enviar_imagem'.freeze
+  # 🔊 09/11/2026 (LIFE, pedido do Guilherme): áudio pronto da empresa num ponto do
+  # roteiro (1º: o Fernando apresentando a Life para quem vai receber o orçamento).
+  # Mesma lista ai_config['imagens_roteiro'], arquivos .ogg/.opus/.mp3/.m4a.
+  AUDIO_TOOL_NAME = 'enviar_audio'.freeze
   FAKE_TASK_WORDS = [
     'placeholder', 'ignorar', 'ignore', 'nenhum', 'nenhuma', 'cancelado', 'cancelada', 'não usar', 'nao usar',
     'não aplic', 'nao aplic', 'não necess', 'nao necess', 'desnecess', 'sem necessidade', 'not needed',
     'nevermind', 'never mind', 'nunca mind', 'n/a', 'teste', 'test', 'dummy', 'xxx'
   ].freeze
   FAKE_TASK_RE = /\A\W*(#{FAKE_TASK_WORDS.map { |w| Regexp.escape(w) }.join('|')})/i
-  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME, IMAGE_TOOL_NAME]).freeze
+  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME, IMAGE_TOOL_NAME, AUDIO_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
   # 🩺 item 251: o Atendente de Pós-operatório abre tarefa para a equipe.
@@ -93,17 +97,48 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   # definições para a API (input_schema em JSON Schema)
-  def definitions
+  def definitions # rubocop:disable Metrics/CyclomaticComplexity
     list = base_definitions
     list << task_definition if TASK_TOOL_KEYS.include?(@agent_key)
     list << stage_definition if TASK_TOOL_KEYS.include?(@agent_key) && crm_etapas.any?
     list << image_definition if TASK_TOOL_KEYS.include?(@agent_key) && script_images.any?
+    list << audio_definition if TASK_TOOL_KEYS.include?(@agent_key) && script_audios.any?
     list
   end
 
-  # imagens do roteiro desta conta (só as que têm arquivo de verdade)
+  # mídias do roteiro desta conta (só as que têm arquivo de verdade)
+  def script_medias
+    @script_medias ||= Crm::ScriptImages.for(@account)
+  end
+
   def script_images
-    @script_images ||= Crm::ScriptImages.for(@account)
+    @script_images ||= script_medias.select { |m| m['tipo'] == 'imagem' }
+  end
+
+  def script_audios
+    @script_audios ||= script_medias.select { |m| m['tipo'] == 'audio' }
+  end
+
+  def audio_definition
+    guia = script_audios.map do |a|
+      legenda = a['legenda'].present? ? " (antes dele vai o balão: \"#{a['legenda']}\")" : ''
+      "#{a['chave']} = #{a['quando']}#{legenda}"
+    end.join('; ')
+    {
+      name: AUDIO_TOOL_NAME,
+      description: 'Envia ao cliente um ÁUDIO PRONTO, gravado pela própria equipe da empresa, no momento do roteiro ' \
+                   "descrito para ele, uma vez por conversa: #{guia}. O áudio sai ANTES dos seus balões, já com a frase " \
+                   'de apresentação dele. Não repita nos balões o que o áudio diz: siga a conversa.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          audio: { type: 'string', enum: script_audios.pluck('chave'), description: 'Qual áudio enviar' },
+          reenviar: { type: 'boolean', description: 'true SÓ quando o cliente disser que o áudio não chegou ou não abriu' }
+        },
+        required: %w[audio],
+        additionalProperties: false
+      }
+    }
   end
 
   def image_definition
@@ -280,6 +315,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when 'abrir_tarefa' then abrir_tarefa(args)
     when 'marcar_etapa' then marcar_etapa(args)
     when IMAGE_TOOL_NAME then enviar_imagem(args)
+    when AUDIO_TOOL_NAME then enviar_audio(args)
     else
       { ok: false, motivo: "Ferramenta desconhecida: #{name}" }
     end
@@ -568,36 +604,50 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   # 🖼️ imagem pronta do roteiro → mensagem com anexo na conversa (Crm::ScriptImages).
   # Ao vivo: vai ao cliente. Testar agente: entra na conversa de teste (sem canal).
   # Sombra numa conversa real: nada é enviado, só registrado.
-  def enviar_imagem(args) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    return refuse(IMAGE_TOOL_NAME, 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
+  def enviar_imagem(args)
+    enviar_midia(IMAGE_TOOL_NAME, 'imagem', script_images, args['imagem'], args)
+  end
 
-    chave = args['imagem'].to_s.strip.downcase
-    image = script_images.find { |i| i['chave'] == chave }
-    return refuse(IMAGE_TOOL_NAME, 'Imagem fora da lista desta conta: faça a pergunta só em texto.') if image.nil?
+  # 🔊 09/11: áudio pronto (ex.: o Fernando apresentando a Life) — mesmo caminho da imagem
+  def enviar_audio(args)
+    enviar_midia(AUDIO_TOOL_NAME, 'áudio', script_audios, args['audio'], args)
+  end
+
+  def enviar_midia(tool, nome, lista, chave_bruta, args) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    plural = nome == 'áudio' ? 'áudios' : 'imagens'
+    art = nome == 'áudio' ? 'o' : 'a'
+    return refuse(tool, 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
+
+    chave = chave_bruta.to_s.strip.downcase
+    image = lista.find { |i| i['chave'] == chave }
+    return refuse(tool, "#{nome.capitalize} fora da lista desta conta: siga só em texto.") if image.nil?
 
     sent = Crm::ScriptImages.sent_count(@conversation, chave)
     if sent.positive? && args['reenviar'] != true
-      log_acao(IMAGE_TOOL_NAME, true, "imagem #{chave} já tinha ido nesta conversa")
+      log_acao(tool, true, "#{nome} #{chave} já tinha ido nesta conversa")
       return { ok: true, ja_enviada: true,
-               aviso: 'Esta imagem JÁ FOI enviada antes nesta conversa. Só reenvie (reenviar=true) se o cliente disser que ' \
-                      'ela não chegou; senão, retome a pergunta em texto.' }
+               aviso: "Est#{nome == 'áudio' ? 'e áudio' : 'a imagem'} JÁ FOI enviad#{nome == 'áudio' ? 'o' : 'a'} antes nesta conversa. " \
+                      'Só reenvie (reenviar=true) se o cliente disser que não chegou; senão, siga em texto.' }
     end
     if sent >= Crm::ScriptImages::MAX_SENDS
-      return refuse(IMAGE_TOOL_NAME, 'A imagem já foi reenviada. Faça a pergunta em texto e, se o cliente não recebe imagens, ' \
-                                     'abra tarefa normal ("cliente não recebe imagens").')
+      return refuse(tool, "#{nome.capitalize} já foi reenviad#{art}. Siga em texto e, se o cliente não recebe " \
+                          "#{plural}, abra tarefa normal (\"cliente não recebe #{plural}\").")
     end
 
     test_conversation = @simulation && Crm::AgentSimulator.simulated?(@conversation)
     unless @live || test_conversation
-      log_acao(IMAGE_TOOL_NAME, true, "enviaria a imagem #{chave} (simulado)")
+      log_acao(tool, true, "enviaria #{art} #{nome} #{chave} (simulado)")
       return { simulado: true, ok: true, legenda_enviada: image['legenda'].presence,
-               mensagem: 'Em sombra nada foi enviado; ao vivo a imagem iria ao cliente agora. Siga como se ela tivesse chegado.' }
+               mensagem: "Em sombra nada foi enviado; ao vivo #{art} #{nome} iria ao cliente agora. Siga como se tivesse chegado." }
     end
 
     message = Crm::ScriptImages.send!(@conversation, image, @agent_key)
-    log_acao(IMAGE_TOOL_NAME, true, "enviou a imagem #{chave}#{' (conversa de teste)' if test_conversation}")
+    log_acao(tool, true, "enviou #{art} #{nome} #{chave}#{' (conversa de teste)' if test_conversation}")
     { ok: true, enviada: true, mensagem_id: message.id, legenda_enviada: image['legenda'].presence,
-      aviso: if !image['faz_pergunta']
+      aviso: if nome == 'áudio'
+               'O áudio JÁ FOI ENVIADO (com a frase de apresentação antes dele). Não repita o que ele diz: ' \
+                 'siga a conversa no balão, como o roteiro manda para este momento.'
+             elsif !image['faz_pergunta']
                'A imagem JÁ FOI ENVIADA com a legenda acima (é prova, não pergunta nada). Não repita o que ela diz: ' \
                  'siga a conversa no balão, como o roteiro manda para este momento.'
              elsif image['legenda'].present?

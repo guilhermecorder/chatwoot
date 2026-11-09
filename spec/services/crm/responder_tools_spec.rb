@@ -22,7 +22,8 @@ RSpec.describe Crm::ResponderTools do
   describe 'definitions' do
     it 'expõe as ferramentas da Agenda + abrir_tarefa (#458) com input_schema; o Agente de Ligação só as da Agenda' do
       defs = tools.definitions
-      expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES - [described_class::STAGE_TOOL_NAME, described_class::IMAGE_TOOL_NAME])
+      so_media = [described_class::STAGE_TOOL_NAME, described_class::IMAGE_TOOL_NAME, described_class::AUDIO_TOOL_NAME]
+      expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES - so_media)
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).to eq(described_class::NAMES)
       expect(defs).to all(include(:description, :input_schema))
       expect(defs.find { |d| d[:name] == 'remarcar_consulta' }.dig(:input_schema, :required)).to eq(%w[id dia hora unidade])
@@ -103,6 +104,51 @@ RSpec.describe Crm::ResponderTools do
     end
   end
 
+  describe 'enviar_audio (09/11 · LIFE: o Fernando apresentando a Life)' do
+    before do
+      CrmSetting.find_or_create_by!(account: account).update!(ai_config: {
+                                                                'imagens_roteiro' => [
+                                                                  { 'chave' => 'telhados', 'quando' => 'na pergunta do telhado',
+                                                                    'arquivo' => 'brand-assets/life/roteiro/telhados.jpg',
+                                                                    'legenda' => 'Qual é o seu?' },
+                                                                  { 'chave' => 'apresentacao_fernando', 'quando' => 'depois da conta recebida',
+                                                                    'arquivo' => 'brand-assets/life/roteiro/fernando-apresentacao.ogg',
+                                                                    'legenda' => 'Ouve o Fernando:', 'faz_pergunta' => false }
+                                                                ]
+                                                              })
+    end
+
+    def audio_tools(live: false)
+      described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: live)
+    end
+
+    it 'aparece como ferramenta própria, só com os áudios; a de imagem fica só com as imagens', :aggregate_failures do
+      defs = audio_tools.definitions
+      audio = defs.find { |d| d[:name] == 'enviar_audio' }
+      expect(audio.dig(:input_schema, :properties, :audio, :enum)).to eq(%w[apresentacao_fernando])
+      expect(audio[:description]).to include('apresentacao_fernando = depois da conta recebida', 'Ouve o Fernando:')
+      expect(defs.find { |d| d[:name] == 'enviar_imagem' }.dig(:input_schema, :properties, :imagem, :enum)).to eq(%w[telhados])
+      expect(tools(agent_key: 'voice').definitions.pluck(:name)).not_to include('enviar_audio')
+    end
+
+    it 'ao vivo manda frase + áudio uma vez; em sombra não manda nada', :aggregate_failures do
+      expect(audio_tools.call('enviar_audio', { 'audio' => 'apresentacao_fernando' })).to include(simulado: true, ok: true)
+      expect(conversation.messages.outgoing.count).to eq(0)
+
+      result = audio_tools(live: true).call('enviar_audio', { 'audio' => 'apresentacao_fernando' })
+      expect(result).to include(ok: true, enviada: true)
+      expect(result[:aviso]).to include('O áudio JÁ FOI ENVIADO')
+      msgs = conversation.messages.outgoing.order(:id)
+      expect(msgs.map(&:content)).to eq(['Ouve o Fernando:', nil])
+      expect(msgs.last.attachments.first.file_type).to eq('audio')
+
+      again = audio_tools(live: true).call('enviar_audio', { 'audio' => 'apresentacao_fernando' })
+      expect(again).to include(ok: true, ja_enviada: true)
+      expect(conversation.messages.outgoing.count).to eq(2)
+      expect(audio_tools(live: true).call('enviar_audio', { 'audio' => 'telhados' })[:ok]).to be(false)
+    end
+  end
+
   describe 'enviar_imagem (08/11 · LIFE: foto dos telhados na sondagem)' do
     let(:legenda) { 'O seu telhado se parece com qual destas opções? Me responde só com o número, de 1 a 4.' }
 
@@ -151,7 +197,7 @@ RSpec.describe Crm::ResponderTools do
       expect(message.attachments.first.file_type).to eq('image')
       expect(message.attachments.first.file.filename.to_s).to eq('telhados.jpg')
       expect(message.additional_attributes).to include('cevico_ia_agent' => 'atendente_agendamento',
-                                                       Crm::ScriptImages::MEDIA_STAMP => { 'chave' => 'telhados' })
+                                                       Crm::ScriptImages::MEDIA_STAMP => { 'chave' => 'telhados', 'tipo' => 'imagem' })
 
       again = image_tools(live: true).call('enviar_imagem', { 'imagem' => 'telhados' })
       expect(again).to include(ok: true, ja_enviada: true)

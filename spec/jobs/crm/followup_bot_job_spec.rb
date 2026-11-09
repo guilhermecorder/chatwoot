@@ -174,6 +174,35 @@ RSpec.describe Crm::FollowupBotJob do
     end
   end
 
+  describe 'cadência longa (LIFE 09/11: orçamento sem resposta em 15 e 60 dias)' do
+    let(:wa_inbox) do
+      create(:channel_whatsapp, account: account, provider: 'whatsapp_cloud', sync_templates: false,
+                                validate_provider_config: false).inbox
+    end
+
+    def modelo_step(days)
+      { 'delay_value' => days, 'delay_unit' => 'days', 'message' => 'Oi [nome], tudo bem?',
+        'template_params' => { 'name' => 'life_orcamento_15d', 'language' => 'pt_BR',
+                               'processed_params' => { 'body' => { '1' => '[nome]' } } } }
+    end
+
+    it 'acha a conversa parada há 15 dias e manda a mensagem modelo; o robô curto continua só com 3 dias', :aggregate_failures do
+      conv = silent_conversation('Isabel', answered: '2026-09-28 13:00', the_inbox: wa_inbox)
+      longo = bot_with([modelo_step(15), modelo_step(60)], name: 'Orçamento sem resposta')
+      curto = bot_with([text_step(3)], name: 'Curto')
+      job = described_class.new
+
+      expect(job.send(:lookback_for, curto)).to eq(3.days)
+      expect(job.send(:lookback_for, longo)).to eq(62.days)
+      expect(job.send(:conversations, curto)).not_to include(conv)
+
+      job.send(:process_bot, longo)
+      sent = nudges(conv, longo).sole
+      expect(sent.additional_attributes.dig('template_params', 'processed_params', 'body', '1')).to eq('Isabel')
+      expect(sent.additional_attributes['cevico_followup_step']).to eq(0)
+    end
+  end
+
   it 'paciente de parceiro nunca é cutucado (cerca dentro do plano, além da lista de conversas)', :aggregate_failures do
     Rails.cache.clear
     conv = silent_conversation('Parceiro', answered: '2026-10-13 12:50', contact_attrs: { additional_attributes: { 'parceiro' => 'CLINICA X' } })

@@ -348,6 +348,40 @@ RSpec.describe Crm::ResponderAgentJob do
   end
 
   # 🔒 auditoria 10/2026 (#100): a mesma mensagem nunca é respondida duas vezes
+  describe 'rede de segurança da foto dos telhados (09/11 · gatilho)' do
+    let(:legenda) { 'Cada tipo de telhado tem um jeito certo de fixar as placas. O seu se parece com qual? Só o número.' }
+
+    before do
+      stub_const('Crm::ResponderAgentJob::BALLOON_GAP', 0)
+      settings.update!(ai_config: settings.ai_config.merge(
+        'imagens_roteiro' => [{ 'chave' => 'telhados', 'quando' => 'na pergunta do telhado', 'legenda' => legenda,
+                                'arquivo' => 'brand-assets/life/roteiro/telhados.jpg', 'gatilho' => 'telha,? laje|laje ou|ou metalic' }]
+      ))
+    end
+
+    def mandar(textos, gatilho = incoming)
+      described_class.new.send(:send_replies, conversation, textos, gatilho.id, 'atendente_agendamento')
+    end
+
+    it 'troca o balão que pergunta o telhado em texto pela foto com a legenda, uma vez', :aggregate_failures do
+      mandar(['Telha, beleza, anotado!', 'O seu telhado é de telha, laje ou metálico?'])
+      msgs = conversation.messages.outgoing.order(:id).to_a
+      expect(msgs.map(&:content)).to eq(['Telha, beleza, anotado!', legenda])
+      expect(msgs.last.attachments.first.file_type).to eq('image')
+      expect(msgs.last.additional_attributes[Crm::ScriptImages::MEDIA_STAMP]).to eq('chave' => 'telhados', 'tipo' => 'imagem')
+
+      outra = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: 'não entendi')
+      mandar(['De novo: telha, laje ou metálico?'], outra)
+      expect(conversation.messages.outgoing.count).to eq(3)
+      expect(conversation.messages.outgoing.order(:id).last.content).to eq('De novo: telha, laje ou metálico?')
+    end
+
+    it 'não mexe em balão que só comenta o telhado' do
+      mandar(['Telha, beleza!', 'O imóvel é seu?'])
+      expect(conversation.messages.outgoing.order(:id).map(&:content)).to eq(['Telha, beleza!', 'O imóvel é seu?'])
+    end
+  end
+
   describe 'trava por conversa e "já respondi"' do
     let(:lock_key) { format(described_class::LOCK_KEY, id: conversation.id) }
 
