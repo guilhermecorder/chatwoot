@@ -397,6 +397,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # ── Meta Ads ────────────────────────────────────────────────────────────────
 
+  # Lead Ads (formulários instantâneos): página + token de página + webhook +
+  # a mensagem modelo que sai para o lead assim que ele chega (08/11, LIFE)
+  def apply_lead_ads(cfg)
+    cfg['page_id']           = params[:page_id].to_s.strip     if params.key?(:page_id)
+    cfg['page_access_token'] = params[:page_access_token]      if params[:page_access_token].present?
+    cfg['app_secret']        = params[:app_secret]             if params[:app_secret].present?
+    cfg['lead_inbox_id']     = params[:lead_inbox_id].presence&.to_i if params.key?(:lead_inbox_id)
+    cfg['leadgen_verify_token'] ||= SecureRandom.hex(8) if cfg['page_id'].present?
+    cfg['lead_welcome'] = Crm::MetaLeadWelcome.sanitize_config(params[:lead_welcome]) if params.key?(:lead_welcome)
+  end
+
   # parâmetros bom/atenção/ruim da Central de Criativos (item 172)
   def apply_creative_targets(cfg)
     cfg['creative_targets'] = Crm::CreativeTargets.sanitize(params[:creative_targets]) if params.key?(:creative_targets)
@@ -411,6 +422,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # etapas do CRM que contam como conversão no relatório de anúncios
     cfg['conversion_stage_ids'] = Array(params[:conversion_stage_ids]).map(&:to_i) if params.key?(:conversion_stage_ids)
     apply_creative_targets(cfg)
+    apply_lead_ads(cfg)
     crm_settings.update!(meta_ads_config: cfg)
     render json: meta_ads_json(crm_settings)
   end
@@ -419,6 +431,28 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # conta), sempre com código de teste — resposta em lista, um por destino
   def test_meta_ads
     render json: Crm::MetaAdsTestService.new(account: Current.account).call
+  end
+
+  # Lead Ads: valida página+token e lista os formulários com contagem de leads
+  def test_meta_leads
+    render json: Crm::MetaLeadIngestService.new(account: Current.account).test_connection
+  end
+
+  # Lead Ads: importação retroativa (a Meta guarda leads por 90 dias)
+  def import_meta_leads
+    unless Current.account_user.administrator?
+      return render json: { error: 'Apenas administradores podem importar leads.' }, status: :forbidden
+    end
+
+    cfg = crm_settings.meta_ads_config || {}
+    if import_running?(cfg['last_lead_import'])
+      return render json: { error: 'Já existe uma importação em andamento.' }, status: :unprocessable_entity
+    end
+
+    cfg['last_lead_import'] = { 'status' => 'running', 'started_at' => Time.current.iso8601 }
+    crm_settings.update!(meta_ads_config: cfg)
+    Crm::MetaLeadImportJob.perform_later(Current.account.id)
+    render json: meta_ads_json(crm_settings)
   end
 
   # ── 🌾 Colheitadeira da Base (item 128) ──────────────────────────────────────
@@ -2827,7 +2861,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       test_event_code: cfg['test_event_code'],
       configured: cfg['pixel_id'].present? && cfg['access_token'].present?,
       insights_configured: cfg['ad_account_id'].present? && cfg['access_token'].present?,
-      whatsapp_datasets: meta_whatsapp_datasets(s, cfg)
+      whatsapp_datasets: meta_whatsapp_datasets(s, cfg),
+      # Lead Ads (formulários instantâneos)
+      page_id: cfg['page_id'],
+      page_token_set: cfg['page_access_token'].present?,
+      app_secret_set: cfg['app_secret'].present?,
+      lead_inbox_id: cfg['lead_inbox_id'],
+      leadgen_verify_token: cfg['leadgen_verify_token'],
+      leads_configured: cfg['page_id'].present? && cfg['page_access_token'].present?,
+      last_lead_import: cfg['last_lead_import'],
+      lead_welcome: cfg['lead_welcome']
     }
   end
 
@@ -2837,6 +2880,18 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   rescue StandardError => e
     Rails.logger.warn "[MetaWabaDatasets] lista da tela falhou: #{e.message}"
     []
+  end
+
+  def import_running?(last_import)
+    last = last_import || {}
+    return false unless last['status'] == 'running'
+
+    started = begin
+      Time.zone.parse(last['started_at'].to_s)
+    rescue StandardError
+      nil
+    end
+    started.present? && started > 30.minutes.ago
   end
 
   # cor escolhida pelo admin por card da fileira (item 143): só strings de

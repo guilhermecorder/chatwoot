@@ -169,6 +169,8 @@ namespace :crm do
     post :fetch_workflows
     post :update_meta_ads
     post :test_meta_ads
+    post :test_meta_leads
+    post :import_meta_leads
     post :update_ai
     post :test_ai
     # 🕶️ rodada 188: tela Sombra dos respondedores (o que a IA teria dito × o que foi dito)

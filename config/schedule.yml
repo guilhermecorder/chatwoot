@@ -232,6 +232,13 @@ crm_voice_unresponsive_leads_job:
   class: 'Crm::VoiceAgent::UnresponsiveLeadsJob'
   queue: low
 
+# 🔄 08/11 (LIFE): leads novos dos formulários do Meta a cada 5 min (garantia
+# além do webhook; o lead recebe a boas-vindas no WhatsApp na hora)
+crm_meta_lead_poll_job:
+  cron: '*/5 * * * *'
+  class: 'Crm::MetaLeadPollJob'
+  queue: low
+
 # 🎯 Central de Criativos (item 172): 07:20 UTC (04:20 SP) — anúncios +
 # métricas diárias da Meta (últimos 3 dias; 90 na primeira vez)
 crm_ad_insights_sync_job:

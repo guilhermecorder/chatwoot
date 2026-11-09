@@ -425,6 +425,16 @@ const actions = {
     const { data } = await CrmAPI.testMetaAds();
     return data;
   },
+  async testMetaLeads() {
+    const { data } = await CrmAPI.testMetaLeads();
+    return data;
+  },
+  async importMetaLeads({ commit }) {
+    const { data } = await CrmAPI.importMetaLeads();
+    if (!data.error) commit('setSettings', { meta_ads: data });
+    return data;
+  },
+
   async updateGoogleAds({ commit }, params) {
     const { data } = await CrmAPI.updateGoogleAds(params);
     commit('setSettings', { google_ads: data });

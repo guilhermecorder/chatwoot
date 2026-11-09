@@ -1135,6 +1135,14 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/test_meta_ads`);
   }
 
+  testMetaLeads() {
+    return axios.post(`${this.url}/settings/test_meta_leads`);
+  }
+
+  importMetaLeads() {
+    return axios.post(`${this.url}/settings/import_meta_leads`);
+  }
+
   // ── Google Ads ────────────────────────────────────────────────────
   updateGoogleAds(data) {
     return axios.post(`${this.url}/settings/update_google_ads`, data);
