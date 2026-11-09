@@ -36,6 +36,7 @@ const pal = useCevicoPalette({
   scope: 'otica:estoque',
   blocks: [
     { id: 'visao', label: 'Visão', icon: 'i-lucide-gauge' },
+    { id: 'compras', label: 'O que comprar', icon: 'i-lucide-shopping-cart' },
     { id: 'entrada', label: 'Entrada de mercadoria', icon: 'i-lucide-truck' },
     { id: 'inventario', label: 'Inventário', icon: 'i-lucide-clipboard-check' },
     { id: 'movimentacoes', label: 'Movimentações', icon: 'i-lucide-history' },
@@ -542,9 +543,84 @@ const saveAdjust = async () => {
   }
 };
 
+// ── 📊 o que vende × o que comprar (08/11, noite) ──
+// vendas por categoria (formato, marca, lente, tipo) no período, saldo de cada
+// categoria, meta de estoque mínimo mensal (automática = ritmo × cobertura, ou
+// a que a loja gravar) e o que comprar = meta − saldo
+const compras = ref(null);
+const comprasLoading = ref(false);
+const comprasError = ref('');
+const comprasDim = ref('frame_shape');
+const metaDraft = ref({});
+const coberturaDraft = ref('');
+const savingMeta = ref(false);
+const COMPRAS_DIMS = [
+  { key: 'frame_shape', label: 'Formato', icon: 'i-lucide-scan-face' },
+  { key: 'brand', label: 'Marca', icon: 'i-lucide-tag' },
+  { key: 'lens_type', label: 'Lente', icon: 'i-lucide-circle-dot' },
+  { key: 'kind', label: 'Tipo', icon: 'i-lucide-shapes' },
+];
+const comprasRows = computed(
+  () => compras.value?.dimensions?.[comprasDim.value]?.rows || []
+);
+const comprasHasStock = computed(
+  () => compras.value?.dimensions?.[comprasDim.value]?.stock !== false
+);
+const comprasTotal = computed(() =>
+  comprasRows.value.reduce((n, r) => n + (r.comprar || 0), 0)
+);
+const loadCompras = async () => {
+  comprasLoading.value = true;
+  comprasError.value = '';
+  try {
+    const { data: payload } = await CrmAPI.getOticaCompras({ days: days.value });
+    compras.value = payload;
+    coberturaDraft.value = String(payload?.cobertura_meses ?? 1.5).replace('.', ',');
+    metaDraft.value = {};
+  } catch (e) {
+    comprasError.value = errorOf(e, 'Não consegui carregar o que vende.');
+  } finally {
+    comprasLoading.value = false;
+  }
+};
+const metaKey = row => `${comprasDim.value}:${row.key}`;
+const metaValue = row =>
+  metaDraft.value[metaKey(row)] ?? (row.meta_manual ?? '');
+const setMetaDraft = (row, v) => {
+  metaDraft.value = { ...metaDraft.value, [metaKey(row)]: v };
+};
+const saveMetas = async () => {
+  if (!editable.value || savingMeta.value) return;
+  savingMeta.value = true;
+  try {
+    const { data: payload } = await CrmAPI.saveOticaCompras({
+      days: days.value,
+      cobertura_meses: coberturaDraft.value,
+      metas: metaDraft.value,
+    });
+    compras.value = payload;
+    metaDraft.value = {};
+    coberturaDraft.value = String(payload?.cobertura_meses ?? 1.5).replace('.', ',');
+    useAlert('Metas de estoque gravadas.');
+  } catch (e) {
+    useAlert(errorOf(e, 'Não consegui gravar as metas.'));
+  } finally {
+    savingMeta.value = false;
+  }
+};
+const metaDirty = computed(
+  () =>
+    Object.keys(metaDraft.value).length > 0 ||
+    coberturaDraft.value !== String(compras.value?.cobertura_meses ?? 1.5).replace('.', ',')
+);
+const pct = v => `${Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
+const fmtPerMonth = v => `${Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/mês`;
+watch(days, () => loadCompras());
+
 onMounted(async () => {
   await load();
   loadPurchases();
+  loadCompras();
 });
 </script>
 
@@ -825,6 +901,125 @@ onMounted(async () => {
               </div>
             </article>
           </div>
+        </section>
+
+        <!-- bloco 1b · o que vende × o que comprar (08/11, noite) -->
+        <section class="cv-ag-block p-5 sm:p-7 mb-8">
+          <div class="flex items-start gap-3 flex-wrap">
+            <div>
+              <h2 class="cv-ag-block-title">O que vende · o que comprar</h2>
+              <span class="cv-ag-block-sub">
+                as vendas dos últimos {{ compras?.in_days ?? days }} dias por
+                categoria, o saldo de cada uma e a meta de estoque mínimo
+                mensal: comprar = meta − saldo
+              </span>
+            </div>
+            <div class="ml-auto cv-seg">
+              <button
+                v-for="d in COMPRAS_DIMS"
+                :key="d.key"
+                class="cv-seg-item"
+                :class="comprasDim === d.key ? 'cv-seg-on' : ''"
+                @click="comprasDim = d.key"
+              >
+                <span :class="d.icon" class="text-xs mr-1" />{{ d.label }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="comprasError"
+            class="cv-block cv-strip cv-red px-4 py-3 mt-4 flex items-center gap-3"
+          >
+            <p class="text-xs text-n-slate-11 flex-1">{{ comprasError }}</p>
+            <button class="cv-btn cv-btn-sm" @click="loadCompras">Tentar de novo</button>
+          </div>
+          <p v-else-if="comprasLoading && !compras" class="text-xs text-n-slate-10 py-6 text-center">
+            Somando as vendas…
+          </p>
+          <template v-else>
+            <div class="flex items-center gap-3 flex-wrap mt-4 mb-3">
+              <span class="cv-sub px-3 py-2 text-[11px] text-n-slate-11 flex items-center gap-2">
+                <span class="i-lucide-hourglass text-xs" />
+                cobertura
+                <input
+                  v-model="coberturaDraft"
+                  type="text"
+                  inputmode="decimal"
+                  :disabled="!editable"
+                  class="ot-meta-input !w-10 text-center"
+                />
+                mês(es) de venda em estoque
+              </span>
+              <span
+                v-if="comprasHasStock"
+                class="text-[11px] font-bold tabular-nums px-2.5 py-1 rounded-full"
+                :style="{ background: comprasTotal > 0 ? '#DC26261A' : '#16A34A1A', color: comprasTotal > 0 ? VERMELHO : VERDE }"
+              >
+                {{ comprasTotal }} peça(s) a comprar
+              </span>
+              <button
+                v-if="editable"
+                class="cv-btn cv-btn-sm ml-auto"
+                :disabled="!metaDirty || savingMeta"
+                @click="saveMetas"
+              >
+                <span class="i-lucide-save text-xs" />
+                {{ savingMeta ? 'Gravando…' : 'Gravar metas' }}
+              </button>
+            </div>
+
+            <p v-if="!comprasRows.length" class="text-xs text-n-slate-10 py-6 text-center">
+              Nenhuma venda nem saldo nesta categoria no período.
+            </p>
+            <div v-else class="flex flex-col gap-1.5">
+              <div
+                v-for="r in comprasRows"
+                :key="r.key"
+                class="cv-sub px-3 py-2.5 grid items-center gap-x-3 gap-y-1"
+                :style="{ gridTemplateColumns: comprasHasStock ? 'minmax(0,1fr) 4.5rem 3rem 4.5rem 3.5rem' : 'minmax(0,1fr) 4.5rem' }"
+              >
+                <div class="min-w-0">
+                  <p class="text-xs font-semibold text-n-slate-12 truncate">
+                    {{ r.label }}
+                    <span class="ml-1 text-[10px] font-bold text-n-slate-9">{{ pct(r.share) }}</span>
+                  </p>
+                  <p v-if="r.top.length" class="text-[10px] text-n-slate-9 leading-snug truncate">
+                    <span v-for="(t, ti) in r.top" :key="t.id">{{ ti ? ' · ' : '' }}{{ t.name }} ({{ t.sold_units }})</span>
+                  </p>
+                  <p class="text-[10px] text-n-slate-9 tabular-nums">{{ fmtPerMonth(r.per_month) }} · {{ fmtMoney(r.sold_value) }}</p>
+                </div>
+                <div class="text-right">
+                  <p class="text-[10px] text-n-slate-9">vendidos</p>
+                  <p class="text-sm font-extrabold tabular-nums" :style="{ color: VERDE }">{{ r.sold_units }}</p>
+                </div>
+                <div v-if="comprasHasStock" class="text-right">
+                  <p class="text-[10px] text-n-slate-9">saldo</p>
+                  <p class="text-sm font-extrabold tabular-nums" :style="{ color: ROXO }">{{ r.stock_units ?? 0 }}</p>
+                </div>
+                <div v-if="comprasHasStock" class="text-right">
+                  <p class="text-[10px] text-n-slate-9">meta/mês</p>
+                  <input
+                    :value="metaValue(r)"
+                    type="number"
+                    min="0"
+                    :placeholder="String(r.meta_auto)"
+                    :disabled="!editable"
+                    class="ot-meta-input"
+                    :style="{ color: OURO }"
+                    @input="setMetaDraft(r, $event.target.value)"
+                  />
+                  <p class="text-[9px] text-n-slate-9 leading-none">{{ r.meta_manual ? 'sua meta' : 'sugerida' }}</p>
+                </div>
+                <div v-if="comprasHasStock" class="text-right">
+                  <p class="text-[10px] text-n-slate-9">comprar</p>
+                  <p class="text-base font-extrabold tabular-nums" :style="{ color: r.comprar > 0 ? VERMELHO : CINZA }">
+                    {{ r.comprar ?? 0 }}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </template>
         </section>
 
         <!-- bloco 2 · entrada de mercadoria -->
@@ -1429,5 +1624,27 @@ onMounted(async () => {
 .ot-form select,
 .ot-form textarea {
   margin-bottom: 0;
+}
+
+/* 📊 08/11: campos de meta na seção "O que vende · o que comprar" */
+.ot-meta-input {
+  width: 3.5rem !important;
+  min-width: 0 !important;
+  padding: 0 0.15rem !important;
+  margin: 0 !important;
+  height: 1.5rem !important;
+  font-size: 0.875rem !important;
+  font-weight: 800;
+  text-align: right;
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgb(148 163 184 / 0.5) !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-variant-numeric: tabular-nums;
+}
+.ot-meta-input.\!w-10 {
+  width: 2.75rem !important;
 }
 </style>

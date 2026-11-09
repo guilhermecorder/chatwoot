@@ -105,6 +105,21 @@ class Api::V1::Accounts::Crm::Otica::ProductsController < Api::V1::Accounts::Bas
     render json: { entraram: done, pularam: skipped, total: files.size }
   end
 
+  # 🪞 08/11 (noite): o Gemini lê a foto e preenche formato, público e frase (o que estiver vazio; force=1 sobrescreve)
+  def read_frame
+    product = products.find(params[:id])
+    reading = ::Otica::FrameReading.read!(product, force: params[:force].to_s == '1')
+    render json: { leitura: reading, product: product.reload.as_json_otica }
+  rescue ::Otica::FrameReading::Error => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # todas as armações com foto e sem formato, de uma vez (síncrono, até 200)
+  def read_frames
+    done, errors = ::Otica::FrameReading.read_missing!(Current.account)
+    render json: { lidas: done, erros: errors, faltam: ::Otica::FrameReading.missing_count(Current.account) }
+  end
+
   def delete_photo
     product = products.find(params[:id])
     product.photo.purge_later if product.photo.attached?

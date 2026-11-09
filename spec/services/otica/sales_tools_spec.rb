@@ -141,9 +141,37 @@ RSpec.describe Otica::SalesTools do
     end
   end
 
+  # 🔁 08/11 (noite): "hoje não temos o formato ideal; posso te chamar daqui a uma semana?" → sim → tarefa na data
+  describe 'agendar_retorno' do
+    it 'em sombra simula; ao vivo abre UMA tarefa por cliente na data combinada (chamada nova só atualiza)', :aggregate_failures do
+      out, resumo = tools(live: false).call('agendar_retorno', { 'motivo' => 'gatinho ou oval pro rosto redondo' })
+      expect(out).to include(ok: true, simulado: true, dias: 7)
+      expect(resumo).to eq('retorno simulado em 7 dias')
+      expect(account.tasks.count).to eq(0)
+
+      out, resumo = tools(live: true).call('agendar_retorno', { 'dias' => 5, 'motivo' => 'gatinho ou oval pro rosto redondo' })
+      expect(out).to include(ok: true, dias: 5)
+      expect(resumo).to start_with('retorno em ')
+      task = account.tasks.last
+      expect(task.task_type).to eq('otica_retorno')
+      expect(task.title).to include('Chamar Maria Silva').and include('gatinho ou oval')
+      expect(task.due_at.to_date).to eq((Otica::TZ.now + 5.days).to_date)
+      expect(task.contact).to eq(contact)
+      expect(conversation.messages.where(message_type: :activity).last.content).to include('Retorno combinado')
+
+      tools(live: true).call('agendar_retorno', { 'dias' => 10, 'motivo' => 'armação preta fininha' })
+      expect(account.tasks.where(task_type: 'otica_retorno').count).to eq(1)
+      expect(task.reload.due_at.to_date).to eq((Otica::TZ.now + 10.days).to_date)
+      expect(task.title).to include('armação preta fininha')
+
+      expect(tools(live: true).call('agendar_retorno', { 'motivo' => '' }).first[:ok]).to be(false)
+      expect(tools(live: true).call('agendar_retorno', { 'dias' => 90, 'motivo' => 'x' }).first[:dias]).to eq(30)
+    end
+  end
+
   it 'as três ferramentas entram no Atendente da ótica pela Crm::ResponderTools e registram a ação', :aggregate_failures do
     rt = Crm::ResponderTools.new(conversation: conversation, agent_key: 'atendente_agendamento', live: false)
-    expect(rt.definitions.pluck(:name)).to include('experimentar_armacoes', 'mostrar_lentes', 'conferir_desconto', 'registrar_fechamento')
+    expect(rt.definitions.pluck(:name)).to include('experimentar_armacoes', 'mostrar_lentes', 'conferir_desconto', 'registrar_fechamento', 'agendar_retorno')
     out = rt.call('mostrar_lentes', { 'rotina' => 'leitura' })
     expect(out[:ok]).to be(true)
     expect(rt.acoes.last).to include('ferramenta' => 'mostrar_lentes', 'ok' => true, 'simulado' => true)

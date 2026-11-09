@@ -330,11 +330,13 @@ namespace :crm do
       collection do
         post :import_csv
         post :photos_bulk # 🪞 08/11: fotos em lote, nome do arquivo = código
+        post :read_frames # 🪞 08/11 (noite): lê o formato de todas as armações com foto e sem formato
       end
       # 🪞 prova virtual (08/11): foto da armação
       member do
         post :photo
         delete :photo, action: :delete_photo
+        post :read_frame # 🪞 08/11 (noite): formato/público/frase pela foto (Gemini)
       end
     end
     # 🪞 prova virtual (08/11): status + prévia pela tela de Produtos (equipe testa sem WhatsApp)
@@ -366,6 +368,9 @@ namespace :crm do
       post :inventory
       get :purchases
       post :purchases, action: :create_purchase
+      # 📊 08/11 (noite): o que vende por categoria + meta de estoque mínimo mensal + o que comprar
+      get :compras
+      patch :compras, action: :save_compras
       post 'purchases/preview_xml', action: :preview_xml
       post 'purchases/:id/receive', action: :receive_purchase
       delete 'purchases/:id', action: :delete_purchase

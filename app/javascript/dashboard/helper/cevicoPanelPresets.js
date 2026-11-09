@@ -21,7 +21,164 @@ import { PALETTE_BY_KEY } from 'dashboard/helper/cevicoPalettes';
 
 const gradOf = ([key, step = 1]) => PALETTE_BY_KEY[key]?.family?.[step] || null;
 
+// 👓 08/11 (noite): VIDRO FUMÊ — o fumê dos vídeos da ótica. Todos os cards do
+// modelo são o mesmo vidro escuro translúcido; cada GRUPO (divisória + seus
+// cards) tem um fio de cor no topo. `accent` nos tiles do modelo escolhe o fio.
+export const GLASS_ACCENTS = {
+  ceu: '#6FB4FF', // chegaram
+  lilas: '#C19BFF', // antes da loja (WhatsApp)
+  ouro: '#F4C56A', // venda (dinheiro)
+  agua: '#5FD3C6', // o que saiu
+  rosa: '#FF8FB4',
+  branco: '#F1F5F9',
+};
+const FUME_BASE = 'rgba(22, 24, 30, 0.74)';
+const FUME_EDGE = 'rgba(52, 56, 68, 0.58)';
+// o gradiente leva um nada do acento na ponta — dá pra achar o acento de volta (glassAccentOf)
+export const glassGrad = accent =>
+  `linear-gradient(135deg, ${FUME_BASE} 0%, ${FUME_EDGE} 72%, ${GLASS_ACCENTS[accent] || GLASS_ACCENTS.branco}33 100%)`;
+export const GLASS_GRADS = Object.fromEntries(
+  Object.keys(GLASS_ACCENTS).map(k => [k, glassGrad(k)])
+);
+export const isGlassGrad = grad =>
+  typeof grad === 'string' && grad.startsWith(`linear-gradient(135deg, ${FUME_BASE}`);
+export const glassAccentOf = grad => {
+  const key = Object.keys(GLASS_GRADS).find(k => GLASS_GRADS[k] === grad);
+  return key ? GLASS_ACCENTS[key] : null;
+};
+
 export const PANEL_PRESETS = [
+  // 👓 08/11 (noite, pedido do Guilherme): o Meu Painel da LOJA — só aparece
+  // em conta do ramo ótica (otica: true). Vendas e dinheiro grandes, depois
+  // o que foi vendido (armações, lentes, multifocais), a prova virtual e os
+  // retornos combinados; o funil de chegada (contatos, visitas) nos pequenos.
+  {
+    key: 'otica_loja',
+    otica: true,
+    glass: true,
+    panels: ['gestor', 'agendamento'],
+    label: 'Sua Ótica · Loja',
+    emoji: '👓',
+    desc: 'Vidro fumê, em 4 grupos ligados por um fio de cor: Chegaram (contatos, visitas) · Antes da loja (provas virtuais, retornos pelo WhatsApp) · Venda (vendas e faturamento grandes, ticket, contato → venda) · O que saiu (armações, lentes, multifocais).',
+    tiles: [
+      { divider: 'Chegaram' },
+      { fixed: 'new_leads', accent: 'ceu' },
+      {
+        kpi: {
+          id: 'visitas',
+          label: 'Visitas marcadas',
+          expr: 'appointments_booked',
+          format: 'number',
+          icon: 'i-lucide-calendar-check',
+        },
+        accent: 'ceu',
+      },
+      { spacer: true },
+      { spacer: true },
+      { divider: 'Antes da loja · WhatsApp' },
+      {
+        kpi: {
+          id: 'provas',
+          label: 'Provas virtuais enviadas',
+          expr: 'otica_provas_virtuais',
+          format: 'number',
+          icon: 'i-lucide-camera',
+        },
+        accent: 'lilas',
+      },
+      {
+        kpi: {
+          id: 'retornos',
+          label: 'Retornos combinados',
+          expr: 'otica_retornos',
+          format: 'number',
+          icon: 'i-lucide-bell-ring',
+        },
+        accent: 'lilas',
+      },
+      { spacer: true },
+      { spacer: true },
+      { divider: 'Venda' },
+      {
+        kpi: {
+          id: 'vendas',
+          label: 'Vendas da loja',
+          expr: 'otica_vendas',
+          format: 'number',
+          icon: 'i-lucide-receipt-text',
+        },
+        size: 'lg',
+        accent: 'ouro',
+      },
+      {
+        kpi: {
+          id: 'fat',
+          label: 'Faturamento da loja',
+          expr: 'otica_faturamento',
+          format: 'currency',
+          icon: 'i-lucide-banknote',
+          finance: true,
+        },
+        size: 'lg',
+        accent: 'ouro',
+      },
+      {
+        kpi: {
+          id: 'ticket',
+          label: 'Ticket médio',
+          expr: 'otica_faturamento / otica_vendas',
+          format: 'currency',
+          icon: 'i-lucide-wallet',
+          finance: true,
+        },
+        accent: 'ouro',
+      },
+      {
+        kpi: {
+          id: 'conv',
+          label: 'Contato → venda',
+          expr: 'otica_vendas / new_leads * 100',
+          format: 'percent',
+          icon: 'i-lucide-trending-up',
+        },
+        accent: 'ouro',
+      },
+      { spacer: true },
+      { spacer: true },
+      { divider: 'O que saiu' },
+      {
+        kpi: {
+          id: 'arm',
+          label: 'Armações e solares',
+          expr: 'otica_armacoes',
+          format: 'number',
+          icon: 'i-lucide-glasses',
+        },
+        accent: 'agua',
+      },
+      {
+        kpi: {
+          id: 'lentes',
+          label: 'Lentes de grau',
+          expr: 'otica_lentes',
+          format: 'number',
+          icon: 'i-lucide-circle-dot',
+        },
+        accent: 'agua',
+      },
+      {
+        kpi: {
+          id: 'multi',
+          label: 'Multifocais',
+          expr: 'otica_multifocais',
+          format: 'number',
+          icon: 'i-lucide-layers',
+        },
+        accent: 'agua',
+      },
+      { spacer: true },
+    ],
+  },
   {
     key: 'jornada_completa',
     panels: ['gestor', 'agendamento'],
@@ -453,7 +610,8 @@ export const buildPreset = (preset, { panel, metrics, fixedIds }) => {
         id: defId,
         expr,
         panel,
-        color: gradOf(t.color || ['bondi', 1]) || '',
+        // 👓 vidro fumê: o acento do grupo vira o gradiente do card
+        color: preset.glass ? glassGrad(t.accent) : gradOf(t.color || ['bondi', 1]) || '',
         icon_manual: true,
       });
       id = `kpi:${defId}`;
@@ -461,7 +619,8 @@ export const buildPreset = (preset, { panel, metrics, fixedIds }) => {
     if (!id) return;
     order.push(id);
     if (t.size === 'lg') sizes[id] = 'lg';
-    if (t.color && !t.kpi) colors[id] = gradOf(t.color);
+    if (preset.glass && !t.kpi && !t.divider && !t.spacer) colors[id] = glassGrad(t.accent);
+    else if (t.color && !t.kpi) colors[id] = gradOf(t.color);
   });
   return {
     defs,

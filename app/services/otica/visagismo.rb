@@ -126,6 +126,38 @@ module Otica::Visagismo
     end
   end
 
+  # 🔁 08/11 (noite, pedido do Guilherme): o agente só mostra o que EXISTE no estoque e
+  # diz a verdade sobre o quanto combina. Nível da combinação rosto × armação:
+  #   exata      = formato está nas recomendadas pro rosto
+  #   aproximada = não é das recomendadas, mas também não foge (ou formato não cadastrado)
+  #   foge       = está em "evitar": nunca vai pra cliente como sugestão
+  LEVELS = %w[exata aproximada foge].freeze
+  def match_level(face_shape, frame_shape)
+    r = rule(face_shape)
+    shape = frame_shape.to_s
+    return 'exata' if r['recomendadas'].include?(shape)
+    return 'foge' if r['evitar'].include?(shape)
+
+    'aproximada'
+  end
+
+  # escolha HONESTA: tira as que fogem, prefere as exatas; devolve [escolhidas, nível geral, formatos ideais].
+  # nível geral = 'exata' se a melhor é exata, 'aproximada' se só há aproximadas, 'nenhuma' se não sobrou nada.
+  def honest_pick(products, face_shape:, preference: nil, limit: 2)
+    r = rule(face_shape)
+    pool = products.reject { |p| match_level(face_shape, p.frame_shape) == 'foge' }
+    ideais = r['recomendadas'].map { |s| frame_label(s) }
+    return [[], 'nenhuma', ideais] if pool.empty?
+
+    exact = pool.select { |p| match_level(face_shape, p.frame_shape) == 'exata' }
+    chosen = recommend(exact.presence || pool, face_shape: face_shape, preference: preference, limit: limit)
+    # exatas de menos: completa com aproximadas (a cliente sempre compara 2)
+    if exact.any? && chosen.size < limit
+      chosen += recommend(pool - chosen, face_shape: face_shape, preference: preference, limit: limit - chosen.size)
+    end
+    [chosen, (exact.any? ? 'exata' : 'aproximada'), ideais]
+  end
+
   def face_label(shape)
     FACE_SHAPES[shape.to_s] || shape.to_s
   end

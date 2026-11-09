@@ -21,7 +21,10 @@
 # pelo WhatsApp): pix_key, payment_link, default_discount_pct.
 # Em SOMBRA nada é enviado, nada espera e nenhuma tarefa nasce: tudo `simulado`.
 class Otica::SalesTools
-  NAMES = %w[pedir_fotos mostrar_lentes conferir_desconto registrar_fechamento status_do_pedido].freeze
+  NAMES = %w[pedir_fotos mostrar_lentes conferir_desconto registrar_fechamento agendar_retorno status_do_pedido].freeze
+  # 🔁 08/11 (noite): "posso te chamar daqui a uma semana?" — tarefa pra equipe na data combinada
+  RETURN_TASK_TYPE = 'otica_retorno'.freeze
+  RETURN_DAYS = (1..30)
   # 🪞 08/11: o pedido da foto (uma só: "quanto mais fácil, melhor") sai com o cartão-exemplo da loja (Produtos → Venda pelo WhatsApp)
   DEFAULT_PHOTO_GUIDE = 'Me manda uma foto sua, assim fica bem parecido: de frente pra uma janela, com a luz do dia no rosto, ' \
                         'celular com o braço esticado na altura dos olhos, sem óculos e sem boné, só você na foto.'.freeze
@@ -144,6 +147,22 @@ class Otica::SalesTools
           required: %w[valor forma_pagamento],
           additionalProperties: false
         }
+      },
+      {
+        name: 'agendar_retorno',
+        description: 'RETORNO COMBINADO: quando a loja NÃO tem hoje o que a cliente procura (formato de armação pro rosto dela, ' \
+                     'cor, modelo, lente) e ela ACEITOU que a gente chame depois ("posso te chamar daqui a uma semana?"). Abre ' \
+                     'uma tarefa para a equipe na data combinada, com o que ela procurava, e devolve a data. Só depois do sim dela. ' \
+                     'Nunca prometa que o modelo vai chegar: prometa o retorno.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            dias: { type: 'integer', minimum: RETURN_DAYS.min, maximum: RETURN_DAYS.max, description: 'Em quantos dias chamar (padrão 7)' },
+            motivo: { type: 'string', description: 'O que ela procurava, em 1 frase: "armação gatinho ou oval pro rosto redondo, preta"' }
+          },
+          required: %w[motivo],
+          additionalProperties: false
+        }
       }
     ]
   end
@@ -164,6 +183,7 @@ class Otica::SalesTools
     when 'mostrar_lentes' then mostrar_lentes(args)
     when 'conferir_desconto' then conferir_desconto(args)
     when 'registrar_fechamento' then registrar_fechamento(args)
+    when 'agendar_retorno' then agendar_retorno(args)
     when 'status_do_pedido' then status_do_pedido
     else [{ ok: false, motivo: "Ferramenta desconhecida: #{name}" }, 'desconhecida']
     end
@@ -308,6 +328,43 @@ class Otica::SalesTools
     Rails.logger.error "[Otica::SalesTools#registrar_fechamento] #{e.class}: #{e.message}"
     [{ ok: false, motivo: 'Não consegui registrar o fechamento agora. Diga que a equipe confirma por aqui em instantes e marque chamar_humano.' },
      "erro: #{e.message.truncate(80)}"]
+  end
+
+  # ── 🔁 retorno combinado (08/11, noite) ───────────────────────────────────
+  # "Hoje não temos o formato ideal pro seu rosto; posso te chamar daqui a uma semana?" → sim → tarefa
+  # pra equipe na data, com o que ela procurava. Uma por cliente: chamada nova só atualiza a data e o motivo.
+  def agendar_retorno(args) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    motivo = args['motivo'].to_s.strip.first(160)
+    return [{ ok: false, motivo: 'Diga em 1 frase o que a cliente procurava.' }, 'sem motivo'] if motivo.blank?
+
+    dias = (args['dias'].presence || 7).to_i.clamp(RETURN_DAYS.min, RETURN_DAYS.max)
+    due = Otica::TZ.now.advance(days: dias).change(hour: 9)
+    quando = "#{due.strftime('%d/%m')} (#{%w[domingo segunda terça quarta quinta sexta sábado][due.wday]})"
+    contact = @conversation.contact
+    if !@live || @simulation
+      return [{ ok: true, simulado: true, quando: quando, dias: dias,
+                aviso: "SIMULAÇÃO: ao vivo a equipe receberia a tarefa de chamar a cliente em #{quando}. Confirme com ela em 1 frase." },
+              "retorno simulado em #{dias} dias"]
+    end
+
+    creator = @account.administrators.first || @account.users.first
+    return [{ ok: false, motivo: 'A loja ainda não tem usuário para receber a tarefa.' }, 'sem usuário'] if creator.nil?
+
+    task = @account.tasks.where(task_type: RETURN_TASK_TYPE, contact_id: contact&.id, status: %i[todo doing]).first if contact
+    title = "🔁 Chamar #{contact&.name.presence || 'cliente'} · #{motivo}"
+    detail = "#{Otica::TZ.now.strftime('%d/%m %H:%M')} · combinado pelo WhatsApp: chamar em #{dias} dias com novidade.\nProcurava: #{motivo}" \
+             "\nConversa ##{@conversation.display_id}"
+    if task
+      task.update!(title: title, description: detail, due_at: due)
+    else
+      assignee = Crm::TaskOwner.resolve(@account, contact: contact, task_type: 'consulta') || creator
+      task = @account.tasks.create!(title: title, description: detail, task_type: RETURN_TASK_TYPE, priority: :high, status: :todo,
+                                    due_at: due, contact: contact, phone: contact&.phone_number, creator: creator, assignee: assignee)
+    end
+    activity_note!("🔁 Retorno combinado (#{stamp}): chamar em #{quando} · #{motivo}")
+    [{ ok: true, id: task.id, quando: quando, dias: dias,
+       aviso: "Tarefa aberta para a equipe chamar a cliente em #{quando}. Confirme com ela em 1 frase (\"Combinado, te chamo dia #{due.strftime('%d/%m')}\") e encerre sem nova pergunta." },
+     "retorno em #{quando}: #{motivo}"]
   end
 
   # ── 📦 acompanhamento do pedido ──────────────────────────────────────────

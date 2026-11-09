@@ -15,7 +15,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   # não tem a área Financeiro não recebe o faturamento; o gasto do WhatsApp
   # segue o nó "Gasto do WhatsApp" (hoje só administrador, item 303). O
   # cesto é guardado por CONTA, então o corte entra DEPOIS do cache (call).
-  REVENUE_KEYS = %w[revenue].freeze
+  REVENUE_KEYS = %w[revenue otica_faturamento].freeze # 👓 08/11: o faturamento da loja também é dinheiro
   WA_COST_KEYS = %w[wa_cost wa_cost_meta].freeze
   MONEY_KEYS = (REVENUE_KEYS + WA_COST_KEYS).freeze
 
@@ -186,7 +186,59 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
     add.call('wa_cost_meta', 'Gasto com WhatsApp (fatura da Meta)', 'brl',
              wa_charges(since, until_at), wa_charges(prev_since, prev_until), 'crm_whatsapp_charges.day',
              sum: 'crm_whatsapp_charges.cost', date: true)
+    otica_metrics(add, since, until_at, prev_since, prev_until) if otica_account?
     metrics
+  end
+
+  # 👓 08/11 (noite, pedido do Guilherme): os números da LOJA no Meu Painel —
+  # vendas (O.S. que venderam, pela data da venda), faturamento líquido,
+  # armações/lentes/multifocais vendidas, provas virtuais enviadas, retornos
+  # combinados. Ticket médio = fórmula (otica_faturamento / otica_vendas).
+  OTICA_SOLD = Otica::StockReport::SOLD_STATUSES
+  def otica_account?
+    @otica_account = Otica::VirtualTryOn.otica?(@account) if @otica_account.nil?
+    @otica_account
+  end
+
+  def otica_metrics(add, since, until_at, prev_since, prev_until) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    add.call('otica_vendas', 'Vendas da loja (O.S. vendidas)', 'n',
+             otica_orders(since, until_at), otica_orders(prev_since, prev_until), 'otica_orders.sold_on', date: true)
+    add.call('otica_faturamento', 'Faturamento da loja (R$, líquido das O.S.)', 'brl',
+             otica_orders(since, until_at), otica_orders(prev_since, prev_until), 'otica_orders.sold_on',
+             sum: 'otica_orders.net', date: true)
+    add.call('otica_armacoes', 'Armações e solares vendidos (unidades)', 'n',
+             otica_items(since, until_at).where(kind: Otica::Product::FRAME_KINDS),
+             otica_items(prev_since, prev_until).where(kind: Otica::Product::FRAME_KINDS), 'otica_orders.sold_on',
+             sum: 'otica_order_items.quantity', date: true)
+    add.call('otica_lentes', 'Lentes de grau vendidas (unidades)', 'n',
+             otica_items(since, until_at).where(kind: 'lente'), otica_items(prev_since, prev_until).where(kind: 'lente'),
+             'otica_orders.sold_on', sum: 'otica_order_items.quantity', date: true)
+    add.call('otica_multifocais', 'Multifocais vendidas (unidades)', 'n',
+             otica_items(since, until_at).joins(:product).where(otica_products: { lens_type: 'multifocal' }),
+             otica_items(prev_since, prev_until).joins(:product).where(otica_products: { lens_type: 'multifocal' }),
+             'otica_orders.sold_on', sum: 'otica_order_items.quantity', date: true)
+    add.call('otica_provas_virtuais', 'Provas virtuais enviadas (fotos com armação)', 'n',
+             otica_try_ons(since, until_at), otica_try_ons(prev_since, prev_until), 'messages.created_at')
+    add.call('otica_retornos', 'Retornos combinados ("te chamo em uma semana")', 'n',
+             otica_returns(since, until_at), otica_returns(prev_since, prev_until), 'tasks.created_at')
+  end
+
+  def otica_orders(since, until_at)
+    @account.otica_orders.where(status: OTICA_SOLD, sold_on: since.to_date..until_at.to_date)
+  end
+
+  def otica_items(since, until_at)
+    Otica::OrderItem.joins(:order).where(account_id: @account.id)
+                    .where(otica_orders: { status: OTICA_SOLD, sold_on: since.to_date..until_at.to_date })
+  end
+
+  def otica_try_ons(since, until_at)
+    Message.where(account_id: @account.id, message_type: :outgoing, created_at: since..until_at)
+           .where("messages.additional_attributes ? '#{Otica::VirtualTryOn::STAMP_KEY}'")
+  end
+
+  def otica_returns(since, until_at)
+    @account.tasks.where(task_type: Otica::SalesTools::RETURN_TASK_TYPE, created_at: since..until_at)
   end
 
   def wa_messages(since, until_at)

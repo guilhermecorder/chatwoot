@@ -330,6 +330,52 @@ const removePhoto = async () => {
   }
 };
 
+// ── 🪞 leitura do formato pela foto (08/11, noite): o Gemini preenche formato,
+// público e a dica de visagismo; a equipe corrige no cadastro se quiser ──
+const readingFrame = ref(false);
+const readFrame = async (force = false) => {
+  if (!editingId.value || readingFrame.value) return;
+  readingFrame.value = true;
+  try {
+    const { data: r } = await CrmAPI.readOticaFrame(editingId.value, force);
+    productForm.value.frame_shape = r.product.frame_shape || '';
+    productForm.value.frame_fit = r.product.frame_fit || '';
+    productForm.value.visagismo_notes = r.product.visagismo_notes || '';
+    if (!productForm.value.color) productForm.value.color = r.product.color || '';
+    useAlert(
+      r.leitura.formato
+        ? `Lido pela foto: ${frameShapes.value[r.leitura.formato] || r.leitura.formato} · ${r.leitura.publico || 'público?'}.`
+        : 'Não consegui reconhecer o formato nessa foto.'
+    );
+    await load();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui ler a foto.');
+  } finally {
+    readingFrame.value = false;
+  }
+};
+const readingAll = ref(false);
+const readAllResult = ref(null);
+const missingShape = computed(
+  () => products.value.filter(p => isFrame(p.kind) && p.photo_url && !p.frame_shape).length
+);
+const readAllFrames = async () => {
+  if (readingAll.value) return;
+  readingAll.value = true;
+  readAllResult.value = null;
+  try {
+    const { data: r } = await CrmAPI.readOticaFrames();
+    readAllResult.value = r;
+    useAlert(`${r.lidas} armação(ões) lida(s) pela foto${r.faltam ? `, faltam ${r.faltam}` : ''}.`);
+    await load();
+    await loadProva();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui ler as fotos.');
+  } finally {
+    readingAll.value = false;
+  }
+};
+
 // ── 🪞 fotos em lote (nome do arquivo = código do SavWin) ──
 const bulkUploading = ref(false);
 const bulkResult = ref(null);
@@ -875,6 +921,17 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
                       {{ label }}
                     </option>
                   </select>
+                  <!-- 🪞 08/11 (noite): o Gemini lê a foto e preenche formato, público e dica -->
+                  <button
+                    v-if="editingId && productForm.photo_url"
+                    type="button"
+                    class="cv-btn cv-btn-sm mt-1.5"
+                    :disabled="readingFrame"
+                    @click="readFrame(true)"
+                  >
+                    <span class="i-lucide-sparkles text-xs" />
+                    {{ readingFrame ? 'Lendo a foto…' : 'Ler pela foto' }}
+                  </button>
                 </label>
                 <label class="block">
                   <span :class="LABEL">Público</span>
@@ -1270,6 +1327,24 @@ const supplierColor = kind => (kind === 'lab' ? ROXO : AZUL);
               @change="uploadPhotosBulk"
             />
             <span v-if="bulkUploading" class="text-[11px] text-n-slate-10 ml-2">enviando…</span>
+            <!-- 🪞 08/11 (noite): depois das fotos, o Gemini lê o formato de todas as que não têm -->
+            <div class="flex items-center gap-2 flex-wrap mt-3">
+              <button
+                type="button"
+                class="cv-btn cv-btn-sm"
+                :disabled="readingAll || !missingShape"
+                @click="readAllFrames"
+              >
+                <span class="i-lucide-sparkles text-xs" />
+                {{ readingAll ? 'Lendo as fotos…' : `Ler o formato de todas sem formato (${missingShape})` }}
+              </button>
+              <span class="text-[11px] text-n-slate-10">
+                formato, público e dica de visagismo pela foto; você corrige no cadastro se quiser
+              </span>
+            </div>
+            <div v-if="readAllResult?.erros?.length" class="mt-2 text-[11px]" :style="{ color: AMBAR }">
+              <p v-for="e in readAllResult.erros" :key="e">✗ {{ e }}</p>
+            </div>
             <div v-if="bulkResult" class="mt-2 text-[11px] text-n-slate-11">
               <p v-for="e in bulkResult.entraram" :key="'ok' + e.product_id">✓ {{ e.arquivo }} → {{ e.produto }}</p>
               <p v-for="e in bulkResult.pularam" :key="'no' + e.arquivo" :style="{ color: AMBAR }">

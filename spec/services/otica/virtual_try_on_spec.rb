@@ -46,10 +46,28 @@ RSpec.describe Otica::VirtualTryOn do
     expect(Otica::TryOnImage).not_to receive(:new)
 
     out = service(live: false).run(quantidade: 3)
-    expect(out).to include(ok: true, simulado: true, rosto: 'redondo', rosto_label: 'redondo')
-    expect(out[:armacoes].pluck(:id)).to eq([retangular.id, Otica::Product.find_by(name: 'Redonda').id]) # sem foto fica de fora
+    expect(out).to include(ok: true, simulado: true, rosto: 'redondo', rosto_label: 'redondo', combinacao: 'exata')
+    # 🔁 08/11 (noite): sem foto fica de fora; a redonda FOGE do rosto redondo e nunca vai pra cliente
+    expect(out[:armacoes].pluck(:id)).to eq([retangular.id])
+    expect(out[:armacoes].first[:combinacao]).to eq('exata')
     expect(out[:visagismo]).to include('Rosto redondo')
     expect(conversation.messages.outgoing.count).to eq(0)
+  end
+
+  # 🔁 08/11 (noite, Guilherme): "se não combinar perfeitamente, o mais aproximado; se não tiver, fala a verdade"
+  it 'é honesta: só aproximadas avisam o agente e a legenda; nada que combine recusa pedindo a verdade e o retorno', :aggregate_failures do
+    aviador = armacao('Aviador dourado', 'aviador') # rosto redondo: nem recomendada nem foge
+    selfie!
+    out = service(live: false).run(quantidade: 2)
+    expect(out).to include(ok: true, combinacao: 'aproximada')
+    expect(out[:aviso_honesto]).to include('MAIS PRÓXIMAS').and include('agendar_retorno')
+    expect(out[:armacoes].first).to include(id: aviador.id, combinacao: 'aproximada')
+    expect(service.send(:caption_for, aviador, 1, 1, rosto, nil)).to include('É a mais próxima do ideal pro seu rosto que temos hoje')
+
+    aviador.update!(frame_shape: 'redonda') # agora só há o que foge
+    out = service(live: false).run(quantidade: 2)
+    expect(out[:ok]).to be(false)
+    expect(out[:motivo]).to start_with('SEM MODELO PRO ROSTO').and include('retangular').and include('agendar_retorno {dias: 7')
   end
 
   it 'ao vivo gera a foto de cada armação e envia como mensagem com imagem e legenda; registra o lote', :aggregate_failures do
@@ -74,13 +92,17 @@ RSpec.describe Otica::VirtualTryOn do
     expect(aviso.attachments).to be_empty
     expect(aviso.additional_attributes).to include('cevico_visagismo_aviso' => true)
     expect(aviso.additional_attributes).not_to have_key('cevico_visagismo')
-    sent = all_out.drop(1)
+    sent = all_out.drop(1).select { |m| m.attachments.any? } # as fotos (a pergunta de fechamento vem depois, sem anexo)
     # legenda = opção + nome (formato) + o MOTIVO em palavras simples
     expect(sent.map(&:content)).to eq(['Opção 1 de 2 · Retangular preta (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.',
                                        'Opção 2 de 2 · Gatinho (gatinho): no seu rosto redondo, a gatinho levanta o olhar e valoriza as maçãs do rosto.'])
     expect(sent).to all(satisfy { |m| m.attachments.one? && m.attachments.first.file_type == 'image' && m.attachments.first.file.attached? })
     expect(out[:armacoes].first).to include(motivo: 'no seu rosto redondo, a retangular dá definição e alonga o olhar')
-    expect(out[:aviso]).to include('Qual dos dois você já se imagina usando?')
+    expect(out[:aviso]).to include('Qual dos dois você já se imagina usando?').and include('TAMBÉM JÁ FOI ENVIADA')
+    # 08/11 (noite, teste real: o agente ficou mudo): o sistema manda a pergunta depois da última foto
+    pergunta = conversation.messages.outgoing.where("additional_attributes ? 'cevico_prova_pergunta'").last
+    expect(pergunta.content).to eq('Qual dos dois você já se imagina usando?')
+    expect(pergunta.id).to be > conversation.messages.outgoing.joins(:attachments).maximum(:id)
     expect(out[:foto_usada]).to eq('de frente')
     # o cartão: ANTES e DEPOIS lado a lado = 1080×720 JPEG (sem marca: a loja ainda não subiu o logo)
     card = MiniMagick::Image.read(sent.first.attachments.first.file.blob.open(&:read))
@@ -93,6 +115,10 @@ RSpec.describe Otica::VirtualTryOn do
     reply_jobs = enqueued_jobs.select { |j| j[:job] == SendReplyJob && sent.map(&:id).include?(j[:args].first) }
     expect(reply_jobs.size).to eq(2)
     expect(reply_jobs).to all(satisfy { |j| j['scheduled_at'].present? })
+    # a pergunta sai DEPOIS da última foto (agendada com espera maior que a das imagens)
+    ask_job = enqueued_jobs.find { |j| j[:job] == SendReplyJob && j[:args].first == pergunta.id }
+    expect(ask_job['scheduled_at']).to be_present
+    expect(ask_job['scheduled_at']).to be > reply_jobs.map { |j| j['scheduled_at'] }.max
   end
 
   it 'recusa com motivo claro: sem foto, foto que não serve, limite do dia, ramo clínica', :aggregate_failures do
@@ -166,6 +192,8 @@ RSpec.describe Otica::VirtualTryOn do
     expect(out[:armacoes].map { |a| [a[:id], a[:faixa]] }).to eq([[media.id, 'Top de linha'], [boa.id, 'Melhor custo-benefício'], [barata.id, 'Mais acessível']])
     expect(out[:aviso]).to include('Qual desses 3 você já se imagina usando?')
     texts = conversation.messages.outgoing.order(:id).pluck(:content)
+    expect(texts.last).to eq('Qual desses 3 você já se imagina usando?') # 08/11 (noite): a pergunta sai do sistema
+    texts = texts[0...-1]
     expect(texts).to include("Boa escolha!\n\nVou te mandar 3 opções nesse mesmo estilo pra você comparar: uma top de linha, uma de melhor " \
                              "custo-benefício e uma mais acessível.\n\nSó um instante.")
     expect(texts.last(3)).to eq(['Top de linha · R$ 450 · Meio (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.',
@@ -176,7 +204,7 @@ RSpec.describe Otica::VirtualTryOn do
   end
 
   it 'vale sempre a ÚLTIMA foto boa (o formato é lido nela) e sai ANTES/DEPOIS com a marca; perfil (lado) não serve', :aggregate_failures do
-    armacao('Retangular', 'retangular')
+    armacao('Aviador', 'aviador') # combina (ou aproxima) com redondo, oval e quadrado: a escolha honesta não recusa
     selfie!(rosto.merge('angulo' => 'frente', 'formato' => 'redondo'))
     tres_quartos = selfie!(rosto.merge('angulo' => 'tres_quartos', 'formato' => 'oval'))
     CrmSetting.find_by(account: account).otica_logo.attach(io: File.open(Rails.root.join('spec/assets/sample.png')), filename: 'logo.png', content_type: 'image/png')

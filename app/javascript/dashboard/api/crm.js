@@ -1985,6 +1985,15 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🪞 08/11 (noite): o Gemini lê a foto da armação → formato, público, frase
+  readOticaFrame(id, force = false) {
+    return axios.post(`${this.url}/otica/products/${id}/read_frame`, { force: force ? '1' : '0' });
+  }
+
+  readOticaFrames() {
+    return axios.post(`${this.url}/otica/products/read_frames`);
+  }
+
   deleteOticaProductPhoto(id) {
     return axios.delete(`${this.url}/otica/products/${id}/photo`);
   }
@@ -2098,6 +2107,15 @@ class CrmAPI extends ApiClient {
 
   getOticaStock(params = {}) {
     return axios.get(`${this.url}/otica/stock`, { params });
+  }
+
+  // 📊 08/11 (noite): o que vende por categoria + meta de estoque mínimo + o que comprar
+  getOticaCompras(params = {}) {
+    return axios.get(`${this.url}/otica/stock/compras`, { params });
+  }
+
+  saveOticaCompras(payload) {
+    return axios.patch(`${this.url}/otica/stock/compras`, payload);
   }
 
   getOticaStockMoves(params = {}) {

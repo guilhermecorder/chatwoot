@@ -86,6 +86,8 @@ class Message < ApplicationRecord
   attr_accessor :echo_id
   # Transient flag used to skip waiting_since clearing for specific bot/system messages.
   attr_accessor :preserve_waiting_since
+  # 👓 08/11 (ótica): espera antes de sair pelo canal (a pergunta da prova virtual sai DEPOIS das fotos)
+  attr_accessor :cevico_send_wait
 
   enum message_type: { incoming: 0, outgoing: 1, activity: 2, template: 3 }
   enum content_type: {
@@ -400,6 +402,8 @@ class Message < ApplicationRecord
   def send_reply
     # FIXME: Giving it few seconds for the attachment to be uploaded to the service
     # active storage attaches the file only after commit
+    return ::SendReplyJob.set(wait: cevico_send_wait).perform_later(id) if cevico_send_wait.present?
+
     attachments.blank? ? ::SendReplyJob.perform_later(id) : ::SendReplyJob.set(wait: 2.seconds).perform_later(id)
   end
 

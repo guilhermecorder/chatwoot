@@ -33,6 +33,32 @@ RSpec.describe Otica::Visagismo do
     expect(described_class.recommend([gatinho, retangular], face_shape: 'redondo', preference: 'gosto de vinho', limit: 1)).to eq([gatinho])
   end
 
+  # 🔁 08/11 (noite): o agente só sugere o que combina; o que foge nunca vai; sem nada, diz a verdade
+  it 'escolha honesta: exata > aproximada; a que foge fica de fora; sem nada devolve os formatos ideais', :aggregate_failures do
+    redonda = armacao('Redonda', 'redonda')
+    retangular = armacao('Retangular', 'retangular')
+    aviador = armacao('Aviador', 'aviador')
+    sem_forma = armacao('Sem formato', '')
+
+    expect(described_class.match_level('redondo', 'retangular')).to eq('exata')
+    expect(described_class.match_level('redondo', 'aviador')).to eq('aproximada')
+    expect(described_class.match_level('redondo', 'redonda')).to eq('foge')
+    expect(described_class.match_level('redondo', '')).to eq('aproximada')
+
+    chosen, nivel, = described_class.honest_pick([redonda, retangular, aviador, sem_forma], face_shape: 'redondo', limit: 2)
+    expect(nivel).to eq('exata')
+    expect(chosen).to eq([retangular, aviador]) # 1 exata + completa com a melhor aproximada; a redonda (foge) nunca
+
+    chosen, nivel, ideais = described_class.honest_pick([redonda, aviador], face_shape: 'redondo', limit: 2)
+    expect(nivel).to eq('aproximada')
+    expect(chosen).to eq([aviador])
+    expect(ideais.first).to eq('retangular')
+
+    chosen, nivel, ideais = described_class.honest_pick([redonda], face_shape: 'redondo', limit: 2)
+    expect([chosen, nivel]).to eq([[], 'nenhuma'])
+    expect(ideais).to include('gatinho')
+  end
+
   it 'limita a quantidade, aceita rosto desconhecido como oval e explica em palavras simples', :aggregate_failures do
     a = armacao('A', 'retangular')
     b = armacao('B', 'gatinho')

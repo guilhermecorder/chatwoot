@@ -147,12 +147,23 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
       quantidade = (quantidade.presence || 2).to_i.clamp(1, MAX_PER_CALL)
       pool = products.reject { |p| already.include?(p.id) }
       pool = products if pool.empty?
-      chosen = Otica::Visagismo.recommend(pool, face_shape: rosto['formato'], preference: preferencia, limit: quantidade)
+      # 🔁 08/11 (noite): escolha HONESTA — só o que existe com foto e saldo; exata > aproximada; o que foge nunca vai
+      chosen, nivel, ideais = Otica::Visagismo.honest_pick(pool, face_shape: rosto['formato'], preference: preferencia, limit: quantidade)
+      return refuse(sem_modelo_text(rosto['formato'], ideais)) if chosen.empty?
     end
 
     base = { rosto: rosto['formato'], rosto_label: Otica::Visagismo.face_label(rosto['formato']),
              foto_usada: (media(attachment).dig('rosto', 'angulo') == 'tres_quartos' ? 'de 3/4' : 'de frente'),
              visagismo: Otica::Visagismo.explain(rosto['formato']), parecidas: parecida_com.present? }
+    if nivel == 'aproximada'
+      base[:combinacao] = 'aproximada'
+      base[:aviso_honesto] = 'ATENÇÃO: nenhuma armação com foto e saldo é do formato IDEAL pro rosto dela (' \
+                             "#{ideais.first(3).join(', ')}). As enviadas são as MAIS PRÓXIMAS que a loja tem hoje. Diga isso com " \
+                             'naturalidade (sem desmerecer as opções) e, se ela quiser o formato ideal, ofereça: "está chegando peça nova; ' \
+                             'posso te chamar daqui a uma semana?" e use agendar_retorno se ela disser sim.'
+    elsif nivel == 'exata'
+      base[:combinacao] = 'exata'
+    end
 
     unless @live
       return base.merge(ok: true, simulado: true,
@@ -206,16 +217,14 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
                     'na loja; não prometa a foto.')
     end
 
-    # 08/11 (Guilherme): a pergunta que faz ela se ver com o óculos
-    pergunta = case sent.size
-               when 1 then 'Você já se imagina usando esse?'
-               when 2 then 'Qual dos dois você já se imagina usando?'
-               else "Qual desses #{sent.size} você já se imagina usando?"
-               end
+    # 08/11 (Guilherme): a pergunta que faz ela se ver com o óculos. 08/11 à noite (teste real: as fotos
+    # chegaram e o agente ficou mudo): o SISTEMA manda a pergunta logo depois da última foto, garantido.
+    pergunta = closing_question(sent.size)
+    send_text!(pergunta, PERGUNTA_KEY)
     base.merge(ok: true, enviadas: sent.size, armacoes: sent, falhas: failures, imagens_hoje: today + sent.size,
-               aviso: 'As fotos JÁ FORAM ENVIADAS à cliente nesta conversa (uma por armação, com legenda e o motivo). Agora escreva ' \
-                      "1 balão curto, sem repetir os nomes nem os motivos (já estão nas legendas), e FECHE com a pergunta: \"#{pergunta}\" " \
-                      '(lembre em meia frase que é uma simulação por computador). NÃO chame experimentar_armacoes de novo nesta resposta.')
+               aviso: 'As fotos JÁ FORAM ENVIADAS à cliente nesta conversa (uma por armação, com legenda e o motivo) e a pergunta ' \
+                      "\"#{pergunta}\" TAMBÉM JÁ FOI ENVIADA. Não repita nomes, motivos nem a pergunta: responda com NADA (texto vazio) " \
+                      'ou no máximo 1 linha curta, e espere a escolha dela. NÃO chame experimentar_armacoes de novo nesta resposta.')
   ensure
     Redis::Alfred.delete(@lock_key) if @lock_key
   end
@@ -277,7 +286,17 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     { id: product.id, armacao: product.name, formato: Otica::Visagismo.frame_label(product.frame_shape),
       cor: product.color, valor: product.price, faixa: (tier ? TIERS[tier] : nil),
       motivo: (rosto ? Otica::Visagismo.reason(rosto['formato'], product.frame_shape) : nil),
+      combinacao: (rosto ? Otica::Visagismo.match_level(rosto['formato'], product.frame_shape) : nil),
       observacao: product.visagismo_notes.presence }.compact
+  end
+
+  # 🔁 08/11 (noite): quando NADA do estoque combina, o agente fala a verdade e oferece chamar depois
+  def sem_modelo_text(face_shape, ideais)
+    "SEM MODELO PRO ROSTO: nenhuma armação com foto e saldo combina com o rosto #{Otica::Visagismo.face_label(face_shape)} dela " \
+      "(o ideal seria #{ideais.first(3).join(', ')}). NÃO invente nem mostre o que não combina. Fale a verdade em 2 balões: " \
+      'hoje a loja não tem o formato ideal pro rosto dela com foto pra mostrar, estão chegando peças novas essa semana, e pergunte: ' \
+      '"Posso te chamar daqui a uma semana com novidade?". Se ela disser sim, chame agendar_retorno {dias: 7, motivo: "armação ' \
+      "#{ideais.first(2).join(' ou ')} pro rosto #{Otica::Visagismo.face_label(face_shape)}\"}. Também vale convidar pra ver na loja."
   end
 
   # tom do selo de vidro (branco = logo verde; verde = logo branco), escolhido em Produtos → Venda pelo WhatsApp
@@ -314,7 +333,9 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   def caption_for(product, index, total, rosto, tier)
     head = tier ? "#{TIERS[tier]} · #{money(product.price)}" : "Opção #{index} de #{total}"
     shape = product.frame_shape.present? ? " (#{Otica::Visagismo.frame_label(product.frame_shape)})" : ''
-    "#{head} · #{product.name}#{shape}: #{Otica::Visagismo.reason(rosto['formato'], product.frame_shape)}.".truncate(600)
+    # 🔁 08/11 (noite): a legenda também é honesta — aproximada diz que é a mais próxima que a loja tem hoje
+    honest = Otica::Visagismo.match_level(rosto['formato'], product.frame_shape) == 'aproximada' ? ' É a mais próxima do ideal pro seu rosto que temos hoje.' : ''
+    "#{head} · #{product.name}#{shape}: #{Otica::Visagismo.reason(rosto['formato'], product.frame_shape)}.#{honest}".truncate(600)
   end
 
   # "R$ 450" ou "R$ 450,50"
@@ -378,6 +399,28 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     @conversation.messages.create!(account_id: account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing, content: text,
                                    additional_attributes: { 'cevico_ia_agent' => @agent_key.presence || Otica::TryOnImage::AGENT_KEY,
                                                             AVISO_KEY => true })
+  end
+
+  PERGUNTA_KEY = 'cevico_prova_pergunta'.freeze
+  def closing_question(count)
+    case count
+    when 1 then 'Você já se imagina usando esse?'
+    when 2 then 'Qual dos dois você já se imagina usando?'
+    else "Qual desses #{count} você já se imagina usando?"
+    end
+  end
+
+  # balão de texto da loja na conversa (sai pelo WhatsApp), carimbado; `wait` = sai depois das fotos
+  # (cada foto espera 2 s pelo anexo; a pergunta espera mais, pra chegar por último)
+  QUESTION_WAIT = 6.seconds
+  def send_text!(text, stamp_key, wait: QUESTION_WAIT)
+    message = @conversation.messages.new(account_id: account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing,
+                                         content: Otica::TextSpacing.space(text),
+                                         additional_attributes: { 'cevico_ia_agent' => @agent_key.presence || Otica::TryOnImage::AGENT_KEY,
+                                                                  stamp_key => true })
+    message.cevico_send_wait = wait
+    message.save!
+    message
   end
 
   def mime_of(attached, fallback)

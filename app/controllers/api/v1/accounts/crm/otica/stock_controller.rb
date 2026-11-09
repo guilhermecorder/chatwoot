@@ -17,6 +17,17 @@ class Api::V1::Accounts::Crm::Otica::StockController < Api::V1::Accounts::BaseCo
     }
   end
 
+  # 📊 08/11 (noite): o que vende por categoria (formato, marca, lente, tipo), saldo, meta mensal e o que comprar
+  def compras
+    render json: ::Otica::SalesMix.new(Current.account, days: params[:days].presence || 90).call
+  end
+
+  def save_compras
+    attrs = params.permit(:cobertura_meses, metas: {}).to_h
+    cfg = ::Otica::SalesMix.save_config!(Current.account, attrs)
+    render json: { config: cfg }.merge(::Otica::SalesMix.new(Current.account, days: params[:days].presence || 90).call)
+  end
+
   def moves # rubocop:disable Metrics/AbcSize
     scope = moves_scope
     scope = scope.where(product_id: params[:product_id]) if params[:product_id].present?

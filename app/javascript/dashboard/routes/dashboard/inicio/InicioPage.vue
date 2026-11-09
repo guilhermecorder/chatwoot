@@ -35,6 +35,8 @@ import VisaoGeral from 'dashboard/components-next/cevico/guia/VisaoGeral.vue';
 import { fraseDoDia } from 'dashboard/helper/cevicoFrases';
 import {
   PANEL_PRESETS,
+  isGlassGrad,
+  glassAccentOf,
   PRESET_BY_KEY,
   buildPreset,
 } from 'dashboard/helper/cevicoPanelPresets';
@@ -88,7 +90,9 @@ const { isAdmin } = useAdmin();
 // vez de ficar vazio). Gasto do WhatsApp = só admin.
 // DECISÃO PENDENTE (Guilherme): se "só ver" o Financeiro também deve abrir o
 // faturamento, trocar 'edit' por 'view' aqui e em can_see_revenue? no servidor.
-const { can: cevicoCan } = useCevicoAccess();
+const { can: cevicoCan, company: cevicoCompany } = useCevicoAccess();
+// 👓 08/11: conta do ramo ótica (modelo pronto "Sua Ótica · Loja")
+const isOticaAccount = computed(() => cevicoCompany.value?.segment === 'otica');
 const canSeeRevenue = computed(
   () => isAdmin.value || cevicoCan('financeiro', 'edit')
 );
@@ -3342,8 +3346,10 @@ const toggleHistJudge = () => saveKpiLayout({ judge: !histJudgeOn.value });
 const showPresets = ref(false);
 const isApplyingPreset = ref(false);
 const panelPresets = computed(() => {
-  const mine = PANEL_PRESETS.filter(p => p.panels.includes(panelBase.value));
-  const others = PANEL_PRESETS.filter(p => !p.panels.includes(panelBase.value));
+  // 👓 08/11: o modelo da LOJA só existe em conta da ótica (e vem primeiro nela)
+  const list = PANEL_PRESETS.filter(p => !p.otica || isOticaAccount.value);
+  const mine = list.filter(p => p.panels.includes(panelBase.value));
+  const others = list.filter(p => !p.panels.includes(panelBase.value));
   return [...mine, ...others];
 });
 const currentPreset = computed(
@@ -3625,17 +3631,23 @@ const tileVisual = tile => {
   const pal = tilePalette(tile);
   const alert = ['bad', 'warn', 'meta'].includes(st.status);
   let grad = tile.customGrad || tile.chip?.grad || tile.grad;
+  // 👓 08/11 (noite): card de VIDRO FUMÊ (modelo da loja) — a paleta automática não
+  // pinta por cima; só o alerta de meta (vermelho/âmbar) continua vencendo
+  const glass = !alert && isGlassGrad(tile.customGrad || tile.grad);
   if (alert) grad = grads[st.status];
-  else if (pal) grad = pal.grad;
+  else if (pal && !glass) grad = pal.grad;
+  const accent = glass ? glassAccentOf(tile.customGrad || tile.grad) : null;
   return {
     ...st,
+    glass,
+    accent,
     // alerta de meta (vermelho/âmbar/verde-meta) por cima de tudo; depois a
     // paleta automática (item 269); desligada, a cor escolhida (item 143),
     // o chip "Muito bom" e a família do dia
     grad,
     // item 326: sem vidro — o card é sempre cor cheia; no card claro (apoio)
     // o número usa o tom mais intenso da família
-    darkText: !alert && !!pal?.darkText,
+    darkText: !alert && !glass && !!pal?.darkText,
     ink: pal?.ink || '#0f172a',
     palette: pal,
     aura: st.isRecord,
@@ -3643,6 +3655,25 @@ const tileVisual = tile => {
     pulse: st.status === 'meta' || st.isRecord,
   };
 };
+
+// 👓 08/11 (noite): a divisória acende na cor do GRUPO que vem depois dela
+// (o fio dos cards de vidro) — união sutil, mas evidente
+const dividerAccent = tile => {
+  const list = panelTiles.value;
+  const i = list.findIndex(t => t.id === tile.id);
+  if (i === -1) return null;
+  for (let j = i + 1; j < list.length; j += 1) {
+    const t = list[j];
+    if (t.divider) return null;
+    if (t.spacer) continue;
+    const g = t.customGrad || t.grad;
+    if (isGlassGrad(g)) return glassAccentOf(g);
+    return null;
+  }
+  return null;
+};
+const accentVars = hex =>
+  hex ? { '--cv-accent': hex, '--cv-accent-glow': `${hex}66` } : {};
 
 // ── modal de METAS (admin, mira 🎯 ao lado das pílulas) ──
 const showGoalsModal = ref(false);
@@ -7413,11 +7444,13 @@ onUnmounted(() => {
                           <div
                             v-if="tile && tile.divider"
                             class="cv-tile-div relative flex items-center gap-3 py-2"
-                            :class="
+                            :class="[
                               organizeMode
                                 ? 'cursor-grab active:cursor-grabbing'
-                                : ''
-                            "
+                                : '',
+                              dividerAccent(tile) ? 'cv-tile-div-fume' : '',
+                            ]"
+                            :style="accentVars(dividerAccent(tile))"
                           >
                             <span class="cv-tile-div-line" />
                             <input
@@ -7495,12 +7528,14 @@ onUnmounted(() => {
                               tileVisual(tile).darkText
                                 ? 'cv-tile-ink-dark'
                                 : '',
+                              tileVisual(tile).glass ? 'cv-tile-fume' : '',
                             ]"
                             :style="{
                               background: tileVisual(tile).grad,
                               color: tileVisual(tile).darkText
                                 ? tileVisual(tile).ink
                                 : undefined,
+                              ...accentVars(tileVisual(tile).accent),
                             }"
                             :title="
                               tileVisual(tile).palette
