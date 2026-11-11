@@ -21,7 +21,9 @@ const teamAgents = useMapGetter('agents/getAgents');
 const activeSection = ref('general');
 const isSaving = ref(false);
 
-const form = ref({ name: '', color: '#6B7280', description: '', main_inbox_ids: [], task_owner_id: null });
+// ⏳ 11/11 (LIFE): prazo e compromisso da coluna (Crm::StageDeadline)
+const emptyPrazo = () => ({ modo: '', horas: 24, hora: '09:00', tarefa: '' });
+const form = ref({ name: '', color: '#6B7280', description: '', main_inbox_ids: [], task_owner_id: null, prazo: emptyPrazo() });
 
 watch(() => props.stage, (s) => {
   if (!s) return;
@@ -31,6 +33,7 @@ watch(() => props.stage, (s) => {
     description: s.description ?? '',
     main_inbox_ids: [...(s.main_inbox_ids ?? [])],
     task_owner_id: s.task_owner_id ?? null,
+    prazo: { ...emptyPrazo(), ...(s.prazo || {}) },
   };
   if (!inboxes.value.length) store.dispatch('inboxes/get');
   if (!teamAgents.value.length) store.dispatch('agents/get');
@@ -55,6 +58,14 @@ const save = async () => {
       settings: {
         main_inbox_ids: form.value.main_inbox_ids,
         task_owner_id: form.value.task_owner_id,
+        prazo: form.value.prazo.modo
+          ? {
+              modo: form.value.prazo.modo,
+              horas: form.value.prazo.horas,
+              hora: form.value.prazo.hora,
+              tarefa: form.value.prazo.tarefa,
+            }
+          : null,
       },
     });
     useAlert(t('CRM.SUCCESS.STAGE_RENAMED'));
@@ -220,6 +231,63 @@ const sections = [
                   {{ agent.available_name || agent.name }}
                 </option>
               </select>
+            </div>
+            <div class="border-t border-n-weak" />
+
+            <!-- ⏳ Prazo e compromisso da coluna (11/11) -->
+            <div>
+              <p class="text-sm font-medium text-n-slate-12 mb-1">
+                ⏳ Prazo desta etapa
+              </p>
+              <p class="text-xs text-n-slate-10 mb-2.5 leading-relaxed">
+                O cartão mostra o prazo em cores: verde com folga, amarelo quando
+                vence em menos de 24 horas, vermelho quando venceu.
+              </p>
+              <select
+                v-model="form.prazo.modo"
+                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              >
+                <option value="">— sem prazo —</option>
+                <option value="dia_util">Próximo dia útil, numa hora marcada</option>
+                <option value="horas">Um número de horas depois de entrar</option>
+              </select>
+              <div v-if="form.prazo.modo === 'dia_util'" class="flex items-center gap-2 mt-2 text-sm text-n-slate-11">
+                <span>Vence às</span>
+                <input
+                  v-model="form.prazo.hora"
+                  type="time"
+                  class="border border-n-weak rounded-lg px-3 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                />
+                <span class="text-xs text-n-slate-10">sexta, sábado e domingo vencem na segunda</span>
+              </div>
+              <div v-if="form.prazo.modo === 'horas'" class="flex items-center gap-2 mt-2 text-sm text-n-slate-11">
+                <span>Vence em</span>
+                <input
+                  v-model.number="form.prazo.horas"
+                  type="number"
+                  min="1"
+                  max="2160"
+                  class="w-24 border border-n-weak rounded-lg px-3 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                />
+                <span>horas</span>
+              </div>
+              <div v-if="form.prazo.modo" class="mt-3">
+                <p class="text-xs font-medium text-n-slate-11 mb-1">
+                  Compromisso que nasce sozinho ao entrar (opcional)
+                </p>
+                <input
+                  v-model="form.prazo.tarefa"
+                  type="text"
+                  maxlength="80"
+                  placeholder="Ex.: Montar e enviar o orçamento"
+                  class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+                />
+                <p class="text-xs text-n-slate-10 mt-1.5 leading-relaxed">
+                  Vai para o responsável da coluna, com o prazo acima: aparece em
+                  Tarefas, no Meu Painel e na agenda dele. Quando o cartão sai
+                  desta coluna, o compromisso recebe baixa sozinho.
+                </p>
+              </div>
             </div>
             <div class="border-t border-n-weak" />
 

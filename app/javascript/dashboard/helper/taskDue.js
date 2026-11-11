@@ -31,3 +31,18 @@ export const dueCountdown = (iso, now = new Date()) => {
   if (days === 1) return { text: `amanhã ${hhmm(due)}`, tone };
   return { text: `em ${days} dias · ${ddmm(due)}`, tone };
 };
+
+// ⏳ 11/11/2026 (LIFE): PRAZO DA COLUNA no cartão do funil — o mesmo relógio da
+// tarefa, na fala do cartão ("vence amanhã 09:00", "venceu há 2 dias").
+// tone: 'late' (vermelho, venceu) · 'soon' (amarelo, menos de 24 h) · 'later' (verde)
+export const stageDeadline = (iso, now = new Date()) => {
+  const base = dueCountdown(iso, now);
+  if (!base) return null;
+  if (base.tone === 'late') {
+    const text = base.text
+      .replace('atrasada desde', 'venceu às')
+      .replace('atrasada há', 'venceu há');
+    return { text, tone: 'late' };
+  }
+  return { text: `vence ${base.text}`, tone: base.tone };
+};

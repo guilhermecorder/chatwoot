@@ -353,6 +353,26 @@
 }
 .dark .cv-crm .cv-crm-wait { color: #fcd34d; background: rgba(245, 158, 11, 0.2); }
 
+/* ⏳ 11/11 (LIFE): prazo da coluna no cartão — verde (folga), amarelo (< 24 h), vermelho (venceu) */
+.cv-crm .cv-crm-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+.cv-crm .cv-crm-due-dot { width: 6px; height: 6px; border-radius: 9999px; background: currentColor; }
+.cv-crm .cv-crm-due-later { color: #166534; background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.3); }
+.cv-crm .cv-crm-due-soon { color: #92400e; background: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.36); }
+.cv-crm .cv-crm-due-late { color: #b91c1c; background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.36); }
+.dark .cv-crm .cv-crm-due-later { color: #86efac; background: rgba(34, 197, 94, 0.18); }
+.dark .cv-crm .cv-crm-due-soon { color: #fcd34d; background: rgba(245, 158, 11, 0.2); }
+.dark .cv-crm .cv-crm-due-late { color: #fca5a5; background: rgba(239, 68, 68, 0.2); }
+
 /* navegador de colunas no celular */
 .cv-crm .cv-crm-mobile-nav {
   background: rgba(255, 255, 255, 0.72);

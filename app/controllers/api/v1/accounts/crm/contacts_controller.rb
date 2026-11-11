@@ -525,6 +525,8 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       contact_created_at: contact.created_at,
       crm_created_at: c.created_at,
       stage_id: c.stage_id,
+      # ⏳ 11/11: quando vence o prazo da coluna para este cartão (nil = coluna sem prazo)
+      stage_due_at: stage_due_at(c),
       pipeline_id: c.pipeline_id,
       assignee: c.assignee ? { id: c.assignee.id, name: c.assignee.name } : nil,
       # 💰 R2 (#287): valor só para quem vê o Financeiro (a tela já escondia;
@@ -542,6 +544,12 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       last_conversation: last_conv_data,
       appointment_kind: @kind_by_contact&.[](contact.id)
     }
+  end
+
+  # prazo da coluna (uma leitura por coluna, não por cartão)
+  def stage_due_at(card)
+    @stage_prazo ||= Hash.new { |h, id| h[id] = Crm::StageDeadline.config(Crm::Stage.find_by(id: id)) }
+    Crm::StageDeadline.due_at(@stage_prazo[card.stage_id], card.stage_moved_at)
   end
 
   def build_conversation_data(conversation)

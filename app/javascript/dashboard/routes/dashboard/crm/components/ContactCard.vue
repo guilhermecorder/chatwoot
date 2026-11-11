@@ -15,6 +15,7 @@ import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIco
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors.js';
 import { relativeTime } from '../helpers';
+import { stageDeadline } from 'dashboard/helper/taskDue';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 
 const props = defineProps({
@@ -49,6 +50,16 @@ const isAwaitingReply = computed(() => props.contact.last_conversation?.awaiting
 const waitingTime = computed(() => relativeTime(props.contact.last_conversation?.waiting_since));
 const unreadPreview = computed(() =>
   unreadCount.value > 0 ? props.contact.last_conversation?.last_message : null
+);
+
+// ⏳ 11/11 (LIFE): prazo da coluna — verde com folga, amarelo < 24 h, vermelho venceu
+const deadline = computed(() => stageDeadline(props.contact.stage_due_at));
+const deadlineWhen = computed(() =>
+  props.contact.stage_due_at
+    ? new Date(props.contact.stage_due_at).toLocaleString('pt-BR', {
+        weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+      })
+    : ''
 );
 
 const initials = computed(() => {
@@ -131,6 +142,19 @@ const channelIcon = (channelType) => {
         :title="$t('CRM.CARD.UNREAD', { count: unreadCount })"
       >
         {{ unreadCount > 9 ? '9+' : unreadCount }}
+      </span>
+    </div>
+
+    <!-- ⏳ Prazo da coluna (cores: verde / amarelo / vermelho) -->
+    <div v-if="deadline" class="mt-2">
+      <span
+        class="cv-crm-due"
+        :class="`cv-crm-due-${deadline.tone}`"
+        :title="`Prazo desta etapa: ${deadlineWhen}`"
+      >
+        <span class="cv-crm-due-dot" />
+        <span :class="deadline.tone === 'late' ? 'i-lucide-alarm-clock' : 'i-lucide-timer'" class="text-[11px]" />
+        {{ deadline.text }}
       </span>
     </div>
 

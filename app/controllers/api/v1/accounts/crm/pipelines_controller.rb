@@ -72,6 +72,6 @@ class Api::V1::Accounts::Crm::PipelinesController < Api::V1::Accounts::BaseContr
   def stage_json(s)
     { id: s.id, name: s.name, color: s.color, position: s.position, pipeline_id: s.pipeline_id,
       main_inbox_ids: Array(s.settings&.[]('main_inbox_ids')).map(&:to_i),
-      task_owner_id: s.settings&.[]('task_owner_id') }
+      task_owner_id: s.settings&.[]('task_owner_id'), prazo: Crm::StageDeadline.config(s) }
   end
 end

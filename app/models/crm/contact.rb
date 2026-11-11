@@ -105,6 +105,8 @@ class Crm::Contact < ApplicationRecord
       event_type:  'entered',
       entered_at:  now
     )
+    # ⏳ 11/11 (LIFE): a coluna tem prazo/compromisso? Nasce junto com o cartão
+    Crm::StageDeadline.on_move(self)
   end
 
   def log_stage_change
@@ -125,6 +127,8 @@ class Crm::Contact < ApplicationRecord
     )
 
     update_column(:stage_moved_at, now)
+    # ⏳ 11/11 (LIFE): baixa no compromisso da coluna antiga, abre o da nova
+    Crm::StageDeadline.on_move(self, previous_stage_id: previous_stage_id)
   end
 
   # Gatilho "Valor adicionado no card": quando o card GANHA valor (> 0),
