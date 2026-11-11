@@ -47,6 +47,17 @@ class Whatsapp::IncomingMessageBaseService # rubocop:disable Metrics/ClassLength
 
     stamp_ad_attribution
     stamp_page_attribution
+    stamp_whatsapp_origin
+  end
+
+  # 🧭 10/11: de onde veio a conversa (anúncio, formulário, página do site ou
+  # direto) — só nas contas com ai_config['origens_site'] (Crm::WhatsappOrigin)
+  def stamp_whatsapp_origin
+    return if outgoing_echo || @conversation.nil?
+
+    Crm::WhatsappOrigin.new(conversation: @conversation, text: messages_data.first&.dig(:text, :body)).call
+  rescue StandardError => e
+    Rails.logger.error "[WhatsappOrigin] #{e.message}"
   end
 
   # Mensagem vinda de clique em anúncio (CTWA) chega com "referral" —
