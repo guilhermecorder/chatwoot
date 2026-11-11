@@ -66,6 +66,11 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/campaigns/${id}`);
   }
 
+  // 📨 item 391: criar mensagem modelo e pedir a aprovação à Meta nos números escolhidos
+  createWhatsappTemplate(payload) {
+    return axios.post(`${this.url}/whatsapp_templates`, payload);
+  }
+
   createCampaign(data) {
     return axios.post(`${this.url}/campaigns`, { campaign: data });
   }

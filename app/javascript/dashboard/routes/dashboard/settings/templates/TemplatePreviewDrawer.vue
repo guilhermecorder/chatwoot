@@ -23,6 +23,9 @@ const props = defineProps({
   },
 });
 
+// 📨 item 391: copiar o texto deste modelo para outros números (abre o criar já preenchido)
+const emit = defineEmits(['copy']);
+
 const { t } = useI18n();
 const META_TEMPLATE_MANAGER_URL =
   'https://business.facebook.com/latest/whatsapp_manager/message_templates';
@@ -59,6 +62,7 @@ const statusLabel = computed(() =>
     ? t('WHATSAPP_TEMPLATE_MGMT.STATUSES.UNSUBMITTED')
     : formatTemplateLabel(props.template?.status)
 );
+const canCopy = computed(() => platform.value === PLATFORMS.WHATSAPP);
 const open = () => panelRef.value?.open();
 const close = () => panelRef.value?.close();
 
@@ -127,15 +131,30 @@ defineExpose({ open, close });
       </div>
     </div>
 
-    <template v-if="managementUrl" #footer>
-      <a :href="managementUrl" target="_blank" rel="noopener noreferrer">
+    <template v-if="managementUrl || canCopy" #footer>
+      <div class="flex flex-col gap-2">
         <Button
+          v-if="canCopy"
           class="w-full"
-          :label="managementLabel"
-          icon="i-lucide-external-link"
-          trailing-icon
+          label="Copiar para outros números"
+          icon="i-lucide-copy"
+          color="slate"
+          @click="emit('copy')"
         />
-      </a>
+        <a
+          v-if="managementUrl"
+          :href="managementUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <Button
+            class="w-full"
+            :label="managementLabel"
+            icon="i-lucide-external-link"
+            trailing-icon
+          />
+        </a>
+      </div>
     </template>
   </SidePanel>
 </template>

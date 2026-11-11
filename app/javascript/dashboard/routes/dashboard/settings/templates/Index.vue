@@ -15,6 +15,7 @@ import Icon from 'dashboard/components-next/icon/Icon.vue';
 import BaseSettingsHeader from '../components/BaseSettingsHeader.vue';
 import SettingsLayout from '../SettingsLayout.vue';
 import TemplateCard from './TemplateCard.vue';
+import TemplateCreatePanel from './TemplateCreatePanel.vue';
 import TemplatePreviewDrawer from './TemplatePreviewDrawer.vue';
 import {
   formatTemplateDate,
@@ -47,6 +48,7 @@ const selectedType = ref('all');
 const selectedTemplate = ref(null);
 const openFilterMenu = ref(null);
 const previewPanelRef = ref(null);
+const createPanelRef = ref(null); // 📨 item 391: criar modelo daqui
 const templateRecordsByInboxId = new Map();
 const lastSyncAttemptsByInboxId = ref({});
 const isSyncing = ref(false);
@@ -172,6 +174,12 @@ const toggleFilterMenu = key => {
 const openPreview = template => {
   selectedTemplate.value = template;
   previewPanelRef.value?.open();
+};
+
+// 📨 item 391: "Criar modelo" (em branco) ou "Copiar para outros números" (preenchido)
+const openCreate = (template = null) => {
+  previewPanelRef.value?.close();
+  createPanelRef.value?.open(template);
 };
 
 const handleFilterAction = ({ action, value }) => {
@@ -404,7 +412,24 @@ onDeactivated(abortTemplateRequest);
         </template>
         <template #actions>
           <Button
+            label="Criar modelo"
+            icon="i-lucide-plus"
+            size="sm"
+            :disabled="!whatsappInboxes.length"
+            @click="openCreate()"
+          />
+          <Button
+            class="hidden sm:inline-flex"
             :label="$t('WHATSAPP_TEMPLATE_MGMT.SYNC_TEMPLATES')"
+            icon="i-lucide-refresh-cw"
+            color="slate"
+            size="sm"
+            :is-loading="isSyncing"
+            :disabled="!whatsappInboxes.length || isSyncing"
+            @click="syncTemplates"
+          />
+          <Button
+            class="sm:hidden"
             icon="i-lucide-refresh-cw"
             color="slate"
             size="sm"
@@ -436,6 +461,15 @@ onDeactivated(abortTemplateRequest);
       </div>
     </template>
 
-    <TemplatePreviewDrawer ref="previewPanelRef" :template="selectedTemplate" />
+    <TemplatePreviewDrawer
+      ref="previewPanelRef"
+      :template="selectedTemplate"
+      @copy="openCreate(selectedTemplate)"
+    />
+    <TemplateCreatePanel
+      ref="createPanelRef"
+      :inboxes="whatsappInboxes"
+      @created="fetchTemplates"
+    />
   </SettingsLayout>
 </template>

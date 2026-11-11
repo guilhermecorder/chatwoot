@@ -408,6 +408,8 @@ namespace :crm do
     post :rates
     post :sync
   end
+  # 📨 item 391 (11/11): criar mensagem modelo e pedir a aprovação à Meta nos números escolhidos (só admin)
+  resources :whatsapp_templates, only: [:create]
   # 🚦 Saúde do WhatsApp (16/10): números, modelos, quem não quer receber, silêncio
   resource :whatsapp_health, only: [:show], controller: 'whatsapp_healths' do
     post :settings
