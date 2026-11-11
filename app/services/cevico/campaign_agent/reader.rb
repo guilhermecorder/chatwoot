@@ -201,13 +201,13 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
     @meta_page_funnels ||= begin
       leads = page_leads('meta_ads')
       ads_by_name = Crm::AdCreative.where(account_id: @account.id).pluck(:ad_name, :ad_id, :campaign_name)
-      name_index = ads_by_name.to_h { |name, id, _| [simple(name), id] }
+      ids_by_name = ads_by_name.group_by { |name, _, _| simple(name) }.transform_values { |list| list.map(&:second) }
       campaign_names = ads_by_name.to_set { |_, _, cn| simple(cn) }
       ad_groups = Hash.new { |h, k| h[k] = [] }
       campaign_groups = Hash.new { |h, k| h[k] = [] }
       untracked = []
-      leads.each do |cid, campaign, content, _utm_id|
-        ad_id = name_index[simple(content)] || (content.to_s.match?(/\A\d{8,}\z/) ? content.to_s : nil)
+      leads.each do |cid, campaign, content, _utm_id, captured_at|
+        ad_id = ad_for_name(ids_by_name[simple(content)], captured_at) || (content.to_s.match?(/\A\d{8,}\z/) ? content.to_s : nil)
         if ad_id
           ad_groups[ad_id] << cid
         elsif campaign_names.include?(simple(campaign))
@@ -221,6 +221,48 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
         campaign: campaign_groups.transform_values { |cids| Crm::AdFunnel.funnel_row(cids, steps) },
         untracked: untracked.any? ? Crm::AdFunnel.funnel_row(untracked.map(&:first), steps) : nil,
         untracked_names: untracked.map(&:last).compact_blank.tally }
+    end
+  end
+
+  # 11/11: o MESMO nome de anúncio se repete em conjuntos diferentes (conjunto refeito, cópia do anúncio).
+  # Antes ganhava um qualquer e o lead caía no conjunto pausado — o conjunto no ar aparecia gastando sem
+  # trazer lead. Agora o lead vai para o anúncio daquele nome que estava gastando no dia do clique; sem
+  # gasto no dia, o que gastou por último até ali; sem gasto nenhum, o mais novo.
+  def ad_for_name(ids, captured_at)
+    return if ids.blank?
+    return ids.first if ids.size == 1
+
+    day = click_day(captured_at)
+    spend = ids.index_with { |id| repeated_name_spend[id] || {} }
+    spent_on(spend, day) || last_spender(spend, day) || ids.max_by(&:to_i)
+  end
+
+  # quem gastou NO dia (se mais de um, o que gastou mais)
+  def spent_on(spend, day)
+    spend.select { |_, days| days.key?(day) }.max_by { |_, days| days[day] }&.first
+  end
+
+  # quem gastou por último até aquele dia
+  def last_spender(spend, day)
+    spend.filter_map { |id, days| (last = days.keys.select { |d| d <= day }.max) && [id, last] }.max_by(&:last)&.first
+  end
+
+  # dia do clique no fuso da conta de anúncios (a Meta fecha o dia no horário de Brasília)
+  def click_day(captured_at)
+    (Time.zone.parse(captured_at.to_s) || Time.current).in_time_zone('America/Sao_Paulo').to_date
+  rescue ArgumentError
+    Time.current.in_time_zone('America/Sao_Paulo').to_date
+  end
+
+  # { ad_id => { dia => gasto } } só dos anúncios cujo nome se repete (dia a dia, sem limite de período:
+  # o lead de hoje pode ser de um anúncio que parou ontem)
+  def repeated_name_spend
+    @repeated_name_spend ||= begin
+      names = Crm::AdCreative.where(account_id: @account.id).pluck(:ad_name, :ad_id).group_by { |name, _| simple(name) }
+      ids = names.values.select { |list| list.size > 1 }.flatten(1).map(&:second)
+      Crm::AdInsight.where(account_id: @account.id, ad_id: ids).where("(metrics ->> 'spend')::numeric > 0")
+                    .pluck(:ad_id, :date, Arel.sql("(metrics ->> 'spend')::numeric"))
+                    .each_with_object({}) { |(id, date, value), acc| (acc[id] ||= {})[date] = value.to_f }
     end
   end
 
@@ -379,7 +421,7 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
   end
 
   # ── CRM ────────────────────────────────────────────────────────────────
-  # [[contact_id, campaign, content, utm_id]] dos leads que chegaram por página com aquela origem
+  # [[contact_id, campaign, content, utm_id, captured_at]] dos leads que chegaram por página com aquela origem
   def page_leads(source)
     @page_leads ||= {}
     @page_leads[source] ||= @account.contacts
@@ -388,7 +430,8 @@ class Cevico::CampaignAgent::Reader # rubocop:disable Metrics/ClassLength
                                     .where("(additional_attributes -> 'page_ads' ->> 'captured_at')::timestamptz <= ?", @until_date.end_of_day)
                                     .pluck(:id, Arel.sql("additional_attributes -> 'page_ads' ->> 'campaign'"),
                                            Arel.sql("additional_attributes -> 'page_ads' ->> 'utm_content'"),
-                                           Arel.sql("additional_attributes -> 'page_ads' ->> 'utm_id'"))
+                                           Arel.sql("additional_attributes -> 'page_ads' ->> 'utm_id'"),
+                                           Arel.sql("additional_attributes -> 'page_ads' ->> 'captured_at'"))
   end
 
   def steps_for(contact_ids)
