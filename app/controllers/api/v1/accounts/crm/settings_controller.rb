@@ -1905,7 +1905,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       'enabled' => ActiveModel::Type::Boolean.new.cast(raw[:enabled]) == true,
       'inbox_id' => raw[:inbox_id].to_i.positive? ? raw[:inbox_id].to_i : nil,
       'template_params' => reminder_template_params(raw[:template_params]),
-      'message_preview' => raw[:message_preview].to_s[0, 2000].presence
+      'message_preview' => raw[:message_preview].to_s[0, 2000].presence,
+      'units' => reminder_units(raw[:units]).presence # 📍 item 392: o modelo de cada unidade
     }.compact
   end
 

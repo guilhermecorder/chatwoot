@@ -113,10 +113,20 @@ const slotFrom = saved => ({
   saved: saved?.template_params ? { ...saved } : null,
   preview: saved?.message_preview || '',
 });
+// 📍 item 392: o bloco do Oftalmofácil também tem o modelo de CADA unidade
+// (só havia um, o da Paulista, e o paciente do Tatuapé recebia o endereço errado)
 const partnerFrom = c => ({
   enabled: c?.enabled === true,
   inbox_id: c?.inbox_id || null,
   slot: slotFrom(c?.template_params ? c : null),
+  slots: {
+    paulista: slotFrom(c?.units?.paulista),
+    tatuape: slotFrom(c?.units?.tatuape),
+  },
+});
+const blankPartnerSlots = () => ({
+  paulista: blankSlot(),
+  tatuape: blankSlot(),
 });
 
 // item 314 (02/10; "quero ambientes mais separados para cada caixa de
@@ -395,6 +405,7 @@ const addRule = (days, hour) => {
       enabled: false,
       inbox_id: partnerInboxIds.value[0] || null,
       slot: blankSlot(),
+      slots: blankPartnerSlots(),
     },
     followup: followupFrom(null),
   };
@@ -485,10 +496,34 @@ const togglePartner = rule => {
 };
 const onPartnerInbox = rule => {
   rule.partner.slot = blankSlot();
+  rule.partner.slots = blankPartnerSlots();
   rule.followup.partnerSlot = blankSlot();
   loadTemplates(rule.partner.inbox_id);
   touch();
 };
+
+// os três lugares de modelo do bloco: cada unidade e o geral
+const partnerPickers = rule => [
+  ...UNITS.map(u => ({
+    key: u.key,
+    label: `Consulta em ${u.label}`,
+    slot: rule.partner.slots[u.key],
+  })),
+  {
+    key: 'geral',
+    label: 'Qualquer unidade (só modelo SEM endereço)',
+    slot: rule.partner.slot,
+  },
+];
+const partnerHasTemplate = rule =>
+  partnerPickers(rule).some(picker => picker.slot?.name);
+const partnerUnitsPayload = rule =>
+  Object.fromEntries(
+    UNITS.map(u => [
+      u.key,
+      payloadIn(rule.partner.inbox_id, rule.partner.slots[u.key]),
+    ]).filter(([, payload]) => payload)
+  );
 
 // ── reforço para quem não respondeu (item 288) ───────────────────────────
 const FOLLOWUP_HOURS = [1, 2, 3, 4, 6, 8, 12, 24, 48];
@@ -535,6 +570,7 @@ const buildPayload = () => {
         enabled: rule.partner.enabled,
         inbox_id: rule.partner.inbox_id,
         ...(payloadIn(rule.partner.inbox_id, rule.partner.slot) || {}),
+        units: partnerUnitsPayload(rule),
       },
       followup: followupPayload(rule),
       variants: variantsPayload(rule.inbox_id, rule.variants),
@@ -571,7 +607,7 @@ const problemOf = rule => {
   if (!hasTemplate(rule)) return 'escolha pelo menos um modelo';
   if (rule.partner.enabled && !rule.partner.inbox_id)
     return 'escolha a caixa que fala com os pacientes do Oftalmofácil';
-  if (rule.partner.enabled && !rule.partner.slot.name)
+  if (rule.partner.enabled && !partnerHasTemplate(rule))
     return 'escolha o modelo dos pacientes do Oftalmofácil';
   if (rule.followup.enabled && !rule.followup.slot.name)
     return 'escolha o modelo do reforço';
@@ -783,7 +819,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
           </p>
           <div class="flex items-center gap-1.5 flex-wrap mt-1.5">
             <span class="cv-chip">{{ META.tag }}</span>
-            <span class="cv-chip" :class="statusChip.tone"
+            <span
+class="cv-chip" :class="statusChip.tone"
               >● {{ statusChip.label }}</span
             >
           </div>
@@ -817,10 +854,12 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
               {{ META.title }}
             </p>
             <span class="cv-chip">{{ META.tag }}</span>
-            <span class="cv-chip" :class="statusChip.tone"
+            <span
+class="cv-chip" :class="statusChip.tone"
               >● {{ statusChip.label }}</span
             >
-            <span v-if="dirty" class="cv-chip cv-amber"
+            <span
+v-if="dirty" class="cv-chip cv-amber"
               >📝 alterações não salvas</span
             >
           </div>
@@ -995,7 +1034,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
             <span class="text-[11px] text-n-slate-10">{{
               ruleSummary(rule)
             }}</span>
-            <span v-if="problemOf(rule)" class="cv-chip cv-amber"
+            <span
+v-if="problemOf(rule)" class="cv-chip cv-amber"
               >⚠️ {{ problemOf(rule) }}</span
             >
             <span
@@ -1533,60 +1573,72 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 </select>
                 <div
                   v-if="rule.partner.inbox_id"
-                  class="cv-stat p-3 space-y-1.5 lg:w-1/2"
+                  class="grid gap-2 lg:grid-cols-3"
                 >
-                  <p class="text-[11px] font-bold text-n-slate-12">
-                    Modelo para os pacientes do Oftalmofácil
-                  </p>
-                  <select
-                    v-model="rule.partner.slot.name"
-                    class="cv-input w-full !h-8 text-xs"
-                    style="margin-bottom: 0"
-                    @change="fillVars(rule.partner.inbox_id, rule.partner.slot)"
+                  <div
+                    v-for="picker in partnerPickers(rule)"
+                    :key="rule.uid + 'pp' + picker.key"
+                    class="cv-stat p-3 space-y-1.5"
                   >
-                    <option value="">— nenhum —</option>
-                    <option
-                      v-if="
-                        rule.partner.slot.name &&
-                        !templatesIn(rule.partner.inbox_id).some(
-                          t => t.name === rule.partner.slot.name
-                        )
-                      "
-                      :value="rule.partner.slot.name"
-                    >
-                      {{ rule.partner.slot.name }} (salva)
-                    </option>
-                    <option
-                      v-for="t in templatesIn(rule.partner.inbox_id)"
-                      :key="rule.uid + 'pt' + t.name + t.language"
-                      :value="t.name"
-                    >
-                      {{ t.name }} ({{ t.language }})
-                    </option>
-                  </select>
-                  <template v-if="rule.partner.slot.name">
-                    <p
-                      class="text-[10px] text-n-slate-10 whitespace-pre-wrap max-h-28 overflow-auto bg-n-alpha-1 rounded-lg px-2 py-1.5"
-                    >
-                      {{
-                        bodyIn(rule.partner.inbox_id, rule.partner.slot) ||
-                        'prévia indisponível'
-                      }}
+                    <p class="text-[11px] font-bold text-n-slate-12">
+                      {{ picker.label }}
                     </p>
-                    <input
-                      v-for="token in tokensIn(
-                        rule.partner.inbox_id,
-                        rule.partner.slot
-                      )"
-                      :key="rule.uid + 'pv' + token"
-                      v-model="rule.partner.slot.vars[token]"
-                      class="cv-input w-full !h-7 text-[11px] font-mono"
+                    <select
+                      v-model="picker.slot.name"
+                      class="cv-input w-full !h-8 text-xs"
                       style="margin-bottom: 0"
-                      :placeholder="varHint(token)"
-                      @input="touch"
-                    />
-                  </template>
+                      @change="fillVars(rule.partner.inbox_id, picker.slot)"
+                    >
+                      <option value="">— nenhum —</option>
+                      <option
+                        v-if="
+                          picker.slot.name &&
+                          !templatesIn(rule.partner.inbox_id).some(
+                            t => t.name === picker.slot.name
+                          )
+                        "
+                        :value="picker.slot.name"
+                      >
+                        {{ picker.slot.name }} (salva)
+                      </option>
+                      <option
+                        v-for="t in templatesIn(rule.partner.inbox_id)"
+                        :key="
+                          rule.uid + 'pt' + picker.key + t.name + t.language
+                        "
+                        :value="t.name"
+                      >
+                        {{ t.name }} ({{ t.language }})
+                      </option>
+                    </select>
+                    <template v-if="picker.slot.name">
+                      <p
+                        class="text-[10px] text-n-slate-10 whitespace-pre-wrap max-h-28 overflow-auto bg-n-alpha-1 rounded-lg px-2 py-1.5"
+                      >
+                        {{
+                          bodyIn(rule.partner.inbox_id, picker.slot) ||
+                          'prévia indisponível'
+                        }}
+                      </p>
+                      <input
+                        v-for="token in tokensIn(
+                          rule.partner.inbox_id,
+                          picker.slot
+                        )"
+                        :key="rule.uid + 'pv' + picker.key + token"
+                        v-model="picker.slot.vars[token]"
+                        class="cv-input w-full !h-7 text-[11px] font-mono"
+                        style="margin-bottom: 0"
+                        :placeholder="varHint(token)"
+                        @input="touch"
+                      />
+                    </template>
+                  </div>
                 </div>
+                <p class="text-[10px] text-n-slate-9">
+                  Modelo com o nome de outra unidade nunca sai: a consulta fica
+                  nas puladas, com o aviso de qual modelo falta.
+                </p>
                 <p class="text-[10px] text-n-slate-9">
                   Mesmas variáveis de cima, mais
                   <code v-pre>{{ parceiro }}</code> = nome do parceiro do hub.
@@ -1828,7 +1880,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                     >· Oftalmofácil ({{ e.partner }})</span
                   >
                   <!-- #45: reforço que a Meta recusou (não chegou; nenhum outro sai sozinho) -->
-                  <span v-if="e.refused" class="text-red-600 dark:text-red-400"
+                  <span
+v-if="e.refused" class="text-red-600 dark:text-red-400"
                     >· {{ e.refused }}</span
                   >
                   <span class="text-n-slate-9"
@@ -1862,7 +1915,8 @@ const compact = computed(() => props.view === 'cards' && !isOpen.value);
                 ✓ {{ e.when }} · {{ e.name }} · {{ e.unit }} · …{{
                   e.phone_tail
                 }}
-                <span v-if="e.manual" class="font-semibold"
+                <span
+v-if="e.manual" class="font-semibold"
                   >· envio manual</span
                 >
                 <span

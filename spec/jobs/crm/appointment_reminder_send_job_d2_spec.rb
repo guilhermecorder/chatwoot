@@ -777,6 +777,43 @@ RSpec.describe Crm::AppointmentReminderSendJob do
       expect(parceiro.reload.additional_attributes['cevico_appt_reminders']).to be_present
     end
 
+    # 📍 item 392 (11/11): o bloco só tinha o modelo da Paulista e o paciente do parceiro
+    # com consulta no Tatuapé recebia o endereço da Paulista
+    describe 'unidade da consulta no bloco do Oftalmofácil' do
+      let(:paulista_only) do
+        params = tpl.call('confirmacao_paulista_oftalmofacil').merge('processed_params' => { 'body' => { '1' => '{{nome}}' } })
+        partner_cfg.merge('template_params' => params)
+      end
+
+      before do
+        patient = contact_named('Parceiro Tatuape', '+5511999990053')
+        consulta(patient, '2026-09-28 11:00', unit: 'tatuape', source: 'oftalmofacil', source_detail: 'CLINICA X', external_ref: 'p53')
+      end
+
+      def state
+        settings.reload.agenda_config.dig('appointment_reminders_state', 'd2')
+      end
+
+      it 'modelo com o nome de outra unidade não sai: a consulta fica nas puladas com o que fazer', :aggregate_failures do
+        settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('partner' => paulista_only) } })
+        described_class.perform_now(now)
+
+        skipped = state['skipped'].find { |e| e['name'] == 'Parceiro Tatuape' }
+        expect(skipped['why']).to include('confirmacao_paulista_oftalmofacil é de outra unidade', 'Tatuapé', 'bloco Pacientes do Oftalmofácil')
+        expect(state['sent'].pluck('name')).to include('Paciente Parceiro')
+        expect(state['sent'].pluck('name')).not_to include('Parceiro Tatuape')
+      end
+
+      it 'com o modelo de cada unidade, o Tatuapé recebe o do Tatuapé e a Paulista o da Paulista', :aggregate_failures do
+        units = { 'tatuape' => { 'template_params' => tpl.call('confirmacao_tatuape_oftalmofacil'), 'message_preview' => 'Tatuapé {{1}}' } }
+        settings.update!(agenda_config: { 'appointment_reminders' => { 'd2' => d2_cfg.merge('partner' => paulista_only.merge('units' => units)) } })
+        described_class.perform_now(now)
+
+        sent = state['sent'].to_h { |e| [e['name'], e['template']] }
+        expect(sent).to include('Parceiro Tatuape' => 'confirmacao_tatuape_oftalmofacil', 'Paciente Parceiro' => 'confirmacao_paulista_oftalmofacil')
+      end
+    end
+
     # 🤝 item 386: Amor Saúde Tatuapé sai com {{valor}} = 0,00 (e não o R$ 338 do hub)
     it 'parceiro com valor combinado: o {{valor}} vai 0,00, não é pulado e a lista diz de onde saiu', :aggregate_failures do
       cleide = contact_named('Cleide Miguel', '+5511999990053')

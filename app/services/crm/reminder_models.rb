@@ -60,6 +60,25 @@ module Crm::ReminderModels
     nil
   end
 
+  # 🤝 item 392 (11/11): bloco "Pacientes do Oftalmofácil" — o modelo da UNIDADE da
+  # consulta antes do geral. O bloco só tinha UM modelo (o da Paulista) e o paciente
+  # do parceiro com consulta no Tatuapé recebia o endereço da Paulista.
+  def partner_pick(partner, task)
+    partner = {} unless partner.is_a?(Hash)
+    slot(units(partner)[unit_key(task)]) || slot(partner)
+  end
+
+  # 📍 item 392: o modelo carrega no NOME outra unidade (ex.: "confirmacao_paulista_…"
+  # para uma consulta no Tatuapé)? Esse nunca sai: endereço errado é pior que não enviar.
+  # Só o nome conta — o texto do modelo do Tatuapé também diz "Instituto … Paulista".
+  def foreign_unit?(template, task)
+    name = fold(template&.dig('template_params', 'name')).delete('^a-z0-9')
+    own = unit_key(task)
+    return false if name.blank? || name.include?(fold(own))
+
+    (Crm::AgendaSlots::UNIT_LABELS.keys.map(&:to_s) - [own]).any? { |unit| name.include?(fold(unit)) }
+  end
+
   # o modelo do REFORÇO: o personalizado mais específico que tiver, senão o padrão do bloco
   def followup(block, task)
     candidates(block, task).each do |set, spec|

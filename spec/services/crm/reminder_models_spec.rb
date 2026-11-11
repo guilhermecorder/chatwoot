@@ -32,6 +32,25 @@ RSpec.describe Crm::ReminderModels do
     expect(roberta['model']).to eq('Dra. Roberta Negri')
   end
 
+  # 📍 item 392 (11/11): bloco do Oftalmofácil por unidade + modelo de outra unidade nunca sai
+  it 'bloco do parceiro: o modelo da unidade da consulta antes do geral', :aggregate_failures do
+    partner = tpl.call('confirmacao_paulista_oftalmofacil').merge('units' => { 'tatuape' => tpl.call('confirmacao_tatuape_oftalmofacil') })
+    expect(name_of(described_class.partner_pick(partner, consulta(unit: 'tatuape')))).to eq('confirmacao_tatuape_oftalmofacil')
+    expect(name_of(described_class.partner_pick(partner, consulta))).to eq('confirmacao_paulista_oftalmofacil')
+    expect(described_class.partner_pick(nil, consulta)).to be_nil
+    expect(described_class.partner_pick({ 'enabled' => true }, consulta)).to be_nil
+  end
+
+  it 'reconhece o modelo que traz outra unidade no nome (e só o nome conta)', :aggregate_failures do
+    paulista = tpl.call('confirmacao_paulista_oftalmofacil')
+    expect(described_class.foreign_unit?(paulista, consulta(unit: 'tatuape'))).to be(true)
+    expect(described_class.foreign_unit?(paulista, consulta)).to be(false)
+    expect(described_class.foreign_unit?(tpl.call('confirmao_consulta_tatuape'), consulta(unit: nil))).to be(true) # sem unidade = Paulista
+    expect(described_class.foreign_unit?(tpl.call('lembrete_1dia_antes'), consulta(unit: 'tatuape'))).to be(false)
+    expect(described_class.foreign_unit?(tpl.call('Confirmação Tatuapé'), consulta(unit: 'tatuape'))).to be(false)
+    expect(described_class.foreign_unit?(nil, consulta)).to be(false)
+  end
+
   it 'conjunto sem modelo para a consulta passa a vez; sem unidade vale Av. Paulista; tipo desconhecido = avaliação', :aggregate_failures do
     expect(name_of(described_class.pick(block, consulta(doctor: 'Dra. Roberta Negri')))).to eq('padrao_paulista')
     expect(name_of(described_class.pick(block, consulta(unit: nil)))).to eq('padrao_paulista')

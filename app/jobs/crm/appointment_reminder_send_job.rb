@@ -205,13 +205,18 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
       inbox = account.inboxes.find_by(id: rcfg.dig('partner', 'inbox_id'))
       return skip(run, task, 'Oftalmofácil: caixa não encontrada') if inbox.nil? && !shadow
     end
-    template = partner ? partner_template(rcfg) : Crm::ReminderModels.pick(rcfg, task)
+    template = partner ? Crm::ReminderModels.partner_pick(rcfg['partner'], task) : Crm::ReminderModels.pick(rcfg, task)
 
     # item 310/314: o lembrete sai pela caixa em que o paciente JÁ conversa,
     # com o modelo escolhido PARA AQUELA CAIXA no card — por isso a falta de
     # modelo só é decidida DEPOIS do roteamento (varredura 03/10)
     inbox, template = inbox_and_template_for(account, rcfg, contact, task, inbox => template) unless partner
     return skip(run, task, partner ? 'Oftalmofácil: sem modelo' : "sem modelo para #{unit_label(task)}") if template.nil? && !shadow
+
+    # 📍 item 392 (11/11): modelo com o nome de OUTRA unidade nunca sai (o paciente do Tatuapé recebia
+    # o endereço da Paulista pelo bloco Oftalmofácil). Fica nas puladas, dizendo o que fazer.
+    foreign = foreign_unit_reason(template, task, partner: partner)
+    return skip(run, task, foreign) if foreign
 
     # 💳 19/10: "R$sem custo à vista" nunca mais — valor em texto só sai por um modelo feito para o tipo
     free = free_value_reason(template, task, rcfg, partner: partner)
@@ -297,11 +302,12 @@ class Crm::AppointmentReminderSendJob < ApplicationJob # rubocop:disable Metrics
     rcfg.dig('partner', 'enabled') == true && rcfg.dig('partner', 'inbox_id').to_i.positive?
   end
 
-  def partner_template(rcfg)
-    tp = rcfg.dig('partner', 'template_params')
-    return nil if tp.blank?
+  def foreign_unit_reason(template, task, partner:)
+    return unless Crm::ReminderModels.foreign_unit?(template, task)
 
-    { 'template_params' => tp, 'message_preview' => rcfg.dig('partner', 'message_preview') }
+    where = partner ? 'no bloco Pacientes do Oftalmofácil' : 'neste lembrete'
+    "o modelo #{template.dig('template_params', 'name')} é de outra unidade e a consulta é em #{unit_label(task)} — " \
+      "escolha o modelo dessa unidade #{where}"
   end
 
   # ── caixa certa para o paciente (item 310, 02/10) ─────────────────────
