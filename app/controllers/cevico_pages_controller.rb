@@ -1,6 +1,7 @@
 # Página PÚBLICA CEVICO (/p/:slug) — sem login, preparada para SEO:
 # meta title/description próprios, Open Graph e URL limpa. Só páginas
-# publicadas aparecem; rascunho responde 404.
+# publicadas aparecem; rascunho responde 404. Página "redirecionada para"
+# outra (item 395) responde 301 para o endereço da página de destino.
 #
 # Com o domínio oficial configurado (CEVICO_PUBLIC_HOST), a página também
 # responde na RAIZ desse domínio (www.cevico.com.br/preoperatorio) e os
@@ -13,7 +14,7 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
 
   def show # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     @page = CevicoPage.published.find_by(slug: params[:slug])
-    return render plain: 'Página não encontrada.', status: :not_found if @page.nil?
+    return moved_or_not_found if @page.nil?
 
     blocked = library_guard
     return blocked if blocked
@@ -254,6 +255,22 @@ class CevicoPagesController < ActionController::Base # rubocop:disable Rails/App
   end
 
   private
+
+  # ↪ item 395: endereço "redirecionado para" outra página → 301 para o
+  # endereço da página de destino NO MESMO host. O destino é montado só com o
+  # caminho (nunca sai do domínio), leva a query string inteira (utm, gclid,
+  # fbclid…) e a âncora no fim. Destino apagado, despublicado ou em laço = 404,
+  # como qualquer página fora do ar (regras em CevicoPage#redirect_destination).
+  def moved_or_not_found
+    moved = CevicoPage.redirected.select(*CevicoPage::REDIRECT_COLUMNS).find_by(slug: params[:slug])
+    target, anchor = moved&.redirect_destination
+    return render plain: 'Página não encontrada.', status: :not_found if target.nil?
+
+    location = request.path.start_with?('/p/') ? "/p/#{target.slug}" : "/#{target.slug}"
+    location += "?#{request.query_string}" if request.query_string.present?
+    location += "##{anchor}" if anchor.present?
+    redirect_to location, status: :moved_permanently
+  end
 
   # "a,b,c" do beacon → no máximo 80 chaves distintas (o modelo confere cada uma no mapa da página)
   def beacon_keys(name)

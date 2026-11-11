@@ -64,10 +64,13 @@ class CevicoPage < ApplicationRecord
 
   # gestão de projetos de página (pedido 17/07): ideia → em produção →
   # publicada. Só 'published' aparece ao público.
+  # 'redirected' (item 395): o endereço responde 301 para outra página — só
+  # entra por redirect_to_page! (regras no concern CevicoPageRedirect).
   STATUSES = {
     'idea' => '💡 Ideia',
     'draft' => '🛠 Em produção',
-    'published' => '🟢 Publicada'
+    'published' => '🟢 Publicada',
+    'redirected' => '↪️ Redirecionada'
   }.freeze
 
   # funil de páginas: o CTA pode reapontar pra outra página da CEVICO
@@ -159,6 +162,10 @@ class CevicoPage < ApplicationRecord
   def published?
     status == 'published'
   end
+
+  # ↪ item 395: redirecionamento permanente (301) para outra página —
+  # status 'redirected' + chave reservada no daily_stats (sem migration)
+  include CevicoPageRedirect
 
   # ── Prévia do RASCUNHO (pedido 23/07) ──
   # Link secreto do admin: quem tem o link vê a página antes de publicar,

@@ -13,6 +13,13 @@ import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyPill.vue';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
+import {
+  cleanAnchor,
+  anchorValid,
+  redirectPath,
+  redirectSummary,
+  redirectedToCount,
+} from 'dashboard/helper/cevicoPageRedirect';
 
 // 🔐 rodada 334: quem só VÊ páginas lê e comenta; editar = criar e salvar
 // rascunhos. Publicar/despublicar, trocar o endereço e mexer em página NO AR
@@ -322,10 +329,27 @@ const STATUS_META = {
     cv: 'cv-green',
     chip: '🟢 Publicadas',
   },
+  // ↪ item 395: o endereço responde 301 para outra página (não é etapa que
+  // se escolhe no editor — entra e sai pelo bloco "Redirecionar este endereço")
+  redirected: {
+    label: 'REDIRECIONADA',
+    tab: 'Redirecionadas',
+    icon: 'i-lucide-corner-up-right',
+    cv: 'cv-blue',
+    chip: '↪️ Redirecionadas',
+  },
 };
+// etapas que o administrador escolhe no editor
+const STAGE_STATUSES = ['idea', 'draft', 'published'];
 const statusFilter = ref(''); // '' = todas
 const statusCount = status =>
   pages.value.filter(p => p.status === status).length;
+// a aba "Redirecionadas" só aparece quando existe alguma
+const statusTabs = computed(() =>
+  Object.keys(STATUS_META).filter(
+    st => st !== 'redirected' || statusCount('redirected') > 0
+  )
+);
 
 // ── funil: próxima página + números de conversão ──
 const funnelCandidates = computed(() =>
@@ -341,6 +365,9 @@ const pageConversion = page => {
   if (!page.views_count) return null;
   return Math.round((clicks / page.views_count) * 100);
 };
+
+// ↪ item 395: escolha do bloco "Redirecionar este endereço" (zera a cada abertura)
+const redirectForm = ref({ target_page_id: null, anchor: '' });
 
 const openNew = category => {
   editing.value = null;
@@ -367,7 +394,79 @@ const openEdit = page => {
     })),
   };
   comments.value = page.team_comments || [];
+  redirectForm.value = { target_page_id: null, anchor: '' };
   showEditor.value = true;
+};
+
+// ── ↪ item 395: redirecionamento permanente (301) ──
+// O endereço desta página passa a levar visitante e Google para outra página
+// PUBLICADA (com âncora opcional). Para juntar guias que disputam a mesma
+// busca sem perder a posição. Só admin; o conteúdo da página fica guardado.
+const redirecting = ref(false);
+const redirectCandidates = computed(() =>
+  pages.value
+    .filter(p => p.status === 'published' && p.id !== editing.value?.id)
+    .sort((a, b) => a.title.localeCompare(b.title, 'pt-BR'))
+);
+const redirectOf = page => redirectSummary(page, pages.value);
+// frase por extenso do que vai acontecer, montada ao vivo
+const redirectPreview = computed(() =>
+  redirectPath(
+    pages.value.find(p => p.id === redirectForm.value.target_page_id),
+    redirectForm.value.anchor
+  )
+);
+const redirectAnchorOk = computed(() => anchorValid(redirectForm.value.anchor));
+const redirectError = error =>
+  useAlert(
+    error?.response?.data?.error ||
+      error?.response?.data?.message ||
+      'Não consegui mudar o redirecionamento.'
+  );
+const applyRedirect = async () => {
+  const page = editing.value;
+  if (!page || !redirectPreview.value || !redirectAnchorOk.value) return;
+  if (
+    // eslint-disable-next-line no-alert
+    !window.confirm(
+      `Redirecionar /${page.slug} para ${redirectPreview.value}?\n\nA página sai do ar: quem abrir este endereço (e o Google) vai direto para a outra. Dá para desfazer.`
+    )
+  )
+    return;
+  redirecting.value = true;
+  try {
+    await CrmAPI.setPageRedirect(
+      page.id,
+      redirectForm.value.target_page_id,
+      cleanAnchor(redirectForm.value.anchor)
+    );
+    showEditor.value = false;
+    useAlert(`Pronto: /${page.slug} agora leva para ${redirectPreview.value}.`);
+    fetchPages();
+  } catch (error) {
+    redirectError(error);
+  } finally {
+    redirecting.value = false;
+  }
+};
+const undoRedirect = async () => {
+  const page = editing.value;
+  if (!page) return;
+  redirecting.value = true;
+  try {
+    const { data } = await CrmAPI.undoPageRedirect(page.id);
+    showEditor.value = false;
+    useAlert(
+      data.status === 'published'
+        ? 'Redirecionamento desfeito: a página voltou ao ar.'
+        : 'Redirecionamento desfeito: a página voltou para "Em produção".'
+    );
+    fetchPages();
+  } catch (error) {
+    redirectError(error);
+  } finally {
+    redirecting.value = false;
+  }
 };
 
 // ── 🧪 Teste A/B: variações de título/subtítulo/botão no MESMO endereço ──
@@ -504,10 +603,15 @@ const savePage = async (publish = null) => {
 };
 
 const deletePage = async page => {
+  // item 395: quem redireciona para ela fica sem destino (endereço "não encontrada")
+  const pointing = redirectedToCount(page, pages.value);
+  const warning = pointing
+    ? ` ${pointing} página(s) redirecionada(s) para ela também param de funcionar.`
+    : '';
   // eslint-disable-next-line no-alert
   if (
     !window.confirm(
-      `Excluir a página "${page.title}"? O link público para de funcionar.`
+      `Excluir a página "${page.title}"? O link público para de funcionar.${warning}`
     )
   )
     return;
@@ -579,6 +683,10 @@ onMounted(() => {
             <span class="i-lucide-lightbulb text-xs" />
             {{ statusCount('idea') }} ideia(s)
           </span>
+          <span v-if="statusCount('redirected')" class="cevico-hero-chip">
+            <span class="i-lucide-corner-up-right text-xs" />
+            {{ statusCount('redirected') }} redirecionada(s)
+          </span>
         </template>
         <template #actions>
           <CevicoViewOnlyPill v-if="!canEditPages" />
@@ -620,14 +728,14 @@ onMounted(() => {
             <span class="opacity-70 tabular-nums">{{ pages.length }}</span>
           </button>
           <button
-            v-for="(meta, st) in STATUS_META"
+            v-for="st in statusTabs"
             :key="st"
             class="cv-seg-item"
             :class="{ 'cv-seg-on': statusFilter === st }"
             @click="statusFilter = statusFilter === st ? '' : st"
           >
-            <span :class="meta.icon" class="cv-seg-icon" />
-            {{ meta.tab }}
+            <span :class="STATUS_META[st].icon" class="cv-seg-icon" />
+            {{ STATUS_META[st].tab }}
             <span class="opacity-70 tabular-nums">{{ statusCount(st) }}</span>
           </button>
         </div>
@@ -719,6 +827,32 @@ onMounted(() => {
                   class="text-xs text-n-slate-10 mt-1 leading-relaxed break-all"
                 >
                   {{ publicPath(page) }}
+                </p>
+                <!-- ↪ item 395: para onde este endereço leva (texto inteiro, sem cortar) -->
+                <p
+                  v-if="redirectOf(page)"
+                  class="text-xs mt-1.5 leading-relaxed break-all font-medium"
+                  :class="
+                    redirectOf(page).state === 'ok'
+                      ? 'text-n-slate-12'
+                      : 'text-amber-600'
+                  "
+                >
+                  <span
+                    class="i-lucide-corner-up-right text-[13px] align-[-2px]"
+                  />
+                  <template v-if="redirectOf(page).path">
+                    leva para {{ redirectOf(page).path }}
+                  </template>
+                  <template v-if="redirectOf(page).state === 'missing'">
+                    o destino foi apagado: o endereço não abre
+                  </template>
+                  <template v-else-if="redirectOf(page).state === 'off'">
+                    — destino fora do ar: o endereço não abre
+                  </template>
+                  <template v-else-if="redirectOf(page).state === 'chain'">
+                    — que também foi redirecionada
+                  </template>
                 </p>
               </div>
               <!-- números do funil: visitas · seguiram o funil · WhatsApp · conversão -->
@@ -1615,6 +1749,113 @@ class="text-emerald-600"
             />
           </label>
 
+          <!-- ↪ item 395: redirecionamento permanente (301) — só o admin.
+               Fora do "Salvar": marcar e desfazer valem na hora. -->
+          <div
+            v-if="editing && isAdmin"
+            class="mb-4 rounded-xl border border-n-weak bg-n-alpha-1 p-3"
+          >
+            <p
+              class="text-[12px] font-bold text-n-slate-12 flex items-center gap-1.5"
+            >
+              <span class="i-lucide-corner-up-right text-sm text-blue-600" />
+              Redirecionar este endereço
+            </p>
+
+            <!-- já redirecionada: diz para onde leva e oferece desfazer -->
+            <template v-if="redirectOf(editing)">
+              <p
+                class="text-[12px] text-n-slate-12 mt-1.5 leading-relaxed break-all"
+              >
+                Quem abre <b>/{{ editing.slug }}</b> é levado para
+                <b>{{ redirectOf(editing).path || 'uma página apagada' }}</b>
+                — visitante e Google. O conteúdo desta página continua guardado.
+              </p>
+              <p
+                v-if="redirectOf(editing).state === 'chain'"
+                class="text-[11px] text-amber-600 mt-1 leading-relaxed"
+              >
+                ⚠ A página de destino também foi redirecionada. O sistema segue
+                um passo adiante, mas o melhor é desfazer e apontar direto para
+                a página final.
+              </p>
+              <p
+                v-else-if="redirectOf(editing).state !== 'ok'"
+                class="text-[11px] text-amber-600 mt-1 leading-relaxed"
+              >
+                ⚠ A página de destino não está no ar: por enquanto este
+                endereço responde "página não encontrada".
+              </p>
+              <button
+                class="mt-2 px-3 h-8 rounded-lg text-[12px] font-semibold border border-n-weak text-n-slate-12 hover:bg-n-alpha-1 disabled:opacity-60"
+                :disabled="redirecting"
+                title="A página volta para a etapa em que estava antes (publicada volta ao ar)"
+                @click="undoRedirect"
+              >
+                {{ redirecting ? 'Desfazendo…' : 'Desfazer redirecionamento' }}
+              </button>
+            </template>
+
+            <!-- marcar: página que fica + âncora opcional + frase por extenso -->
+            <template v-else>
+              <p class="text-[11px] text-n-slate-11 mt-1 leading-relaxed">
+                Use quando esta página foi juntada a outra: quem abrir este
+                endereço (e o Google) vai direto para a página que fica, sem
+                perder a posição na busca.
+              </p>
+              <div class="grid grid-cols-1 sm:grid-cols-[1fr_11rem] gap-2 mt-2">
+                <label class="block min-w-0">
+                  <span class="text-[11px] font-medium text-n-slate-11">Redirecionar para (página no ar)</span>
+                  <select
+                    v-model="redirectForm.target_page_id"
+                    class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12"
+                  >
+                    <option :value="null">Não redirecionar</option>
+                    <option
+                      v-for="p in redirectCandidates"
+                      :key="p.id"
+                      :value="p.id"
+                    >
+                      {{ p.title }} — /{{ p.slug }}
+                    </option>
+                  </select>
+                </label>
+                <label class="block min-w-0">
+                  <span class="text-[11px] font-medium text-n-slate-11">Trecho (âncora, opcional)</span>
+                  <input
+                    v-model="redirectForm.anchor"
+                    type="text"
+                    placeholder="ex.: juntos"
+                    class="mt-1 w-full h-9 rounded-lg border border-n-weak bg-n-solid-2 px-2 text-[13px] text-n-slate-12 font-mono"
+                  />
+                </label>
+              </div>
+              <p
+                v-if="!redirectAnchorOk"
+                class="text-[11px] text-amber-600 mt-1 leading-relaxed"
+              >
+                ⚠ O trecho só aceita letras, números, hífen e sublinhado (é o
+                nome que vem depois do # no endereço).
+              </p>
+              <p
+                v-else-if="redirectPreview"
+                class="text-[12px] text-n-slate-12 mt-2 leading-relaxed break-all"
+              >
+                Vai ficar assim: <b>/{{ editing.slug }}</b> →
+                <b>{{ redirectPreview }}</b>
+              </p>
+              <button
+                v-if="redirectForm.target_page_id"
+                class="mt-2 px-3 h-8 rounded-lg text-[12px] font-bold text-white disabled:opacity-60"
+                style="background: linear-gradient(135deg, #1d4ed8, #3b82f6)"
+                :disabled="redirecting || !redirectAnchorOk"
+                @click="applyRedirect"
+              >
+                {{ redirecting ? 'Redirecionando…' : 'Redirecionar agora' }}
+              </button>
+            </template>
+          </div>
+
           <!-- etapa do projeto (gestão: ideia → produção → publicada) —
                só o admin muda; o servidor ignora a etapa enviada por outra pessoa -->
           <p
@@ -1631,13 +1872,16 @@ class="text-emerald-600"
             Etapa: {{ STATUS_META[form.status]?.chip || form.status }} —
             publicar e despublicar é com o administrador.
           </p>
-          <div v-if="isAdmin" class="flex items-center gap-2 mb-4 flex-wrap">
+          <div
+            v-if="isAdmin && form.status !== 'redirected'"
+            class="flex items-center gap-2 mb-4 flex-wrap"
+          >
             <span class="text-[11px] font-medium text-n-slate-11">Etapa do projeto:</span>
             <div
               class="flex items-center h-[34px] bg-n-solid-2 border border-n-weak rounded-xl px-0.5 gap-0.5"
             >
               <button
-                v-for="(meta, st) in STATUS_META"
+                v-for="st in STAGE_STATUSES"
                 :key="st"
                 class="h-7 px-3 rounded-lg text-xs font-medium whitespace-nowrap transition-colors"
                 :class="
@@ -1654,7 +1898,7 @@ class="text-emerald-600"
                 "
                 @click="form.status = st"
               >
-                {{ meta.chip }}
+                {{ STATUS_META[st].chip }}
               </button>
             </div>
           </div>

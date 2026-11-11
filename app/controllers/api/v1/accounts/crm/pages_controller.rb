@@ -9,7 +9,8 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
   #
   # o TIME inteiro cria e edita RASCUNHOS (inclusive com IA);
   # publicar/despublicar, trocar o endereço (slug) e excluir continuam com o admin
-  before_action :check_admin, only: [:destroy]
+  # item 395: redirecionar (301) e desfazer mexem no endereço público — só admin
+  before_action :check_admin, only: [:destroy, :set_redirect, :undo_redirect]
   # auditoria rodada 2 (#20/#150/#399/#428): página NO AR só o admin altera —
   # antes a mudança de um atendente ia direto para o site público
   before_action :lock_published_page, only: [:update]
@@ -47,6 +48,30 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
   def destroy
     Current.account.cevico_pages.find(params[:id]).destroy!
     head :no_content
+  end
+
+  # ↪ item 395 — "Redirecionar para": o endereço desta página passa a
+  # responder 301 para outra página PUBLICADA da mesma conta (âncora opcional).
+  # Para juntar guias que disputam a mesma busca: visitante e Google seguem
+  # para o endereço que fica. O conteúdo da página não é apagado.
+  def set_redirect
+    page = Current.account.cevico_pages.find(params[:id])
+    target = Current.account.cevico_pages.find_by(id: params[:target_page_id])
+    anchor = params[:anchor].to_s.strip.delete_prefix('#')
+    error = redirect_error(page, target, anchor)
+    return render json: { error: error }, status: :unprocessable_entity if error
+
+    page.redirect_to_page!(target, anchor: anchor)
+    render json: page_json(page)
+  end
+
+  # desfaz: a página volta para a etapa em que estava (publicada volta ao ar)
+  def undo_redirect
+    page = Current.account.cevico_pages.find(params[:id])
+    return render json: { error: 'Esta página não está redirecionada.' }, status: :unprocessable_entity unless page.redirected?
+
+    page.undo_redirect!
+    render json: page_json(page)
   end
 
   # IA no editor, dois modos:
@@ -162,6 +187,17 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
     ).call
   end
 
+  # por que o redirecionamento não pode ser gravado (nil = pode)
+  def redirect_error(page, target, anchor) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return 'Escolha a página de destino.' if target.nil?
+    return 'A página não pode redirecionar para ela mesma.' if target.id == page.id
+    return 'A página de destino também está redirecionada. Escolha a página final.' if target.redirected?
+    return 'A página de destino precisa estar publicada.' unless target.published?
+    return 'A Biblioteca só abre dentro do sistema: escolha outra página.' if target.library? || page.library?
+
+    'A âncora só aceita letras, números, hífen e sublinhado (ex.: juntos).' if anchor.present? && !anchor.match?(CevicoPage::REDIRECT_ANCHOR)
+  end
+
   def check_admin
     render json: { error: 'Só administradores editam páginas.' }, status: :forbidden unless Current.account_user.administrator?
   end
@@ -208,6 +244,8 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       permitted.delete(:status)
       permitted.delete(:slug)
     end
+    # item 395: 'redirected' só entra pela ação própria (set_redirect), nunca pelo editor
+    permitted.delete(:status) if permitted[:status] == 'redirected'
     permitted
   end
 
@@ -288,8 +326,14 @@ class Api::V1::Accounts::Crm::PagesController < Api::V1::Accounts::BaseControlle
       # ambiente de montagem: prévia + token de RETOQUE (edição inline) —
       # só quem EDITA páginas recebe este link (quem só vê fica sem o token)
       builder_url: builder_url_for(page),
+      redirect: redirect_json(page), # item 395: para onde o endereço leva (nil = não redirecionada)
       updated_at: page.updated_at
     }.merge(page_stats_json(page))
+  end
+
+  def redirect_json(page)
+    info = page.redirect_info
+    info && { page_id: info['page_id'], anchor: page.redirect_anchor }
   end
 
   def builder_url_for(page)

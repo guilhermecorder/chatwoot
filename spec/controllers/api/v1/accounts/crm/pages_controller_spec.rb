@@ -138,6 +138,91 @@ RSpec.describe 'CEVICO Páginas (API)', type: :request do
     end
   end
 
+  # ↪ item 395: "Redirecionar para" — só o admin marca e desfaz; destino é
+  # sempre uma página PUBLICADA da mesma conta; âncora opcional dentro da régua
+  describe 'redirecionamento permanente (item 395)' do
+    let(:target) do
+      CevicoPage.create!(account: account, title: 'Diferença', slug: 'diferenca-miopia-astigmatismo', status: 'published',
+                         sections: [], ab_variants: [], team_comments: [], daily_stats: {})
+    end
+
+    it 'administrador marca com âncora, a lista mostra o destino e desfazer devolve a página ao ar', :aggregate_failures do
+      post "#{base}/#{published.id}/set_redirect", params: { target_page_id: target.id, anchor: '#juntos' },
+                                                   headers: auth(admin), as: :json
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to include('status' => 'redirected',
+                                              'redirect' => { 'page_id' => target.id, 'anchor' => 'juntos' })
+
+      get base, headers: auth(admin), as: :json
+      listed = response.parsed_body['pages'].index_by { |pg| pg['id'] }
+      expect(listed[published.id]['redirect']).to eq('page_id' => target.id, 'anchor' => 'juntos')
+      expect(listed[target.id]['redirect']).to be_nil
+
+      post "#{base}/#{published.id}/undo_redirect", headers: auth(admin), as: :json
+      expect(response).to have_http_status(:success)
+      expect(response.parsed_body).to include('status' => 'published', 'redirect' => nil)
+      expect(published.reload.daily_stats).not_to have_key('redirect')
+    end
+
+    it 'atendente não redireciona nem desfaz (403)', :aggregate_failures do
+      post "#{base}/#{draft.id}/set_redirect", params: { target_page_id: target.id }, headers: auth(agent), as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(draft.reload.status).to eq('draft')
+
+      published.redirect_to_page!(target)
+      post "#{base}/#{published.id}/undo_redirect", headers: auth(agent), as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(published.reload.status).to eq('redirected')
+    end
+
+    it 'recusa destino vazio, ela mesma, rascunho, já redirecionado e de outra conta', :aggregate_failures do
+      other = CevicoPage.create!(account: create(:account), title: 'Alheia', slug: 'pagina-alheia', status: 'published',
+                                 sections: [], ab_variants: [], team_comments: [], daily_stats: {})
+      moved = CevicoPage.create!(account: account, title: 'Já saiu', slug: 'ja-saiu', status: 'published',
+                                 sections: [], ab_variants: [], team_comments: [], daily_stats: {})
+      moved.redirect_to_page!(target)
+
+      { nil => 'Escolha', published.id => 'ela mesma', draft.id => 'precisa estar publicada',
+        moved.id => 'também está redirecionada', other.id => 'Escolha' }.each do |target_id, message|
+        post "#{base}/#{published.id}/set_redirect", params: { target_page_id: target_id }, headers: auth(admin), as: :json
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body['error']).to include(message)
+      end
+      expect(published.reload.status).to eq('published')
+    end
+
+    it 'recusa âncora fora da régua e Biblioteca como destino', :aggregate_failures do
+      post "#{base}/#{published.id}/set_redirect", params: { target_page_id: target.id, anchor: 'a b/../x' },
+                                                   headers: auth(admin), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body['error']).to include('âncora')
+
+      target.update!(custom_html: '<html><body data-biblioteca="1"></body></html>')
+      post "#{base}/#{published.id}/set_redirect", params: { target_page_id: target.id }, headers: auth(admin), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body['error']).to include('Biblioteca')
+    end
+
+    it 'o editor não grava a etapa "redirected" por conta própria; publicar pelo editor desfaz', :aggregate_failures do
+      put "#{base}/#{draft.id}", params: { status: 'redirected' }, headers: auth(admin), as: :json
+      expect(response).to have_http_status(:success)
+      expect(draft.reload.status).to eq('draft')
+
+      published.redirect_to_page!(target, anchor: 'juntos')
+      put "#{base}/#{published.id}", params: { title: 'Catarata 2', status: 'redirected' }, headers: auth(admin), as: :json
+      expect(published.reload).to have_attributes(status: 'redirected', title: 'Catarata 2')
+
+      put "#{base}/#{published.id}", params: { status: 'published' }, headers: auth(admin), as: :json
+      expect(published.reload.status).to eq('published')
+      expect(published.daily_stats).not_to have_key('redirect')
+    end
+
+    it 'desfazer numa página que não está redirecionada devolve erro claro' do
+      post "#{base}/#{published.id}/undo_redirect", headers: auth(admin), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+  end
+
   describe 'link do botão (cta_url)' do
     it 'recusa destino fora da régua e aceita WhatsApp', :aggregate_failures do
       patch "#{base}/#{draft.id}", params: { cta_url: 'https://exemplo.com/promocao' }, headers: auth(agent), as: :json

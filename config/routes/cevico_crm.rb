@@ -278,6 +278,9 @@ namespace :crm do
     member do
       post :add_comment
       post :delete_comment
+      # item 395: redirecionamento permanente (301) para outra página
+      post :set_redirect
+      post :undo_redirect
     end
   end
   # Resultados de tráfego das Páginas: origem (Google/SEO/Meta) →

@@ -1630,6 +1630,18 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // ↪ item 395: redirecionamento permanente (301) para outra página da conta
+  setPageRedirect(pageId, targetPageId, anchor) {
+    return axios.post(`${this.url}/pages/${pageId}/set_redirect`, {
+      target_page_id: targetPageId,
+      anchor,
+    });
+  }
+
+  undoPageRedirect(pageId) {
+    return axios.post(`${this.url}/pages/${pageId}/undo_redirect`);
+  }
+
   // ── Planejamento de conteúdos (workflow de marketing) ─────────────
   getContentItems() {
     return axios.get(`${this.url}/content_items`);
