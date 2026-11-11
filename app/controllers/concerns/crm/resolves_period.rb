@@ -28,6 +28,12 @@ module Crm
       end
     end
 
+    # 📐 item 394: a BASE DE COMPARAÇÃO do período (?compare=previous|month|pick
+    # + compare_month=AAAA-MM) — uma régua só para todas as telas
+    def period_comparison(since, until_at)
+      Crm::PeriodComparison.from_params(since, until_at, params)
+    end
+
     def custom_period_range(now = PERIOD_TZ.now)
       from = safe_period_parse(params[:from])&.beginning_of_day
       to = safe_period_parse(params[:to])&.end_of_day

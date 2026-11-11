@@ -20,9 +20,20 @@ import FunnelSteps from 'dashboard/components-next/cevico/FunnelSteps.vue';
 import AreaChart from 'dashboard/components-next/cevico/AreaChart.vue';
 import HBars from 'dashboard/components-next/cevico/HBars.vue';
 import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
+import CompareRuler from 'dashboard/components-next/cevico/CompareRuler.vue';
+import CompareLine from 'dashboard/components-next/cevico/CompareLine.vue';
+import {
+  compareParams,
+  variationText,
+} from 'dashboard/helper/cevicoComparison';
+import {
+  useCevicoCompare,
+  useCevicoJourney,
+} from 'dashboard/composables/useCevicoCompare';
 import CvBloco from './CvBloco.vue';
 import CvIndicador from './CvIndicador.vue';
 import CvPainelLateral from './CvPainelLateral.vue';
+import JornadaPaciente from './JornadaPaciente.vue';
 
 const props = defineProps({
   // lente da fonte da chavinha do Meu Painel (cevico | oftalmofacil | all)
@@ -36,6 +47,19 @@ const { accountId } = useAccount();
 const periodo = ref({ preset: 'last7', from: '', to: '' });
 const isLoading = ref(true);
 const data = ref(null);
+// 📐 item 394: BASE DE COMPARAÇÃO (período anterior | mês passado | outro mês),
+// salva por pessoa; vale para TODOS os números desta tela e para a jornada
+const { compare, setCompare } = useCevicoCompare('cevico_home_compare');
+const {
+  journey,
+  loading: journeyLoading,
+  lineOf,
+  stepOf,
+} = useCevicoJourney({
+  period: periodo,
+  compare,
+  source: () => props.source,
+});
 
 const load = async () => {
   isLoading.value = true;
@@ -45,6 +69,7 @@ const load = async () => {
       from: periodo.value.from,
       to: periodo.value.to,
       source: props.source || undefined,
+      ...compareParams(compare.value),
     });
     data.value = payload;
   } catch {
@@ -55,6 +80,7 @@ const load = async () => {
 };
 onMounted(load);
 watch(periodo, load, { deep: true });
+watch(compare, load, { deep: true });
 watch(() => props.source, load);
 
 // ── cores dos gráficos: a família da cor do dia + o destaque ──
@@ -82,41 +108,25 @@ const dias = v =>
   v === null || v === undefined
     ? '—'
     : `${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias`;
-// comparação com o período anterior: { texto, estado, seta }
-const cmp = (atual, anterior, { bomQuandoSobe = true, sufixo = '' } = {}) => {
-  if (anterior === null || anterior === undefined) return null;
-  if (!anterior && !atual)
-    return { texto: 'sem movimento nos dois períodos', estado: 'neutro' };
-  if (!anterior) return { texto: `antes: 0${sufixo}`, estado: 'neutro' };
-  const delta = ((atual - anterior) / anterior) * 100;
-  const arred = Math.round(delta);
-  if (arred === 0)
-    return {
-      texto: `igual ao período anterior (${n(anterior)}${sufixo})`,
-      estado: 'neutro',
-    };
-  const subiu = delta > 0;
-  return {
-    texto: `${subiu ? '+' : ''}${arred}% vs anterior (${n(anterior)}${sufixo})`,
-    estado: subiu === bomQuandoSobe ? 'bom' : 'atencao',
-    seta: true,
-  };
-};
-const cmpPct = (atual, anterior, opts = {}) => {
-  if (anterior === null || anterior === undefined) return null;
-  const delta = Math.round((atual - anterior) * 10) / 10;
-  if (!delta)
-    return {
-      texto: `igual ao período anterior (${pctTxt(anterior)})`,
-      estado: 'neutro',
-    };
-  const subiu = delta > 0;
-  return {
-    texto: `${subiu ? '+' : ''}${delta} pontos vs anterior (${pctTxt(anterior)})`,
-    estado: subiu === (opts.bomQuandoSobe ?? true) ? 'bom' : 'atencao',
-    seta: true,
-  };
-};
+// comparação com a BASE escolhida (item 394): { texto, estado, seta } — o
+// nome da base vem do servidor ("ontem", "setembro", "mesmo período de outubro")
+const rotuloBase = computed(
+  () =>
+    data.value?.periodo?.comparacao?.rotulo ||
+    journey.value?.comparacao?.rotulo ||
+    'período anterior'
+);
+const cmp = (atual, anterior, { bomQuandoSobe = true, sufixo = '' } = {}) =>
+  variationText(atual, anterior, rotuloBase.value, {
+    bomQuandoSobe,
+    format: v => `${n(v)}${sufixo}`,
+  });
+const cmpPct = (atual, anterior, opts = {}) =>
+  variationText(atual, anterior, rotuloBase.value, {
+    bomQuandoSobe: opts.bomQuandoSobe ?? true,
+    pontos: true,
+    format: pctTxt,
+  });
 const estadoTaxa = (v, bom, atencao) => {
   if (v >= bom) return 'bom';
   return v >= atencao ? 'atencao' : 'problema';
@@ -504,6 +514,27 @@ const abrir = (key, titulo, valor, comparacao = null) => {
 const fechar = () => {
   painel.value = null;
 };
+// 📐 item 394: a LINHA do número aberto (agora × base), quando ele é uma
+// etapa ou um desvio da jornada
+const ETAPA_DO_PAINEL = {
+  novos: 'chegaram',
+  confirmacao: 'confirmaram',
+  indicadas: 'indicacoes',
+  fecharam: 'fecharam',
+  'vol:marcadas': 'marcadas',
+  'vol:agendamentos': 'agendaram',
+  'vol:confirmacoes': 'confirmaram',
+  'vol:comparecimentos': 'compareceram',
+  'vol:faltas': 'faltas',
+  'vol:reagendamentos': 'reagendamentos',
+  'vol:cancelamentos': 'cancelamentos',
+  'vol:indicacoes': 'indicacoes',
+  'vol:fechamentos': 'fecharam',
+  'vol:cirurgias_realizadas': 'operaram',
+};
+const linhaPainel = computed(() =>
+  stepOf(ETAPA_DO_PAINEL[painel.value?.key] || '')
+);
 const volumeAberto = computed(() => {
   const k = painel.value?.key || '';
   if (!k.startsWith('vol:')) return null;
@@ -574,8 +605,19 @@ const pessoaSub = p => {
           operou. Só pacientes da CEVICO. Clique num número para ver a história.
         </p>
       </div>
-      <PeriodRuler v-model="periodo" glass />
+      <div class="cvg-visao-reguas">
+        <PeriodRuler v-model="periodo" glass />
+        <CompareRuler
+          :model-value="compare"
+          :resolved="journey?.comparacao || data?.periodo?.comparacao"
+          glass
+          @update:model-value="setCompare"
+        />
+      </div>
     </div>
+
+    <!-- 🧭 item 394: a JORNADA de ponta a ponta, com linha e comparação por etapa -->
+    <JornadaPaciente :dados="journey" :carregando="journeyLoading" />
 
     <SkeletonScreen v-if="isLoading && !data" variant="dashboard" />
 
@@ -595,6 +637,7 @@ const pessoaSub = p => {
               :comparacao="cmp(entrada.novos.valor, entrada.novos.anterior)"
               :contexto="ctxNovos"
               :serie="series?.novos || []"
+              :serie-anterior="lineOf('chegaram').serieAnterior"
               heroi
               pe="de onde vieram"
               @abrir="
@@ -681,6 +724,7 @@ const pessoaSub = p => {
               :valor="n(vol('marcadas').valor)"
               :comparacao="cmpVolume(vol('marcadas'))"
               :contexto="ctxVolume(vol('marcadas'))"
+              v-bind="lineOf('marcadas')"
               heroi
               pe="primeiras consultas · retorno e pós-op fora"
               @abrir="
@@ -702,6 +746,7 @@ const pessoaSub = p => {
                 )
               "
               :contexto="ctxAgendaram"
+              :serie="series?.agendaram_novos || []"
               pe="quem chegou no período"
               @abrir="
                 abrir(
@@ -725,6 +770,7 @@ const pessoaSub = p => {
                 )
               "
               contexto="Pacientes que já estavam na base e marcaram consulta no período."
+              :serie="series?.agendaram_base || []"
               pe="quem chegou antes"
               @abrir="
                 abrir(
@@ -884,7 +930,7 @@ const pessoaSub = p => {
                 estado: estadoTaxa(agenda.taxa_confirmacao, 70, 50),
               }"
               :contexto="ctxConfirmacao"
-              :serie="series?.consultas || []"
+              v-bind="lineOf('confirmaram')"
               heroi
               pe="como é contado"
               @abrir="
@@ -899,6 +945,7 @@ const pessoaSub = p => {
                 estado: estadoTaxa(agenda.taxa_comparecimento, 80, 60),
               }"
               :contexto="ctxComparecimento"
+              v-bind="lineOf('compareceram')"
               :pe="vol('comparecimentos') ? 'quem veio' : ''"
               @abrir="
                 vol('comparecimentos') &&
@@ -916,6 +963,7 @@ const pessoaSub = p => {
               :valor="n(vol('faltas').valor)"
               :comparacao="cmpVolume(vol('faltas'))"
               :contexto="ctxVolume(vol('faltas'))"
+              v-bind="lineOf('faltas')"
               pe="quem faltou"
               @abrir="
                 abrir(
@@ -932,6 +980,7 @@ const pessoaSub = p => {
               :valor="n(vol('reagendamentos').valor)"
               :comparacao="cmpVolume(vol('reagendamentos'))"
               :contexto="ctxVolume(vol('reagendamentos'))"
+              v-bind="lineOf('reagendamentos')"
               pe="quem remarcou"
               @abrir="
                 abrir(
@@ -948,6 +997,7 @@ const pessoaSub = p => {
               :valor="n(vol('cancelamentos').valor)"
               :comparacao="cmpVolume(vol('cancelamentos'))"
               :contexto="ctxVolume(vol('cancelamentos'))"
+              v-bind="lineOf('cancelamentos')"
               pe="motivos"
               @abrir="
                 abrir(
@@ -1067,6 +1117,7 @@ const pessoaSub = p => {
                 estado: 'neutro',
               }"
               :contexto="ctxIndicacao"
+              v-bind="lineOf('indicacoes')"
               heroi
               pe="quem foi indicado"
               @abrir="
@@ -1085,6 +1136,7 @@ const pessoaSub = p => {
                 estado: estadoTaxa(cirurgia.taxa_fechamento, 40, 20),
               }"
               :contexto="`${n(cirurgia.cirurgias_marcadas)} cirurgias marcadas no período.`"
+              v-bind="lineOf('fecharam')"
               pe="quem fechou"
               @abrir="
                 abrir('fecharam', 'Fecharam cirurgia', n(cirurgia.fecharam))
@@ -1096,6 +1148,7 @@ const pessoaSub = p => {
               :valor="n(vol('cirurgias_realizadas').valor)"
               :comparacao="cmpVolume(vol('cirurgias_realizadas'))"
               :contexto="ctxVolume(vol('cirurgias_realizadas'))"
+              v-bind="lineOf('operaram')"
               pe="quem operou"
               @abrir="
                 abrir(
@@ -1403,6 +1456,27 @@ const pessoaSub = p => {
       @fechar="fechar"
     >
       <template v-if="painel && data">
+        <!-- 📐 item 394: a linha deste número, agora × a base de comparação -->
+        <section v-if="linhaPainel" class="cvg-painel-sec">
+          <h3>
+            {{ journey?.balde === 'mes' ? 'Mês a mês' : 'Dia a dia' }}: agora ×
+            {{ rotuloBase }}
+          </h3>
+          <CompareLine
+            :values="linhaPainel.serie"
+            :prev-values="linhaPainel.serie_anterior"
+            :labels="journey?.rotulos || []"
+            :prev-labels="journey?.rotulos_anterior || []"
+            :current-label="journey?.periodo?.datas || 'agora'"
+            :previous-label="rotuloBase"
+            :unit="linhaPainel.medida"
+            :good-when-up="linhaPainel.bom_quando_sobe !== false"
+            :height="180"
+          />
+          <p v-if="!volumeAberto" class="cvg-legenda">
+            {{ linhaPainel.formula }}
+          </p>
+        </section>
         <section v-if="listaOrigem.length" class="cvg-painel-sec">
           <h3>De onde vieram (caixa de entrada)</h3>
           <div v-for="r in listaOrigem" :key="r.label" class="cvg-visao-barra">
@@ -1779,6 +1853,19 @@ const pessoaSub = p => {
   flex-direction: column;
   gap: 24px;
   margin-bottom: 24px;
+}
+.cv-page .cvg-visao-reguas {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .cv-page .cvg-visao-reguas {
+    align-items: flex-start;
+  }
 }
 .cv-page .cvg-visao-topo {
   display: flex;

@@ -286,9 +286,23 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def overview
     since, until_at = resolve_range
     admin = Current.account_user.administrator?
-    key = ['cevico:overview:v354', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i]
+    compare = chosen_comparison(since, until_at)
+    key = ['cevico:overview:v354', account.id, lens.key, admin, params[:preset].to_s, since.to_i, until_at.to_i, compare&.cache_key]
     payload = Rails.cache.fetch(key, expires_in: heavy_ttl) do
-      Crm::OverviewService.new(account: account, since: since, until_at: until_at, lens: lens, admin: admin).call
+      Crm::OverviewService.new(account: account, since: since, until_at: until_at, lens: lens, admin: admin, compare: compare).call
+    end
+    render json: payload
+  end
+
+  # 🧭 item 394: a JORNADA DO PACIENTE de ponta a ponta (chegou → … → pós-op),
+  # cada etapa com a linha do período e a da base de comparação. Sem dinheiro:
+  # vale para a equipe toda. Cache curto por conta/lente/período/comparação.
+  def journey
+    since, until_at = resolve_range
+    compare = period_comparison(since, until_at)
+    key = ['cevico:journey:v394', account.id, lens.key, since.to_i, until_at.to_i, compare.cache_key]
+    payload = Rails.cache.fetch(key, expires_in: heavy_ttl) do
+      Crm::JourneyService.new(account: account, since: since, until_at: until_at, lens: lens, compare: compare).call
     end
     render json: payload
   end
@@ -300,10 +314,17 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     # item 328: o Meu Painel manda a fonte da chavinha (?source=); as outras
     # telas que usam o cesto não mandam e seguem na régua de sempre
     render json: Crm::KpiBagService.new(account: account, since: since, until_at: until_at, granularity: params[:granularity],
-                                        lens: params[:source].present? ? lens : nil).call(hide: hidden_money_keys)
+                                        lens: params[:source].present? ? lens : nil,
+                                        compare: chosen_comparison(since, until_at)).call(hide: hidden_money_keys)
   end
 
   private
+
+  # 📐 item 394: a base de comparação SÓ quando a tela manda (?compare=) — aba
+  # aberta antes do deploy e as outras telas que usam o cesto seguem como sempre
+  def chosen_comparison(since, until_at)
+    period_comparison(since, until_at) if params[:compare].present?
+  end
 
   # 🔒 auditoria R2 (#33/#350): o cesto entregava faturamento e gasto do
   # WhatsApp a qualquer atendente. Faturamento = administrador ou quem tem a

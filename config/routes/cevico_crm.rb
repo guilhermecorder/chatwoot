@@ -391,6 +391,8 @@ namespace :crm do
     get :kpis
     # 🧭 item 337: VISÃO GERAL (as 14 perguntas) — dinheiro e médicos só p/ admin
     get :overview
+    # 🧭 item 394: jornada do paciente com linha e base de comparação por etapa
+    get :journey
     # 🎂 item 331: aniversário da pessoa logada
     post :birthday
   end

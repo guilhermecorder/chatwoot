@@ -32,6 +32,13 @@ import { IMAC_PALETTES, FRUIT_PALETTES } from 'dashboard/helper/cevicoPalettes';
 // 🧭 item 336: vitrine giratória do guia arejado (frase do dia + equipe)
 import CvVitrine from 'dashboard/components-next/cevico/guia/CvVitrine.vue';
 import VisaoGeral from 'dashboard/components-next/cevico/guia/VisaoGeral.vue';
+import JornadaPaciente from 'dashboard/components-next/cevico/guia/JornadaPaciente.vue';
+import CompareRuler from 'dashboard/components-next/cevico/CompareRuler.vue';
+import { compareParams } from 'dashboard/helper/cevicoComparison';
+import {
+  useCevicoCompare,
+  useCevicoJourney,
+} from 'dashboard/composables/useCevicoCompare';
 import { fraseDoDia } from 'dashboard/helper/cevicoFrases';
 import {
   PANEL_PRESETS,
@@ -129,6 +136,17 @@ const setEstiloPainel = key => {
   updateUISettings({ cevico_home_estilo: key });
 };
 const sourceParams = () => ({ source: sourceLens.value });
+
+// 📐 item 394 (11/11): BASE DE COMPARAÇÃO do painel (período anterior | mês
+// passado | outro mês), salva por pessoa — a mesma chavinha vale para o
+// Clássico e para o Novo. No Clássico ela troca o "vs …" de todos os cards
+// e popups (o cesto de indicadores) e desenha a JORNADA DO PACIENTE no topo.
+const { compare, setCompare } = useCevicoCompare('cevico_home_compare');
+const jornadaRecolhida = ref(!!uiSettings.value?.cevico_home_jornada_fechada);
+const toggleJornada = () => {
+  jornadaRecolhida.value = !jornadaRecolhida.value;
+  updateUISettings({ cevico_home_jornada_fechada: jornadaRecolhida.value });
+};
 
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
 const BASE_PANELS = [
@@ -466,6 +484,7 @@ const fetchKpiBag = async () => {
     const { data: bag } = await CrmAPI.getKpiBag({
       preset,
       ...sourceParams(),
+      ...compareParams(compare.value),
       ...(preset === 'custom' ? { from, to } : {}),
     });
     if (seq !== kpiSeq) return;
@@ -528,6 +547,15 @@ const fetchHistBag = async () => {
 
 // régua nova: qualquer mudança (preset ou De/Até) recarrega o painel
 watch(period, fetchData);
+// item 394: trocar a base de comparação refaz só o cesto (cards e popups)
+watch(compare, () => fetchKpiBag(), { deep: true });
+// a jornada do paciente no Clássico (o Novo carrega a dele na Visão geral)
+const { journey: jornada, loading: jornadaCarregando } = useCevicoJourney({
+  period,
+  compare,
+  source: sourceLens,
+  enabled: () => estiloClassico.value && !jornadaRecolhida.value,
+});
 
 // 🔎 item 328: as opções da chavinha vêm do servidor (as fontes cadastradas
 // em Integrações → Fontes de pacientes) + "Tudo"; com uma fonte só, não aparece
@@ -1825,7 +1853,7 @@ const fetchKpiModalBag = async () => {
     const params = kpiModalPreset.value
       ? { preset: kpiModalPreset.value }
       : { preset, ...(preset === 'custom' ? { from, to } : {}) };
-    Object.assign(params, sourceParams());
+    Object.assign(params, sourceParams(), compareParams(compare.value));
     if (kpiModalGranularity.value)
       params.granularity = kpiModalGranularity.value;
     const { data: bag } = await CrmAPI.getKpiBag(params);
@@ -7164,6 +7192,13 @@ onUnmounted(() => {
         <!-- Régua de período PADRÃO (presets + Personalizado De/Até) -->
         <div class="mb-4 max-w-full flex flex-wrap items-center gap-2">
           <PeriodRuler v-model="period" glass class="max-w-full" />
+          <!-- 📐 item 394: com o que comparar (vale para cards, popups e jornada) -->
+          <CompareRuler
+            :model-value="compare"
+            :resolved="kpiBag?.comparison || jornada?.comparacao"
+            glass
+            @update:model-value="setCompare"
+          />
           <!-- 🔎 item 328: de qual FONTE de pacientes são os números -->
           <div
             v-if="lensOptions.length"
@@ -7200,6 +7235,18 @@ onUnmounted(() => {
           Tarefas, próximas consultas, Radar e desempenho das pessoas não mudam
           com a chavinha.
         </p>
+
+        <!-- 🧭 item 394: JORNADA DO PACIENTE de ponta a ponta (linha + comparação
+             por etapa); recolhe para quem quer ir direto aos cards -->
+        <JornadaPaciente
+          v-if="!organizeMode"
+          class="mb-4"
+          :dados="jornada"
+          :carregando="jornadaCarregando"
+          :recolhida="jornadaRecolhida"
+          recolhivel
+          @alternar="toggleJornada"
+        />
 
         <!-- ✈️ GESTOR: o indicador de decisão — posso viajar ou é ação imediata? -->
         <!-- item 240: minimizado = barrinha na mesma cor; clique abre de novo -->

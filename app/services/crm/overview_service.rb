@@ -32,19 +32,23 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
   MODALITY_LABELS = { 'avaliacao' => 'Avaliação', 'retorno' => 'Retorno', 'pos_op' => 'Pós-operatório',
                       'exames' => 'Exames', 'teleconsulta' => 'Teleconsulta' }.freeze
 
-  def initialize(account:, since:, until_at:, lens: nil, admin: false)
+  # compare (item 394): a BASE DE COMPARAÇÃO escolhida na tela (Crm::PeriodComparison).
+  # Sem ela vale o período de mesmo tamanho logo antes — o de sempre.
+  def initialize(account:, since:, until_at:, lens: nil, admin: false, compare: nil) # rubocop:disable Metrics/ParameterLists
     @account = account
     @since = since
     @until_at = until_at
     @lens = lens || Crm::SourceLens.for(account, nil)
     @admin = admin
-    @prev_since = since - (until_at - since)
-    @prev_until = since
+    @compare = compare
+    @prev_since = compare ? compare.since : since - (until_at - since)
+    @prev_until = compare ? compare.until_at : since
   end
 
   def call
     out = {
-      periodo: { de: @since.iso8601, ate: @until_at.iso8601, anterior_de: @prev_since.iso8601, anterior_ate: @prev_until.iso8601 },
+      periodo: { de: @since.iso8601, ate: @until_at.iso8601, anterior_de: @prev_since.iso8601, anterior_ate: @prev_until.iso8601,
+                 comparacao: @compare&.to_h },
       entrada: entrada,
       agenda: agenda,
       cirurgia: cirurgia,

@@ -223,6 +223,8 @@
 .cv-page .cvg-ind-graf .area { fill: var(--cv); opacity: 0.15; }
 .cv-page .cvg-ind-graf .linha { fill: none; stroke: var(--cv); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .cv-page .cvg-ind-graf .ponto { fill: var(--gd); stroke: var(--g-superficie-2); stroke-width: 2; }
+/* item 394: a BASE DE COMPARAÇÃO no mesmo gráfico — mesma cor, mais clara e tracejada */
+.cv-page .cvg-ind-graf .linha-anterior { fill: none; stroke: var(--cv); stroke-opacity: 0.4; stroke-width: 1.5; stroke-dasharray: 4 4; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .cv-page .cvg-ind--apoio .cvg-ind-graf .ponto { stroke: var(--ga-fundo); }
 .cv-page .cvg-ind-pe { display: flex; justify-content: space-between; gap: 8px; }
 
@@ -503,6 +505,7 @@
 .cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-cmp.cvg-texto-3 { color: rgba(255, 255, 255, 0.8); }
 .cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-graf .area { fill: #fff; opacity: 0.22; }
 .cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-graf .linha { stroke: #fff; }
+.cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-graf .linha-anterior { stroke: #fff; stroke-opacity: 0.55; }
 .cv-page.cvg-arejado .cvg-ind--heroi .cvg-ind-graf .ponto { fill: var(--gd); stroke: #fff; }
 .cv-page.cvg-arejado .cvg-ind--heroi:focus-visible { outline-color: #fff; }
 /* no escuro a regra do cartão comum (.dark …) ganharia do herói: repete o degradê */

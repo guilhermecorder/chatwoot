@@ -23,9 +23,12 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   # balde; sem ela vale o automático pelo tamanho do período
   # lens: opcional (item 328) — a lente da fonte escolhida no Meu Painel
   # (Crm::SourceLens). Sem lente, tudo continua na régua de sempre.
-  def initialize(account:, since:, until_at:, granularity: nil, lens: nil)
+  # compare: opcional (item 394) — a base de comparação escolhida na tela
+  # (Crm::PeriodComparison). Sem ela, o período de mesmo tamanho logo antes.
+  def initialize(account:, since:, until_at:, granularity: nil, lens: nil, compare: nil) # rubocop:disable Metrics/ParameterLists
     @account = account
     @lens = lens
+    @compare = compare
     @since = since
     @until_at = until_at
     forced = granularity.to_s.to_sym
@@ -35,16 +38,16 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
   # hide: chaves que esta pessoa NÃO pode ver (ex.: MONEY_KEYS) — tiradas do
   # cesto já pronto, para o cache continuar valendo para a conta inteira
   def call(hide: [])
-    prev_until = @since - 1.second
-    prev_since = prev_until - (@until_at - @since)
+    prev_since, prev_until = previous_range
     keys = bucket_keys(@since, @until_at)
     # baldes do período ANTERIOR (item 144): a série sobreposta no gráfico
     # compara balde a balde, não só a média
-    prev_keys = bucket_keys(prev_since, prev_until)
+    prev_keys = previous_keys(prev_since, prev_until, keys.size)
     # ⚡ item 237: cesto guardado por conta+período (2 min com o período aberto,
     # 10 min fechado) — a tela atualiza a cada 2 min e refazia ~120 queries
     ttl = @until_at >= Time.current ? 2.minutes : 10.minutes
-    cache_key = "cevico:kpibag:#{@account.id}:#{@lens&.key || 'padrao'}:#{@since.to_i}:#{@until_at.to_i}:#{@granularity}"
+    cache_key = "cevico:kpibag:#{@account.id}:#{@lens&.key || 'padrao'}:#{@since.to_i}:#{@until_at.to_i}:#{@granularity}" \
+                "#{@compare && ":#{@compare.cache_key}"}"
     bag = Rails.cache.fetch(cache_key, expires_in: ttl) do
       build_bag(prev_since, prev_until, keys, prev_keys)
     end
@@ -68,12 +71,38 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
       source: @lens&.key,
       points: keys.map { |k, label| { key: k, label: label } },
       prev_points: prev_keys.map { |k, label| { key: k, label: label } },
-      previous_label: "#{prev_since.strftime('%d/%m')}–#{prev_until.strftime('%d/%m')}",
+      previous_label: previous_label(prev_since, prev_until),
+      comparison: @compare&.to_h,
       metrics: base_metrics(@since, @until_at, prev_since, prev_until, keys.map(&:first), prev_keys.map(&:first))
     }
   end
 
   private
+
+  # item 394: a base de comparação escolhida na tela ou, sem ela, o período
+  # de mesmo tamanho logo antes (o de sempre)
+  def previous_range
+    return [@compare.since, @compare.until_at] if @compare
+
+    prev_until = @since - 1.second
+    [prev_until - (@until_at - @since), prev_until]
+  end
+
+  # com a base escolhida (mês de 31 × mês de 30 dias), a linha de antes fica
+  # do mesmo tamanho da de agora — o total continua sendo o do período inteiro
+  def previous_keys(prev_since, prev_until, size)
+    keys = bucket_keys(prev_since, prev_until)
+    return keys unless @compare
+
+    keys.first(size) + Array.new([size - keys.size, 0].max) { [nil, ''] }
+  end
+
+  # "21/10–31/10" como sempre; com a base escolhida na tela, o nome dela na
+  # frente: "outubro (01/10–31/10)", "mesmo período de outubro (01/10–11/10)"
+  def previous_label(prev_since, prev_until)
+    dates = "#{prev_since.strftime('%d/%m')}–#{prev_until.strftime('%d/%m')}"
+    @compare && @compare.mode != 'previous' ? "#{@compare.label} (#{@compare.range_label})" : dates
+  end
 
   # ── catálogo ──────────────────────────────────────────────────────────
   def base_metrics(since, until_at, prev_since, prev_until, keys, prev_keys) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/ParameterLists, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity

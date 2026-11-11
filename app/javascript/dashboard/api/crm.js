@@ -372,7 +372,9 @@ class CrmAPI extends ApiClient {
   // 🗂️ item 307: regras da agenda para a IA + o que ela recebe agora
   // ⏱️ item 367: teto de avaliações por hora em cada unidade
   updateAgendaHourly(hourly) {
-    return axios.post(`${this.url}/settings/update_agenda`, { hourly_evaluations: hourly });
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      hourly_evaluations: hourly,
+    });
   }
 
   updateAgendaAiRules(aiRules) {
@@ -676,7 +678,10 @@ class CrmAPI extends ApiClient {
       payload.texto = texto;
       if (titulo !== undefined) payload.titulo = titulo;
     }
-    return axios.post(`${this.url}/settings/update_reactivation_message`, payload);
+    return axios.post(
+      `${this.url}/settings/update_reactivation_message`,
+      payload
+    );
   }
 
   // 📣 item 381: plano de reativação em fatias (uma mãe por conta)
@@ -751,7 +756,13 @@ class CrmAPI extends ApiClient {
   }
 
   createSegment({ name, kind, source, variants, pace }) {
-    return axios.post(`${this.url}/segments`, { name, kind, source, variants, pace });
+    return axios.post(`${this.url}/segments`, {
+      name,
+      kind,
+      source,
+      variants,
+      pace,
+    });
   }
 
   getSegment(id) {
@@ -776,7 +787,10 @@ class CrmAPI extends ApiClient {
 
   // manda a próxima leva agora (limit opcional = quantas)
   tickSegmentNow(id, limit) {
-    return axios.post(`${this.url}/segments/${id}/tick_now`, limit ? { limit } : {});
+    return axios.post(
+      `${this.url}/segments/${id}/tick_now`,
+      limit ? { limit } : {}
+    );
   }
 
   getSegmentResults(id) {
@@ -789,7 +803,12 @@ class CrmAPI extends ApiClient {
 
   // 🏆 escala a vencedora num lote novo
   escalarSegment(id, { variant, size, name, pace }) {
-    return axios.post(`${this.url}/segments/${id}/escalar`, { variant, size, name, pace });
+    return axios.post(`${this.url}/segments/${id}/escalar`, {
+      variant,
+      size,
+      name,
+      pace,
+    });
   }
 
   getSegmentsDashboard() {
@@ -1038,7 +1057,11 @@ class CrmAPI extends ApiClient {
   // category (marketing | utility | authentication) = tarifa usada no custo estimado
   // 🔁 item 379: campaignId = recorrente que já existe (desconta as rodadas
   // anteriores); inboxId = quanto a caixa já mandou de campanha em 30 dias
-  previewAudience(audience, category = 'marketing', { campaignId, inboxId } = {}) {
+  previewAudience(
+    audience,
+    category = 'marketing',
+    { campaignId, inboxId } = {}
+  ) {
     return axios.post(`${this.url}/campaigns/preview_audience`, {
       audience,
       category,
@@ -1277,6 +1300,11 @@ class CrmAPI extends ApiClient {
   // 🧭 item 337: visão geral do Meu Painel (14 perguntas)
   getOverview(params = {}) {
     return axios.get(`${this.url}/home/overview`, { params });
+  }
+
+  // 🧭 item 394: jornada do paciente (linha + base de comparação por etapa)
+  getJourney(params = {}) {
+    return axios.get(`${this.url}/home/journey`, { params });
   }
 
   // 🎂 item 331: informar o aniversário (dia, mês, ano opcional); clear = apagar

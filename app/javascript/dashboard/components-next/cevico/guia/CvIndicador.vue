@@ -13,6 +13,9 @@ const props = defineProps({
   comparacao: { type: Object, default: null },
   contexto: { type: String, default: '' },
   serie: { type: Array, default: () => [] }, // 7–30 números
+  // 📐 item 394: a mesma série na BASE DE COMPARAÇÃO (linha mais clara,
+  // tracejada, no mesmo eixo); null = balde que não existe na base
+  serieAnterior: { type: Array, default: null },
   heroi: { type: Boolean, default: false },
   apoio: { type: Boolean, default: false },
   pe: { type: String, default: '' }, // texto pequeno à esquerda do "ver história"
@@ -25,9 +28,13 @@ const clicavel = computed(() => !!inst?.vnode?.props?.onAbrir);
 
 const SETAS = { bom: '▲', atencao: '▼', problema: '▼', neutro: '' };
 // seta só quando a comparação é uma VARIAÇÃO (seta: true); taxas e totais ficam sem
-const seta = computed(() =>
-  props.comparacao?.seta ? (SETAS[props.comparacao?.estado] ?? '') : ''
-);
+// item 394: quando a comparação já traz o SENTIDO ('▲' subiu / '▼' caiu), vale
+// ele — falta que caiu é "▼" em verde, não "▲"
+const seta = computed(() => {
+  const s = props.comparacao?.seta;
+  if (!s) return '';
+  return typeof s === 'string' ? s : (SETAS[props.comparacao?.estado] ?? '');
+});
 const estadoClass = computed(() => {
   const e = props.comparacao?.estado;
   return e && e !== 'neutro' ? `cvg-${e}` : 'cvg-texto-3';
@@ -37,20 +44,33 @@ const estadoClass = computed(() => {
 const graf = computed(() => {
   const pts = (props.serie || []).map(Number).filter(n => !Number.isNaN(n));
   if (pts.length < 2) return null;
-  const max = Math.max(...pts, 1);
+  // a base para onde ela acaba (mês de 30 × 31 dias) e divide o eixo com a de agora
+  const bruta = Array.isArray(props.serieAnterior) ? props.serieAnterior : [];
+  const fim = bruta.findIndex(v => v === null || v === undefined);
+  const antes = (fim === -1 ? bruta : bruta.slice(0, fim))
+    .slice(0, pts.length)
+    .map(v => Number(v) || 0);
+  const max = Math.max(...pts, ...antes, 1);
   const min = Math.min(...pts, 0);
   const span = max - min || 1;
   const w = 300;
   const h = 64;
   const stepX = w / (pts.length - 1);
-  const xy = pts.map((v, i) => [
+  const ponto = (v, i) => [
     Math.round(i * stepX),
     Math.round(h - 8 - ((v - min) / span) * (h - 16)),
-  ]);
-  const linha = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' ');
+  ];
+  const caminho = lista =>
+    lista.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' ');
+  const xy = pts.map(ponto);
+  const linha = caminho(xy);
   const last = xy[xy.length - 1];
   return {
     linha,
+    anterior:
+      antes.length > 1 && antes.some(v => v > 0)
+        ? caminho(antes.map(ponto))
+        : '',
     area: `${linha} L${w} ${h} L0 ${h} Z`,
     cx: last[0],
     cy: last[1],
@@ -94,6 +114,7 @@ const graf = computed(() => {
       aria-hidden="true"
     >
       <path class="area" :d="graf.area" />
+      <path v-if="graf.anterior" class="linha-anterior" :d="graf.anterior" />
       <path class="linha" :d="graf.linha" />
       <circle class="ponto" :cx="graf.cx" :cy="graf.cy" r="4" />
     </svg>
