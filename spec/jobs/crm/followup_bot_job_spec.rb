@@ -174,6 +174,30 @@ RSpec.describe Crm::FollowupBotJob do
     end
   end
 
+  # 😊 12/11: no modelo oficial, sem nome aproveitável vai um sorriso no {{1}};
+  # apelido (só letras) vale como nome; o texto simples continua com "oi".
+  describe 'nome no campo do modelo' do
+    let(:params) { { 'name' => 'retorno_combinado', 'processed_params' => { 'body' => { '1' => '[nome]' } } } }
+
+    def first_var(name)
+      conv = create(:conversation, account: account, inbox: inbox, contact: create(:contact, account: account, name: name))
+      described_class.new.send(:render_template_params, params, conv).dig('processed_params', 'body', '1')
+    end
+
+    it 'usa o primeiro nome ou o apelido; emoji, letra solta ou vazio viram 😊', :aggregate_failures do
+      expect(first_var('maria clara 🌸')).to eq('Maria')
+      expect(first_var('Tati')).to eq('Tati')
+      expect(first_var('😎🔥')).to eq('😊')
+      expect(first_var('~ J')).to eq('😊')
+      expect(first_var('+55 11 99999-0000')).to eq('😊')
+    end
+
+    it 'o texto simples segue com "oi" (sem "Oi oi")' do
+      conv = create(:conversation, account: account, inbox: inbox, contact: create(:contact, account: account, name: '😎'))
+      expect(described_class.new.send(:render_message, 'Oi [nome], tudo bem?', conv)).to eq('Oi, tudo bem?')
+    end
+  end
+
   it 'paciente de parceiro nunca é cutucado (cerca dentro do plano, além da lista de conversas)', :aggregate_failures do
     Rails.cache.clear
     conv = silent_conversation('Parceiro', answered: '2026-10-13 12:50', contact_attrs: { additional_attributes: { 'parceiro' => 'CLINICA X' } })

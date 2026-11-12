@@ -1087,12 +1087,17 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # [nome] → primeiro nome do paciente, LIMPO: sem emojis/números/símbolos
   # (nomes de WhatsApp vêm sujos). Sem nome aproveitável → "oi" no lugar,
   # evitando "Oi oi" quando a mensagem já cumprimenta antes.
-  def render_message(text, conversation)
+  def render_message(text, conversation, fallback: 'oi')
     name = sanitized_first_name(conversation.contact)
-    out = text.to_s.gsub(/\[nome\]/i) { name.presence || 'oi' }
-    out = out.gsub(/\b(oi|olá|ola|opa)([\s,]+)oi\b/i, '\1') if name.blank?
+    out = text.to_s.gsub(/\[nome\]/i) { name.presence || fallback }
+    out = out.gsub(/\b(oi|olá|ola|opa)([\s,]+)oi\b/i, '\1') if name.blank? && fallback == 'oi'
     out.gsub(/ {2,}/, ' ')
   end
+
+  # 😊 12/11 (pedido dele): no MODELO oficial o nome vai sozinho num campo
+  # ("Oi, {{1}}! Aqui é o Guilherme…"). Sem nome aproveitável (só emoji,
+  # número, letra solta, vazio) sai um sorriso — "Oi, 😊!" em vez de "Oi, oi!".
+  TEMPLATE_NAME_FALLBACK = '😊'.freeze
 
   def sanitized_first_name(contact)
     raw = contact&.name.to_s
@@ -1105,7 +1110,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
   # substitui [nome] também nos parâmetros preenchidos do modelo
   def render_template_params(params, conversation)
-    JSON.parse(render_message(params.to_json, conversation))
+    JSON.parse(render_message(params.to_json, conversation, fallback: TEMPLATE_NAME_FALLBACK))
   rescue JSON::ParserError
     params
   end
