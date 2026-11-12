@@ -174,7 +174,8 @@ RSpec.describe Crm::FollowupBotJob do
     end
   end
 
-  # 😊 12/11: no modelo oficial, sem nome aproveitável vai um sorriso no {{1}};
+  # 🙂 12/11: no modelo oficial, sem nome aproveitável vai um sorriso no {{1}}
+  # (nunca o 😊, a carinha que pausa a IA);
   # apelido (só letras) vale como nome; o texto simples continua com "oi".
   describe 'nome no campo do modelo' do
     let(:params) { { 'name' => 'retorno_combinado', 'processed_params' => { 'body' => { '1' => '[nome]' } } } }
@@ -184,12 +185,13 @@ RSpec.describe Crm::FollowupBotJob do
       described_class.new.send(:render_template_params, params, conv).dig('processed_params', 'body', '1')
     end
 
-    it 'usa o primeiro nome ou o apelido; emoji, letra solta ou vazio viram 😊', :aggregate_failures do
+    it 'usa o primeiro nome ou o apelido; emoji, letra solta ou vazio viram 🙂 (nunca 😊)', :aggregate_failures do
       expect(first_var('maria clara 🌸')).to eq('Maria')
       expect(first_var('Tati')).to eq('Tati')
-      expect(first_var('😎🔥')).to eq('😊')
-      expect(first_var('~ J')).to eq('😊')
-      expect(first_var('+55 11 99999-0000')).to eq('😊')
+      expect(first_var('😎🔥')).to eq('🙂')
+      expect(first_var('~ J')).to eq('🙂')
+      expect(first_var('+55 11 99999-0000')).to eq('🙂')
+      expect(first_var('😊')).not_to include('😊')
     end
 
     it 'o texto simples segue com "oi" (sem "Oi oi")' do

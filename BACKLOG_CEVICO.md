@@ -9775,9 +9775,9 @@ Hoje o Agente lê 7 dias contra a média de 30. Acrescentar a visão "jornada co
 - **Falta**: conferir a TELA no navegador (computador e celular, rolando o editor até o fim) — nesta rodada só deu para confirmar que ela compila. As telas Análise de Páginas e Resultados de tráfego chamam a página redirecionada de "rascunho" (rótulo antigo para tudo que não está no ar) — acertar o rótulo quando mexer nelas. Endereço antigo `/p/slug` num domínio com endereço oficial faz dois saltos (redirecionamento + o 301 antigo para o oficial, que já descartava a query string); na raiz do domínio das páginas é um salto só.
 - **Deploy**: WEB+SIDEKIQ juntos pela etiqueta curta; sem migration (sem backup obrigatório). Reversão: voltar para a etiqueta anterior — só ANTES de marcar alguma página; depois de marcar, desfazer os redirecionamentos na tela antes de voltar a versão (a versão antiga não conhece o status `redirected` e recusaria salvar essas páginas).
 
-## 396. 😊 NOME NO MODELO: quem não tem nome recebe um sorriso (12/11, pedido dele ao aprovar `retorno_combinado` e `retomar_agendamento`)
+## 396. 🙂 NOME NO MODELO: quem não tem nome recebe um sorriso (12/11, pedido dele ao aprovar `retorno_combinado` e `retomar_agendamento`)
 - Os dois modelos novos começam com "Oi, {{1}}! Aqui é o Guilherme, da CEVICO." e o campo {{1}} recebe `[nome]` na tela (Follow-up inteligente e robôs por coluna).
-- Regra: primeiro nome LIMPO (só letras; apelido vale) → "Oi, Maria!". Nome só de emoji, número, letra solta ou vazio → **😊** ("Oi, 😊!"). Antes ia "oi" e o paciente lia "Oi, oi!".
+- Regra: primeiro nome LIMPO (só letras; apelido vale) → "Oi, Maria!". Nome só de emoji, número, letra solta ou vazio → **🙂** ("Oi, 🙂!"; NUNCA o 😊, que é a carinha que pausa a IA — trocado a pedido dele). Antes ia "oi" e o paciente lia "Oi, oi!".
 - Só muda o campo do MODELO oficial (`render_template_params` do `Crm::FollowupBotJob`); o texto simples continua com "oi" e sem "Oi oi".
 - Testado: `spec/jobs/crm/followup_bot_job_spec.rb` (+2 exemplos) e os 4 arquivos do robô: 43 exemplos verdes. Rubocop: nenhuma ofensa nova (as 8 já existiam).
 - Deploy: WEB+SIDEKIQ pela etiqueta curta; sem migration. Reversão: etiqueta anterior (:27d505e).

@@ -1094,10 +1094,11 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     out.gsub(/ {2,}/, ' ')
   end
 
-  # 😊 12/11 (pedido dele): no MODELO oficial o nome vai sozinho num campo
+  # 🙂 12/11 (pedido dele): no MODELO oficial o nome vai sozinho num campo
   # ("Oi, {{1}}! Aqui é o Guilherme…"). Sem nome aproveitável (só emoji,
-  # número, letra solta, vazio) sai um sorriso — "Oi, 😊!" em vez de "Oi, oi!".
-  TEMPLATE_NAME_FALLBACK = '😊'.freeze
+  # número, letra solta, vazio) sai um sorriso — "Oi, 🙂!" em vez de "Oi, oi!".
+  # NUNCA o 😊: essa é a carinha que pausa a IA (ver responder_agent_job).
+  TEMPLATE_NAME_FALLBACK = '🙂'.freeze
 
   def sanitized_first_name(contact)
     raw = contact&.name.to_s
