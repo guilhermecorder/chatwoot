@@ -7,6 +7,7 @@ import { ref, computed, nextTick, onMounted } from 'vue';
 import CrmAPI from 'dashboard/api/crm';
 import { useAlert } from 'dashboard/composables';
 import { createContactSearcher } from 'dashboard/components-next/NewConversation/helpers/composeConversationHelper';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
 
 const props = defineProps({
   // paciente já escolhido (ex.: vindo de um cartão) — pula a busca
@@ -15,6 +16,8 @@ const props = defineProps({
   autofocus: { type: Boolean, default: true },
 });
 const emit = defineEmits(['saved', 'cancel']);
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { theSpace } = useCevicoSpaceName();
 
 const searchContacts = createContactSearcher();
 const q = ref('');
@@ -156,7 +159,7 @@ onMounted(() => {
       <button v-if="$attrs.onCancel" type="button" class="cv-btn cv-btn-ghost" :class="compact ? 'cv-btn-sm' : ''" @click="emit('cancel')">
         Cancelar
       </button>
-      <span class="text-[10px] text-n-slate-9 ml-auto hidden sm:inline">a nota vai para a ficha e o Espaço do Paciente</span>
+      <span class="text-[10px] text-n-slate-9 ml-auto hidden sm:inline">a nota vai para a ficha e {{ theSpace }}</span>
     </div>
   </div>
 </template>

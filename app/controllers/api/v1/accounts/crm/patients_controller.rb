@@ -15,6 +15,12 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
     render json: { payload: Crm::PatientSearch.new(account: Current.account, query: params[:q], limit: params[:limit] || 8).call }
   end
 
+  # 📄 11/11 (LIFE): GET /crm/patients/proposal_queue?stage_id=&contact_id= — quem está na coluna
+  # do funil (para escolher de quem é a proposta) + os dados do cliente escolhido
+  def proposal_queue
+    render json: Crm::ProposalQueue.new(Current.account, stage_id: params[:stage_id], contact_id: params[:contact_id]).call
+  end
+
   # GET /crm/patients/phone_owner?phone= — "este telefone já é de X, usar?"
   def phone_owner
     contact = Crm::PatientSearch.phone_owner(Current.account, params[:phone])
@@ -30,6 +36,8 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       label_events: label_events(contact),
       automations: automations(contact),
       updates: updates(contact),
+      # 📝 11/11: resumo escrito do cliente (ficha preenchida pelo atendente de IA ou pela equipe)
+      client_summary: Crm::ClientSummary.for(contact),
       # 🏥 ficha cirúrgica do OftalmoFácil (item 157) — só admin vê o dinheiro
       surgeries: Current.account_user.administrator? ? oftalmofacil_surgeries(contact) : nil
     }
@@ -63,10 +71,17 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
       attrs['data_nascimento'] = params[:data_nascimento].to_s if params.key?(:data_nascimento)
       attrs
     end
-    render json: { profile: patient_profile(contact) }
+    render json: profile_response(contact)
   end
 
   private
+
+  # 📝 11/11: a equipe corrige/completa o resumo do cliente pela Central do cliente
+  def profile_response(contact)
+    ficha = params[:ficha]
+    Crm::ClientSummary.write!(contact, ficha.to_unsafe_h, by: Current.user.name) if ficha.respond_to?(:to_unsafe_h)
+    { profile: patient_profile(contact), client_summary: Crm::ClientSummary.for(contact.reload) }
+  end
 
   def account
     Current.account

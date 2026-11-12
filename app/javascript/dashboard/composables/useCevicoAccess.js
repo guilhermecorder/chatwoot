@@ -1,5 +1,6 @@
 import { computed } from 'vue';
 import { useMapGetter } from 'dashboard/composables/store';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
 
 // 🔐 rodada 334 — acessos em ÁRVORE (ver × editar) no front.
 //
@@ -55,6 +56,9 @@ export function useCevicoAccess() {
         ? value.charAt(0).toUpperCase() + value.slice(1)
         : value;
     });
+  // 🏠 11/11/2026 (LIFE): nome do ambiente da pessoa ("Espaço do Paciente" na
+  // clínica, "Central do cliente" na LIFE) — ver useCevicoSpaceName
+  const { spaceName, theSpace, openSpaceLabel } = useCevicoSpaceName();
   const isClinic = computed(() => (company.value?.segment ?? 'clinica') === 'clinica');
   const hasModule = key => company.value?.modules?.[key] !== false;
 
@@ -74,6 +78,9 @@ export function useCevicoAccess() {
     unitAllowed,
     word,
     fill,
+    spaceName,
+    theSpace,
+    openSpaceLabel,
     isClinic,
     hasModule,
     catalog,

@@ -16,6 +16,15 @@ namespace :crm do
     post :delete_record
     post :update_config
   end
+  # ☀️ Cotador de kits (LIFE, 11/11): consumo da conta → opções de kit com preço nos fornecedores
+  resource :kit_quote, only: [:show, :create], controller: 'kit_quotes' do
+    post :update_access
+    post :dre
+    post :documents # 📄 proposta do cliente + justificativa do orçamento
+    get :ready # 🔓 o botão "Gerar orçamento" da conversa já pode abrir?
+    get :history # 📚 orçamentos guardados deste cliente
+    post :sent # 🏷️ a proposta foi enviada ao cliente (etiqueta orcamento-enviado)
+  end
   resources :campaigns, only: [:index, :show, :create, :destroy] do
     member do
       post :send_now
@@ -246,6 +255,7 @@ namespace :crm do
     get :access_admin
     post :update_agent_access
     post :update_access_roles
+    post :update_admin_limits # 🧭 11/11: triagem de administrador (só o dono)
     post :update_company
     # tabela de preços oficial (Espaço do Paciente + prompts da IA)
     post :update_price_table
@@ -374,6 +384,8 @@ namespace :crm do
     collection do
       get :search
       get :phone_owner
+      # 📄 11/11 (LIFE): quem está na coluna do funil, para o gerador de proposta
+      get :proposal_queue
     end
     resources :clinical_notes, only: [:index, :create, :update, :destroy], controller: 'clinical_notes'
   end

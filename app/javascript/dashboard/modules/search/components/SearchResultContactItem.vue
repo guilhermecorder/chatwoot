@@ -9,6 +9,10 @@ import { dynamicTime } from 'shared/helpers/timeHelper';
 import CardLayout from 'dashboard/components-next/CardLayout.vue';
 import Avatar from 'dashboard/components-next/avatar/Avatar.vue';
 import Flag from 'dashboard/components-next/flag/Flag.vue';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { spaceName } = useCevicoSpaceName();
 
 const props = defineProps({
   id: {
@@ -141,7 +145,7 @@ const formattedLocation = computed(() => {
             </span>
             <button
               class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
-              title="Espaço do Paciente"
+              :title="spaceName"
               @click.prevent.stop="openPatient"
             >
               <PatientSpaceIcon :size="24" />

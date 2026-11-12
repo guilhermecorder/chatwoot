@@ -39,6 +39,10 @@ import {
   hexToRgbSpaced,
   unitListFor,
 } from 'dashboard/helper/cevicoAgenda';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel, theSpace } = useCevicoSpaceName();
 
 // 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
 // (clicar abre o Espaço do Paciente, onde se faz tudo no contato da pessoa)
@@ -1033,7 +1037,7 @@ onBeforeUnmount(() => {
       <CevicoHero
         :pal="pal"
         title="Agendamentos"
-        :subtitle="`${cap(nounPlural)} marcadas, remarcadas, confirmadas, canceladas ou lançadas, quem marcou e por qual caixa; abra a conversa, o Espaço do Paciente ou ligue daqui`"
+        :subtitle="`${cap(nounPlural)} marcadas, remarcadas, confirmadas, canceladas ou lançadas, quem marcou e por qual caixa; abra a conversa, ${theSpace} ou ligue daqui`"
         :icon="trackKind.icon"
         :hero-bg="trackKind.hero"
         :palette="false"
@@ -2329,7 +2333,7 @@ class="cv-chip" :class="kindMeta(row).tone"
                         v-if="row.contact?.id"
                         class="cv-side-action"
                         :to="patientUrl(row)"
-                        title="Abrir o Espaço do Paciente"
+                        :title="openSpaceLabel"
                       >
                         <span class="cv-side-action-btn">
                           <span class="i-lucide-user-round" />

@@ -54,7 +54,7 @@ RSpec.describe Crm::ResponderAgentService do
     # #458: abrir_tarefa nos três atendentes (marcar_etapa e enviar_imagem só com lista configurada na conta)
     expect(calls.first[:tools].pluck(:name))
       .to eq(Crm::ResponderTools::ALL_NAMES - [Crm::ResponderTools::STAGE_TOOL_NAME, Crm::ResponderTools::IMAGE_TOOL_NAME,
-                                               Crm::ResponderTools::AUDIO_TOOL_NAME])
+                                               Crm::ResponderTools::AUDIO_TOOL_NAME, Crm::ResponderTools::SUMMARY_TOOL_NAME])
     expect(calls.first[:output_config][:format][:type]).to eq('json_schema')
     history = calls.last[:messages]
     expect(history.size).to eq(3)

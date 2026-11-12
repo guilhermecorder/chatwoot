@@ -229,6 +229,8 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # ⏰ 08/11 (LIFE): mudaram o dia/hora de uma tarefa de RETORNO com data → o aviso
   # "chegou o dia" do Radar passa a valer para o prazo novo (o antigo não dispara antes)
   after_update_commit :reschedule_due_alert!, if: :due_alert_reschedule?
+  # 🔔 11/11 (LIFE): baixa num compromisso da etapa → nasce o próximo lembrete da fila (Crm::StageDeadline)
+  after_update_commit -> { Crm::StageDeadline.advance!(self) }, if: -> { saved_change_to_status? && done? }
 
   DUE_ALERT_MARK = '⏰'.freeze
 

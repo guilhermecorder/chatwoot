@@ -1,0 +1,65 @@
+{
+  "_leia": "Textos fixos da Life. Valem para toda proposta. O JSON do orçamento pode trocar qualquer campo daqui repetindo a mesma chave.",
+
+  "vendedor": {
+    "nome": "Fernando",
+    "nome_completo": "Fernando Guimaro Srair",
+    "cargo": "sócio da Life e especialista em energia solar",
+    "objetivo": "Meu objetivo é ajudar você a instalar um sistema top de linha, por um investimento justo.",
+    "foto": "modelo/img/fernando.jpg",
+    "foto_rosto": "modelo/img/fernando-rosto.jpg",
+    "foto_vidro": "modelo/img/fernando-vidro.jpg"
+  },
+
+  "empresa": {
+    "nome": "Life Energia Solar",
+    "manchete": "A Life já fez 1.000 projetos em Piracicaba e região.",
+    "fatos": [
+      "Equipe própria, do projeto à instalação.",
+      "Loja de portas abertas na Av. Dr. Morato, 233, Vila Rezende."
+    ],
+    "endereco": "Av. Dr. Morato, 233, Vila Rezende, Piracicaba/SP",
+    "google": "4,9 no Google, com 216 avaliações (out/2026)",
+    "whatsapp": "5519988504691"
+  },
+
+  "prints": {
+    "perfil": "modelo/img/google-perfil.jpg",
+    "avaliacoes": ["modelo/img/aval-deunicio.jpg", "modelo/img/aval-andrea.jpg"],
+    "legenda": "Prints do perfil da Life no Google, novembro de 2026."
+  },
+
+  "roteiro": [
+    { "titulo": "O projeto", "texto": "Tudo o que será entregue para você." },
+    { "titulo": "A instalação", "texto": "Como a gente instala no seu imóvel." },
+    { "titulo": "Prazos e garantias", "texto": "A sua tranquilidade, por escrito." },
+    { "titulo": "O investimento", "texto": "Valor total e formas de pagamento." }
+  ],
+
+  "instalacao": [
+    { "titulo": "O equipamento chega", "texto": "Direto no seu imóvel, pronto para instalar." },
+    { "titulo": "A gente instala", "texto": "E cuida de toda a papelada da {distribuidora} para você." },
+    { "titulo": "Energia ligada", "texto": "Você começa a produzir a sua energia e a economizar." }
+  ],
+
+  "garantia_geracao": {
+    "titulo": "Produção garantida em contrato",
+    "texto": "Se o sistema não produzir a energia combinada, a gente aumenta o sistema para você, sem custo."
+  },
+
+  "investimento": {
+    "cartao": "6x sem juros ou até 20x no cartão (favor nos consultar)"
+  },
+
+  "textos": {
+    "capa_frase": "Uma chance de reduzir a sua conta de luz por décadas.",
+    "combinado": "Se você gostar e couber no seu orçamento, a gente fecha.",
+    "economia_frase": "Imagine o que dá para fazer com essa economia.",
+    "rodape_estimativa": "Valores estimados; variam com consumo, telhado e irradiação.",
+    "salto_depois": "Você leva um sistema mais moderno por uma pequena parte desse valor.",
+    "validade_motivo": "O preço acompanha o dólar e pode mudar depois dessa data.",
+    "pergunta_final": "Gostou da proposta e ela cabe no seu orçamento?",
+    "abraco": "Vai ser uma honra ajudar você a instalar um sistema de energia solar de alta tecnologia no seu imóvel.",
+    "despedida": "Um grande abraço e conte comigo."
+  }
+}

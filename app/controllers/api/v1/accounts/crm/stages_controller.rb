@@ -119,8 +119,9 @@ class Api::V1::Accounts::Crm::StagesController < Api::V1::Accounts::BaseControll
     # settings.task_owner_id = quem cuida da coluna (tarefas automáticas
     # de pacientes daqui nascem no nome dela — pedido 20/07)
     # settings.prazo = ⏳ prazo e compromisso da coluna (Crm::StageDeadline, 11/11)
+    prazo = [:modo, :horas, :hora, :tarefa, { lembretes: %i[dias tarefa] }]
     permitted = params.require(:stage).permit(:name, :color, :position, :description,
-                                              settings: [:task_owner_id, { main_inbox_ids: [], prazo: %i[modo horas hora tarefa] }])
+                                              settings: [:task_owner_id, { main_inbox_ids: [], prazo: prazo }])
     if permitted[:settings]
       raw = permitted[:settings]
       merged = (@stage&.settings || {}).merge(

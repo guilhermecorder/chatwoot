@@ -39,10 +39,18 @@ const stageIdOf = computed(() => props.stageId || props.bot?.stage_id || null);
 const pipelineIdOf = computed(() => props.pipelineId || props.bot?.pipeline_id || null);
 const isSaving = ref(false);
 
+// 🏷️ 11/11 (LIFE): etapa contada da entrada na coluna pode parar quando o cliente responde
+const STOP_ON_REPLY = {
+  label: 'para se o cliente responder',
+  title:
+    'Depois que o cliente manda qualquer mensagem (a partir da entrada na coluna), esta etapa não sai mais. Quem assume é a pessoa.',
+};
+
 const newStep = () => ({
   delay_value: 3,
   delay_unit: 'hours',
   delay_from: 'silence',
+  stop_on_reply: false,
   kind: 'text',
   message: 'Oi, pode falar?',
   template_params: null,
@@ -56,6 +64,7 @@ const normalizeStep = s => ({
   delay_value: s.delay_value ?? s.delay_hours ?? 3,
   delay_unit: s.delay_unit ?? 'hours',
   delay_from: s.delay_from ?? 'silence',
+  stop_on_reply: s.stop_on_reply === true,
   kind: s.kind === 'ai' ? 'ai' : s.template_params ? 'template' : 'text',
   message: s.message ?? '',
   template_params: s.template_params ?? null,
@@ -207,6 +216,9 @@ const save = async () => {
         delay_value: Number(s.delay_value),
         delay_unit: s.delay_unit,
         delay_from: s.delay_from || 'silence',
+        // 🏷️ 11/11 (LIFE): só vale para etapa contada da entrada na coluna
+        stop_on_reply:
+          s.delay_from === 'stage_entry' && s.stop_on_reply === true,
         kind: s.kind,
         message: s.kind === 'template' ? s.message : (s.message || '').trim(),
         template_params: s.kind === 'template' ? s.template_params : null,
@@ -401,6 +413,19 @@ const save = async () => {
                   <option value="silence">sem resposta do paciente</option>
                   <option v-if="isStageBot" value="stage_entry">desde a entrada na coluna</option>
                 </select>
+                <!-- 🏷️ 11/11 (LIFE): a mensagem não sai mais depois que o cliente responde -->
+                <label
+                  v-if="step.delay_from === 'stage_entry'"
+                  class="flex items-center gap-1.5 text-xs text-n-slate-11"
+                  :title="STOP_ON_REPLY.title"
+                >
+                  <input
+                    v-model="step.stop_on_reply"
+                    type="checkbox"
+                    class="!m-0"
+                  />
+                  {{ STOP_ON_REPLY.label }}
+                </label>
                 <span class="text-xs text-n-slate-10">→ enviar:</span>
 
                 <!-- Tipo da etapa -->

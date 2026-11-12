@@ -37,6 +37,7 @@ class Crm::MetaLeadIngestService
     contact = find_or_create_contact(lead)
     stamp_attribution(contact, lead, leadgen_id)
     record_response(form, contact, lead, leadgen_id)
+    place_card(contact)
     first_contact(contact, lead, leadgen_id)
     :imported
   rescue StandardError => e
@@ -205,6 +206,28 @@ class Crm::MetaLeadIngestService
     Time.zone.parse(value.to_s)
   rescue StandardError
     Time.current
+  end
+
+  # 🗂️ 11/11 (LIFE, pedido do Guilherme): o lead do formulário nasce com
+  # cartão na coluna escolhida do funil (meta_ads_config['lead_stage_id'], ex.:
+  # "Formulários") ANTES da boas-vindas — senão a conversa que a boas-vindas
+  # abre criaria o cartão na 1ª coluna, misturado com quem chamou no WhatsApp.
+  # Quem já tem cartão nesse funil fica onde está (não volta para trás).
+  def place_card(contact)
+    stage_id = config['lead_stage_id'].to_i
+    return unless stage_id.positive?
+
+    stage = Crm::Stage.joins(:pipeline).find_by(id: stage_id, crm_pipelines: { account_id: @account.id })
+    return if stage.nil?
+
+    Crm::Stamp.with(via: 'robo') do
+      Crm::Contact.find_or_create_by!(contact_id: contact.id, pipeline_id: stage.pipeline_id) do |card|
+        card.stage_id = stage.id
+        card.origin = 'Formulário do Meta'
+      end
+    end
+  rescue StandardError => e
+    Rails.logger.error "[Crm::MetaLeadIngest] cartão do contato #{contact&.id}: #{e.class}: #{e.message}"
   end
 
   # 👋 08/11 (LIFE): com a boas-vindas ligada, o lead recebe a mensagem modelo

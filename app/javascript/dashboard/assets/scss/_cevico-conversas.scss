@@ -556,6 +556,11 @@
 }
 .cv-chat .cv-side-btn:hover { background: var(--ch-hover); transform: translateY(-1px); }
 .cv-chat .cv-side-btn:disabled { opacity: 0.5; transform: none; cursor: default; }
+/* 📄 "Gerar orçamento" (LIFE): amarelo do sol quando liberado; apagado, com cadeado, enquanto o cliente não mandou a conta */
+.cv-chat .cv-side-btn-quote { color: #3a2a00; border-color: transparent; background: #ffcc00; }
+.cv-chat .cv-side-btn-quote:hover { background: #ffd633; }
+.cv-chat .cv-side-btn-quote-locked { opacity: 0.55; }
+.cv-chat .cv-side-btn-quote-locked:hover { transform: none; }
 .cv-chat .cv-side-btn-green {
   color: #fff;
   border-color: transparent;

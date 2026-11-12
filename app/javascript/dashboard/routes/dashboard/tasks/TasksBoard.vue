@@ -20,15 +20,20 @@ import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { isAppointmentTask } from 'dashboard/helper/cevicoAgenda';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
 import { dueCountdown } from 'dashboard/helper/taskDue';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel, theSpace } = useCevicoSpaceName();
 
 ChartJS.register(Title, Tooltip, Legend, ArcElement);
 
 const store = useStore();
 const router = useRouter();
+const route = useRoute();
 const { t } = useI18n();
 const accountId = useMapGetter('getCurrentAccountId');
 const { isAdmin } = useAdmin();
@@ -572,6 +577,19 @@ const openEdit = task => {
   showModal.value = true;
 };
 
+// 🌡️ 11/11/2026 (LIFE): o Meu Painel abre o quadro já NA tarefa clicada
+// (…/tasks?task=12), uma vez só, quando a lista chega. Tarefa que não está
+// mais no quadro só abre o quadro.
+const linkedTaskOpened = ref(false);
+watch(tasks, list => {
+  const id = Number(route.query.task);
+  if (!id || linkedTaskOpened.value) return;
+  const task = list.find(x => x.id === id);
+  if (!task) return;
+  linkedTaskOpened.value = true;
+  openEdit(task);
+});
+
 // ── 📎 Anexos da tarefa (imagem/PDF/documento) ─────────────
 const ACCEPT_FILES = 'image/*,.pdf,.doc,.docx,.xls,.xlsx';
 const pendingFiles = ref([]); // escolhidos e ainda não enviados ({ file, url })
@@ -741,7 +759,7 @@ const noteMenu = note => ({
   subtitle: 'Nota do paciente',
   items: [
     note.contact?.id && {
-      label: 'Abrir o Espaço do Paciente',
+      label: openSpaceLabel.value,
       icon: 'i-lucide-user-round',
       action: () => openPatient(note),
     },
@@ -1218,8 +1236,9 @@ const formatDue = iso => {
           </button>
         </header>
         <p class="text-xs text-n-slate-10 mb-3">
-          recados rápidos sobre um paciente — a nota vai para a ficha, para o
-          Espaço do Paciente e para o Meu Painel de quem cuida
+          {{
+            `recados rápidos sobre um paciente — a nota vai para a ficha, para ${theSpace} e para o Meu Painel de quem cuida`
+          }}
         </p>
         <p
           v-if="!isLoadingNotes && !visibleNotes.length"
@@ -1242,7 +1261,7 @@ const formatDue = iso => {
             <div class="flex items-center gap-2 min-w-0">
               <button
                 class="text-sm font-semibold text-n-slate-12 truncate hover:underline text-left"
-                title="Abrir o Espaço do Paciente"
+                :title="openSpaceLabel"
                 @click="openPatient(note)"
               >
                 {{ note.contact?.name || 'Paciente' }}

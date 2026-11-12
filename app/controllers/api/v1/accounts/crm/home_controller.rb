@@ -959,19 +959,29 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def my_tasks_json
     open_tasks = account.tasks.board_cards.where(assignee_id: Current.user.id, status: %w[todo doing])
                         .order(Arel.sql('priority DESC, due_at ASC NULLS LAST, created_at DESC'))
+    # 🌡️ 11/11 (LIFE): fora da clínica cada tarefa leva cliente, etapa do funil, valor e
+    # TEMPERATURA, e a lista sai em ordem de prioridade (Crm::TaskPriority). Na clínica nada muda.
+    return my_tasks_by_heat(open_tasks) unless Cevico::Company.for(account).clinic?
+
+    { count: open_tasks.count, by_heat: false, items: open_tasks.limit(40).map { |t| my_task_item(t) } }
+  end
+
+  def my_tasks_by_heat(open_tasks)
+    rows = open_tasks.limit(200).to_a
+    extra = Crm::TaskPriority.new(account, rows).call
+    items = rows.map { |t| my_task_item(t).merge(extra[t.id]) }
+    { count: open_tasks.count, by_heat: true, items: Crm::TaskPriority.sort(items).first(40) }
+  end
+
+  def my_task_item(task)
     {
-      count: open_tasks.count,
-      items: open_tasks.limit(40).map do |t|
-        {
-          id: t.id,
-          title: t.title,
-          priority: t.priority,
-          status: t.status,
-          due_at: t.due_at,
-          creator_name: t.creator&.name,
-          comments_count: Array(t.comments).size
-        }
-      end
+      id: task.id,
+      title: task.title,
+      priority: task.priority,
+      status: task.status,
+      due_at: task.due_at,
+      creator_name: task.creator&.name,
+      comments_count: Array(task.comments).size
     }
   end
 

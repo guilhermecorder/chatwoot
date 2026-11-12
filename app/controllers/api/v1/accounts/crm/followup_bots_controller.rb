@@ -122,7 +122,7 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
     permitted = params.require(:followup_bot).permit(
       :name, :inbox_id, :pipeline_id, :stage_id, :active, :starts_at, :ends_at,
       # item 315: kind 'ai' + orientação para a IA; caixas e colunas em que atua
-      steps: [:delay_hours, :delay_value, :delay_unit, :delay_from, :kind, :message, :ai_instructions,
+      steps: [:delay_hours, :delay_value, :delay_unit, :delay_from, :stop_on_reply, :kind, :message, :ai_instructions,
               { template_params: {}, skip_labels: [], only_labels: [] }],
       required_labels: [], exclude_labels: [], inbox_ids: [], stage_ids: []
     )

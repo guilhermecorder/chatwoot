@@ -10,6 +10,7 @@ import AppointmentAlerts from './AppointmentAlerts.vue';
 import OftalmofacilHub from './OftalmofacilHub.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
+import CrmCotador from './CrmCotador.vue';
 import CrmIntegrationsPage from './CrmIntegrationsPage.vue';
 import PatientSources from './PatientSources.vue';
 
@@ -81,6 +82,13 @@ export default {
       name: 'crm_campaigns_dashboard',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmCampaignsDashboard,
+    },
+    // ☀️ Cotador de kits (LIFE): nó crm.cotador
+    {
+      path: frontendURL('accounts/:accountId/crm/cotador'),
+      name: 'crm_cotador',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CrmCotador,
     },
     {
       path: frontendURL('accounts/:accountId/crm/forms'),

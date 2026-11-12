@@ -6,6 +6,7 @@ import { computed } from 'vue';
 import { FEATURE_FLAGS } from 'dashboard/featureFlags';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useKeyboardEvents } from 'dashboard/composables/useKeyboardEvents';
+import { useProposalReady } from 'dashboard/composables/useCevicoProposal';
 
 const { updateUISettings } = useUISettings();
 
@@ -16,6 +17,23 @@ const isFeatureEnabledonAccount = useMapGetter(
 
 const showCopilotTab = computed(() =>
   isFeatureEnabledonAccount.value(currentAccountId.value, FEATURE_FLAGS.CAPTAIN)
+);
+
+// 📄 11/11/2026 (LIFE, pedido do Guilherme): "na conversa também tenha um botão gerar
+// orçamento", junto do bonequinho. Fica travado (cadeado) até o cliente mandar a conta de
+// luz ou os dados; liberado, fica amarelo e abre o gerador já neste cliente.
+const currentChat = useMapGetter('getSelectedChat');
+const {
+  canMakeProposal,
+  proposalReady,
+  proposalHint,
+  proposalLabel,
+  openWhenReady,
+} = useProposalReady(() => currentChat.value?.meta?.sender?.id);
+const proposalTooltip = computed(() =>
+  proposalReady.value
+    ? proposalLabel
+    : `${proposalLabel}: ${proposalHint.value}`
 );
 
 const { uiSettings } = useUISettings();
@@ -84,6 +102,22 @@ useKeyboardEvents(keyboardEvents);
       }"
       icon="i-woot-captain"
       @click="handleCopilotSidebarToggle"
+    />
+    <Button
+      v-if="canMakeProposal && currentChat?.meta?.sender?.id"
+      v-tooltip.bottom="proposalTooltip"
+      ghost
+      slate
+      sm
+      class="!rounded-full transition-all duration-[250ms] ease-out active:!scale-95 active:duration-75"
+      :class="
+        proposalReady
+          ? '!bg-[#ffcc00] !text-[#3a2a00] hover:!bg-[#ffd633]'
+          : 'opacity-60'
+      "
+      :icon="proposalReady ? 'i-lucide-file-text' : 'i-lucide-lock'"
+      :aria-disabled="!proposalReady"
+      @click="openWhenReady"
     />
   </ButtonGroup>
 </template>

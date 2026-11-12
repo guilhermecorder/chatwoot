@@ -20,6 +20,16 @@ import CevicoCallButton from 'dashboard/components-next/cevico/calls/CevicoCallB
 import { openNovaConversa } from 'dashboard/helper/cevicoNovaConversa';
 import { hexToRgbSpaced, unitsFor } from 'dashboard/helper/cevicoAgenda';
 import { PRICE_UNITS } from 'dashboard/routes/dashboard/settings/precos/priceRows';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+import ClientSummaryBlock from 'dashboard/components-next/cevico/ClientSummaryBlock.vue';
+import { useCevicoProposal } from 'dashboard/composables/useCevicoProposal';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { theSpace } = useCevicoSpaceName();
+
+// 📄 11/11 (LIFE): botão "Gerar proposta" (abre o gerador já no cliente)
+const { canMakeProposal, openProposal, proposalLabel, proposalTitle } =
+  useCevicoProposal();
 
 const route = useRoute();
 const router = useRouter();
@@ -54,6 +64,13 @@ const fetchPatient = async () => {
 };
 
 const identity = computed(() => data.value?.identity || {});
+// 📝 11/11 (LIFE): resumo escrito do cliente (ficha do que ele contou)
+const clientSummary = computed(
+  () => data.value?.client_summary || { enabled: false, fields: [] }
+);
+const onSummarySaved = summary => {
+  if (data.value && summary) data.value.client_summary = summary;
+};
 const indicators = computed(() => data.value?.indicators || {});
 // 🏥 ficha cirúrgica do OftalmoFácil (item 157) — o servidor só manda p/ admin
 const surgeries = computed(() => data.value?.surgeries || []);
@@ -1012,11 +1029,21 @@ watch(contactId, () => {
                 </span>
                 <button
                   class="cevico-hero-btn"
-                  title="Abrir a conversa mais recente aqui mesmo, sem sair do Espaço do Paciente"
+                  :title="`Abrir a conversa mais recente aqui mesmo, sem sair d${theSpace}`"
                   @click="openPatientChat({ contactId: Number(contactId) })"
                 >
                   <span class="i-lucide-messages-square text-[13px]" />
                   Abrir conversa
+                </button>
+                <!-- 📄 11/11 (LIFE): abre o gerador de proposta já neste cliente -->
+                <button
+                  v-if="canMakeProposal"
+                  class="cevico-hero-btn"
+                  :title="proposalTitle"
+                  @click="openProposal(Number(contactId))"
+                >
+                  <span class="i-lucide-file-text text-[13px]" />
+                  {{ proposalLabel }}
                 </button>
                 <button
                   v-if="lastConversationId"
@@ -1185,6 +1212,16 @@ watch(contactId, () => {
             </div>
           </div>
         </div>
+
+        <!-- ══ 📝 Resumo do cliente (11/11): o que ele contou ══ -->
+        <ClientSummaryBlock
+          v-if="clientSummary.enabled"
+          class="mb-6"
+          :summary="clientSummary"
+          :contact-id="contactId"
+          :can-edit="canEditPatient"
+          @saved="onSummarySaved"
+        />
 
         <!-- ══ Cards de informação ══ -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">

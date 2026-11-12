@@ -28,6 +28,10 @@ import {
   inboxSolidFor,
   ALL_INBOXES_GRADIENT,
 } from 'dashboard/helper/cevicoInboxColors.js';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel } = useCevicoSpaceName();
 
 const props = defineProps({
   pipeline: { type: Object, required: true },
@@ -2153,7 +2157,7 @@ const agentView = computed(() => {
                 v-for="c in lossContacts"
                 :key="c.contact_id"
                 class="cv-sub cv-sub-hover w-full flex items-center gap-2.5 px-3 py-2 mb-1.5 text-left"
-                title="Abrir o Espaço do Paciente"
+                :title="openSpaceLabel"
                 @click="openPatientSpace(c)"
               >
                 <span class="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0" style="background: linear-gradient(135deg, #B91C1C, #EF4444)">

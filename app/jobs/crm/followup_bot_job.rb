@@ -760,6 +760,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
       base_time = from_stage ? stage_entered : anchor
       next if base_time.nil?
+      # 🏷️ 11/11 (LIFE, follow-up pós-orçamento): etapa "para se o cliente respondeu" — vale para as
+      # etapas contadas da entrada na coluna. Depois que ele fala, esta mensagem não sai mais:
+      # quem assume a conversa é a pessoa (os compromissos dela continuam).
+      next if from_stage && step['stop_on_reply'] && replied_since?(conversation, base_time)
 
       due_at = base_time + delays[index].hours
       spacing = false
@@ -1017,6 +1021,15 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # reais (paciente fala primeiro). Comparação por maximum() não sofre disso.
   # Nota interna (outgoing + private) NÃO conta: o paciente não a viu — se a
   # última coisa visível é a pergunta dele, a vez é do atendimento (varredura 03/10).
+  # o cliente mandou alguma mensagem depois deste momento? (uma leitura por conversa por rodada)
+  def replied_since?(conversation, since)
+    @replied_since ||= {}
+    key = [conversation.id, since.to_i]
+    return @replied_since[key] if @replied_since.key?(key)
+
+    @replied_since[key] = conversation.messages.incoming.where(private: false).exists?(['created_at > ?', since])
+  end
+
   def silence_anchor(conversation)
     msgs = conversation.messages.where(message_type: [:incoming, :outgoing], private: false)
     last_incoming_at = msgs.incoming.maximum(:created_at)

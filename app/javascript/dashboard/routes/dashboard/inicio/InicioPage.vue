@@ -56,6 +56,7 @@ import {
 } from 'dashboard/helper/cevicoKpiPalette';
 import MagnetBoard from 'dashboard/routes/dashboard/business/MagnetBoard.vue';
 import { dueCountdown } from 'dashboard/helper/taskDue';
+import TaskPriorityList from 'dashboard/components-next/cevico/TaskPriorityList.vue';
 import {
   mergeLayout,
   place as placeBlock,
@@ -89,7 +90,12 @@ const { isAdmin } = useAdmin();
 // vez de ficar vazio). Gasto do WhatsApp = só admin.
 // DECISÃO PENDENTE (Guilherme): se "só ver" o Financeiro também deve abrir o
 // faturamento, trocar 'edit' por 'view' aqui e em can_see_revenue? no servidor.
-const { can: cevicoCan } = useCevicoAccess();
+const {
+  can: cevicoCan,
+  word: cevicoWord,
+  spaceName,
+  openSpaceLabel,
+} = useCevicoAccess();
 const canSeeRevenue = computed(
   () => isAdmin.value || cevicoCan('financeiro', 'edit')
 );
@@ -3983,6 +3989,21 @@ const TASK_PRIORITY_LABEL = {
 };
 const goToTasks = () =>
   router.push({ name: 'tasks_board', params: { accountId: accountId.value } });
+// 🌡️ 11/11/2026 (LIFE): fora da clínica as tarefas vêm com cliente, etapa do
+// funil, valor e TEMPERATURA, já em ordem de prioridade (Crm::TaskPriority) —
+// a lista vira os cartões grandes do TaskPriorityList. Na clínica nada muda.
+const tasksByHeat = computed(() => data.value?.my_tasks?.by_heat === true);
+const openTaskOnBoard = task =>
+  router.push({
+    name: 'tasks_board',
+    params: { accountId: accountId.value },
+    query: task?.id ? { task: task.id } : {},
+  });
+const openClientSpace = contactId =>
+  router.push({
+    name: 'patient_space',
+    params: { accountId: accountId.value, contactId },
+  });
 // atalho pro Dashboard da Agenda em TODOS os painéis (item 86 — equipe vê)
 const goToAgendaDashboard = () =>
   router.push({
@@ -6686,7 +6707,7 @@ onUnmounted(() => {
                               <button
                                 v-if="radarFront.contact_id"
                                 class="flex items-center justify-center w-8 h-8 rounded-lg transition-transform hover:scale-110"
-                                title="Espaço do Paciente"
+                                :title="spaceName"
                                 @click.stop="openPatientSpace(radarFront)"
                               >
                                 <PatientSpaceIcon :size="24" />
@@ -6792,7 +6813,7 @@ onUnmounted(() => {
                         <div class="ml-auto flex items-center gap-1.5">
                           <button
                             class="cv-btn cv-btn-ghost cv-btn-sm"
-                            title="Escrever um recado sobre um paciente"
+                            :title="`Escrever um recado sobre um ${cevicoWord('paciente')}`"
                             @click="showNoteForm = !showNoteForm"
                           >
                             <span class="i-lucide-plus text-xs" />
@@ -6839,15 +6860,24 @@ onUnmounted(() => {
                           @click="pickTasksTab('notas')"
                         >
                           <span class="i-lucide-sticky-note text-[11px]" />
-                          Notas dos pacientes
+                          Notas dos {{ cevicoWord('paciente_plural') }}
                           <span class="tabular-nums opacity-70">{{
                             patientNotes.length
                           }}</span>
                         </button>
                       </div>
 
+                      <!-- 🌡️ TAREFAS fora da clínica (LIFE): cartões grandes com
+                           cliente, etapa, valor, prazo e temperatura -->
+                      <TaskPriorityList
+                        v-if="tasksTab === 'tarefas' && tasksByHeat"
+                        :tasks="myTasks"
+                        :total="myTasksCount"
+                        @open-task="openTaskOnBoard"
+                        @open-space="openClientSpace"
+                      />
                       <!-- TAREFAS: uma linha por tarefa -->
-                      <template v-if="tasksTab === 'tarefas'">
+                      <template v-else-if="tasksTab === 'tarefas'">
                         <p
                           v-if="!myTasks.length"
                           class="text-xs text-n-slate-9 py-5 text-center"
@@ -6937,7 +6967,7 @@ onUnmounted(() => {
                           >
                             <button
                               class="cv-avatar flex-shrink-0"
-                              title="Abrir o Espaço do Paciente"
+                              :title="openSpaceLabel"
                               @click="openPatientFromNote(note)"
                             >
                               {{ noteInitials(note.contact?.name) }}
@@ -6946,7 +6976,7 @@ onUnmounted(() => {
                               <div class="flex items-baseline gap-2 min-w-0">
                                 <button
                                   class="text-[13px] font-semibold text-n-slate-12 truncate hover:underline text-left"
-                                  title="Abrir o Espaço do Paciente"
+                                  :title="openSpaceLabel"
                                   @click="openPatientFromNote(note)"
                                 >
                                   {{ note.contact?.name || 'Paciente' }}

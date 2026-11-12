@@ -17,6 +17,11 @@ import { inboxSolidFor } from 'dashboard/helper/cevicoInboxColors.js';
 import { relativeTime } from '../helpers';
 import { stageDeadline } from 'dashboard/helper/taskDue';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+import ClientSummaryLines from 'dashboard/components-next/cevico/ClientSummaryLines.vue';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { spaceName } = useCevicoSpaceName();
 
 const props = defineProps({
   contact: { type: Object, required: true },
@@ -195,6 +200,13 @@ const channelIcon = (channelType) => {
       <span v-if="extraLabels > 0" class="cv-tag cv-tag-more">+{{ extraLabels }}</span>
     </div>
 
+    <!-- 📝 11/11 (LIFE): resumo escrito do cliente (o que ele contou) -->
+    <ClientSummaryLines
+      v-if="contact.client_summary?.length"
+      class="mt-2"
+      :lines="contact.client_summary"
+    />
+
     <!-- Valor (só quem vê o Financeiro) -->
     <div v-if="canSeeValue && contact.value" class="mt-1.5">
       <span class="cv-crm-value">
@@ -226,7 +238,7 @@ const channelIcon = (channelType) => {
         <span v-if="lastActivity" class="cv-crm-meta">{{ lastActivity }}</span>
         <button
           class="cv-crm-act cv-crm-act-plain"
-          title="Espaço do Paciente"
+          :title="spaceName"
           @click.stop="openPatient"
         >
           <PatientSpaceIcon :size="22" />

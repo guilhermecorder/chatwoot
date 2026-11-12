@@ -14,6 +14,10 @@ import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel } = useCevicoSpaceName();
 
 const route = useRoute();
 const router = useRouter();
@@ -395,7 +399,7 @@ const personLine = p =>
                 >
                   <button
                     class="text-left font-semibold text-[13px] text-n-slate-12 hover:underline"
-                    title="Abrir o Espaço do Paciente"
+                    :title="openSpaceLabel"
                     @click="openPatient(p.id)"
                   >
                     {{ p.name || 'Sem nome' }}

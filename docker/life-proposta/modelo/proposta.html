@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390">
+<title>Proposta Life Energia Solar: {{cliente.nome}}</title>
+<link rel="stylesheet" href="proposta.css">
+</head>
+<body>
+<!--
+  Modelo da proposta da LIFE. Cada section com a classe "tela" vira uma página do PDF.
+  As marcações entre chaves duplas estão explicadas no README.md (campos do JSON, "f." = valor já formatado,
+  blocos "se", "nao" e "cada"; chaves triplas = SVG pronto, sem escapar). O "i" de classe "arco" e o
+  comentário "pe" são preenchidos pelo gerar.py (sol do progresso e rodapé com o número da tela).
+  Vidro: o elemento com data-vidro (a tela ou uma foto) leva a cópia desfocada; cada .vidro dentro dele
+  recebe essa cópia na posição certa pelo script do fim da página.
+  A ORDEM das telas é o esqueleto aprovado pelo Guilherme: não trocar.
+-->
+
+<!-- 1. CAPA -->
+<section class="tela capa" data-vidro="img/capa-vidro.jpg">
+  <img class="fundo" src="img/capa.jpg" alt="">
+  <div class="topo"><img src="img/life-logo-claro.png" alt="Life Energia Solar"><span>{{f.data}}</span></div>
+  <h1>Sua jornada rumo à energia solar</h1>
+  <div class="vidro escuro capa-cartao empurra">
+    <p class="para">Proposta para</p>
+    <p class="cliente">{{cliente.nome}}</p>
+    <p class="frase">{{textos.capa_frase}}</p>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 2. QUEM SOU EU -->
+<section class="tela escura">
+  <i class="arco"></i>
+  <img class="retrato" src="{{f.foto_vendedor}}" alt="{{vendedor.nome}}">
+  <h1>Muito prazer, eu sou o {{vendedor.nome}}.</h1>
+  <p>{{vendedor.nome_completo}}, {{vendedor.cargo}}.</p>
+  <p class="forte">{{vendedor.objetivo}}</p>
+  <!--pe-->
+</section>
+
+<!-- 3. QUEM É A LIFE -->
+<section class="tela escura">
+  <i class="arco"></i>
+  <img class="retrato loja" src="img/loja.jpg" alt="Loja da Life Energia Solar">
+  <h1>Quem é a {{empresa.nome}}</h1>
+  <p class="forte">{{empresa.manchete}}</p>
+  <ul class="fatos">
+    {{#cada empresa.fatos}}<li>{{.}}</li>{{/cada}}
+  </ul>
+  <!--pe-->
+</section>
+
+<!-- 4. ALGUNS CLIENTES (prints do Google) -->
+<section class="tela escura prints">
+  <i class="arco"></i>
+  <h1>Alguns dos nossos clientes</h1>
+  <figure class="print perfil"><img src="{{prints.perfil}}" alt="Perfil da Life no Google"></figure>
+  {{#cada prints.avaliacoes}}<figure class="print aval"><img src="{{.}}" alt="Avaliação no Google"></figure>{{/cada}}
+  {{#se prints.legenda}}<p class="legenda">{{prints.legenda}}</p>{{/se}}
+  <!--pe-->
+</section>
+
+<!-- 5. O QUE VAMOS COBRIR -->
+<section class="tela escura">
+  <i class="arco"></i>
+  <h1>O que você vai ver nesta proposta</h1>
+  <ol class="passos">
+    {{#cada roteiro}}<li><b>{{titulo}}</b><span>{{texto}}</span></li>{{/cada}}
+  </ol>
+  <!--pe-->
+</section>
+
+<!-- 6 e 7. COMBINADO? -->
+<section class="tela ouro centro combinado">
+  <i class="arco"></i>
+  <p>{{textos.combinado}}</p>
+  <p class="sim">Combinado?</p>
+  <div class="foto-fernando" data-vidro="{{f.foto_vidro}}">
+    <img src="{{f.foto_vendedor}}" alt="{{vendedor.nome}}">
+    <div class="vidro escuro"><b>{{vendedor.nome}}</b><span>{{empresa.nome}}</span></div>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 8. RECAPITULANDO O PROJETO (com conta.composicao, mostra como a conta foi calculada) -->
+<section class="tela vidrada {{f.recap_classe}}" data-vidro="img/fundo-verde-vidro.jpg">
+  <img class="fundo" src="img/fundo-verde.jpg" alt="">
+  <i class="arco"></i>
+  <h1>Recapitulando o seu projeto</h1>
+  {{#se f.composicao}}
+  <div class="vidro escuro conta-conta">
+    <p class="rot">Como calculamos a sua conta</p>
+    {{#cada f.composicao}}<div class="parte"><span>{{#se mais}}<i>+</i>{{/se}}{{#nao mais}}<i class="vazio"></i>{{/nao}}{{rotulo}}</span><b>{{valor}}</b></div>{{/cada}}
+    <div class="parte total"><span><i>=</i>Sua conta por mês</span><b>{{f.conta}}</b></div>
+  </div>
+  {{/se}}
+  {{#nao f.composicao}}
+  <div class="vidro escuro conta-hoje">
+    <div><p class="rot">Sua conta de luz hoje</p><b>{{f.conta}} <small>/mês</small></b></div>
+    <span class="chip">{{f.cidade}}</span>
+  </div>
+  {{/nao}}
+  <div class="vidro eco">
+    <p class="rot">Você economiza, em média</p>
+    <p class="valorzao neon-verde {{f.eco_mes_classe}}"><span class="rs">R$</span>{{f.eco_mes_n}}<span class="mes">por mês</span></p>
+    <p class="depois">por mês</p>
+  </div>
+  <div class="vidro escuro barras">
+    {{#cada f.barras}}
+    <div class="barra {{classe}}">
+      <div class="lin"><span>{{rotulo}}</span><b>{{valor}}</b></div>
+      <div class="trilho"><div class="cheio" style="width:{{pct}}%"></div></div>
+    </div>
+    {{/cada}}
+  </div>
+  <p class="nota empurra" style="padding-top:12px">{{textos.rodape_estimativa}}</p>
+  <!--pe-->
+</section>
+
+<!-- 9. O QUE SERÁ ENTREGUE -->
+<section class="tela vidrada" data-vidro="img/fundo-sol-vidro.jpg">
+  <img class="fundo" src="img/fundo-sol.jpg" alt="">
+  <i class="arco"></i>
+  <h1>O que será entregue</h1>
+  <div class="grade {{f.equip_classe}}">
+    {{#cada f.equipamentos}}
+    <div class="vidro escuro equip">
+      <span class="ico {{cor}}">{{{icone}}}</span>
+      <span class="qtd c-{{cor}}">{{qtd}}</span>
+      <b>{{nome}}</b><span class="que">{{descricao}}</span>
+    </div>
+    {{/cada}}
+  </div>
+  <div class="vidro escuro producao">
+    <div class="anel">
+      <svg viewBox="0 0 108 108"><circle class="fundo-anel" cx="54" cy="54" r="46" fill="none" stroke-width="12"/><circle class="cheio-anel" cx="54" cy="54" r="46" fill="none" stroke-width="12" stroke-linecap="round" stroke-dasharray="{{f.anel_cheio}} 289.03"/></svg>
+      <div class="centro-anel"><b>{{f.cobertura}}%</b><span>do que você<br>gasta hoje</span></div>
+    </div>
+    <div>
+      <p class="rot">Suas placas vão produzir, em média</p>
+      <p class="num">{{f.producao_mes}} <small>kWh/mês</small></p>
+      <p class="sub">{{f.producao_ano}} kWh por ano.<br>Sistema de {{f.potencia}} kWp.</p>
+    </div>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 9 (continuação). DETALHES TÉCNICOS -->
+<section class="tela clara">
+  <i class="arco"></i>
+  <h1>Detalhes técnicos</h1>
+  <div class="grade">
+    <div class="bloco ficha largo"><span class="ico vermelho">{{{f.icones.pino}}}</span><div><p class="rot">Cidade</p><b>{{f.cidade}}</b></div></div>
+    <div class="bloco ficha"><span class="ico laranja">{{{f.icones.casa}}}</span><p class="rot">Tipo de telhado</p><b>{{telhado.tipo}}</b></div>
+    <div class="bloco ficha"><span class="ico amarelo">{{{f.icones.raio}}}</span><p class="rot">Consumo médio</p><b>{{f.consumo}} <small>kWh/mês</small></b></div>
+    <div class="bloco ficha"><span class="ico azul">{{{f.icones.potencia}}}</span><p class="rot">Potência do sistema</p><b>{{f.potencia}} <small>kWp</small></b></div>
+    <div class="bloco ficha"><span class="ico verde">{{{f.icones.area}}}</span><p class="rot">Área ocupada</p><b>{{f.area}} <small>m²</small></b></div>
+    <div class="bloco ficha"><span class="ico cinza">{{{f.icones.peso}}}</span><p class="rot">Peso no telhado</p><b>{{f.peso}} <small>kg</small></b></div>
+    <div class="bloco ficha"><span class="ico ciano">{{{f.icones.sol}}}</span><p class="rot">Sol por dia</p><b>{{f.incidencia}} <small>kWh/m²</small></b></div>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 10. INSTALAÇÃO EM 3 PASSOS -->
+<section class="tela vidrada" data-vidro="img/fundo-azul-vidro.jpg">
+  <img class="fundo" src="img/fundo-azul.jpg" alt="">
+  <i class="arco"></i>
+  <h1>Instalação em {{f.passos_qtd}} passos</h1>
+  <img class="retrato obra" src="img/obra-instalacao.jpg" alt="Obra da Life">
+  <div class="vidro escuro passos-vidro">
+    <ol>
+      {{#cada instalacao}}<li><b>{{titulo}}</b><span>{{texto}}</span></li>{{/cada}}
+    </ol>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 11. GARANTIAS (tela azul: confiança e contraste) -->
+<section class="tela azul garantias">
+  <i class="arco"></i>
+  <span class="escudo">{{{f.icones.escudo}}}</span>
+  <h1>Garantias de longa duração</h1>
+  <div class="lista-azul">
+    {{#cada f.garantias}}
+    <div class="gar"><span class="anos">{{anos}}<small>anos</small></span><div><b>{{item}}</b><span>{{cobre}}</span></div></div>
+    {{/cada}}
+  </div>
+  {{#se garantia_geracao.titulo}}
+  <div class="selo empurra"><span class="ico verde">{{{f.icones.check}}}</span><div><b>{{garantia_geracao.titulo}}</b><p>{{garantia_geracao.texto}}</p></div></div>
+  {{/se}}
+  <!--pe-->
+</section>
+
+<!-- 13. SALTO NO TEMPO -->
+<section class="tela vidrada centro" data-vidro="img/fundo-sol-vidro.jpg">
+  <img class="fundo" src="img/fundo-sol.jpg" alt="">
+  <i class="arco"></i>
+  <h1>Um salto no tempo</h1>
+  <div class="vidro escuro antes-cartao">
+    <span class="chip laranja">Há poucos anos</span>
+    <p>um sistema de energia solar como este custava</p>
+    {{#se f.antes_ate}}<p class="antes"><small>de</small>{{f.antes_de}}<small>a</small>{{f.antes_ate}}</p>{{/se}}
+    {{#nao f.antes_ate}}<p class="antes"><small>cerca de</small>{{f.antes_de}}</p>{{/nao}}
+  </div>
+  <svg class="seta" viewBox="0 0 24 24"><path d="M12 4v15M5.5 12.5 12 19l6.5-6.5"/></svg>
+  <div class="vidro verde hoje-cartao">
+    <span class="chip verde">Hoje</span>
+    <p>{{textos.salto_depois}}</p>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 14. INVESTIMENTO E FORMAS DE PAGAMENTO (tudo junto; a opção indicada aparece em destaque) -->
+<section class="tela vidrada investimento" data-vidro="img/fundo-sol-vidro.jpg">
+  <img class="fundo" src="img/fundo-sol.jpg" alt="">
+  <i class="arco"></i>
+  <h1>Qual será o seu investimento?</h1>
+  <div class="vidro escuro preco-cartao">
+    <div class="preco-linha"><p class="rot">Valor total do projeto</p><p class="riscado">{{f.antes_de}}</p></div>
+    <p class="valorzao {{f.preco_classe}}"><span class="rs">R$</span>{{f.preco_n}}</p>
+  </div>
+  {{#se f.financiamento}}
+  <div class="vidro escuro parcelas">
+    <p class="rot">Financiamento</p>
+    {{#cada f.financiamento}}<div class="parcela {{classe}}"><span>{{parcelas}}x de</span>{{#se indicada}}<em class="chip azul">Indicada</em>{{/se}}<b>{{valor}}</b></div>{{/cada}}
+  </div>
+  {{/se}}
+  {{#se investimento.cartao}}
+  <div class="vidro escuro cartao-linha"><span class="ico laranja">{{{f.icones.cartao}}}</span><p><b>Cartão de crédito:</b> {{investimento.cartao}}</p></div>
+  {{/se}}
+  <p class="validade-linha empurra"><b>Válida até {{f.validade}}.</b> {{textos.validade_motivo}}</p>
+  <!--pe-->
+</section>
+
+<!-- 15. PRÓXIMOS PASSOS -->
+<section class="tela vidrada" data-vidro="img/fundo-sol-vidro.jpg">
+  <img class="fundo" src="img/fundo-sol.jpg" alt="">
+  <i class="arco"></i>
+  <h1>Próximos passos</h1>
+  <div class="vidro escuro investe"><span>Seu investimento</span><div><b>{{f.preco}}</b>{{#se f.indicada}}<small>ou {{f.indicada.parcelas}}x de {{f.indicada.valor}}</small>{{/se}}</div></div>
+  <div class="empurra">
+    <div class="fernando"><img src="{{f.foto_rosto}}" alt=""><span><b>{{vendedor.nome}}</b>Agora é você que me diz:</span></div>
+    <p class="pergunta">{{textos.pergunta_final}}</p>
+    <a class="botao" href="{{f.link_whatsapp}}">Responder no WhatsApp</a>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 16. ABRAÇO FINAL -->
+<section class="tela escura centro abraco">
+  <i class="arco"></i>
+  <img class="rosto" src="{{f.foto_vendedor}}" alt="{{vendedor.nome}}">
+  <h1>Um abraço da {{empresa.nome}}</h1>
+  <p>{{textos.abraco}}</p>
+  <p class="forte">{{textos.despedida}}</p>
+  <p class="assina">{{vendedor.nome}}</p>
+  <p class="cargo">{{empresa.nome}}</p>
+  <p class="onde" style="margin-top:34px">{{empresa.endereco}}</p>
+  <!--pe-->
+</section>
+
+<!-- 17. RESUMO DA PROPOSTA (último card: tudo o que importa numa tela, com a validade em vermelho) -->
+<section class="tela vidrada resumo-tela" data-vidro="img/fundo-azul-vidro.jpg">
+  <img class="fundo" src="img/fundo-azul.jpg" alt="">
+  <i class="arco"></i>
+  <p class="rot">Resumo da sua proposta</p>
+  <h1>{{cliente.nome}}</h1>
+  <p class="r-local">{{f.cidade}}, {{f.data}}</p>
+  <div class="vidro escuro r-cartao">
+    <div class="r-item r-largo"><span>Investimento</span><b>{{f.preco}}</b>{{#se f.indicada}}<small>ou {{f.indicada.parcelas}}x de {{f.indicada.valor}}</small>{{/se}}</div>
+    <div class="r-item"><span>Economia, em média</span><b class="c-verde-neon">{{f.conta_eco}}</b><small>por mês</small></div>
+    <div class="r-item"><span>Sistema</span><b>{{f.potencia}} kWp</b><small>{{f.placas_total}} placas</small></div>
+    <div class="r-item"><span>Produção</span><b>{{f.producao_mes}}</b><small>kWh por mês</small></div>
+    <div class="r-item"><span>Garantia</span><b>até {{f.garantia_max}} anos</b><small>{{f.garantia_max_item}}</small></div>
+  </div>
+  <div class="r-validade empurra">
+    <span class="ico vermelho">{{{f.icones.relogio}}}</span>
+    <div><b>Válida até {{f.validade}}</b><p>{{f.validade_dias}} dias a partir de {{f.data}}. {{textos.validade_motivo}}</p></div>
+  </div>
+  <!--pe-->
+</section>
+
+<script>
+/* 1) Vidro: cópia desfocada do fundo atrás de cada cartão, na posição exata (o PDF não imprime backdrop-filter). */
+document.querySelectorAll('.vidro').forEach(function (el) {
+  var ref = el.parentElement && el.parentElement.closest('[data-vidro]');
+  if (!ref) return;
+  var r = ref.getBoundingClientRect(), e = el.getBoundingClientRect(), cs = getComputedStyle(el);
+  var bx = parseFloat(cs.borderLeftWidth) || 0, by = parseFloat(cs.borderTopWidth) || 0;
+  var tinta = cs.getPropertyValue('--vidro-tinta').trim() || 'linear-gradient(rgba(255,255,255,.14), rgba(255,255,255,.06))';
+  el.style.backgroundImage = tinta + ', url("' + ref.getAttribute('data-vidro') + '")';
+  el.style.backgroundSize = '100% 100%, ' + r.width + 'px ' + r.height + 'px';
+  el.style.backgroundPosition = '0 0, ' + (r.left - e.left - bx) + 'px ' + (r.top - e.top - by) + 'px';
+});
+/* 2) Marca a tela em que o conteúdo passou do espaço útil; o gerar.py lê isso e avisa. */
+document.querySelectorAll('.tela').forEach(function (t) {
+  var limite = t.getBoundingClientRect().bottom - (t.classList.contains('capa') ? 60 : 70), pior = 0;
+  Array.prototype.forEach.call(t.children, function (c) {
+    if (/\b(pe|arco|fundo)\b/.test(c.getAttribute('class') || '')) return;
+    var sobra = c.getBoundingClientRect().bottom - limite;
+    if (sobra > pior) pior = sobra;
+  });
+  if (pior > 1) t.setAttribute('data-estouro', Math.round(pior));
+});
+</script>
+</body>
+</html>

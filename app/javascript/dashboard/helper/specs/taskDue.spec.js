@@ -40,22 +40,46 @@ describe('dueCountdown (⏰ prazo das tarefas)', () => {
 
 describe('stageDeadline (⏳ prazo da coluna no cartão)', () => {
   const now = new Date(2026, 10, 12, 15, 0);
+  const at = (...d) => stageDeadline(new Date(...d).toISOString(), now);
 
-  it('verde com folga, amarelo em menos de 24 h, vermelho quando venceu', () => {
-    expect(stageDeadline(new Date(2026, 10, 16, 9, 0).toISOString(), now)).toEqual({
-      text: 'vence em 4 dias · 16/11',
+  it('verde com folga, amarelo em menos de 24 h', () => {
+    expect(at(2026, 10, 16, 9, 0)).toEqual({
+      text: 'pra 16/11 · faltam 4 dias',
       tone: 'later',
     });
-    expect(stageDeadline(new Date(2026, 10, 13, 9, 0).toISOString(), now)).toEqual({
-      text: 'vence amanhã 09:00',
+    expect(at(2026, 10, 13, 21, 0)).toEqual({
+      text: 'pra amanhã, 21:00',
+      tone: 'later',
+    });
+    expect(at(2026, 10, 13, 9, 0)).toEqual({
+      text: 'pra amanhã, 09:00',
       tone: 'soon',
     });
-    expect(stageDeadline(new Date(2026, 10, 12, 9, 0).toISOString(), now)).toEqual({
-      text: 'venceu às 09:00',
+    expect(at(2026, 10, 12, 18, 0)).toEqual({
+      text: 'é pra hoje, até 18:00',
+      tone: 'soon',
+    });
+    expect(at(2026, 10, 12, 15, 20)).toEqual({
+      text: 'falta 20 min',
+      tone: 'soon',
+    });
+  });
+
+  it('vermelho quando passou do prazo, contando horas e dias de verdade', () => {
+    expect(at(2026, 10, 12, 14, 40)).toEqual({
+      text: 'acabou de vencer',
       tone: 'late',
     });
-    expect(stageDeadline(new Date(2026, 10, 10, 9, 0).toISOString(), now)).toEqual({
-      text: 'venceu há 2 dias',
+    expect(at(2026, 10, 12, 9, 0)).toEqual({
+      text: 'atrasou 6 horas',
+      tone: 'late',
+    });
+    expect(at(2026, 10, 11, 22, 0)).toEqual({
+      text: 'atrasou 17 horas',
+      tone: 'late',
+    });
+    expect(at(2026, 10, 10, 9, 0)).toEqual({
+      text: 'atrasou 2 dias',
       tone: 'late',
     });
   });

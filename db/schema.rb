@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_11_03_120000) do
+ActiveRecord::Schema[7.2].define(version: 2026_11_11_210000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1680,6 +1680,20 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_03_120000) do
     t.index ["account_id"], name: "index_crm_pipelines_on_account_id"
   end
 
+  create_table "crm_quotes", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "contact_id", null: false
+    t.bigint "user_id"
+    t.string "kind"
+    t.decimal "price", precision: 12, scale: 2, default: "0.0", null: false
+    t.decimal "margin", precision: 6, scale: 4
+    t.jsonb "payload", default: {}, null: false
+    t.datetime "sent_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "contact_id", "created_at"], name: "index_crm_quotes_on_account_id_and_contact_id_and_created_at"
+  end
+
   create_table "crm_script_versions", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.string "kind", default: "script", null: false
@@ -1713,6 +1727,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_03_120000) do
     t.index ["segment_id", "status"], name: "index_crm_segment_members_on_segment_id_and_status"
     t.index ["segment_id"], name: "index_crm_segment_members_on_segment_id"
   end
+
   create_table "crm_segments", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "creator_id"

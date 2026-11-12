@@ -12,19 +12,26 @@ class Cevico::Company # rubocop:disable Metrics/ClassLength
   SEGMENT_LABELS = { 'clinica' => 'Clínica', 'otica' => 'Ótica', 'outro' => 'Outro ramo' }.freeze
 
   # vocabulário padrão por ramo — o admin pode trocar qualquer palavra
+  # 🏠 11/11/2026 (LIFE, pedido do Guilherme): 'espaco' é o NOME do ambiente da pessoa (a página
+  # com tudo dela). Na clínica segue "Espaço do Paciente"; no ramo 'outro' (LIFE) vira "Central do
+  # cliente". 'o_espaco' é o mesmo nome com o artigo, para as frases ("Abrir {{o_espaco}}",
+  # "n{{o_espaco}}" → "na Central do cliente"). Rotas, chaves e nós de acesso não mudam.
   VOCABULARY = {
     'clinica' => { 'paciente' => 'paciente', 'paciente_plural' => 'pacientes', 'consulta' => 'consulta',
                    'consulta_plural' => 'consultas', 'medico' => 'médico', 'medico_plural' => 'médicos',
                    'cirurgia' => 'cirurgia', 'cirurgia_plural' => 'cirurgias', 'empresa' => 'clínica',
-                   'unidade' => 'unidade', 'unidade_plural' => 'unidades' },
+                   'unidade' => 'unidade', 'unidade_plural' => 'unidades',
+                   'espaco' => 'Espaço do Paciente', 'o_espaco' => 'o Espaço do Paciente' },
     'otica' => { 'paciente' => 'cliente', 'paciente_plural' => 'clientes', 'consulta' => 'atendimento',
                  'consulta_plural' => 'atendimentos', 'medico' => 'consultor', 'medico_plural' => 'consultores',
                  'cirurgia' => 'compra', 'cirurgia_plural' => 'compras', 'empresa' => 'ótica',
-                 'unidade' => 'loja', 'unidade_plural' => 'lojas' },
+                 'unidade' => 'loja', 'unidade_plural' => 'lojas',
+                 'espaco' => 'Espaço do Paciente', 'o_espaco' => 'o Espaço do Paciente' },
     'outro' => { 'paciente' => 'cliente', 'paciente_plural' => 'clientes', 'consulta' => 'atendimento',
                  'consulta_plural' => 'atendimentos', 'medico' => 'consultor', 'medico_plural' => 'consultores',
                  'cirurgia' => 'compra', 'cirurgia_plural' => 'compras', 'empresa' => 'empresa',
-                 'unidade' => 'unidade', 'unidade_plural' => 'unidades' }
+                 'unidade' => 'unidade', 'unidade_plural' => 'unidades',
+                 'espaco' => 'Central do cliente', 'o_espaco' => 'a Central do cliente' }
   }.freeze
 
   # ☀️ 08/11: TIPOS DA AGENDA por empresa — renomeia e limita os tipos da tela

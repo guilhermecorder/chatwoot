@@ -637,6 +637,18 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/update_agent_access`, body);
   }
 
+  // 🧭 11/11: triagem de administrador (só o dono da conta)
+  // { userId, liberados: ['inicio', 'crm'] } ou { userId, liberarTudo: true }
+  updateAdminLimits({ userId, liberados, escondidos, liberarTudo }) {
+    const body = { user_id: userId };
+    if (liberarTudo) body.liberar_tudo = true;
+    else {
+      body.liberados = liberados || [];
+      body.escondidos = escondidos || [];
+    }
+    return axios.post(`${this.url}/settings/update_admin_limits`, body);
+  }
+
   // a lista inteira de papéis: [{ id?, name, hint, tree, units }]
   updateAccessRoles(roles) {
     return axios.post(`${this.url}/settings/update_access_roles`, { roles });
@@ -1383,6 +1395,11 @@ class CrmAPI extends ApiClient {
 
   // ── Central do Paciente ───────────────────────────────────────────
   // 🔎 item 346: busca que puxa o paciente (nome sem acento, telefone com/sem 9)
+  // 📄 11/11 (LIFE): quem está na coluna do funil + o cliente escolhido (gerador de proposta)
+  getProposalQueue(params = {}) {
+    return axios.get(`${this.url}/patients/proposal_queue`, { params });
+  }
+
   searchPatients(q, { signal, limit } = {}) {
     return axios.get(`${this.url}/patients/search`, {
       params: { q, limit },
@@ -1686,6 +1703,50 @@ class CrmAPI extends ApiClient {
 
   updateRoutinesTools(payload) {
     return axios.post(`${this.url}/goal_plans/update_routines`, payload);
+  }
+
+  // ── ☀️ Cotador de kits (LIFE): consumo → opções de kit nos fornecedores ──
+  getKitQuote() {
+    return axios.get(`${this.url}/kit_quote`);
+  }
+
+  // telhado: com ele a cotação já vem com a estrutura (entra na média do kit)
+  createKitQuote({ consumo, rede, telhado }) {
+    return axios.post(`${this.url}/kit_quote`, { consumo, rede, telhado });
+  }
+
+  // 📄 proposta do cliente + justificativa do orçamento (dados sempre; PDFs quando o gerador está ligado)
+  createKitQuoteDocuments(payload) {
+    return axios.post(`${this.url}/kit_quote/documents`, payload);
+  }
+
+  // DRE projetado: preço médio dos kits + regras da planilha (sem valor = padrão de 25%)
+  getKitQuoteDre(payload) {
+    return axios.post(`${this.url}/kit_quote/dre`, payload);
+  }
+
+  // 🔓 o botão "Gerar orçamento" da conversa já pode abrir para este cliente?
+  getKitQuoteReady(contactId) {
+    return axios.get(`${this.url}/kit_quote/ready`, {
+      params: { contact_id: contactId },
+    });
+  }
+
+  // 📚 orçamentos guardados deste cliente (do mais novo ao mais antigo)
+  getKitQuoteHistory(contactId) {
+    return axios.get(`${this.url}/kit_quote/history`, {
+      params: { contact_id: contactId },
+    });
+  }
+
+  // 🏷️ a proposta foi enviada ao cliente (etiqueta orcamento-enviado)
+  markKitQuoteSent(id) {
+    return axios.post(`${this.url}/kit_quote/sent`, { id });
+  }
+
+  // segredos entram e não voltam: a resposta é só o estado dos acessos
+  updateKitQuoteAccess(payload) {
+    return axios.post(`${this.url}/kit_quote/update_access`, payload);
   }
 
   // ── Ferramentas de Fechamento (script + mapa de objeções) ─────────

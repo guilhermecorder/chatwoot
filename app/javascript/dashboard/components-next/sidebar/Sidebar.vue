@@ -476,6 +476,7 @@ const DEFAULT_MENU_ORDER = [
   'Negocios',
   'Inicio',
   'CRM',
+  'Cotador',
   'Reports',
   'Strategy',
   'Finance',
@@ -506,6 +507,7 @@ const DEFAULT_MENU_ORDER = [
 const AGENT_MENU_ORDER = [
   'Inicio',
   'CRM',
+  'Cotador',
   'Conversation',
   'Cevico Calls',
   'Agenda',
@@ -580,10 +582,15 @@ const gradientColorAt = ratio => {
 // sobrar algum filho. Configurações vira "Meu perfil" — e, se a pessoa tiver
 // algum filho CEVICO liberado (Integrações, Tabela de preços…), ele entra
 // junto na gaveta.
+const acessoAtual = useMapGetter('crm/getAccess');
+const emTriagem = computed(() => acessoAtual.value?.limited === true);
+const TRIAGEM_MANTEM = ['HubHome', 'Negocios'];
 const menuItemsForRole = computed(() => {
   // admin vê tudo — menos o que o RAMO da empresa não tem (nó fora de
   // `access.me`, ex.: Oftalmofácil e Agenda cirúrgica numa ótica)
-  if (isAdmin.value) {
+  // 🧭 11/11: administrador em TRIAGEM (o dono limitou o que ele vê) segue a
+  // regra do atendente — só o que está liberado — e mantém a entrada do HUB
+  if (isAdmin.value && !emTriagem.value) {
     if (!loaded.value) return menuItems.value;
     const gone = name => itemVisible(name) === false;
     return menuItems.value.flatMap(item => {
@@ -593,7 +600,9 @@ const menuItemsForRole = computed(() => {
       return kids.length ? [{ ...item, children: kids }] : [];
     });
   }
-  const visible = name => itemVisible(name) === true;
+  const visible = name =>
+    itemVisible(name) === true ||
+    (emTriagem.value && TRIAGEM_MANTEM.includes(name));
   const meuPerfil = {
     name: 'Settings',
     label: 'Meu perfil',
@@ -653,6 +662,7 @@ const MENU_LAYOUT = [
     ],
   },
   { solo: 'CRM' }, // em que ponto está cada paciente?
+  { solo: 'Cotador' }, // ☀️ LIFE: quanto custa o kit deste cliente?
   { solo: 'Tasks' }, // avisa por notificação — fica à mão
   {
     name: 'group:automacoes', // o que trabalha sozinho por mim?
@@ -783,6 +793,7 @@ const TILE_COLORS = {
   Tasks: '#ff9500',
   Canned: '#5ac8fa',
   CRM: '#af52de',
+  Cotador: '#ffcc00', // 📄 Gerador de proposta (LIFE): amarelo do sol
   'Jornada do paciente': '#ff2d55',
   'Campanha WhatsApp': '#25d366',
   Reativação: '#ff9500',
@@ -1278,6 +1289,17 @@ const menuItems = computed(() => {
       icon: 'i-lucide-rocket',
       to: accountScopedRoute('crm_board'),
     },
+    // 📄 Gerador de proposta (LIFE; era o "Cotador") — nó crm.cotador
+    ...(show('Cotador')
+      ? [
+          {
+            name: 'Cotador',
+            label: 'Gerador de proposta',
+            icon: 'i-lucide-file-text',
+            to: accountScopedRoute('crm_cotador'),
+          },
+        ]
+      : []),
     {
       name: 'Inbox',
       label: t('SIDEBAR.INBOX'),

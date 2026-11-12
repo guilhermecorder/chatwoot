@@ -51,6 +51,8 @@ const VOCAB_DEFAULTS = {
     empresa: 'clínica',
     unidade: 'unidade',
     unidade_plural: 'unidades',
+    espaco: 'Espaço do Paciente',
+    o_espaco: 'o Espaço do Paciente',
   },
   otica: {
     paciente: 'cliente',
@@ -64,6 +66,8 @@ const VOCAB_DEFAULTS = {
     empresa: 'ótica',
     unidade: 'loja',
     unidade_plural: 'lojas',
+    espaco: 'Espaço do Paciente',
+    o_espaco: 'o Espaço do Paciente',
   },
   outro: {
     paciente: 'cliente',
@@ -77,6 +81,8 @@ const VOCAB_DEFAULTS = {
     empresa: 'empresa',
     unidade: 'unidade',
     unidade_plural: 'unidades',
+    espaco: 'Central do cliente',
+    o_espaco: 'a Central do cliente',
   },
 };
 const VOCAB_ROWS = [
@@ -91,6 +97,10 @@ const VOCAB_ROWS = [
   { key: 'empresa', label: 'empresa' },
   { key: 'unidade', label: 'unidade' },
   { key: 'unidade_plural', label: 'unidades' },
+  // 🏠 11/11: nome do ambiente da pessoa (a página com tudo dela) e o mesmo
+  // nome com o artigo, usado nas frases ("Abrir a Central do cliente")
+  { key: 'espaco', label: 'Espaço do Paciente (nome do ambiente)' },
+  { key: 'o_espaco', label: 'o Espaço do Paciente (com o artigo)' },
 ];
 
 const MODULES = [

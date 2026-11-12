@@ -24,6 +24,10 @@ import {
 import { personGradient } from 'dashboard/helper/cevicoPersonGradient';
 import { normalizePhone } from 'dashboard/helper/cevicoNovaConversa';
 import { PERIOD_PRESETS, periodRangeFor } from 'dashboard/helper/cevicoPeriod';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel } = useCevicoSpaceName();
 
 // 🔎 item 346: a barra de pesquisa também puxa os PACIENTES do cadastro
 // (clicar abre o Espaço do Paciente, onde se faz tudo no contato da pessoa)
@@ -1059,7 +1063,7 @@ const cardMenu = (contact, { openPatient } = {}) => {
         action: () => openChat(contact),
       },
       openPatient && contact.contact_id && {
-        label: 'Abrir o Espaço do Paciente',
+        label: openSpaceLabel.value,
         icon: 'i-lucide-user-round',
         action: () => openPatient(),
       },

@@ -17,6 +17,10 @@ import {
   tableProblems,
   rowsToSave,
 } from './priceRows';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { spaceName } = useCevicoSpaceName();
 
 const store = useStore();
 // 🔐 rodada 334: quem só VÊ a tabela lê os preços; editar = linhas e salvar
@@ -125,7 +129,7 @@ const fmtDate = iso =>
     </h1>
     <p class="text-sm text-n-slate-10 mt-1 mb-5">
       Os preços oficiais da clínica, num lugar só. Valem no
-      <b>Espaço do Paciente</b> (orçamento de indicação) e nos
+      <b>{{ spaceName }}</b> (orçamento de indicação) e nos
       <b>agentes de IA</b> que falam de valores. Preencher o preço promocional
       (menor que o normal) faz ele valer no lugar do preço normal. Toda linha
       precisa de preço e da <b>unidade</b> (por olho, dois olhos, por sessão ou

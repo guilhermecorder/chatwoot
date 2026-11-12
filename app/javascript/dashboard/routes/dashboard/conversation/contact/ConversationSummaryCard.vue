@@ -9,11 +9,26 @@ import { useAlert } from 'dashboard/composables';
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+import { useProposalReady } from 'dashboard/composables/useCevicoProposal';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { spaceName, openSpaceLabel } = useCevicoSpaceName();
 
 const props = defineProps({
   conversationId: { type: [Number, String], required: true },
   contact: { type: Object, default: () => ({}) },
 });
+
+// 📄 11/11 (LIFE): botão "Gerar orçamento" ao lado do bonequinho. Só libera depois
+// que o cliente mandou a conta de luz ou os dados (quem decide é o servidor).
+const {
+  canMakeProposal,
+  proposalReady,
+  proposalHint,
+  proposalLabel,
+  openWhenReady,
+} = useProposalReady(() => props.contact?.id);
 
 const route = useRoute();
 const router = useRouter();
@@ -248,7 +263,7 @@ const analyzedAgo = computed(() => {
   <div class="flex flex-col gap-3">
     <!-- ══ JORNADA NO CRM ══ -->
     <div class="cv-side-card p-4">
-      <div class="flex items-center gap-2 mb-3">
+      <div class="flex items-center flex-wrap gap-2 mb-3">
         <p class="cv-side-title flex-1 min-w-0">
           <span class="cv-side-icon cv-side-icon-violet"><span class="i-lucide-kanban"/></span>
           Jornada
@@ -256,11 +271,29 @@ const analyzedAgo = computed(() => {
         <button
           v-if="contact?.id"
           class="cv-side-btn"
-          title="Abrir o Espaço do Paciente (toda a jornada numa página)"
+          :title="`${openSpaceLabel} (toda a jornada numa página)`"
           @click="openPatientSpace"
         >
           <PatientSpaceIcon :size="14" />
-          Espaço do Paciente
+          {{ spaceName }}
+        </button>
+        <!-- 📄 11/11 (LIFE): abre o gerador já neste cliente; travado até o
+             cliente mandar a conta de luz ou os dados -->
+        <button
+          v-if="contact?.id && canMakeProposal"
+          class="cv-side-btn"
+          :class="
+            proposalReady ? 'cv-side-btn-quote' : 'cv-side-btn-quote-locked'
+          "
+          :title="proposalHint"
+          :aria-disabled="!proposalReady"
+          @click="openWhenReady"
+        >
+          <span
+            class="text-sm"
+            :class="proposalReady ? 'i-lucide-file-text' : 'i-lucide-lock'"
+          />
+          {{ proposalLabel }}
         </button>
       </div>
 

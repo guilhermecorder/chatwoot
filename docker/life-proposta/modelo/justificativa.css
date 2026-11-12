@@ -1,0 +1,123 @@
+/* Justificativa do orçamento: vem depois do proposta.css e só acrescenta o que é dela. */
+
+.j-passo { font-size: 14px; font-weight: 600; color: var(--sol); margin: 0 0 6px; }
+.clara .j-passo { color: #A87B04; }
+.j-titulo { font-size: 40px; line-height: 1.02; margin: 18px 0 14px; }
+.chip.interno { align-self: flex-start; background: rgba(255,255,255,.12); }
+.chip.fora { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); color: rgba(255,255,255,.8); }
+.c-verde-forte { color: #3DF56E; }
+.clara .c-amarelo, .c-amarelo { color: var(--sol); }
+.j-cliente { font-size: 17px; line-height: 1.4; margin: 0 0 22px; }
+.j-cliente b { font-size: 22px; color: #fff; }
+
+.j-lin { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.j-lin span { font-size: 16px; color: rgba(255,255,255,.86); }
+.j-lin b { font-size: 20px; letter-spacing: -0.015em; white-space: nowrap; }
+.j-lin b small { font-size: 14px; font-weight: 600; color: var(--fraco); margin-left: 4px; }
+.j-sub { font-size: 14px; line-height: 1.38; color: var(--fraco); margin: 4px 0 0; }
+.j-nota { font-size: 13px; line-height: 1.42; color: var(--fraco); margin: 0; padding-top: 12px; }
+.j-regra { font-size: 15px; line-height: 1.4; margin: 0 0 14px; }
+.j-preco-tela h1 { margin-bottom: 10px; }
+.j-preco-tela .j-regra { font-size: 14px; margin-bottom: 10px; }
+.j-preco-tela .vidro + .vidro { margin-top: 10px; }
+
+/* capa */
+.j-resumo { padding: 8px 20px; }
+.j-resumo .j-linha { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 14px 0; }
+.j-resumo .j-linha + .j-linha { border-top: 1px solid rgba(255,255,255,.14); }
+.j-resumo .j-linha span { font-size: 16px; color: rgba(255,255,255,.86); }
+.j-resumo .j-linha b { font-size: 22px; letter-spacing: -0.02em; white-space: nowrap; }
+.j-resumo .j-linha b small { font-size: 14px; font-weight: 600; margin-left: 4px; color: var(--fraco); }
+.j-grande { font-size: 30px !important; }
+
+/* consumo */
+.j-lista { padding: 8px 18px; }
+.j-item { padding: 12px 0; }
+.j-item + .j-item { border-top: 1px solid rgba(255,255,255,.14); }
+.j-item .j-sub { padding-left: 28px; }
+.j-lin span i { font-style: normal; display: inline-block; width: 20px; height: 20px; margin-right: 8px; border-radius: 50%; background: var(--sol); color: var(--tinta); font-size: 15px; font-weight: 700; line-height: 20px; text-align: center; vertical-align: 1px; }
+.j-lin span i.vazio { background: transparent; }
+.j-item.total .j-lin span { color: #fff; font-weight: 600; }
+.j-item.total .j-lin span i { background: #fff; }
+.j-item.total .j-lin b { font-size: 26px; }
+
+/* sistema (tela branca) */
+.j-formula { padding: 16px 18px; }
+.j-formula p:last-child { font-size: 17px; line-height: 1.42; color: #111114; margin: 0; }
+.j-seta { font-size: 16px; color: #6E6E73; margin: 16px 4px; }
+.j-seta b { font-size: 28px; color: #111114; letter-spacing: -0.02em; margin-right: 4px; }
+.j-placas { padding: 18px 18px 16px; }
+.j-placas-n { font-size: 20px; color: #111114; margin: 0; }
+.j-placas-n b { font-size: 46px; letter-spacing: -0.04em; margin-right: 4px; }
+.j-placas-kwp { font-size: 40px; line-height: 1.05; font-weight: 700; letter-spacing: -0.035em; color: #007AFF; margin: 2px 0 8px; }
+.clara .j-sub b { color: #111114; }
+.clara .j-nota b { color: #111114; }
+
+/* kit */
+.j-cotacao { padding: 14px 18px; }
+.j-cotacao .j-forn { font-size: 19px; font-weight: 700; color: #fff; }
+.j-cotacao .j-lin b { font-size: 22px; }
+.j-lin-baixo { align-items: flex-end; margin-top: 4px; }
+.j-lin-baixo .j-sub { margin: 0; flex: 1; }
+.j-lin-baixo em { font-style: normal; font-size: 12px; padding: 4px 9px; flex: none; }
+.j-cotacao.fora .j-lin b, .j-cotacao.fora .j-forn { color: rgba(255,255,255,.55); }
+.j-cotacao.fora .j-lin b { text-decoration: line-through; text-decoration-color: rgba(255,255,255,.4); }
+.j-naocot { margin: 12px 4px 0; }
+.j-media { padding: 16px 18px; }
+.j-media .j-lin span { color: #fff; font-weight: 600; line-height: 1.25; }
+.j-media .j-lin span small { font-weight: 400; font-size: 13px; color: var(--fraco); }
+.j-media .j-lin b { font-size: 30px; }
+
+/* custos (tela branca) */
+.j-custos { padding: 4px 18px; }
+.j-custo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 12px 0; }
+.j-custo + .j-custo { border-top: 1px solid #DADADF; }
+.j-custo span { font-size: 15px; line-height: 1.3; color: #111114; }
+.j-custo span em { font-style: normal; font-size: 12px; font-weight: 600; color: #007AFF; background: rgba(0,122,255,.1); padding: 2px 7px; border-radius: 99px; white-space: nowrap; }
+.j-custo b { font-size: 17px; color: #111114; white-space: nowrap; }
+.j-custo.total { border-top: 1.5px solid #111114; padding: 14px 0 12px; }
+.j-custo.total span { font-size: 17px; font-weight: 700; }
+.j-custo.total b { font-size: 24px; letter-spacing: -0.02em; }
+
+/* preço e lucro */
+.j-preco { padding: 6px 18px; }
+.j-preco .j-lin { padding: 8px 0; }
+.j-preco .j-lin + .j-lin { border-top: 1px solid rgba(255,255,255,.14); }
+.j-faixa { padding: 12px 12px 6px; }
+.j-faixa .rot { margin: 0 8px 2px; }
+.j-faixa .parcela { padding: 6px 10px; }
+.j-faixa .parcela b { font-size: 18px; }
+.j-faixa .parcela.indicada { padding: 10px 10px; }
+.j-faixa .parcela.indicada b { font-size: 21px; }
+.j-socios { padding: 12px 18px 10px; }
+.j-socios .rot { margin-bottom: 2px; }
+.j-socios-grade { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.j-socio { padding: 4px 0; }
+.j-preco-tela .j-faixa .parcela { padding: 5px 10px; }
+.j-preco-tela .j-faixa .parcela.indicada { padding: 8px 10px; }
+.j-socio span { display: block; font-size: 14px; color: rgba(255,255,255,.86); }
+.j-socio span small { color: var(--fraco); }
+.j-socio b { display: block; font-size: 19px; letter-spacing: -0.015em; margin-top: 2px; }
+
+/* o que conferir (tela branca) */
+.j-conferir { margin: 4px 0 0; padding: 0; list-style: none; counter-reset: item; }
+.j-conferir li { position: relative; counter-increment: item; padding: 12px 0 12px 40px; font-size: 16px; line-height: 1.42; color: #111114; border-top: 1px solid #E5E5EA; }
+.j-conferir li:last-child { border-bottom: 1px solid #E5E5EA; }
+.j-conferir li::before { content: counter(item); position: absolute; left: 0; top: 12px; width: 26px; height: 26px; border-radius: 50%; background: #007AFF; color: #fff; font-size: 14px; font-weight: 700; line-height: 26px; text-align: center; }
+.j-fonte { font-size: 12px; line-height: 1.45; color: #6E6E73; margin: 0; padding-top: 14px; }
+.j-fonte b { color: #111114; }
+
+/* versões compactas: só entram quando a tela tem mais conteúdo que o normal */
+.j-preco-tela.cheia h1 { margin-bottom: 6px; }
+.j-preco-tela.cheia .j-regra { font-size: 13px; margin-bottom: 8px; }
+.j-preco-tela.cheia .vidro + .vidro { margin-top: 8px; }
+.j-preco-tela.cheia .j-preco .j-lin { padding: 6px 0; }
+.j-preco-tela.cheia .j-faixa { padding: 10px 12px 4px; }
+.j-preco-tela.cheia .j-faixa .parcela { padding: 3px 10px; }
+.j-preco-tela.cheia .j-faixa .parcela.indicada { padding: 6px 10px; }
+.j-preco-tela.cheia .j-socios { padding: 10px 18px 8px; }
+.j-preco-tela.cheia .j-socio { padding: 2px 0; }
+.j-preco-tela.cheia .j-socio b { font-size: 17px; margin-top: 0; }
+.j-conferir.compacta li { padding: 8px 0 8px 34px; font-size: 14px; line-height: 1.36; }
+.j-conferir.compacta li::before { top: 8px; width: 22px; height: 22px; font-size: 12px; line-height: 22px; }
+.j-conferir.compacta + .j-fonte { font-size: 11px; padding-top: 10px; }

@@ -20,6 +20,16 @@
 #                        'tree' => {…}, 'units' => ['paulista'] }]
 #   'role_by_user' => { '12' => 'r_ab12' }
 #   'units'        => { '12' => ['paulista'] }   (vazio/ausente = todas)
+#
+# 🧭 TRIAGEM DE ADMINISTRADOR (11/11/2026 · LIFE, pedido do Guilherme): o DONO da conta pode
+# deixar outro administrador vendo só o essencial e ir liberando aos poucos.
+#   'owner_ids'    => [1]                                  (donos: nunca são limitados)
+#   'admin_limits' => { '7' => { 'liberados' => %w[inicio conversas crm tarefas agenda],
+#                               'escondidos' => %w[crm.campanhas crm.formularios] } }
+# Administrador com lista em admin_limits edita o que está na lista (e os filhos) e NÃO VÊ o
+# resto. Sem dono definido, ou sem lista para a pessoa, o administrador segue vendo tudo.
+# É organização de tela (menu, rotas e API do catálogo), não cofre: telas antigas do núcleo
+# que checam só "é administrador" continuam abrindo por endereço direto.
 class Cevico::Access
   LEVELS = Cevico::AccessCatalog::LEVELS
   RANK = Cevico::AccessCatalog::LEVEL_RANK
@@ -44,6 +54,39 @@ class Cevico::Access
 
   def uid = user&.id.to_s
   def admin? = @account_user&.administrator? == true
+
+  # ── 🧭 dono da conta e triagem de administrador ───────────────────────
+  def self.owner_ids(perms)
+    Array(perms['owner_ids']).map(&:to_s).compact_blank
+  end
+
+  def owner? = admin? && self.class.owner_ids(perms).include?(uid)
+
+  # lista do que o dono liberou para ESTE administrador (nil = sem triagem: vê tudo)
+  def admin_allowlist
+    return @admin_allowlist if defined?(@admin_allowlist)
+
+    list = perms.dig('admin_limits', uid, 'liberados')
+    limited = admin? && !owner? && self.class.owner_ids(perms).any? && list.is_a?(Array)
+    @admin_allowlist = limited ? list.map(&:to_s) : nil
+  end
+
+  def admin_limited? = !admin_allowlist.nil?
+
+  # itens que o dono escondeu DENTRO de uma área liberada (ex.: crm.campanhas com o CRM liberado)
+  def admin_hidden
+    @admin_hidden ||= Array(perms.dig('admin_limits', uid, 'escondidos')).map(&:to_s)
+  end
+
+  # do nó para cima, vale a marcação mais próxima: escondido ou liberado; sem marcação = não vê
+  def owner_released?(key)
+    chain = [key] + Cevico::AccessCatalog.ancestors(key).sort_by { |anc| -anc.length }
+    chain.each do |node|
+      return false if admin_hidden.include?(node)
+      return true if admin_allowlist.include?(node)
+    end
+    false
+  end
 
   # nós que existem para o ramo desta empresa
   def visible_keys
@@ -87,10 +130,12 @@ class Cevico::Access
   end
 
   # ── o nível efetivo ────────────────────────────────────────────────────
-  def level(key)
+  def level(key) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     key = key.to_s
     return 'none' unless Cevico::AccessCatalog.exist?(key) && visible?(key)
-    return 'edit' if admin? # admin faz tudo, até nos nós "só ver" (ações de sincronizar etc.)
+    # admin faz tudo, até nos nós "só ver" (ações de sincronizar etc.) — menos o administrador
+    # em triagem, que só tem o que o dono liberou
+    return (admin_limited? && !owner_released?(key) ? 'none' : 'edit') if admin?
     return 'none' if Cevico::AccessCatalog.admin_only?(key) || admin_only_ancestor?(key)
 
     explicit = explicit_level(key)
@@ -133,6 +178,8 @@ class Cevico::Access
   def to_h
     {
       admin: admin?,
+      owner: owner?,
+      limited: admin_limited?,
       me: effective,
       units: units,
       role_id: role_id,
@@ -142,7 +189,7 @@ class Cevico::Access
   end
 
   # tudo que o ADMIN precisa para a tela Acessos (todas as pessoas)
-  def self.admin_payload(account) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  def self.admin_payload(account) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     perms = perms_for(account)
     company = Cevico::Company.for(account)
     users = account.account_users.includes(:user).map do |au|
@@ -153,6 +200,10 @@ class Cevico::Access
         name: au.user&.name,
         email: au.user&.email,
         admin: au.administrator?,
+        owner: access.owner?,
+        # 🧭 triagem: nil = vê tudo; lista = só o que o dono liberou
+        liberados: access.admin_allowlist,
+        escondidos: access.admin_limited? ? access.admin_hidden : nil,
         role_id: perms.dig('role_by_user', uid).to_s.presence,
         # quem ainda está no modelo antigo aparece com as concessões CONVERTIDAS
         # como marcação própria — ao salvar, nada do que tinha se perde
@@ -164,6 +215,7 @@ class Cevico::Access
     end
     {
       roles: Array(perms['roles']),
+      owner_ids: owner_ids(perms).map(&:to_i),
       users: users,
       catalog: Cevico::AccessCatalog.tree_for(company),
       units: company.units,

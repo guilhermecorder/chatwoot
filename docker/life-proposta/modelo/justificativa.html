@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390">
+<title>Como chegamos no orçamento: {{cliente}}</title>
+<link rel="stylesheet" href="proposta.css">
+<link rel="stylesheet" href="justificativa.css">
+</head>
+<body>
+<!--
+  Justificativa do orçamento (documento INTERNO, para sócios e equipe). Mesmo visual da proposta.
+  Gerado por gerar_justificativa.py a partir do justificativa.json. Os números vêm prontos do JSON:
+  aqui só se formata, nunca se recalcula.
+-->
+
+<!-- 1. CAPA E RESUMO -->
+<section class="tela vidrada" data-vidro="img/fundo-sol-vidro.jpg">
+  <img class="fundo" src="img/fundo-sol.jpg" alt="">
+  <i class="arco"></i>
+  <span class="chip interno">Uso interno</span>
+  <h1 class="j-titulo">Como chegamos neste orçamento</h1>
+  <p class="j-cliente"><b>{{cliente}}</b><br>{{cidade}}, {{f.data}}</p>
+  <div class="vidro escuro j-resumo">
+    <div class="j-linha"><span>Valor do projeto</span><b class="j-grande">{{f.valor_projeto}}</b></div>
+    <div class="j-linha"><span>Custo total</span><b>{{f.custo_total}}</b></div>
+    <div class="j-linha"><span>Lucro líquido</span><b class="c-verde-forte">{{f.lucro}} <small>{{f.margem}}</small></b></div>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 2. CONSUMO -->
+<section class="tela vidrada" data-vidro="img/fundo-azul-vidro.jpg">
+  <img class="fundo" src="img/fundo-azul.jpg" alt="">
+  <i class="arco"></i>
+  <p class="j-passo">Passo 1</p>
+  <h1>Quanto ela gasta de luz</h1>
+  <div class="vidro escuro j-lista">
+    {{#cada f.consumo}}
+    <div class="j-item"><div class="j-lin"><span>{{#se mais}}<i>+</i>{{/se}}{{#nao mais}}<i class="vazio"></i>{{/nao}}{{rotulo}}</span><b>{{reais}}</b></div><p class="j-sub">{{kwh}} kWh por mês{{#se nota}}<br>{{nota}}{{/se}}</p></div>
+    {{/cada}}
+    <div class="j-item total"><div class="j-lin"><span><i>=</i>Consumo total</span><b class="c-amarelo">{{f.consumo_kwh}} kWh</b></div><p class="j-sub">{{f.consumo_reais}} por mês, a {{f.tarifa}} por kWh</p></div>
+  </div>
+  {{#se consumo.nota}}<p class="j-nota empurra">{{consumo.nota}}</p>{{/se}}
+  <!--pe-->
+</section>
+
+<!-- 3. SISTEMA (tela branca) -->
+<section class="tela clara">
+  <i class="arco"></i>
+  <p class="j-passo">Passo 2</p>
+  <h1>O tamanho do sistema</h1>
+  <div class="bloco j-formula"><p class="rot">A conta</p><p>{{sistema.formula}}</p></div>
+  <div class="j-seta"><b>{{f.necessaria}} kWp</b> necessários</div>
+  <div class="bloco j-placas">
+    <p class="j-placas-n"><b>{{sistema.placas}}</b> placas de {{f.placa_w}} W</p>
+    <p class="j-placas-kwp">= {{f.kwp}} kWp</p>
+    <p class="j-sub">Produz cerca de <b>{{f.producao}} kWh por mês</b>, {{f.cobertura}} do consumo.</p>
+  </div>
+  <p class="j-nota empurra"><b>Equipamento:</b> {{sistema.equipamento}}</p>
+  <!--pe-->
+</section>
+
+<!-- 4. KIT -->
+<section class="tela vidrada" data-vidro="img/fundo-sol-vidro.jpg">
+  <img class="fundo" src="img/fundo-sol.jpg" alt="">
+  <i class="arco"></i>
+  <p class="j-passo">Passo 3</p>
+  <h1>O preço do kit</h1>
+  <p class="j-regra">{{kit.regra}}</p>
+  {{#cada f.cotacoes}}
+  <div class="vidro escuro j-cotacao {{classe}}">
+    <div class="j-lin"><span class="j-forn">{{fornecedor}}</span><b>{{valor}}</b></div>
+    <div class="j-lin j-lin-baixo"><p class="j-sub">{{detalhe}}</p>{{#se entra}}<em class="chip verde">Entra na média</em>{{/se}}{{#nao entra}}<em class="chip fora">Fora da média</em>{{/nao}}</div>
+  </div>
+  {{/cada}}
+  {{#se f.nao_cotados}}<p class="j-sub j-naocot">Sem cotação ainda: {{f.nao_cotados}}.</p>{{/se}}
+  <div class="vidro escuro j-media empurra"><div class="j-lin"><span>Média usada<br><small>{{f.na_media}}</small></span><b class="c-amarelo">{{f.media}}</b></div></div>
+  <!--pe-->
+</section>
+
+<!-- 5. CUSTOS (tela branca) -->
+<section class="tela clara">
+  <i class="arco"></i>
+  <p class="j-passo">Passo 4</p>
+  <h1>Os custos</h1>
+  <div class="lista-ios j-custos">
+    {{#cada f.custos}}<div class="j-custo"><span>{{nome}}{{#se taxa}} <em>{{taxa}}</em>{{/se}}</span><b>{{valor}}</b></div>{{/cada}}
+    <div class="j-custo total"><span>Custo total</span><b>{{f.custo_total}}</b></div>
+  </div>
+  <p class="j-nota j-adequacao"><b>Adequação pela tabela:</b> {{f.adequacao}}.</p>
+  <!--pe-->
+</section>
+
+<!-- 6. PREÇO E LUCRO -->
+<section class="tela vidrada j-preco-tela {{f.preco_classe}}" data-vidro="img/fundo-verde-vidro.jpg">
+  <img class="fundo" src="img/fundo-verde.jpg" alt="">
+  <i class="arco"></i>
+  <p class="j-passo">Passo 5</p>
+  <h1>Preço e lucro</h1>
+  <p class="j-regra">{{preco.regra}}</p>
+  <div class="vidro escuro j-preco">
+    <div class="j-lin"><span>Valor do projeto</span><b class="j-grande">{{f.valor_projeto}}</b></div>
+    <div class="j-lin"><span>Lucro líquido</span><b class="c-verde-forte">{{f.lucro}} <small>{{f.margem}}</small></b></div>
+    <div class="j-lin"><span>Preço por kWp</span><b>{{f.por_kwp}}</b></div>
+  </div>
+  <div class="vidro escuro j-faixa">
+    <p class="rot">Faixa de lucro</p>
+    {{#cada f.faixa}}<div class="parcela {{classe}}"><span>{{margem}}</span>{{#se padrao}}<em class="chip azul">{{selo}}</em>{{/se}}<b>{{valor}}</b></div>{{/cada}}
+  </div>
+  <div class="vidro escuro j-socios">
+    <p class="rot">Lucro por sócio</p>
+    <div class="j-socios-grade">{{#cada f.socios}}<div class="j-socio"><span>{{nome}} <small>{{parte}}</small></span><b>{{valor}}</b></div>{{/cada}}</div>
+  </div>
+  <!--pe-->
+</section>
+
+<!-- 7. O QUE CONFERIR (tela branca) -->
+<section class="tela clara">
+  <i class="arco"></i>
+  <h1>O que conferir</h1>
+  <ol class="j-conferir {{f.conferir_classe}}">
+    {{#cada conferir}}<li>{{.}}</li>{{/cada}}
+  </ol>
+  <p class="j-fonte empurra"><b>Fonte:</b> {{fonte}}</p>
+  <!--pe-->
+</section>
+
+<script>
+/* 1) Vidro: cópia desfocada do fundo atrás de cada cartão (o PDF não imprime backdrop-filter). */
+document.querySelectorAll('.vidro').forEach(function (el) {
+  var ref = el.parentElement && el.parentElement.closest('[data-vidro]');
+  if (!ref) return;
+  var r = ref.getBoundingClientRect(), e = el.getBoundingClientRect(), cs = getComputedStyle(el);
+  var bx = parseFloat(cs.borderLeftWidth) || 0, by = parseFloat(cs.borderTopWidth) || 0;
+  var tinta = cs.getPropertyValue('--vidro-tinta').trim() || 'linear-gradient(rgba(255,255,255,.14), rgba(255,255,255,.06))';
+  el.style.backgroundImage = tinta + ', url("' + ref.getAttribute('data-vidro') + '")';
+  el.style.backgroundSize = '100% 100%, ' + r.width + 'px ' + r.height + 'px';
+  el.style.backgroundPosition = '0 0, ' + (r.left - e.left - bx) + 'px ' + (r.top - e.top - by) + 'px';
+});
+/* 2) Marca a tela em que o conteúdo passou do espaço útil; o gerador lê isso e avisa. */
+document.querySelectorAll('.tela').forEach(function (t) {
+  var limite = t.getBoundingClientRect().bottom - 70, pior = 0;
+  Array.prototype.forEach.call(t.children, function (c) {
+    if (/\b(pe|arco|fundo)\b/.test(c.getAttribute('class') || '')) return;
+    var sobra = c.getBoundingClientRect().bottom - limite;
+    if (sobra > pior) pior = sobra;
+  });
+  if (pior > 1) t.setAttribute('data-estouro', Math.round(pior));
+});
+</script>
+</body>
+</html>

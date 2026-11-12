@@ -17,6 +17,11 @@ import EmojiPicker from 'shared/components/emoji/EmojiPicker.vue';
 import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIcon.vue';
 import ChatQuickActions from './ChatQuickActions.vue';
 import { onClickOutside } from '@vueuse/core';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+import { useProposalReady } from 'dashboard/composables/useCevicoProposal';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { spaceName } = useCevicoSpaceName();
 
 const props = defineProps({
   contact: { type: Object, required: true }, // card do CRM (contact_json)
@@ -33,6 +38,16 @@ const route = useRoute();
 const router = useRouter();
 
 // Espaço do Paciente: página única com toda a jornada do paciente
+// 📄 11/11 (LIFE): "Gerar orçamento" ao lado do bonequinho; travado até o cliente
+// mandar a conta de luz ou os dados
+const {
+  canMakeProposal,
+  proposalReady,
+  proposalHint,
+  proposalLabel,
+  openWhenReady,
+} = useProposalReady(() => props.contact?.contact_id);
+
 const openPatientSpace = () => {
   emit('close');
   router.push(frontendURL(`accounts/${route.params.accountId}/patient/${props.contact.contact_id}`));
@@ -456,10 +471,29 @@ watch(conversationId, id => {
         <!-- Espaço do Paciente -->
         <button
           class="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 transition-transform hover:scale-110"
-          title="Espaço do Paciente"
+          :title="spaceName"
           @click="openPatientSpace"
         >
           <PatientSpaceIcon :size="22" />
+        </button>
+        <!-- 📄 Gerar orçamento (LIFE) -->
+        <button
+          v-if="canMakeProposal && contact?.contact_id"
+          class="flex items-center gap-1.5 h-8 px-2.5 rounded-lg flex-shrink-0 text-xs font-semibold transition-colors"
+          :class="
+            proposalReady
+              ? 'bg-[#ffcc00] text-[#3a2a00] hover:bg-[#ffd633]'
+              : 'bg-n-alpha-2 text-n-slate-10'
+          "
+          :title="proposalHint"
+          :aria-disabled="!proposalReady"
+          @click="openWhenReady"
+        >
+          <span
+            class="text-sm"
+            :class="proposalReady ? 'i-lucide-file-text' : 'i-lucide-lock'"
+          />
+          <span class="hidden sm:inline">{{ proposalLabel }}</span>
         </button>
         <!-- Painel do robô de follow-up -->
         <button

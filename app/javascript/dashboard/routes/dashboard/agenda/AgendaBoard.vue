@@ -52,6 +52,10 @@ import {
 } from 'dashboard/helper/cevicoAgenda';
 import AgendaSettings from './AgendaSettings.vue';
 import PatientSuggest from 'dashboard/components-next/cevico/PatientSuggest.vue';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { spaceName, openSpaceLabel } = useCevicoSpaceName();
 
 const store = useStore();
 const { isAdmin } = useAdmin();
@@ -641,9 +645,47 @@ const inOrigin = t => originFilter.value === 'all' || (originFilter.value === 'c
 const hasExternal = computed(() => liveTasks.value.some(t => t.source));
 const originLabel = t => (t.source === 'oftalmofacil' ? (t.source_detail || 'Oftalmofácil') : '');
 
+// 🔔 11/11/2026 (LIFE, pedido do Guilherme): os COMPROMISSOS com data (tarefas
+// do funil: "enviar o orçamento", "ligar para saber o que achou"…) aparecem
+// também na visão de TODA A EMPRESA, numa camada própria que liga e desliga.
+// Só fora da clínica; compromisso já feito sai da visão geral.
+const COMMIT_KEY = 'cevico_agenda_compromissos';
+const COMMIT_COLOR = '#475569';
+const COMMIT_LABEL = 'Compromissos';
+const COMMIT_TITLE =
+  'Compromissos — tarefas com data que nascem do funil (enviar o orçamento, ligar de volta…) · clique: liga/desliga';
+const COMMIT_VARS = {
+  '--k-grad': 'linear-gradient(135deg, #334155, #64748b)',
+  '--k-deep': '#334155',
+  '--k-rgb': hexToRgbSpaced(COMMIT_COLOR),
+  '--k-deep-rgb': hexToRgbSpaced('#334155'),
+};
+const loadCommitments = () => {
+  try {
+    return localStorage.getItem(COMMIT_KEY) !== '0';
+  } catch (e) {
+    return true;
+  }
+};
+const showCommitments = ref(loadCommitments());
+const toggleCommitments = () => {
+  showCommitments.value = !showCommitments.value;
+  try {
+    localStorage.setItem(COMMIT_KEY, showCommitments.value ? '1' : '0');
+  } catch (e) {
+    /* sem espaço */
+  }
+};
+const isCommitment = t => !isAppointment(t) && t.status !== 'done';
+const commitmentsOn = computed(
+  () => isOwnAgenda.value && showCommitments.value
+);
+const inCompanyView = x =>
+  (isAppointment(x) && inKind(x)) || (commitmentsOn.value && isCommitment(x));
+
 const visibleTasks = computed(() => {
   const list = liveTasks.value.filter(inOrigin);
-  if (view.value === 'clinic') return list.filter(isAppointment).filter(inKind);
+  if (view.value === 'clinic') return list.filter(inCompanyView);
   if (activeUnit.value) return list.filter(x => x.unit === activeUnit.value).filter(inKind);
   if (activeDoctor.value) return list.filter(x => isAppointment(x) && x.doctor === activeDoctor.value).filter(inKind);
   // 🔁 item 343: card da Equipe dos retornos aparece em "Minha agenda" de quem é da equipe
@@ -674,6 +716,15 @@ const rangeEnd = computed(() => {
   if (viewMode.value === 'month') return addDays(endOfWeek(endOfMonth(cursor.value), { weekStartsOn: 0 }), 1);
   if (viewMode.value === 'week') return addDays(startOfWeek(cursor.value, { weekStartsOn: 0 }), 7);
   return addDays(rangeStart.value, 1);
+});
+// 🔔 quantos compromissos do funil cabem no intervalo visível (chip da camada)
+const commitmentCount = computed(() => {
+  const s = rangeStart.value.getTime();
+  const e = rangeEnd.value.getTime();
+  return liveTasks.value.filter(isCommitment).filter(t => {
+    const ts = new Date(t.due_at).getTime();
+    return ts >= s && ts < e;
+  }).length;
 });
 const kindCounts = computed(() => {
   const out = Object.fromEntries(TYPES.map(t => [t.key, 0]));
@@ -907,7 +958,11 @@ const unitOf = task => {
 // tele, cirurgia); a unidade/local vira uma etiqueta pequena no balão
 // item 290: a cor que a equipe deu ao agendamento vence a cor do tipo (balão
 // e cartão); o selo do TIPO continua sempre na cor do tipo
-const typeColorOf = task => TYPE_BY_KEY[typeOf(task)]?.color || '#2563EB';
+const typeColorOf = task => {
+  // compromisso do funil (fora da clínica) tem cor própria, neutra — não é visita nem fechamento
+  if (isOwnAgenda.value && !isAppointment(task)) return COMMIT_COLOR;
+  return TYPE_BY_KEY[typeOf(task)]?.color || '#2563EB';
+};
 const accentOf = task => taskColorOf(task) || typeColorOf(task);
 const tagOf = task => {
   const u = unitOf(task);
@@ -1945,7 +2000,7 @@ const taskMenu = (task, extra = []) => {
         action: () => openTaskChat(task),
       },
       task.contact_id && {
-        label: 'Abrir o Espaço do Paciente',
+        label: openSpaceLabel.value,
         icon: 'i-lucide-user-round',
         action: () => openPatientSpace(task),
       },
@@ -2378,6 +2433,19 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                       <span :class="tt.icon" class="text-sm hidden 2xl:inline" />
                       {{ tt.label }}
                       <span class="cv-ag-kind-n" :title="`${kindCounts[tt.key]} ${rangeNoun}`">{{ kindCounts[tt.key] }}</span>
+                    </button>
+                    <!-- 🔔 11/11: camada dos compromissos do funil na visão de toda a empresa -->
+                    <button
+                      v-if="isOwnAgenda && view === 'clinic'"
+                      class="cv-ag-kind"
+                      :class="showCommitments ? 'cv-ag-kind-on' : 'opacity-60'"
+                      :style="COMMIT_VARS"
+                      :title="COMMIT_TITLE"
+                      @click="toggleCommitments"
+                    >
+                      <span class="cv-ag-kind-dot" />
+                      {{ COMMIT_LABEL }}
+                      <span class="cv-ag-kind-n">{{ commitmentCount }}</span>
                     </button>
                   </div>
                   <!-- 🔁 item 368: a cor do reagendamento (não é tipo, por isso não liga/desliga) -->
@@ -2878,7 +2946,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
                           <span v-if="task.phone"><span class="i-lucide-phone text-[10px]" />{{ task.phone }}</span>
                           <span v-if="task.doctor"><span class="i-lucide-stethoscope text-[10px]" />{{ task.doctor }}</span>
                           <button v-if="task.contact_id" class="hover:underline text-[11px] font-semibold" :style="{ color: accentOf(task) }" @click.stop="openPatientSpace(task)">
-                            <PatientSpaceIcon :size="12" /> Espaço do Paciente
+                            <PatientSpaceIcon :size="12" /> {{ spaceName }}
                           </button>
                         </div>
                       </div>
@@ -2977,7 +3045,7 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
           <button v-if="editingTask && (editingTask.contact_id || editingTask.phone)" class="cv-glass-btn" title="Abrir a conversa deste paciente, sem sair da Agenda" @click="openTaskChat(editingTask)">
             <span class="i-lucide-message-circle" /> <span class="hidden sm:inline">Conversa</span>
           </button>
-          <button v-if="editingTask?.contact_id" class="cv-glass-btn" title="Abrir o Espaço do Paciente" @click="openPatientSpace(editingTask)">
+          <button v-if="editingTask?.contact_id" class="cv-glass-btn" :title="openSpaceLabel" @click="openPatientSpace(editingTask)">
             <PatientSpaceIcon :size="16" /> <span class="hidden sm:inline">Paciente</span>
           </button>
           <button class="cv-glass-btn cv-iconbtn" @click="showModal = false"><span class="i-lucide-x" /></button>

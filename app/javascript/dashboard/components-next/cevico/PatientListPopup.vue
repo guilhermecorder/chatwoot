@@ -6,6 +6,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { frontendURL } from 'dashboard/helper/URLHelper';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -20,6 +21,8 @@ const props = defineProps({
   right: { type: Function, default: null },
 });
 const emit = defineEmits(['close']);
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel } = useCevicoSpaceName();
 const router = useRouter();
 const q = ref('');
 
@@ -133,11 +136,7 @@ const copyList = async () => {
             v-for="p in list"
             :key="p.task_id || p.id"
             class="cv-sub cv-sub-hover w-full flex items-center gap-2.5 px-3 py-2 mb-1.5 text-left"
-            :title="
-              p.conversation_id
-                ? 'Abrir a conversa'
-                : 'Abrir o Espaço do Paciente'
-            "
+            :title="p.conversation_id ? 'Abrir a conversa' : openSpaceLabel"
             @click="open(p)"
           >
             <span

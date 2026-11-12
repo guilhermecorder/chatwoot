@@ -13,6 +13,10 @@ import CevicoViewOnlyPill from 'dashboard/components-next/cevico/CevicoViewOnlyP
 import { frontendURL } from 'dashboard/helper/URLHelper';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import CrmAPI from 'dashboard/api/crm';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
+
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel } = useCevicoSpaceName();
 
 const router = useRouter();
 
@@ -530,7 +534,7 @@ const openPatient = order => {
             v-if="order.contact_name"
             class="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 hover:opacity-80"
             style="background: #7C3AED1A; color: #7C3AED"
-            title="Abrir o espaço do paciente"
+            :title="openSpaceLabel"
             @click="openPatient(order)"
           >
             👤 {{ order.contact_name }}

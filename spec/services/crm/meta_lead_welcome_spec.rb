@@ -116,6 +116,33 @@ RSpec.describe Crm::MetaLeadWelcome do
     expect { Crm::MetaLeadPollJob.perform_now }.to have_enqueued_job(Crm::MetaLeadImportJob).with(account.id, kind_of(Integer)).exactly(:once)
   end
 
+  # 🗂️ 11/11: o lead do formulário nasce na coluna "Formulários" (e não na 1ª)
+  it 'com coluna de formulário configurada, o cartão nasce nela e não na 1ª coluna', :aggregate_failures do
+    pipeline = Crm::Pipeline.create!(account: account, name: 'Vendas')
+    primeira = pipeline.stages.create!(name: 'Novos Contatos', position: 0)
+    formularios = pipeline.stages.create!(name: 'Formulários', position: 1)
+    CrmSetting.find_by(account: account).tap { |c| c.update!(meta_ads_config: c.meta_ads_config.merge('lead_stage_id' => formularios.id)) }
+
+    expect(ingest).to eq(:imported)
+    card = Crm::Contact.find_by(pipeline_id: pipeline.id)
+    expect(card&.stage_id).to eq(formularios.id)
+    expect(Crm::Contact.where(pipeline_id: pipeline.id).count).to eq(1)
+    expect(primeira.id).not_to eq(card.stage_id)
+  end
+
+  it 'quem já tem cartão no funil não volta para a coluna de formulário' do
+    pipeline = Crm::Pipeline.create!(account: account, name: 'Vendas')
+    pipeline.stages.create!(name: 'Novos Contatos', position: 0)
+    formularios = pipeline.stages.create!(name: 'Formulários', position: 1)
+    adiante = pipeline.stages.create!(name: 'Orçamento Enviado', position: 2)
+    CrmSetting.find_by(account: account).tap { |c| c.update!(meta_ads_config: c.meta_ads_config.merge('lead_stage_id' => formularios.id)) }
+    contato = create(:contact, account: account, phone_number: '+5519998887766')
+    Crm::Contact.create!(contact_id: contato.id, pipeline_id: pipeline.id, stage_id: adiante.id)
+
+    ingest
+    expect(Crm::Contact.find_by(contact_id: contato.id, pipeline_id: pipeline.id).stage_id).to eq(adiante.id)
+  end
+
   it 'sanitize_config limpa o que vem da tela' do
     cfg = described_class.sanitize_config('enabled' => '1', 'template_name' => 'Life Lead-Formulario!', 'inbox_id' => '7')
     expect(cfg).to include('enabled' => true, 'template_name' => 'lifeleadformulario', 'language' => 'pt_BR', 'inbox_id' => 7,

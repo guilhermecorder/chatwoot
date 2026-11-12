@@ -62,6 +62,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   # do roteiro (1ª: os 4 telhados numerados na sondagem). Imagens da conta em
   # ai_config['imagens_roteiro'] (Crm::ScriptImages); sem lista, não aparece.
   IMAGE_TOOL_NAME = 'enviar_imagem'.freeze
+  # 📝 11/11 (LIFE): ficha do cliente — o atendente anota o que o cliente conta (Crm::ClientSummary)
+  SUMMARY_TOOL_NAME = 'anotar_cliente'.freeze
   # 🔊 09/11/2026 (LIFE, pedido do Guilherme): áudio pronto da empresa num ponto do
   # roteiro (1º: o Fernando apresentando a Life para quem vai receber o orçamento).
   # Mesma lista ai_config['imagens_roteiro'], arquivos .ogg/.opus/.mp3/.m4a.
@@ -72,7 +74,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     'nevermind', 'never mind', 'nunca mind', 'n/a', 'teste', 'test', 'dummy', 'xxx'
   ].freeze
   FAKE_TASK_RE = /\A\W*(#{FAKE_TASK_WORDS.map { |w| Regexp.escape(w) }.join('|')})/i
-  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME, IMAGE_TOOL_NAME, AUDIO_TOOL_NAME]).freeze
+  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME, IMAGE_TOOL_NAME, AUDIO_TOOL_NAME, SUMMARY_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
   # 🩺 item 251: o Atendente de Pós-operatório abre tarefa para a equipe.
@@ -103,7 +105,48 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     list << stage_definition if TASK_TOOL_KEYS.include?(@agent_key) && crm_etapas.any?
     list << image_definition if TASK_TOOL_KEYS.include?(@agent_key) && script_images.any?
     list << audio_definition if TASK_TOOL_KEYS.include?(@agent_key) && script_audios.any?
-    list
+    list + summary_definitions
+  end
+
+  # 📝 ficha do cliente: só para os atendentes e só quando a conta escolheu os campos
+  def summary_definitions
+    TASK_TOOL_KEYS.include?(@agent_key) && summary_fields.any? ? [summary_definition] : []
+  end
+
+  # campos da ficha do cliente desta conta (vazio = recurso desligado)
+  def summary_fields
+    @summary_fields ||= Crm::ClientSummary.fields(@account)
+  end
+
+  def summary_definition # rubocop:disable Metrics/MethodLength
+    guia = summary_fields.map { |f| "#{f['chave']} = #{f['rotulo']}#{" (#{f['quando']})" if f['quando'].present?}" }.join('; ')
+    ja = summary_known
+    {
+      name: SUMMARY_TOOL_NAME,
+      description: 'Anota na FICHA DO CLIENTE o que ele acabou de contar (a equipe lê no cartão e na página dele). ' \
+                   "Use na hora em que o cliente informar um destes dados, bem curto e com as palavras dele: #{guia}. " \
+                   'Só anote o que o cliente DISSE, nunca suposição. Não repita o que já está anotado; se ele corrigir, ' \
+                   "anote o valor novo. Não conte ao cliente que anotou.#{" Já anotado: #{ja}." if ja.present?}",
+      input_schema: {
+        type: 'object',
+        properties: {
+          dados: {
+            type: 'array', minItems: 1, description: 'Um item por informação nova',
+            items: {
+              type: 'object',
+              properties: {
+                campo: { type: 'string', enum: summary_fields.pluck('chave'), description: 'Qual dado da ficha' },
+                valor: { type: 'string',
+                         description: 'O que o cliente disse, em poucas palavras (ex.: "R$ 300 por mês", "vai pôr 2 ar-condicionados")' }
+              },
+              required: %w[campo valor], additionalProperties: false
+            }
+          }
+        },
+        required: %w[dados],
+        additionalProperties: false
+      }
+    }
   end
 
   # mídias do roteiro desta conta (só as que têm arquivo de verdade)
@@ -314,6 +357,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when 'horarios_do_dia' then horarios_do_dia(args)
     when 'abrir_tarefa' then abrir_tarefa(args)
     when 'marcar_etapa' then marcar_etapa(args)
+    when SUMMARY_TOOL_NAME then anotar_cliente(args)
     when IMAGE_TOOL_NAME then enviar_imagem(args)
     when AUDIO_TOOL_NAME then enviar_audio(args)
     else
@@ -599,6 +643,50 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     activity_note!("🏷️ #{agent_name} marcou a etapa: #{etapa}")
     log_acao(STAGE_TOOL_NAME, true, "marcou a etapa #{etapa}")
     { ok: true, etapa: etapa }
+  end
+
+  # o que já está na ficha deste cliente, para a IA não anotar de novo
+  def summary_known
+    return '' if @contact.nil?
+
+    Crm::ClientSummary.lines(@contact, fields: summary_fields).map { |l| "#{l[:label]}: #{l[:value]}" }.join('; ')
+  end
+
+  # { 'conta' => 'R$ 300', … } só com campos desta conta e valor preenchido
+  def summary_values(dados, labels)
+    Array(dados).each_with_object({}) do |item, out|
+      row = item.to_h.transform_keys(&:to_s)
+      key = row['campo'].to_s
+      value = row['valor'].to_s.squish
+      out[key] = value if labels.key?(key) && value.present?
+    end
+  end
+
+  # por que a anotação não pode ser feita (nil = pode)
+  def summary_problem(values)
+    return 'Esta ferramenta não está disponível para este agente.' unless TASK_TOOL_KEYS.include?(@agent_key)
+    return 'Conversa sem contato.' if @contact.nil?
+
+    'Nenhum dado da lista desta conta.' if values.empty?
+  end
+
+  # 📝 ficha do cliente: grava o que ele contou (Crm::ClientSummary) e põe a etiqueta do campo
+  def anotar_cliente(args)
+    labels = summary_fields.to_h { |f| [f['chave'], f['rotulo']] }
+    values = summary_values(args['dados'], labels)
+    problem = summary_problem(values)
+    return refuse(SUMMARY_TOOL_NAME, problem) if problem
+
+    resumo = values.map { |key, value| "#{labels[key]}: #{value}" }.join(' · ')
+    unless @live
+      log_acao(SUMMARY_TOOL_NAME, true, "anotaria na ficha: #{resumo} (simulado)")
+      return { simulado: true, ok: true, mensagem: 'Em sombra nada foi gravado; a ficha do cliente receberia estes dados.' }
+    end
+
+    changed = Crm::ClientSummary.write!(@contact, values, by: "#{agent_name} (IA)")
+    activity_note!("📝 #{agent_name} anotou na ficha do cliente: #{resumo}") if changed.any?
+    log_acao(SUMMARY_TOOL_NAME, true, "anotou na ficha: #{resumo}")
+    { ok: true, anotado: changed }
   end
 
   # 🖼️ imagem pronta do roteiro → mensagem com anexo na conversa (Crm::ScriptImages).

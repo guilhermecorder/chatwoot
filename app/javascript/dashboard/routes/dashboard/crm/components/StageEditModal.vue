@@ -22,7 +22,28 @@ const activeSection = ref('general');
 const isSaving = ref(false);
 
 // ⏳ 11/11 (LIFE): prazo e compromisso da coluna (Crm::StageDeadline)
-const emptyPrazo = () => ({ modo: '', horas: 24, hora: '09:00', tarefa: '' });
+// 🔔 lembretes: fila que vem depois do primeiro compromisso (cada baixa faz nascer o próximo)
+const MAX_LEMBRETES = 6;
+const LEMBRETE_TXT = {
+  title: 'Lembretes seguintes (opcional)',
+  hint: 'Quando a pessoa dá baixa num compromisso e o cartão continua nesta coluna, nasce o próximo da fila. Assim ninguém fica sem o próximo passo.',
+  after: 'dias depois:',
+  placeholder: 'Ex.: Ligar para saber o que achou do orçamento',
+  remove: 'Tirar este lembrete',
+  add: 'Acrescentar lembrete',
+};
+const emptyPrazo = () => ({
+  modo: '',
+  horas: 24,
+  hora: '09:00',
+  tarefa: '',
+  lembretes: [],
+});
+const loadPrazo = prazo => ({
+  ...emptyPrazo(),
+  ...(prazo || {}),
+  lembretes: (prazo?.lembretes || []).map(l => ({ ...l })),
+});
 const form = ref({ name: '', color: '#6B7280', description: '', main_inbox_ids: [], task_owner_id: null, prazo: emptyPrazo() });
 
 watch(() => props.stage, (s) => {
@@ -33,11 +54,18 @@ watch(() => props.stage, (s) => {
     description: s.description ?? '',
     main_inbox_ids: [...(s.main_inbox_ids ?? [])],
     task_owner_id: s.task_owner_id ?? null,
-    prazo: { ...emptyPrazo(), ...(s.prazo || {}) },
+    prazo: loadPrazo(s.prazo),
   };
   if (!inboxes.value.length) store.dispatch('inboxes/get');
   if (!teamAgents.value.length) store.dispatch('agents/get');
 }, { immediate: true });
+
+const addLembrete = () => {
+  if (form.value.prazo.lembretes.length >= MAX_LEMBRETES) return;
+  const last = form.value.prazo.lembretes.at(-1);
+  form.value.prazo.lembretes.push({ dias: last ? last.dias : 2, tarefa: '' });
+};
+const removeLembrete = index => form.value.prazo.lembretes.splice(index, 1);
 
 const toggleMainInbox = id => {
   const idx = form.value.main_inbox_ids.indexOf(id);
@@ -64,6 +92,9 @@ const save = async () => {
               horas: form.value.prazo.horas,
               hora: form.value.prazo.hora,
               tarefa: form.value.prazo.tarefa,
+              lembretes: form.value.prazo.lembretes.filter(
+                l => String(l.tarefa || '').trim() && Number(l.dias) > 0
+              ),
             }
           : null,
       },
@@ -287,6 +318,66 @@ const sections = [
                   Tarefas, no Meu Painel e na agenda dele. Quando o cartão sai
                   desta coluna, o compromisso recebe baixa sozinho.
                 </p>
+              </div>
+
+              <!-- 🔔 Lembretes em sequência (11/11 tarde) -->
+              <div
+                v-if="form.prazo.modo && form.prazo.tarefa.trim()"
+                class="mt-4"
+              >
+                <p class="text-xs font-medium text-n-slate-11 mb-1">
+                  {{ LEMBRETE_TXT.title }}
+                </p>
+                <p class="text-xs text-n-slate-10 mb-2 leading-relaxed">
+                  {{ LEMBRETE_TXT.hint }}
+                </p>
+                <div
+                  v-for="(lembrete, index) in form.prazo.lembretes"
+                  :key="index"
+                  class="mb-3"
+                >
+                  <div class="flex items-center gap-2 mb-1.5">
+                    <span
+                      class="text-xs font-semibold text-n-slate-11 flex-shrink-0 tabular-nums"
+                    >
+                      {{ index + 1 }}
+                    </span>
+                    <input
+                      v-model.number="lembrete.dias"
+                      type="number"
+                      min="1"
+                      max="90"
+                      class="!w-16 !mb-0 border border-n-weak rounded-lg px-2 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                    />
+                    <span class="text-xs text-n-slate-10 flex-shrink-0">
+                      {{ LEMBRETE_TXT.after }}
+                    </span>
+                    <button
+                      type="button"
+                      class="ml-auto text-n-slate-9 hover:text-red-500 flex-shrink-0"
+                      :title="LEMBRETE_TXT.remove"
+                      @click="removeLembrete(index)"
+                    >
+                      <span class="i-lucide-trash-2 text-sm" />
+                    </button>
+                  </div>
+                  <input
+                    v-model="lembrete.tarefa"
+                    type="text"
+                    maxlength="80"
+                    :placeholder="LEMBRETE_TXT.placeholder"
+                    class="w-full !mb-0 border border-n-weak rounded-lg px-3 py-1.5 text-sm bg-n-solid-2 text-n-slate-12"
+                  />
+                </div>
+                <button
+                  v-if="form.prazo.lembretes.length < MAX_LEMBRETES"
+                  type="button"
+                  class="text-xs font-medium text-n-slate-11 hover:text-n-slate-12 inline-flex items-center gap-1"
+                  @click="addLembrete"
+                >
+                  <span class="i-lucide-plus text-xs" />
+                  {{ LEMBRETE_TXT.add }}
+                </button>
               </div>
             </div>
             <div class="border-t border-n-weak" />

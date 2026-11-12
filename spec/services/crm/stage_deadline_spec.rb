@@ -77,4 +77,76 @@ RSpec.describe Crm::StageDeadline do
     Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: a_fazer)
     expect(account.tasks.where("title LIKE '%Montar e enviar o orçamento'").count).to eq(1)
   end
+
+  # 🔔 11/11 (tarde): fila de lembretes — cada baixa faz nascer o próximo
+  describe 'lembretes em sequência' do
+    let(:acompanhar) do
+      Crm::Stage.create!(pipeline: pipeline, name: 'Orçamento Enviado (com lembretes)', position: 3,
+                         settings: { 'task_owner_id' => admin.id,
+                                     'prazo' => { 'modo' => 'dia_util', 'hora' => '09:00', 'tarefa' => 'Confirmar se recebeu o orçamento',
+                                                  'lembretes' => [{ 'dias' => 2, 'tarefa' => 'Ligar: o que achou do orçamento?' },
+                                                                  { 'dias' => 5, 'tarefa' => 'Retomar a conversa' }] } })
+    end
+
+    it 'limpa a fila que vem da tela: só linhas completas, no máximo 6, e só quando há o primeiro compromisso', :aggregate_failures do
+      fila = [{ 'dias' => '2', 'tarefa' => '  Ligar   para o cliente ' }, { 'dias' => 0, 'tarefa' => 'sem dias' },
+              { 'dias' => 3, 'tarefa' => '' }, { 'dias' => 400, 'tarefa' => 'Muito longe' }]
+      limpo = described_class.sanitize('modo' => 'horas', 'horas' => 24, 'tarefa' => 'Confirmar', 'lembretes' => fila)
+      expect(limpo['lembretes']).to eq([{ 'dias' => 2, 'tarefa' => 'Ligar para o cliente' }, { 'dias' => 90, 'tarefa' => 'Muito longe' }])
+
+      muitos = Array.new(9) { |i| { 'dias' => i + 1, 'tarefa' => "Passo #{i + 1}" } }
+      expect(described_class.sanitize('modo' => 'horas', 'horas' => 24, 'tarefa' => 'Confirmar', 'lembretes' => muitos)['lembretes'].size).to eq(6)
+      expect(described_class.sanitize('modo' => 'horas', 'horas' => 24, 'lembretes' => fila)).not_to have_key('lembretes')
+    end
+
+    it 'o lembrete vence N dias depois, em dia útil, na hora da coluna', :aggregate_failures do
+      cfg = described_class.config(acompanhar)
+      expect(described_class.reminder_due_at(cfg, 2, tz.local(2026, 11, 10, 16, 0))).to eq(tz.local(2026, 11, 12, 9, 0)) # terça → quinta
+      expect(described_class.reminder_due_at(cfg, 2, tz.local(2026, 11, 12, 16, 0))).to eq(tz.local(2026, 11, 16, 9, 0)) # quinta → sábado → segunda
+      expect(described_class.reminder_due_at({ 'modo' => 'horas' }, 1, tz.local(2026, 11, 10, 16, 0))).to eq(tz.local(2026, 11, 11, 9, 0))
+    end
+
+    it 'cada baixa faz nascer o próximo lembrete; no fim da fila não nasce mais nada', :aggregate_failures do
+      travel_to(tz.local(2026, 11, 10, 15, 0)) do # terça
+        card = Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: acompanhar)
+        primeiro = account.tasks.sole
+        expect(primeiro.title).to eq('⏰ Ivan Coral — Confirmar se recebeu o orçamento')
+
+        primeiro.update!(status: :done)
+        segundo = described_class.open_tasks(account, acompanhar.id, card.id).sole
+        expect(segundo.title).to eq('⏰ Ivan Coral — Ligar: o que achou do orçamento?')
+        expect(segundo.due_at).to eq(tz.local(2026, 11, 12, 9, 0))
+        expect(segundo.assignee).to eq(admin)
+        expect(segundo.comments.last['text']).to start_with('Lembrete 1 de 2')
+
+        segundo.update!(status: :done)
+        terceiro = described_class.open_tasks(account, acompanhar.id, card.id).sole
+        expect(terceiro.title).to eq('⏰ Ivan Coral — Retomar a conversa')
+        expect(terceiro.due_at).to eq(tz.local(2026, 11, 16, 9, 0)) # terça + 5 = domingo → segunda
+
+        terceiro.update!(status: :done)
+        expect(described_class.open_tasks(account, acompanhar.id, card.id)).to be_empty
+        expect(account.tasks.count).to eq(3)
+      end
+    end
+
+    it 'o cartão saiu da coluna: a baixa automática não puxa lembrete; baixa depois de sair também não', :aggregate_failures do
+      card = Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: acompanhar)
+      primeiro = account.tasks.sole
+
+      card.update!(stage: novos)
+      expect(primeiro.reload).to be_done
+      expect(account.tasks.count).to eq(1)
+
+      primeiro.update!(status: :todo)
+      primeiro.update!(status: :done)
+      expect(account.tasks.count).to eq(1)
+    end
+
+    it 'tarefa comum (sem marca de etapa) não puxa lembrete' do
+      Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: novos)
+      solta = account.tasks.create!(title: 'Ligar para o fornecedor', creator: admin, assignee: admin)
+      expect { solta.update!(status: :done) }.not_to(change { account.tasks.count })
+    end
+  end
 end

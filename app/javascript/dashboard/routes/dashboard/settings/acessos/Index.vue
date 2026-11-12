@@ -62,6 +62,109 @@ const users = computed(() =>
   })
 );
 
+// ══ 🧭 0. O QUE CADA ADMINISTRADOR VÊ (11/11 · só o DONO da conta) ══
+// O dono deixa outro administrador só com o essencial e libera aos poucos.
+const souDono = computed(() =>
+  (data.value?.owner_ids || []).includes(Number(store.getters.getCurrentUserID))
+);
+const adminsDaTriagem = computed(() =>
+  users.value.filter(u => u.admin && !u.owner)
+);
+const areas = computed(() =>
+  catalog.value.map(n => ({
+    key: n.key,
+    label: n.label,
+    filhos: (n.children || []).map(c => ({ key: c.key, label: c.label })),
+  }))
+);
+// 11/11 (pedido do Guilherme): a Central do cliente ('pacientes') entra no
+// essencial — quem vende precisa abrir a página do cliente
+// textos do bloco da triagem (fora do template, como pede o eslint do projeto)
+const TRIAGEM_TXT = {
+  limitado: 'vê só o que você liberou',
+  tudo: 'vê tudo',
+  liberarTudo: 'Liberar tudo',
+  essencial: 'Mostrar só o essencial',
+  dentroDe: 'Dentro de',
+  dicaAparece: 'Aparece para a pessoa. Clique para esconder.',
+  dicaEscondido: 'Escondido. Clique para liberar.',
+};
+const TRIAGEM_PADRAO = [
+  'inicio',
+  'conversas',
+  'crm',
+  'tarefas',
+  'agenda',
+  'pacientes',
+];
+// dentro das áreas liberadas, o que NÃO é do dia a dia começa escondido
+const TRIAGEM_ESCONDE = [
+  'crm.funis',
+  'crm.campanhas',
+  'crm.jornada',
+  'crm.formularios',
+  'crm.fontes',
+  'agenda.configuracao',
+];
+const salvarTriagem = async (user, body, okMessage) => {
+  isSaving.value = true;
+  try {
+    const { data: payload } = await CrmAPI.updateAdminLimits({
+      userId: user.user_id,
+      ...body,
+    });
+    apply(payload);
+    if (okMessage) useAlert(okMessage);
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui salvar.');
+  } finally {
+    isSaving.value = false;
+  }
+};
+const chavesDoCatalogo = computed(() =>
+  areas.value.flatMap(a => [a.key, ...a.filhos.map(f => f.key)])
+);
+const ligarTriagem = user =>
+  salvarTriagem(
+    user,
+    {
+      liberados: TRIAGEM_PADRAO.filter(k => chavesDoCatalogo.value.includes(k)),
+      escondidos: TRIAGEM_ESCONDE.filter(k =>
+        chavesDoCatalogo.value.includes(k)
+      ),
+    },
+    `${String(user.name || '').split(' ')[0]} agora vê só o essencial.`
+  );
+const liberarTudo = user =>
+  salvarTriagem(
+    user,
+    { liberarTudo: true },
+    `${String(user.name || '').split(' ')[0]} voltou a ver tudo.`
+  );
+const alternarArea = (user, key) => {
+  const set = new Set(user.liberados || []);
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+  salvarTriagem(user, {
+    liberados: [...set],
+    escondidos: user.escondidos || [],
+  });
+};
+const areaLiberada = (user, key) => (user.liberados || []).includes(key);
+// item de dentro de uma área liberada: aparece, a não ser que esteja escondido
+const filhoVisivel = (user, key) => !(user.escondidos || []).includes(key);
+const alternarFilho = (user, key) => {
+  const set = new Set(user.escondidos || []);
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+  salvarTriagem(user, {
+    liberados: user.liberados || [],
+    escondidos: [...set],
+  });
+};
+const areasComFilhos = user =>
+  areas.value.filter(a => a.filhos.length && areaLiberada(user, a.key));
+
 const roleById = id => roles.value.find(r => String(r.id) === String(id));
 const peopleOfRole = id =>
   users.value.filter(u => !u.admin && String(u.role_id) === String(id));
@@ -300,6 +403,115 @@ const applyRoleAsOwn = role => {
     <SkeletonScreen v-if="isLoading" variant="dashboard" />
 
     <template v-else-if="data">
+      <!-- ══ 🧭 0. O QUE CADA ADMINISTRADOR VÊ (só o dono da conta) ══ -->
+      <CvBloco
+        v-if="souDono && adminsDaTriagem.length"
+        titulo="O que cada administrador vê"
+        subtitulo="Você é o dono da conta. Deixe outro administrador só com o essencial e vá liberando aos poucos: clique numa área para mostrar ou esconder."
+        tom="dia"
+        icon="i-lucide-eye"
+      >
+        <div class="cvg-lista">
+          <div
+            v-for="user in adminsDaTriagem"
+            :key="`tri-${user.user_id}`"
+            class="cv-triagem-linha"
+          >
+            <div class="flex items-center gap-2 flex-wrap">
+              <b>{{ user.name }}</b>
+              <span v-if="user.liberados" class="cvg-chip cvg-chip--apoio">
+                <span class="i-lucide-eye-off text-xs" />
+                {{ TRIAGEM_TXT.limitado }}
+              </span>
+              <span v-else class="cvg-chip">
+                <span class="i-lucide-eye text-xs" /> {{ TRIAGEM_TXT.tudo }}
+              </span>
+              <span class="flex-1" />
+              <button
+                v-if="user.liberados"
+                type="button"
+                class="cvg-btn cvg-btn--sm"
+                :disabled="isSaving"
+                @click="liberarTudo(user)"
+              >
+                <span class="i-lucide-unlock text-sm" />
+                {{ TRIAGEM_TXT.liberarTudo }}
+              </button>
+              <button
+                v-else
+                type="button"
+                class="cvg-btn cvg-btn--principal cvg-btn--sm"
+                :disabled="isSaving"
+                @click="ligarTriagem(user)"
+              >
+                <span class="i-lucide-filter text-sm" />
+                {{ TRIAGEM_TXT.essencial }}
+              </button>
+            </div>
+            <div v-if="user.liberados" class="cv-triagem-areas">
+              <button
+                v-for="area in areas"
+                :key="`tri-${user.user_id}-${area.key}`"
+                type="button"
+                class="cv-triagem-area"
+                :class="
+                  areaLiberada(user, area.key) ? 'cv-triagem-area--on' : ''
+                "
+                :aria-pressed="areaLiberada(user, area.key) ? 'true' : 'false'"
+                :disabled="isSaving"
+                :title="
+                  areaLiberada(user, area.key)
+                    ? TRIAGEM_TXT.dicaAparece
+                    : TRIAGEM_TXT.dicaEscondido
+                "
+                @click="alternarArea(user, area.key)"
+              >
+                <span
+                  :class="
+                    areaLiberada(user, area.key)
+                      ? 'i-lucide-check'
+                      : 'i-lucide-plus'
+                  "
+                  class="text-xs"
+                />
+                {{ area.label }}
+              </button>
+            </div>
+            <div
+              v-for="area in areasComFilhos(user)"
+              :key="`trif-${user.user_id}-${area.key}`"
+              class="cv-triagem-dentro"
+            >
+              <span class="cv-triagem-dentro-titulo">
+                {{ TRIAGEM_TXT.dentroDe }} {{ area.label }}
+              </span>
+              <button
+                v-for="filho in area.filhos"
+                :key="`trif-${user.user_id}-${filho.key}`"
+                type="button"
+                class="cv-triagem-area cv-triagem-area--sub"
+                :class="
+                  filhoVisivel(user, filho.key) ? 'cv-triagem-area--on' : ''
+                "
+                :aria-pressed="filhoVisivel(user, filho.key) ? 'true' : 'false'"
+                :disabled="isSaving"
+                @click="alternarFilho(user, filho.key)"
+              >
+                <span
+                  :class="
+                    filhoVisivel(user, filho.key)
+                      ? 'i-lucide-check'
+                      : 'i-lucide-plus'
+                  "
+                  class="text-xs"
+                />
+                {{ filho.label }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </CvBloco>
+
       <!-- ══ 1. PAPÉIS (60%: a cor do dia) ══ -->
       <CvBloco
         titulo="Papéis"
@@ -818,6 +1030,70 @@ const applyRoleAsOwn = role => {
 </template>
 
 <style lang="scss">
+/* 🧭 11/11: o que cada administrador vê — linha da pessoa + áreas de clicar (retas, sem cor cheia) */
+.cv-page .cv-triagem-linha {
+  padding: 14px 4px;
+  border-bottom: 1px solid var(--g-linha, rgb(127 127 127 / 0.18));
+}
+.cv-page .cv-triagem-linha:last-child {
+  border-bottom: 0;
+}
+.cv-page .cv-triagem-areas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cv-page .cv-triagem-area {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px dashed rgb(127 127 127 / 0.45);
+  color: inherit;
+  opacity: 0.6;
+  background: transparent;
+  transition:
+    opacity 0.15s,
+    background 0.15s,
+    border-color 0.15s;
+}
+.cv-page .cv-triagem-area:hover {
+  opacity: 0.9;
+}
+.cv-page .cv-triagem-area--on {
+  opacity: 1;
+  border: 1px solid rgb(var(--cv-rgb) / 0.55);
+  background: rgb(var(--cv-rgb) / 0.14);
+}
+.cv-page .cv-triagem-area:disabled {
+  cursor: progress;
+}
+.cv-page .cv-triagem-dentro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid rgb(var(--cv-rgb) / 0.35);
+}
+.cv-page .cv-triagem-dentro-titulo {
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.7;
+  margin-right: 4px;
+}
+.cv-page .cv-triagem-area--sub {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
 /* 🔐 Acessos e papéis — linha da lista de pessoas (guia arejado):
    quem · papel · resumo · ação */
 .cv-page .cv-acessos-row {

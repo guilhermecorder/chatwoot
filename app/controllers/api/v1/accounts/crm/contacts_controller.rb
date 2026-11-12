@@ -536,6 +536,8 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       procedure_of_interest: c.procedure_of_interest,
       notes: c.notes,
       labels: @labels_by_contact ? @labels_by_contact[contact.id] : contact.label_list,
+      # 📝 11/11: resumo escrito do cliente (o que ele contou: conta, consumo que vai aumentar…)
+      client_summary: Crm::ClientSummary.lines(contact, fields: client_summary_fields),
       # atribuição de anúncio é visão de gestor — agente tem painel simples
       meta_ads: Current.account_user&.administrator? ? contact.additional_attributes&.[]('meta_ads') : nil,
       last_activity_at: contact.last_activity_at,
@@ -544,6 +546,11 @@ class Api::V1::Accounts::Crm::ContactsController < Api::V1::Accounts::BaseContro
       last_conversation: last_conv_data,
       appointment_kind: @kind_by_contact&.[](contact.id)
     }
+  end
+
+  # campos do resumo do cliente desta conta (uma leitura por pedido)
+  def client_summary_fields
+    @client_summary_fields ||= Crm::ClientSummary.fields(Current.account)
   end
 
   # prazo da coluna (uma leitura por coluna, não por cartão)

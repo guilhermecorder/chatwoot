@@ -1,0 +1,40 @@
+name: Gerador de PDF da LIFE
+
+# Constrói a imagem do gerador de PDF da proposta (docker/life-proposta). Só roda quando pedido.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Etiqueta curta (7 caracteres)
+        id: etiqueta
+        run: echo "curta=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: docker/life-proposta
+          file: docker/life-proposta/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/guilhermecorder/life-proposta-pdf:latest
+            ghcr.io/guilhermecorder/life-proposta-pdf:${{ steps.etiqueta.outputs.curta }}

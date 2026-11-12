@@ -232,10 +232,11 @@ crm_voice_unresponsive_leads_job:
   class: 'Crm::VoiceAgent::UnresponsiveLeadsJob'
   queue: low
 
-# 🔄 08/11 (LIFE): leads novos dos formulários do Meta a cada 5 min (garantia
-# além do webhook; o lead recebe a boas-vindas no WhatsApp na hora)
+# 🔄 08/11 (LIFE): leads novos dos formulários do Meta (garantia além do
+# webhook; o lead recebe a boas-vindas no WhatsApp na hora). 11/11: de 5 em
+# 5 min passou para TODO minuto — o Guilherme quer a mensagem quase na hora.
 crm_meta_lead_poll_job:
-  cron: '*/5 * * * *'
+  cron: '* * * * *'
   class: 'Crm::MetaLeadPollJob'
   queue: low
 
@@ -314,3 +315,11 @@ crm_segment_drip_job:
   cron: '*/2 * * * *'
   class: 'Crm::SegmentDripJob'
   queue: scheduled_jobs
+
+# 🔑 12/11 (LIFE): de hora em hora renova a sessão da Bluesun do Gerador de
+# proposta antes de vencer (cada renovação traz chave nova de 7 dias) e abre
+# tarefa urgente para o administrador se a sessão cair ou a chave estiver no fim
+crm_kit_quote_keepalive_job:
+  cron: '15 * * * *'
+  class: 'Crm::KitQuoteKeepaliveJob'
+  queue: low

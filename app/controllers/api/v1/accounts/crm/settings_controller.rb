@@ -68,7 +68,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # Rodada 2: ler o domínio público = nó "Domínio público" da árvore (só admin)
   before_action -> { require_access('configuracoes.dominio', :view) }, only: [:public_domain]
   # conceder acesso NUNCA é delegável (evita escalada de privilégio): só admin
-  before_action :require_administrator!, only: %i[update_agent_grants update_agent_access update_access_roles access_admin update_company]
+  before_action :require_administrator!, only: %i[update_agent_grants update_agent_access update_access_roles access_admin update_company
+                                                         update_admin_limits]
 
   # 🔐 Rodada 2 (achados #295/#337): a MESMA rota serve admin e equipe, mas
   # quem não tem a área "settings" recebe o JSON enxuto — sem Roteiro, prompts,
@@ -180,6 +181,36 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
     crm_settings.update!(agent_permissions: perms)
     render json: Cevico::Access.admin_payload(Current.account)
+  end
+
+  # 🧭 POST update_admin_limits — TRIAGEM de um administrador (só o DONO da conta).
+  # body: { user_id:, liberados: ['inicio', 'crm', …] }  → a pessoa só vê isso
+  #       { user_id:, liberar_tudo: true }               → volta a ver tudo
+  def update_admin_limits # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return render json: { error: 'Só o dono da conta define o que os administradores veem.' }, status: :forbidden unless cevico_access.owner?
+
+    user_id = params[:user_id].to_s
+    target = Current.account.account_users.find_by(user_id: user_id)
+    return render json: { error: 'Essa pessoa não é administradora desta empresa.' }, status: :unprocessable_entity unless target&.administrator?
+
+    crm_settings.with_lock do
+      perms = (crm_settings.agent_permissions || {}).deep_dup
+      if Cevico::Access.owner_ids(perms).include?(user_id)
+        render json: { error: 'O dono da conta sempre vê tudo.' }, status: :unprocessable_entity
+        next
+      end
+      limits = (perms['admin_limits'] || {}).to_h
+      if ActiveModel::Type::Boolean.new.cast(params[:liberar_tudo])
+        limits.delete(user_id)
+      else
+        clean = ->(list) { Array(list).map(&:to_s).select { |k| Cevico::AccessCatalog.exist?(k) }.uniq }
+        limits[user_id] = { 'liberados' => clean.call(params[:liberados]), 'escondidos' => clean.call(params[:escondidos]),
+                            'por' => Current.user.id, 'em' => Time.current.iso8601 }
+      end
+      perms['admin_limits'] = limits
+      crm_settings.update!(agent_permissions: perms)
+    end
+    render json: Cevico::Access.admin_payload(Current.account) unless performed?
   end
 
   # POST update_access_roles — a lista inteira de papéis da empresa.

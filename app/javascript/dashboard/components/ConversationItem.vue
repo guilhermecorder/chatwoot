@@ -10,6 +10,7 @@ import ConversationCardExpanded from 'dashboard/components-next/Conversation/Con
 import { useAlert } from 'dashboard/composables';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
+import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
 
 const props = defineProps({
   source: { type: Object, required: true },
@@ -20,6 +21,8 @@ const props = defineProps({
   showAssignee: { type: Boolean, default: false },
   showExpanded: { type: Boolean, default: false },
 });
+// 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
+const { openSpaceLabel } = useCevicoSpaceName();
 
 const router = useRouter();
 const store = useStore();
@@ -144,7 +147,7 @@ const cevicoMenu = () => {
   const agents = assignableAgents();
   const items = [
     { label: 'Abrir conversa', icon: 'i-lucide-message-circle', hidden: isActiveChat.value, action: () => router.push({ path: conversationPath.value }) },
-    { label: 'Abrir o Espaço do Paciente', icon: 'i-lucide-user-round', hidden: !senderId.value, action: openPatientSpace },
+    { label: openSpaceLabel.value, icon: 'i-lucide-user-round', hidden: !senderId.value, action: openPatientSpace },
     { separator: true },
     { label: 'Marcar como resolvida', icon: 'i-lucide-check-check', hidden: status === 'resolved', action: () => updateConversationStatus(chat.id, 'resolved') },
     { label: 'Reabrir', icon: 'i-lucide-rotate-ccw', hidden: status === 'open', action: () => updateConversationStatus(chat.id, 'open') },

@@ -24,12 +24,33 @@ const onboardingPath = step =>
 //     numa ótica some para todo mundo)
 //   - atendente: fail-closed — espera `crm/fetchSettings` para decidir
 //   - rota sem nó no mapa: segue como sempre foi
+// 🧭 11/11: administrador em TRIAGEM (o dono limitou o que ele vê) — o navegador
+// lembra disso para a primeira navegação também esperar as settings
+const ADMIN_LIMITED_KEY = 'cevico_admin_triagem';
+const rememberAdminTriage = () => {
+  const access = store.getters['crm/getAccess'];
+  if (!access?.me) return;
+  try {
+    if (access.limited) localStorage.setItem(ADMIN_LIMITED_KEY, '1');
+    else localStorage.removeItem(ADMIN_LIMITED_KEY);
+  } catch (e) {
+    /* sem espaço */
+  }
+};
+const adminInTriage = () => {
+  try {
+    return localStorage.getItem(ADMIN_LIMITED_KEY) === '1';
+  } catch (e) {
+    return false;
+  }
+};
 const cevicoRouteAllowed = async (to, isAdminRole) => {
+  rememberAdminTriage();
   if (!routeNodesFor(to.name).length) return true;
   let me = store.getters['crm/getAccess']?.me;
   if (!me) {
-    // admin na primeira navegação: não espera, tem tudo mesmo
-    if (isAdminRole) return true;
+    // admin na primeira navegação: não espera, tem tudo mesmo (menos em triagem)
+    if (isAdminRole && !adminInTriage()) return true;
     // atendente por URL direta: espera as settings para decidir
     try {
       const settings = await store.dispatch('crm/fetchSettings');
