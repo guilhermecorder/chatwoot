@@ -1,4 +1,4 @@
-import { computed, ref, unref, watch } from 'vue';
+import { computed, onUnmounted, ref, unref, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
@@ -19,12 +19,13 @@ export function useCevicoProposal() {
   const { canView } = useCevicoAccess();
 
   const canMakeProposal = computed(() => canView('crm.cotador'));
-  const openProposal = contactId => {
+  // { auto: true } (12/11): abre já fazendo o orçamento sozinho (Gerador → "Orçamento automático")
+  const openProposal = (contactId, { auto = false } = {}) => {
     if (!contactId) return;
     router.push({
       name: 'crm_cotador',
       params: { accountId: route.params.accountId },
-      query: { contact: contactId },
+      query: auto ? { contact: contactId, auto: '1' } : { contact: contactId },
     });
   };
 
@@ -73,10 +74,24 @@ export function useProposalReady(contactId) {
   watch(idOf, check, { immediate: true });
   watch(canMakeProposal, check);
 
+  // 12/11: a conta chegou com a conversa aberta e o cadeado só saía no clique. Travado, confere de
+  // novo a cada 20 s (com a aba à vista) e quando a janela volta ao foco; liberado, para de conferir.
+  const RECHECK_MS = 20000;
+  const recheckIfLocked = () => {
+    if (!ready.value && document.visibilityState === 'visible') check();
+  };
+  const timer = setInterval(recheckIfLocked, RECHECK_MS);
+  window.addEventListener('focus', recheckIfLocked);
+  onUnmounted(() => {
+    clearInterval(timer);
+    window.removeEventListener('focus', recheckIfLocked);
+  });
+
   const openWhenReady = async () => {
     const id = idOf();
     if (ready.value || (await check())) {
-      openProposal(id);
+      // na conversa o botão já faz o orçamento sozinho; você confere e envia (12/11)
+      openProposal(id, { auto: true });
     } else {
       useAlert(waiting.value);
     }

@@ -19,14 +19,14 @@ RSpec.describe Crm::KitQuote::Delivery do
     end
   end
 
-  it 'com a janela aberta manda a proposta, o resumo e a pergunta de fechamento, e marca como enviada', :aggregate_failures do
+  it 'janela aberta: manda a proposta (o resumo fica para o follow-up) e a pergunta de fechamento; marca enviada', :aggregate_failures do
     create(:message, conversation: conversation, account: account, inbox: inbox, message_type: :incoming, content: 'pode mandar')
 
     expect(described_class.new(quote).call).to eq(:enviado)
 
     sent = conversation.messages.outgoing.order(:id).to_a
     expect(sent.first.content).to include('Pronto, Ana!')
-    expect(sent.flat_map { |m| m.attachments.map { |a| a.file.filename.to_s } }).to eq(%w[Proposta-Ana.pdf Resumo-Ana.jpg])
+    expect(sent.flat_map { |m| m.attachments.map { |a| a.file.filename.to_s } }).to eq(%w[Proposta-Ana.pdf])
     expect(sent.last.content).to include('25 a 40 dias', 'É interessante para você fazer esse investimento agora?')
     expect(quote.reload).to be_sent
     expect(contact.reload.label_list).to include('orcamento-enviado')

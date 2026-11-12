@@ -2,7 +2,10 @@
 # ou os dados (pedido do Guilherme, 11/11/2026). Vale um dos dois sinais:
 #   1. a conta de luz está anotada no resumo do cliente (Crm::ClientSummary, campo 'conta');
 #   2. o cartão do cliente já chegou na coluna do orçamento — a primeira coluna do funil que tem
-#      compromisso (Crm::StageDeadline; na LIFE, "Orçamento a fazer") — ou passou dela.
+#      compromisso (Crm::StageDeadline; na LIFE, "Orçamento a fazer") — ou passou dela;
+#   3. o atendente já abriu a tarefa "Orçamento: conta recebida" para este cliente (12/11: a pessoa mandou
+#      a foto da conta, a tarefa #28 abriu e o botão seguiu travado — a ficha não tinha o valor e o cartão
+#      não tinha mudado de coluna). Mesmo sinal da Jornada do orçamento (Crm::QuoteJourney::BILL_TASK).
 class Crm::KitQuote::Ready
   BILL_FIELD = 'conta'.freeze
   WAITING = 'Libera quando o cliente enviar a conta de luz ou os dados.'.freeze
@@ -14,7 +17,7 @@ class Crm::KitQuote::Ready
 
   # { 'liberado' => true, 'motivo' => 'Conta de luz anotada: R$ 300' } ou { 'liberado' => false, 'falta' => '...' }
   def call
-    reason = @contact && (bill_reason || stage_reason)
+    reason = @contact && (bill_reason || task_reason || stage_reason)
     reason ? { 'liberado' => true, 'motivo' => reason } : { 'liberado' => false, 'falta' => WAITING }
   end
 
@@ -23,6 +26,12 @@ class Crm::KitQuote::Ready
   def bill_reason
     value = (@contact.additional_attributes || {}).dig(Crm::ClientSummary::ATTR_KEY, BILL_FIELD, 'valor')
     "Conta de luz anotada: #{value}" if value.present?
+  end
+
+  def task_reason
+    task = @account.tasks.where(contact_id: @contact.id).where('tasks.title LIKE ?', "%#{Crm::QuoteJourney::BILL_TASK}%")
+                   .order(id: :desc).first
+    "Conta recebida (tarefa ##{task.id})" if task
   end
 
   def stage_reason

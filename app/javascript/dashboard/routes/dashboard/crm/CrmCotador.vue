@@ -569,6 +569,119 @@ const gerar = async () => {
   }
 };
 
+// ── ⚡ orçamento em 1 clique (12/11, pedido do Guilherme): "aperto o botão, já gera o orçamento,
+// ele me mostra se deu certo, eu valido e ele envia com a mensagem que o agente já enviaria".
+// Faz na sequência o que o vendedor faria: puxa os dados do cliente → cota → preço (lucro 25%)
+// → proposta em PDF. Para onde faltar alguma coisa e explica o quê; "Continuar" retoma.
+// NÃO envia sozinho: o envio é o botão "Enviar pelo WhatsApp" do cartão, depois de conferir.
+const AUTO_PASSOS = [
+  { id: 'dados', nome: 'Dados do cliente (conta de luz, telhado, cidade)' },
+  { id: 'cotacao', nome: 'Cotação nos fornecedores' },
+  { id: 'preco', nome: 'Preço com lucro de 25%' },
+  { id: 'proposta', nome: 'Proposta em PDF e resumo' },
+];
+const auto = reactive({
+  ativo: false,
+  rodando: false,
+  passo: 0,
+  erro: '',
+  orcamento: null,
+});
+const autoPedido = ref(route.query.auto === '1');
+const esperarPreco = async () => {
+  const limite = Date.now() + 60000;
+  while (dreCarregando.value && Date.now() < limite) {
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise(r => {
+      setTimeout(r, 250);
+    });
+  }
+};
+const pararAuto = (passo, erro) => {
+  auto.passo = passo;
+  auto.erro = erro;
+  auto.rodando = false;
+};
+const fazerSozinho = async () => {
+  if (auto.rodando || !cliente.value || !podeCotar.value) return;
+  auto.ativo = true;
+  auto.rodando = true;
+  auto.erro = '';
+  auto.orcamento = null;
+  document
+    .getElementById('cot-auto')
+    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // 1. dados: na 1ª vez puxa do resumo; no "Continuar" respeita o que foi digitado na tela
+  auto.passo = 0;
+  if (!parseMoney(contaHoje.value)) preencherDoCliente();
+  if (!nomeCliente.value.trim() && cliente.value.name) {
+    nomeCliente.value = cliente.value.name;
+  }
+  if (!parseMoney(contaHoje.value)) {
+    pararAuto(
+      0,
+      'O resumo deste cliente ainda não tem o valor da conta de luz. Olhe a foto da conta na conversa, digite o valor aqui e aperte Continuar.'
+    );
+    return;
+  }
+  // 2. cotação (já escolhe a opção completa mais barata e calcula o preço a 25%)
+  auto.passo = 1;
+  await cotar();
+  if (!resultado.value) {
+    pararAuto(
+      1,
+      'A cotação não voltou. Confira os "Acessos dos fornecedores" e aperte Continuar.'
+    );
+    return;
+  }
+  if (!escolhida.value) {
+    pararAuto(
+      1,
+      'Nenhum fornecedor trouxe um kit completo para este consumo. Escolha uma opção na etapa 3 (ou acrescente uma cotação na mão) e aperte Continuar.'
+    );
+    return;
+  }
+  // 3. preço
+  auto.passo = 2;
+  await esperarPreco();
+  if (!dre.value) {
+    pararAuto(2, dreErro.value || 'O preço não fechou. Confira a etapa 4.');
+    return;
+  }
+  // 4. proposta
+  auto.passo = 3;
+  const antes = new Set(historico.value.map(o => o.id));
+  await gerar();
+  const novo = historico.value.find(o => !antes.has(o.id));
+  if (!novo) {
+    pararAuto(
+      3,
+      'A proposta não ficou pronta. Aperte Continuar para tentar de novo.'
+    );
+    return;
+  }
+  auto.orcamento = novo;
+  auto.passo = AUTO_PASSOS.length;
+  auto.rodando = false;
+};
+// depois de enviar (ou marcar), o cartão do painel mostra a situação nova
+watch(historico, lista => {
+  if (!auto.orcamento) return;
+  auto.orcamento =
+    lista.find(o => o.id === auto.orcamento.id) || auto.orcamento;
+});
+const fecharAuto = () => {
+  auto.ativo = false;
+  auto.erro = '';
+};
+// veio do botão "Gerar orçamento" da conversa (…/cotador?contact=<id>&auto=1): começa sozinho
+// assim que o cliente carrega
+watch(cliente, person => {
+  if (!person || !autoPedido.value) return;
+  autoPedido.value = false;
+  nextTick(fazerSozinho);
+});
+
 const carregar = async () => {
   try {
     const { data } = await CrmAPI.getKitQuote();
@@ -695,6 +808,17 @@ onMounted(async () => {
 onBeforeUnmount(soltarArquivos);
 // textos da tela (fora do template, como pede o eslint do projeto)
 const TXT = {
+  autoTitulo: 'Orçamento automático de',
+  autoSub:
+    'O sistema faz sozinho o que você faria: puxa os dados, cota, calcula o preço e gera a proposta. Nada vai para o cliente sem você apertar Enviar.',
+  autoFechar: 'Fechar',
+  autoContinuar: 'Continuar',
+  autoPronto:
+    'Pronto! Abra a proposta e o resumo para conferir. Estando certo, aperte "Enviar pelo WhatsApp": vai a mesma mensagem que o atendente manda, com a pergunta de fechamento, e a IA continua ligada na conversa.',
+  autoVoltar: 'Voltar para a conversa',
+  autoBotao: 'Fazer o orçamento sozinho',
+  autoDica:
+    'Puxa os dados do cliente, cota nos fornecedores, calcula o preço com 25% e gera a proposta para você conferir',
   orcamentosDesteCliente: 'Orçamentos deste cliente',
   geradoEm: 'Gerado em',
   por: 'por',
@@ -860,6 +984,108 @@ const TXT = {
           </button>
         </nav>
 
+        <!-- ⚡ orçamento em 1 clique -->
+        <section
+          v-if="auto.ativo"
+          id="cot-auto"
+          class="cot-sec cot-violet cot-auto"
+        >
+          <div class="cot-head">
+            <span class="cot-ico"><i class="i-lucide-zap" /></span>
+            <div class="min-w-0 flex-1">
+              <h2 class="cot-title text-n-slate-12">
+                {{ TXT.autoTitulo }} {{ nomeCliente }}
+              </h2>
+              <p class="cot-sub text-n-slate-11">{{ TXT.autoSub }}</p>
+            </div>
+            <button
+              type="button"
+              class="cot-ghost text-n-slate-12"
+              :disabled="auto.rodando"
+              @click="fecharAuto"
+            >
+              <span class="i-lucide-x" />
+              {{ TXT.autoFechar }}
+            </button>
+          </div>
+          <ol class="cot-auto-list">
+            <li
+              v-for="(p, i) in AUTO_PASSOS"
+              :key="p.id"
+              class="cot-auto-item"
+              :class="{
+                'is-done': i < auto.passo,
+                'is-now': i === auto.passo && auto.rodando,
+                'is-err': i === auto.passo && !!auto.erro,
+              }"
+            >
+              <span class="cot-auto-dot">
+                <span
+                  :class="
+                    i < auto.passo
+                      ? 'i-lucide-check'
+                      : i === auto.passo && auto.erro
+                        ? 'i-lucide-alert-triangle'
+                        : i === auto.passo && auto.rodando
+                          ? 'i-lucide-loader-circle animate-spin'
+                          : 'i-lucide-circle'
+                  "
+                />
+              </span>
+              <span class="text-sm text-n-slate-12">{{ p.nome }}</span>
+            </li>
+          </ol>
+          <div v-if="auto.erro" class="cot-auto-erro">
+            <p class="text-sm text-n-slate-12">{{ auto.erro }}</p>
+            <label v-if="auto.passo === 0" class="cot-field cot-auto-conta">
+              <span class="cot-lab text-n-slate-11">{{
+                TXT.contaDeHojeR
+              }}</span>
+              <input
+                v-model="contaHoje"
+                type="text"
+                inputmode="decimal"
+                :placeholder="TXT.t300"
+                class="cot-input !mb-0 text-n-slate-12"
+                @keyup.enter="fazerSozinho"
+              />
+            </label>
+            <button
+              type="button"
+              class="cot-btn2 text-n-slate-12"
+              @click="fazerSozinho"
+            >
+              <span class="i-lucide-play" />
+              {{ TXT.autoContinuar }}
+            </button>
+          </div>
+          <div v-if="auto.orcamento" class="flex flex-col gap-3">
+            <p class="text-sm font-semibold text-n-slate-12">
+              {{ TXT.autoPronto }}
+            </p>
+            <div class="cot-cards">
+              <KitQuoteCard
+                :orcamento="auto.orcamento"
+                :mostrar-cliente="false"
+                :pode-editar="podeCotar"
+                :ocupado="marcando === auto.orcamento.id"
+                @enviar="marcarEnviada"
+                @whatsapp="enviarWhatsapp"
+                @excluir="excluirOrcamento"
+              />
+            </div>
+            <button
+              v-if="auto.orcamento.enviado_em"
+              type="button"
+              class="cot-btn2 text-n-slate-12 self-start"
+              @click="router.back()"
+            >
+              <span class="i-lucide-message-circle" />
+              {{ TXT.autoVoltar }}
+            </button>
+          </div>
+        </section>
+
         <!-- 0. Orçamentos gerados (toda a conta) -->
         <section
           v-if="gerados.length || lixeira.total"
@@ -957,6 +1183,16 @@ const TXT = {
                 >
                   <span class="i-lucide-wand-sparkles" />
                   {{ TXT.preencher }}
+                </button>
+                <button
+                  type="button"
+                  class="cot-btn2 cot-btn-auto text-n-slate-12"
+                  :disabled="!podeCotar || auto.rodando"
+                  :title="TXT.autoDica"
+                  @click="fazerSozinho"
+                >
+                  <span class="i-lucide-zap" />
+                  {{ TXT.autoBotao }}
                 </button>
                 <p class="text-sm text-n-slate-11">
                   {{
@@ -2238,6 +2474,68 @@ const TXT = {
 }
 .cot-btn2:disabled {
   opacity: 0.5;
+}
+
+/* ⚡ orçamento em 1 clique */
+.cot-btn-auto {
+  --c: #7c3aed;
+  background: #7c3aed;
+  border-color: #7c3aed;
+  color: #fff;
+}
+.cot-auto-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cot-auto-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  opacity: 0.55;
+}
+.cot-auto-item.is-done,
+.cot-auto-item.is-now,
+.cot-auto-item.is-err {
+  opacity: 1;
+}
+.cot-auto-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  font-size: 15px;
+  color: #7c3aed;
+  background: color-mix(in srgb, #7c3aed 12%, transparent);
+}
+.cot-auto-item.is-done .cot-auto-dot {
+  color: #fff;
+  background: #16a34a;
+}
+.cot-auto-item.is-err .cot-auto-dot {
+  color: #fff;
+  background: #dc2626;
+}
+.cot-auto-erro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: color-mix(in srgb, #dc2626 10%, transparent);
+  border: 1px solid color-mix(in srgb, #dc2626 35%, transparent);
+}
+.cot-auto-erro p {
+  flex: 1 1 280px;
+  margin: 0;
+}
+.cot-auto-conta {
+  flex: 0 1 200px;
 }
 
 /* controle segmentado (abas e micro × string) */

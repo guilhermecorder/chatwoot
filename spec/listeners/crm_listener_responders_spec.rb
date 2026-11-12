@@ -139,6 +139,14 @@ RSpec.describe CrmListener do
       expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
     end
 
+    it 'orçamento enviado pelo botão "Enviar pelo WhatsApp" do Gerador NÃO pausa a IA (12/11)', :aggregate_failures do
+      sent = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, content: 'Pronto!',
+                              sender: human, additional_attributes: { Crm::KitQuote::Delivery::DELIVERY_STAMP => 5 })
+      fire(sent)
+      expect(conversation.reload.additional_attributes['cevico_atendente_wa']).to be_blank
+      expect(conversation.messages.where(message_type: :activity)).to be_empty
+    end
+
     it 'mensagem enviada SEM remetente (campanha/automação nativa) não pausa' do
       # (a factory sempre põe um remetente; aqui criamos direto, como as automações fazem)
       auto = conversation.messages.create!(account: account, inbox: inbox, message_type: :outgoing, content: 'formulário')

@@ -68,7 +68,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   # roteiro (1º: o Fernando apresentando a Life para quem vai receber o orçamento).
   # Mesma lista ai_config['imagens_roteiro'], arquivos .ogg/.opus/.mp3/.m4a.
   AUDIO_TOOL_NAME = 'enviar_audio'.freeze
-  # 📨 12/11 (LIFE): manda o orçamento gerado (PDF + resumo + pergunta de fechamento) quando o cliente
+  # 📨 12/11 (LIFE): manda o orçamento gerado (PDF + pergunta de fechamento; o resumo fica para o follow-up) quando o cliente
   # responde ao modelo "orçamento pronto" (Crm::KitQuote::Delivery). Só aparece se há orçamento por enviar.
   QUOTE_TOOL_NAME = 'enviar_orcamento'.freeze
   FAKE_TASK_WORDS = [
@@ -705,8 +705,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def quote_definition
     {
       name: QUOTE_TOOL_NAME,
-      description: "Envia ao cliente o ORÇAMENTO JÁ PRONTO (#{Crm::KitQuote::CardUpdate.new(pending_quote).summary_text}): o PDF da proposta, " \
-                   'a imagem do resumo e a pergunta de fechamento ("É interessante para você fazer esse investimento agora?"). ' \
+      description: "Envia ao cliente o ORÇAMENTO JÁ PRONTO (#{Crm::KitQuote::CardUpdate.new(pending_quote).summary_text}): o PDF da proposta " \
+                   'e a pergunta de fechamento ("É interessante para você fazer esse investimento agora?"). ' \
                    'Use quando o cliente pedir o orçamento ou responder à mensagem "seu orçamento está pronto" (ex.: "pode mandar"). ' \
                    'Uma vez por orçamento.',
       input_schema: { type: 'object', properties: {}, additionalProperties: false }
@@ -720,14 +720,14 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     test_conversation = @simulation && Crm::AgentSimulator.simulated?(@conversation)
     unless @live
       log_acao(QUOTE_TOOL_NAME, true, "enviaria o orçamento ##{pending_quote.id} (simulado)")
-      return { simulado: true, ok: true, mensagem: 'Em sombra nada foi enviado; ao vivo o PDF, o resumo e a pergunta de fechamento iriam agora.' }
+      return { simulado: true, ok: true, mensagem: 'Em sombra nada foi enviado; ao vivo o PDF e a pergunta de fechamento iriam agora.' }
     end
     return refuse(QUOTE_TOOL_NAME, 'Conversa de teste: o orçamento não é enviado aqui.') if test_conversation
 
     Crm::KitQuote::Delivery.new(pending_quote, agent_key: @agent_key).deliver!
     log_acao(QUOTE_TOOL_NAME, true, "enviou o orçamento ##{pending_quote.id}")
     { ok: true, enviado: true,
-      aviso: 'O orçamento JÁ FOI ENVIADO: PDF da proposta, imagem do resumo e a pergunta de fechamento "É interessante para você ' \
+      aviso: 'O orçamento JÁ FOI ENVIADO: PDF da proposta e a pergunta de fechamento "É interessante para você ' \
              'fazer esse investimento agora?". NÃO repita a pergunta nem mande outro balão agora: espere a resposta do cliente.' }
   end
 

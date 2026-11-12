@@ -564,6 +564,10 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     return false unless message.sender.is_a?(User)
 
     attrs = message.additional_attributes || {}
+    # 📄 12/11 (LIFE): o envio do orçamento pelo botão "Enviar pelo WhatsApp" é o mesmo texto que o
+    # atendente mandaria — não é a pessoa assumindo a conversa, então a IA continua ligada
+    return false if attrs[Crm::KitQuote::Delivery::DELIVERY_STAMP].present?
+
     AUTOMATED_MARKS.none? { |k| attrs[k].present? }
   end
 

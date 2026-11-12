@@ -5,7 +5,9 @@
 # `enviar_orcamento` do atendente (quando o cliente responde ao modelo "orçamento pronto").
 #
 #   Crm::KitQuote::Delivery.new(quote, sender: user).call
-#     → :enviado     janela de 24 h aberta: proposta (PDF) + resumo (JPG) + pergunta de fechamento; marca como enviada
+#     → :enviado     janela de 24 h aberta: proposta (PDF) + pergunta de fechamento; marca como enviada
+#                    (o RESUMO em imagem NÃO vai no 1º envio — "é uma arma para usar depois", Guilherme 12/11:
+#                    sai no follow-up de 3 dias pelo [resumo])
 #     → :aguardando  janela fechada: manda o modelo life_orcamento_pronto ("Pode mandar"); o atendente envia quando ele responder
 #     → :sem_conversa / :sem_arquivos  (nada sai; a tela explica)
 class Crm::KitQuote::Delivery
@@ -42,7 +44,6 @@ class Crm::KitQuote::Delivery
     first = @quote.contact&.name.to_s.split.first
     say!("Pronto#{", #{first}" if first.present?}! Aqui está o seu orçamento de energia solar:")
     attach_message!(proposal_file, :file)
-    attach_message!(summary_file, :image) if summary_file
     say!(self.class.closing_text(@quote.contact&.name))
     mark_sent!
     :enviado
@@ -60,10 +61,6 @@ class Crm::KitQuote::Delivery
 
   def proposal_file
     @proposal_file ||= files.find { |f| f.content_type == 'application/pdf' && !f.filename.to_s.match?(/justific/i) }
-  end
-
-  def summary_file
-    @summary_file ||= files.find { |f| f.content_type.to_s.start_with?('image/') }
   end
 
   def files
