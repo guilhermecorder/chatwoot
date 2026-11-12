@@ -4,7 +4,7 @@
 # Nó de acesso: crm.cotador (ver = abrir a tela, ver os orçamentos guardados e saber se o botão
 # da conversa libera; editar = cotar, gerar e marcar como enviada). Mexer nos acessos dos
 # fornecedores é só do administrador.
-class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseController
+class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   before_action :require_administrator!, only: [:update_access]
 
   NO_RENDERER = 'O gerador de PDF ainda não está ligado neste servidor. Os números do orçamento estão prontos.'.freeze
@@ -58,11 +58,31 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     render json: Crm::KitQuote::Ready.new(Current.account, contact_from(params[:contact_id])).call
   end
 
-  # 📚 Os orçamentos já gerados para este cliente, do mais novo ao mais antigo.
+  # 📚 Os orçamentos já gerados, do mais novo ao mais antigo: os deste cliente (contact_id) ou,
+  # sem cliente, os da conta inteira (caixas "Orçamentos gerados" no topo do gerador).
   def history
-    contact = contact_from(params[:contact_id])
-    list = contact ? Crm::Quote.where(account: Current.account, contact: contact).recent.includes(:user).with_attached_files.limit(20) : []
+    scope = Crm::Quote.where(account: Current.account)
+    if params[:contact_id].present?
+      contact = contact_from(params[:contact_id])
+      return render json: { orcamentos: [] } unless contact
+
+      scope = scope.where(contact: contact)
+    end
+    list = scope.recent.includes(:user, :contact).with_attached_files.limit(params[:contact_id].present? ? 20 : 60)
     render json: { orcamentos: list.map { |quote| quote_json(quote) } }
+  end
+
+  # 🗑️ Exclui um orçamento guardado (e os PDFs dele). Quem pode: o administrador ou quem gerou.
+  def discard
+    quote = Crm::Quote.find_by(account: Current.account, id: params[:id])
+    return render json: { error: 'Orçamento não encontrado.' }, status: :not_found unless quote
+    unless Current.account_user&.administrator? || quote.user_id == Current.user.id
+      return render json: { error: 'Só o administrador ou quem gerou pode excluir este orçamento.' }, status: :forbidden
+    end
+
+    quote.files.purge_later
+    quote.destroy!
+    render json: { ok: true, id: quote.id }
   end
 
   # 🏷️ A proposta foi enviada ao cliente: marca o orçamento e põe a etiqueta `orcamento-enviado`
@@ -161,9 +181,25 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     {
       id: quote.id, criado_em: quote.created_at.iso8601, por: quote.user&.name, tipo: quote.kind, valor: quote.price.to_f,
       margem: quote.margin.to_f, lucro: quote.payload.dig('dre', 'lucro'), na_faixa: quote.payload.dig('dre', 'na_faixa'),
-      enviado_em: quote.sent_at&.iso8601,
-      arquivos: quote.files.map { |file| { nome: file.filename.to_s, tipo: file.content_type, url: url_for(file) } }
-    }
+      enviado_em: quote.sent_at&.iso8601, arquivos: quote_files(quote)
+    }.merge(quote_extra(quote))
+  end
+
+  def quote_files(quote)
+    quote.files.map { |file| { nome: file.filename.to_s, tipo: file.content_type, url: url_for(file) } }
+  end
+
+  # quem é o cliente e até quando a proposta vale (caixas "Orçamentos gerados")
+  def quote_extra(quote)
+    until_at = valid_until(quote)
+    { cliente: { id: quote.contact_id, nome: quote.contact&.name.presence || quote.payload.dig('cliente', 'nome') },
+      valida_ate: until_at.iso8601, valido: until_at.future? }
+  end
+
+  # A proposta vale N dias (Crm::KitQuote::Proposal grava 'validade_dias'; padrão 7) até o fim do dia.
+  def valid_until(quote)
+    days = quote.payload.dig('proposta', 'validade_dias').to_i
+    (quote.created_at.in_time_zone('America/Sao_Paulo') + (days.positive? ? days : 7).days).end_of_day
   end
 
   # Os PDFs, quando o gerador está ligado; senão (ou se ele falhar) o motivo, sem perder os números.

@@ -269,6 +269,44 @@ RSpec.describe 'Cotador de kits — rota do CRM', type: :request do
     end
   end
 
+  describe 'orçamentos gerados (caixas do topo) e exclusão' do
+    let(:ana) { create(:contact, account: account, name: 'Ana Souza') }
+    let(:bia) { create(:contact, account: account, name: 'Bia Lima') }
+
+    def quote(contact, created_at:, user: admin, sent_at: nil)
+      Crm::Quote.create!(account: account, contact: contact, user: user, price: 12_000, kind: 'micro', created_at: created_at, sent_at: sent_at,
+                         payload: { 'proposta' => { 'validade_dias' => 7 } })
+    end
+
+    it 'sem cliente lista os da conta toda, com o nome do cliente e a validade de 7 dias', :aggregate_failures do
+      novo = quote(ana, created_at: 1.day.ago)
+      velho = quote(bia, created_at: 10.days.ago, sent_at: 9.days.ago)
+
+      get "#{base}/history", headers: admin.create_new_auth_token, as: :json
+
+      lista = response.parsed_body['orcamentos']
+      expect(lista.pluck('id')).to eq([novo.id, velho.id])
+      expect(lista.first).to include('valido' => true, 'cliente' => { 'id' => ana.id, 'nome' => 'Ana Souza' })
+      expect(lista.last).to include('valido' => false)
+      expect(lista.last['enviado_em']).to be_present
+    end
+
+    it 'exclui o orçamento (administrador ou quem gerou) e nega para os outros', :aggregate_failures do
+      do_admin = quote(ana, created_at: 1.day.ago)
+      do_atendente = quote(bia, created_at: 1.day.ago, user: agent)
+
+      post "#{base}/discard", params: { id: do_admin.id }, headers: admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(Crm::Quote.exists?(do_admin.id)).to be(false)
+
+      post "#{base}/discard", params: { id: 0 }, headers: admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:not_found)
+
+      post "#{base}/discard", params: { id: do_atendente.id }, headers: admin.create_new_auth_token, as: :json
+      expect(Crm::Quote.exists?(do_atendente.id)).to be(false)
+    end
+  end
+
   describe 'botão "Gerar orçamento" da conversa' do
     let(:contact) { create(:contact, account: account, name: 'Ivan Coral') }
 

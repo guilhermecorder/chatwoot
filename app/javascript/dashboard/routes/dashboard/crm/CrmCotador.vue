@@ -26,6 +26,7 @@ import CrmAPI from 'dashboard/api/crm';
 import ProposalClientPicker from 'dashboard/components-next/cevico/ProposalClientPicker.vue';
 import CvTutorial from 'dashboard/components-next/cevico/CvTutorial.vue';
 import KitQuoteAccess from './components/KitQuoteAccess.vue';
+import KitQuoteCard from './components/KitQuoteCard.vue';
 import {
   parseMoney,
   formatMoney as reais,
@@ -98,6 +99,10 @@ const margemEscolhida = ref(0.25);
 // 6. os orçamentos guardados deste cliente (Crm::Quote)
 const historico = ref([]);
 const marcando = ref(0);
+// 0. todos os orçamentos gerados da conta, em caixas no topo (12/11, pedido do Guilherme)
+const gerados = ref([]);
+const aba = ref('validos');
+const pickerKey = ref(0);
 
 // 5. os documentos
 const gerando = ref(false);
@@ -117,13 +122,6 @@ const tarifaTexto = computed(() =>
 const erroDe = (e, padrao) => e?.response?.data?.error || padrao;
 
 // ── 6. orçamentos guardados ──────────────────────────────────────────────
-const dataHora = iso =>
-  new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 async function carregarHistorico() {
   const id = cliente.value?.contact_id;
   if (!id) {
@@ -137,6 +135,78 @@ async function carregarHistorico() {
     historico.value = [];
   }
 }
+const ABAS = [
+  { id: 'validos', nome: 'Valendo', filtro: o => o.valido && !o.enviado_em },
+  { id: 'enviados', nome: 'Enviados', filtro: o => !!o.enviado_em },
+  { id: 'todos', nome: 'Todos', filtro: () => true },
+];
+async function carregarGerados() {
+  try {
+    const { data } = await CrmAPI.getKitQuoteHistory();
+    gerados.value = data.orcamentos || [];
+    // abre na aba que tem alguma coisa (Valendo → Enviados → Todos)
+    if (!gerados.value.some(ABAS.find(x => x.id === aba.value).filtro)) {
+      aba.value = ABAS.find(x => gerados.value.some(x.filtro))?.id || 'todos';
+    }
+  } catch {
+    gerados.value = [];
+  }
+}
+const contagem = computed(() =>
+  Object.fromEntries(
+    ABAS.map(a => [a.id, gerados.value.filter(a.filtro).length])
+  )
+);
+// histórico em ordem (12/11): mais novos, mais antigos ou maior valor, com busca pelo nome
+const ORDENS = [
+  { id: 'novos', nome: 'Mais novos' },
+  { id: 'antigos', nome: 'Mais antigos' },
+  { id: 'valor', nome: 'Maior valor' },
+];
+const ordem = ref('novos');
+const busca = ref('');
+const semAcento = t =>
+  String(t || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+const geradosDaAba = computed(() => {
+  const termo = semAcento(busca.value.trim());
+  const lista = gerados.value
+    .filter(ABAS.find(a => a.id === aba.value).filtro)
+    .filter(o => !termo || semAcento(o.cliente?.nome).includes(termo));
+  const quando = o => new Date(o.criado_em).getTime();
+  if (ordem.value === 'antigos')
+    return lista.sort((a, b) => quando(a) - quando(b));
+  if (ordem.value === 'valor') return lista.sort((a, b) => b.valor - a.valor);
+  return lista.sort((a, b) => quando(b) - quando(a));
+});
+const trocarNasListas = (id, novo) => {
+  const troca = lista =>
+    novo
+      ? lista.map(o => (o.id === id ? { ...o, ...novo } : o))
+      : lista.filter(o => o.id !== id);
+  historico.value = troca(historico.value);
+  gerados.value = troca(gerados.value);
+};
+// abre o cliente do orçamento no gerador (o seletor relê o ?contact=)
+const abrirCliente = async orcamento => {
+  await router.replace({ query: { contact: orcamento.cliente.id } });
+  pickerKey.value += 1;
+};
+const excluirOrcamento = async orcamento => {
+  if (marcando.value) return;
+  marcando.value = orcamento.id;
+  try {
+    await CrmAPI.discardKitQuote(orcamento.id);
+    trocarNasListas(orcamento.id, null);
+    useAlert('Orçamento excluído.');
+  } catch (e) {
+    useAlert(erroDe(e, 'Não foi possível excluir o orçamento.'));
+  } finally {
+    marcando.value = 0;
+  }
+};
 // A proposta foi enviada: o cliente ganha a etiqueta "orçamento enviado", que leva o
 // cartão para a coluna e começa o acompanhamento (Crm::QuoteSent).
 const marcarEnviada = async orcamento => {
@@ -144,9 +214,7 @@ const marcarEnviada = async orcamento => {
   marcando.value = orcamento.id;
   try {
     const { data } = await CrmAPI.markKitQuoteSent(orcamento.id);
-    historico.value = historico.value.map(o =>
-      o.id === orcamento.id ? data.orcamento : o
-    );
+    trocarNasListas(orcamento.id, data.orcamento);
     useAlert('Proposta marcada como enviada ao cliente.');
   } catch (e) {
     useAlert(erroDe(e, 'Não foi possível marcar como enviada.'));
@@ -170,6 +238,46 @@ watch(cliente, person => {
   cidadeCliente.value = lido.cidade || '';
   if (lido.telhado) telhado.value = lido.telhado;
 });
+
+// botão "Preencher com os dados do cliente" (12/11): puxa de novo do resumo do cliente
+// (conta de luz, o que vai aumentar, cidade e telhado), por cima do que estiver na tela
+const lidoDoCliente = computed(() =>
+  cliente.value ? prefillFromSummary(cliente.value.summary || []) : null
+);
+const temDadosDoCliente = computed(() => {
+  const l = lidoDoCliente.value;
+  return !!(l && (l.hoje || l.acrescimo || l.cidade || l.telhado));
+});
+const preenchido = ref('');
+watch(cliente, () => {
+  preenchido.value = '';
+});
+const preencherDoCliente = () => {
+  const l = lidoDoCliente.value;
+  if (!l) return;
+  const feito = [];
+  if (cliente.value?.name) nomeCliente.value = cliente.value.name;
+  if (l.hoje) {
+    contaHoje.value = String(l.hoje);
+    feito.push(`conta de ${reais(l.hoje)}`);
+  }
+  if (l.acrescimo) {
+    acrescimos.value = [{ rotulo: l.acrescimo, valor: '' }];
+    feito.push(`vai aumentar: ${l.acrescimo}`);
+  }
+  if (l.cidade) {
+    cidadeCliente.value = l.cidade;
+    feito.push(l.cidade);
+  }
+  if (l.telhado) {
+    telhado.value = l.telhado;
+    const nome = telhados.value.find(t => t.chave === l.telhado)?.nome;
+    feito.push(`telhado ${nome ? nome.toLowerCase() : l.telhado}`);
+  }
+  preenchido.value = feito.length
+    ? `Preenchido com o resumo: ${feito.join(' · ')}.`
+    : 'O resumo deste cliente ainda não tem conta, telhado nem cidade.';
+};
 
 // ── 2. conta de luz → consumo ────────────────────────────────────────────
 const contaTotal = computed(() => billTotal(contaHoje.value, acrescimos.value));
@@ -317,6 +425,7 @@ const faltaParaGerar = computed(() => {
   if (!dre.value) return 'Escolha uma opção de kit.';
   return '';
 });
+const gerado = ref(false);
 const gerar = async () => {
   if (gerando.value || faltaParaGerar.value) return;
   gerando.value = true;
@@ -347,7 +456,10 @@ const gerar = async () => {
       : (data.arquivos || []).map(paraArquivo);
     documentos.aviso = data.aviso || (data.avisos || []).join(' ');
     documentos.valor = data.dre?.valor_projeto || 0;
-    if (data.orcamento) await carregarHistorico();
+    gerado.value = true;
+    aba.value = 'validos';
+    if (data.orcamento)
+      await Promise.all([carregarHistorico(), carregarGerados()]);
     if ((data.arquivos || []).length) {
       useAlert('Proposta e justificativa prontas.');
     }
@@ -448,7 +560,33 @@ const TUTORIAL_PASSOS = [
   },
 ];
 
+// as 5 etapas no topo: feita (verde), a da vez (laranja) e as que faltam
+const ETAPAS = [
+  { id: 'cot-cliente', nome: 'Cliente', icone: 'i-lucide-user-round' },
+  { id: 'cot-conta', nome: 'Conta de luz', icone: 'i-lucide-receipt-text' },
+  { id: 'cot-opcoes', nome: 'Cotação', icone: 'i-lucide-search' },
+  { id: 'cot-preco', nome: 'Preço', icone: 'i-lucide-calculator' },
+  { id: 'cot-proposta', nome: 'Proposta', icone: 'i-lucide-file-text' },
+];
+const feitas = computed(() => [
+  !!nomeCliente.value.trim(),
+  !!parseMoney(contaHoje.value),
+  !!resultado.value,
+  !!dre.value,
+  gerado.value,
+]);
+const etapaDaVez = computed(() => feitas.value.findIndex(f => !f));
+const irPara = id =>
+  document
+    .getElementById(id)
+    ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+const COR_FORNECEDOR = { Bluesun: '#2563eb', AVT: '#ea580c' };
+const nomeTelhado = computed(
+  () => telhados.value.find(t => t.chave === telhado.value)?.nome || ''
+);
+
 onMounted(async () => {
+  carregarGerados();
   await carregar();
   if (!tutorialVisto()) {
     await nextTick();
@@ -534,6 +672,26 @@ const TXT = {
   lucroPorSocio: 'Lucro por sócio',
   baixar: 'Baixar',
   tutorial: 'Tutorial',
+  etapas: 'Etapas do orçamento',
+  orcGerados: 'Orçamentos gerados',
+  orcGeradosSub:
+    'Cada proposta vale 7 dias. Os enviados ficam guardados com os PDFs.',
+  buscarCliente: 'Buscar pelo nome do cliente',
+  nenhumNaAba: 'Nenhum orçamento nesta aba.',
+  paraQuem: 'Para quem é a proposta',
+  paraQuemSub: 'Quem vai receber a proposta.',
+  preencher: 'Preencher com os dados do cliente',
+  contaSub: 'O valor de hoje, o que vai aumentar, o telhado e a rede.',
+  lucroLiquido: 'Lucro líquido',
+  aProposta: 'A proposta',
+  propostaSub:
+    'Proposta do cliente, justificativa e a imagem do resumo para o WhatsApp.',
+  resumo: 'Resumo do orçamento',
+  consumoRot: 'Consumo',
+  telhadoRede: 'Telhado · rede',
+  kitRot: 'Kit',
+  valorProjeto: 'Valor do projeto',
+  valorAparece: 'O valor aparece aqui assim que você escolher um kit.',
   reverOPasso: 'Rever o passo a passo em balões',
   oGeradorDePdf:
     'O gerador de PDF ainda não está ligado neste servidor. O preço e o DRE acima já valem.',
@@ -541,10 +699,10 @@ const TXT = {
 </script>
 
 <template>
-  <div class="flex flex-col h-full w-full bg-n-solid-1 overflow-hidden">
+  <div class="cot flex flex-col h-full w-full overflow-hidden">
     <!-- Header no padrão das telas do CRM -->
     <div
-      class="flex items-center gap-3 px-6 py-4 border-b border-n-weak flex-shrink-0 flex-wrap"
+      class="cot-top flex items-center gap-3 px-6 py-4 flex-shrink-0 flex-wrap"
     >
       <button
         class="flex items-center gap-1 text-sm text-n-slate-11 hover:text-n-slate-12"
@@ -557,10 +715,8 @@ const TXT = {
       <h1
         class="text-base font-semibold text-n-slate-12 flex items-center gap-2"
       >
-        <span
-          class="w-8 h-8 rounded-xl flex items-center justify-center bg-gradient-to-br from-[#b45309] to-[#f59e0b]"
-        >
-          <span class="i-lucide-file-text text-white text-base" />
+        <span class="cot-logo">
+          <span class="i-lucide-file-text" />
         </span>
         {{ TXT.geradorDeProposta }}
         <CevicoViewOnlyPill v-if="!podeCotar" />
@@ -568,7 +724,7 @@ const TXT = {
       <div class="flex-1" />
       <button
         type="button"
-        class="text-xs px-3 py-1.5 rounded-lg border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center gap-1"
+        class="cot-ghost text-n-slate-12"
         :title="TXT.reverOPasso"
         @click="tutorialAberto = true"
       >
@@ -577,648 +733,766 @@ const TXT = {
       </button>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-4 sm:p-10">
-      <div class="max-w-3xl mx-auto flex flex-col gap-6">
-        <!-- 1. Para quem é a proposta -->
-        <div id="cot-cliente">
-          <ProposalClientPicker
-            v-model="cliente"
-            :initial-contact-id="route.query.contact"
-          />
-        </div>
+    <div class="flex-1 overflow-y-auto">
+      <div
+        class="max-w-6xl mx-auto px-4 sm:px-8 py-6 sm:py-10 flex flex-col gap-8"
+      >
+        <!-- as 5 etapas -->
+        <nav class="cot-steps" :aria-label="TXT.etapas">
+          <button
+            v-for="(e, i) in ETAPAS"
+            :key="e.id"
+            type="button"
+            class="cot-step"
+            :class="{
+              'is-done': feitas[i],
+              'is-now': i === etapaDaVez,
+            }"
+            @click="irPara(e.id)"
+          >
+            <span class="cot-step-dot">
+              <span :class="feitas[i] ? 'i-lucide-check' : e.icone" />
+            </span>
+            <span class="cot-step-txt">
+              <span class="cot-step-n">{{ i + 1 }}</span>
+              <span class="cot-step-name text-n-slate-12">{{ e.nome }}</span>
+            </span>
+          </button>
+        </nav>
 
-        <!-- 2. A conta de luz, o telhado e a rede -->
-        <section
-          id="cot-conta"
-          class="rounded-2xl border border-n-weak bg-n-solid-2 p-5 sm:p-6 flex flex-col gap-5"
-        >
-          <h2 class="text-sm font-semibold text-n-slate-12">
-            {{ TXT.aContaDeLuz }}
-          </h2>
-
-          <div class="grid sm:grid-cols-2 gap-3">
-            <label class="flex flex-col gap-1 text-xs text-n-slate-11">
-              {{ TXT.nomeNaProposta }}
-              <input
-                v-model="nomeCliente"
-                type="text"
-                :placeholder="TXT.nomeDoCliente"
-                class="!mb-0 h-11 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-sm text-n-slate-12"
-                :disabled="!podeCotar"
-              />
-            </label>
-            <label class="flex flex-col gap-1 text-xs text-n-slate-11">
-              {{ TXT.contaDeHojeR }}
-              <input
-                v-model="contaHoje"
-                type="text"
-                inputmode="decimal"
-                :placeholder="TXT.t300"
-                class="!mb-0 h-11 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-lg text-n-slate-12"
-                :disabled="!podeCotar"
-              />
-            </label>
+        <!-- 0. Orçamentos gerados (toda a conta) -->
+        <section v-if="gerados.length" class="cot-sec cot-green">
+          <div class="cot-head">
+            <span class="cot-ico"><i class="i-lucide-folder-check" /></span>
+            <div class="min-w-0 flex-1">
+              <h2 class="cot-title text-n-slate-12">{{ TXT.orcGerados }}</h2>
+              <p class="cot-sub text-n-slate-11">{{ TXT.orcGeradosSub }}</p>
+            </div>
+            <div class="cot-seg">
+              <button
+                v-for="a in ABAS"
+                :key="a.id"
+                type="button"
+                :class="{ 'is-on': aba === a.id }"
+                @click="aba = a.id"
+              >
+                {{ a.nome }}
+                <span class="cot-seg-n">{{ contagem[a.id] }}</span>
+              </button>
+            </div>
           </div>
-
-          <div class="flex flex-col gap-2">
-            <p class="text-xs text-n-slate-11">
-              {{ TXT.oQueVaiAcrescentar }}
-            </p>
-            <div
-              v-for="(a, i) in acrescimos"
-              :key="i"
-              class="flex flex-col sm:flex-row gap-2"
-            >
+          <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+            <label class="cot-search flex-1">
+              <span class="i-lucide-search text-n-slate-10" />
               <input
-                v-model="a.rotulo"
-                type="text"
-                :placeholder="TXT.t2AresCondicionados"
-                class="!mb-0 h-11 flex-1 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-sm text-n-slate-12"
-                :disabled="!podeCotar"
+                v-model="busca"
+                type="search"
+                :placeholder="TXT.buscarCliente"
+                class="!mb-0 text-n-slate-12"
               />
-              <div class="flex gap-2">
-                <input
-                  v-model="a.valor"
-                  type="text"
-                  inputmode="decimal"
-                  :placeholder="TXT.rAMaisPor"
-                  class="!mb-0 h-11 flex-1 sm:w-44 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-sm text-n-slate-12"
+            </label>
+            <div class="cot-seg cot-seg-sm">
+              <button
+                v-for="o in ORDENS"
+                :key="o.id"
+                type="button"
+                :class="{ 'is-on': ordem === o.id }"
+                @click="ordem = o.id"
+              >
+                {{ o.nome }}
+              </button>
+            </div>
+          </div>
+          <div v-if="geradosDaAba.length" class="cot-cards">
+            <KitQuoteCard
+              v-for="o in geradosDaAba"
+              :key="o.id"
+              :orcamento="o"
+              :pode-editar="podeCotar"
+              :ocupado="marcando === o.id"
+              @enviar="marcarEnviada"
+              @abrir="abrirCliente"
+              @excluir="excluirOrcamento"
+            />
+          </div>
+          <p v-else class="cot-empty text-n-slate-11">{{ TXT.nenhumNaAba }}</p>
+        </section>
+
+        <div class="cot-grid">
+          <div class="flex flex-col gap-8 min-w-0">
+            <!-- 1. Para quem é a proposta -->
+            <section id="cot-cliente" class="cot-sec cot-blue">
+              <div class="cot-head">
+                <span class="cot-ico"><i class="i-lucide-user-round" /></span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="cot-title text-n-slate-12">
+                    <span class="cot-n">{{ 1 }}</span>
+                    {{ TXT.paraQuem }}
+                  </h2>
+                  <p class="cot-sub text-n-slate-11">{{ TXT.paraQuemSub }}</p>
+                </div>
+              </div>
+              <div class="cot-picker">
+                <ProposalClientPicker
+                  :key="pickerKey"
+                  v-model="cliente"
+                  :initial-contact-id="route.query.contact"
+                />
+              </div>
+              <div
+                v-if="cliente"
+                class="cot-prefill flex flex-col sm:flex-row sm:items-center gap-3"
+              >
+                <button
+                  type="button"
+                  class="cot-btn2 text-n-slate-12"
                   :disabled="!podeCotar"
-                />
-                <button
-                  type="button"
-                  class="h-11 w-11 flex-shrink-0 rounded-xl border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center justify-center"
-                  :title="TXT.tirarEstaLinha"
-                  @click="tirarAcrescimo(i)"
+                  @click="preencherDoCliente"
                 >
-                  <span class="i-lucide-x" />
+                  <span class="i-lucide-wand-sparkles" />
+                  {{ TXT.preencher }}
                 </button>
+                <p class="text-sm text-n-slate-11">
+                  {{
+                    preenchido ||
+                    (temDadosDoCliente
+                      ? 'Puxa a conta de luz, o que vai aumentar, a cidade e o telhado do resumo do cliente.'
+                      : 'O resumo deste cliente ainda não tem a conta de luz: preencha abaixo.')
+                  }}
+                </p>
               </div>
-            </div>
-            <button
-              type="button"
-              class="self-start text-xs font-semibold text-n-slate-11 hover:text-n-slate-12 flex items-center gap-1"
-              @click="maisAcrescimo"
-            >
-              <span class="i-lucide-plus" />
-              {{ TXT.acrescentarOutro }}
-            </button>
-          </div>
+            </section>
 
-          <div
-            class="rounded-xl bg-n-alpha-1 p-4 flex flex-col sm:flex-row sm:items-end gap-3"
-          >
-            <div class="flex-1">
-              <p class="text-xs text-n-slate-11">{{ TXT.contaConsiderada }}</p>
-              <p class="text-xl font-semibold text-n-slate-12">
-                {{ reais(contaTotal) }}
-                <span class="text-sm font-normal text-n-slate-11">{{
-                  TXT.porMes
-                }}</span>
-              </p>
-              <p class="mt-1 text-xs text-n-slate-10">
-                {{ reais(contaTotal) }} {{ TXT.r }} {{ tarifaTexto }}
-                {{ TXT.porKwh }} {{ numero(consumoCalculado) }}
-                {{ TXT.kwhPorMes }}
-              </p>
-            </div>
-            <label class="sm:w-52 flex flex-col gap-1 text-xs text-n-slate-11">
-              {{ TXT.consumoUsadoNaCotacao }}
-              <input
-                v-model="consumo"
-                type="text"
-                inputmode="decimal"
-                :placeholder="TXT.t490"
-                class="!mb-0 h-11 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-lg text-n-slate-12"
-                :disabled="!podeCotar"
-                @input="ajustarConsumo"
-              />
-            </label>
-          </div>
-          <button
-            v-if="consumoNaMao && consumoCalculado"
-            type="button"
-            class="self-start -mt-3 text-xs font-semibold text-n-slate-11 hover:text-n-slate-12"
-            @click="consumoPelaConta"
-          >
-            {{ TXT.voltarParaOConsumo }}
-          </button>
-
-          <div id="cot-telhado" class="flex flex-col gap-2">
-            <p class="text-xs text-n-slate-11">{{ TXT.tipoDeTelhado }}</p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="t in telhados"
-                :key="t.chave"
-                type="button"
-                class="h-10 px-4 rounded-xl text-sm border"
-                :class="
-                  telhado === t.chave
-                    ? 'border-n-amber-9 bg-n-amber-3 text-n-slate-12 font-semibold'
-                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
-                "
-                :disabled="!podeCotar"
-                @click="telhado = t.chave"
-              >
-                {{ t.nome }}
-              </button>
-            </div>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <p class="text-xs text-n-slate-11">{{ TXT.rede }}</p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="r in REDES"
-                :key="r.id"
-                type="button"
-                class="h-10 px-4 rounded-xl text-sm border"
-                :class="
-                  rede === r.id
-                    ? 'border-n-amber-9 bg-n-amber-3 text-n-slate-12 font-semibold'
-                    : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
-                "
-                :disabled="!podeCotar"
-                @click="rede = r.id"
-              >
-                {{ r.nome }}
-              </button>
-            </div>
-          </div>
-
-          <div
-            id="cot-cotar"
-            class="flex flex-col sm:flex-row sm:items-center gap-3"
-          >
-            <button
-              type="button"
-              class="h-11 px-6 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-50 bg-[#f59e0b]"
-              :disabled="!podeCotar || cotando || !parseMoney(consumo)"
-              @click="cotar"
-            >
-              <span
-                :class="
-                  cotando
-                    ? 'i-lucide-loader-circle animate-spin'
-                    : 'i-lucide-search'
-                "
-              />
-              {{ cotando ? 'Cotando' : 'Cotar nos fornecedores' }}
-            </button>
-            <p class="text-xs text-n-slate-10">
-              {{
-                cotando
-                  ? 'Consultando AVT e Bluesun. Leva alguns segundos.'
-                  : `Cotação para ${cidade}, com a estrutura do telhado e o frete.`
-              }}
-            </p>
-          </div>
-        </section>
-
-        <!-- 3. As opções -->
-        <section
-          v-if="resultado"
-          class="rounded-2xl border border-n-weak bg-n-solid-2 p-5 sm:p-6 flex flex-col gap-4"
-        >
-          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 class="text-sm font-semibold text-n-slate-12">
-              {{ TXT.opcoesDeKit }}
-            </h2>
-            <p class="text-xs text-n-slate-11">
-              {{ numero(resultado.potencia_necessaria_kwp) }} {{ TXT.kwpPara }}
-              {{ numero(resultado.consumo_kwh_mes) }} {{ TXT.kwhPorMes }}
-            </p>
-          </div>
-
-          <div class="flex flex-col gap-2">
-            <div
-              v-for="f in resultado.fornecedores"
-              :key="f.fornecedor"
-              class="flex items-start gap-2 text-xs"
-              :class="f.ok ? 'text-n-slate-11' : 'text-n-ruby-11'"
-            >
-              <span
-                class="mt-0.5 flex-shrink-0"
-                :class="
-                  f.ok
-                    ? 'i-lucide-circle-check text-n-teal-10'
-                    : 'i-lucide-circle-alert'
-                "
-              />
-              <span v-if="f.ok">
-                <strong class="text-n-slate-12">{{ f.fornecedor }}</strong>
-                {{ TXT.respondeuCom }} {{ f.opcoes }} {{ TXT.opcoes }}
-                <template v-if="f.falta">
-                  {{ TXT.vieramSem }} {{ f.falta }}{{ TXT.ficamForaDoPreco }}
-                </template>
-              </span>
-              <span v-else>
-                <strong>{{ f.fornecedor }}</strong> {{ TXT.naoRespondeu }}
-                {{ f.motivo }}
-              </span>
-            </div>
-          </div>
-
-          <!-- micro ou string: quem gera escolhe -->
-          <div class="flex gap-2">
-            <button
-              v-for="t in TIPOS"
-              :key="t.id"
-              type="button"
-              class="h-11 flex-1 rounded-xl text-sm border"
-              :class="
-                tipo === t.id
-                  ? 'border-n-amber-9 bg-n-amber-3 text-n-slate-12 font-semibold'
-                  : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
-              "
-              @click="trocarTipo(t.id)"
-            >
-              {{ t.nome }}
-            </button>
-          </div>
-
-          <p v-if="!opcoesDoTipo.length" class="text-sm text-n-slate-11">
-            {{ TXT.nenhumaOpcaoDe }} {{ NOME_TIPO[tipo].toLowerCase() }}
-            {{ TXT.voltouVejaOsMotivos }}
-          </p>
-
-          <button
-            v-for="(o, i) in opcoesDoTipo"
-            :key="i"
-            type="button"
-            class="rounded-2xl border p-4 flex flex-col sm:flex-row gap-3 text-left"
-            :class="
-              escolhida === o
-                ? 'border-n-amber-9 bg-n-amber-2'
-                : 'border-n-weak bg-n-solid-1 hover:bg-n-alpha-1'
-            "
-            @click="escolher(o)"
-          >
-            <span class="sm:w-40 flex-shrink-0 flex flex-col">
-              <span class="text-lg font-semibold text-n-slate-12">
-                {{ reais(o.total) }}
-              </span>
-              <span class="text-xs text-n-slate-11">
-                {{ TXT.kit }} {{ reais(o.preco) }}
-                <template v-if="o.frete !== null">
-                  {{ TXT.frete }} {{ reais(o.frete) }}
-                </template>
-              </span>
-            </span>
-            <span class="flex-1 min-w-0 flex flex-col gap-1">
-              <span class="flex flex-wrap items-center gap-2 text-xs">
-                <span
-                  class="px-2 py-0.5 rounded-full font-semibold text-white bg-[#b45309]"
-                >
-                  {{ o.fornecedor }}
-                </span>
-                <span class="text-n-slate-11">
-                  {{ o.placas }} {{ TXT.placas }} {{ numero(o.potencia_kwp) }}
-                  {{ TXT.kwp }}
-                </span>
-                <span
-                  class="px-2 py-0.5 rounded-full font-semibold"
-                  :class="
-                    o.completa
-                      ? 'bg-n-teal-3 text-n-teal-11'
-                      : 'bg-n-ruby-3 text-n-ruby-11'
-                  "
-                >
-                  {{ o.completa ? 'Com estrutura e frete' : `Sem ${o.falta}` }}
-                </span>
-              </span>
-              <span class="text-sm text-n-slate-12 break-words">
-                {{ o.paineis }}
-              </span>
-              <span class="text-sm text-n-slate-12 break-words">
-                {{ o.inversor }}
-              </span>
-              <span v-if="o.obs" class="text-xs text-n-slate-10">
-                {{ o.obs }}
-              </span>
-            </span>
-            <span
-              class="self-start sm:self-center text-xs font-semibold flex items-center gap-1"
-              :class="escolhida === o ? 'text-n-amber-11' : 'text-n-slate-10'"
-            >
-              <span
-                :class="
-                  escolhida === o ? 'i-lucide-circle-check' : 'i-lucide-circle'
-                "
-              />
-              {{ escolhida === o ? 'Escolhida' : 'Escolher' }}
-            </span>
-          </button>
-          <p class="text-xs text-n-slate-10">
-            {{ TXT.precoDeCustoDo }}
-          </p>
-        </section>
-
-        <!-- 4. Preço e DRE -->
-        <section
-          v-if="escolhida"
-          class="rounded-2xl border border-n-weak bg-n-solid-2 p-5 sm:p-6 flex flex-col gap-5"
-        >
-          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 class="text-sm font-semibold text-n-slate-12">
-              {{ TXT.precoEDreDo }}
-            </h2>
-            <p class="text-xs text-n-slate-11">
-              {{ NOME_TIPO[escolhida.tipo] }} · {{ escolhida.placas }}
-              {{ TXT.placas }} {{ numero(escolhida.potencia_kwp) }}
-              {{ TXT.kwp }}
-            </p>
-          </div>
-
-          <!-- custo do kit: média dos fornecedores com cotação completa -->
-          <div class="flex flex-col gap-2">
-            <p class="text-xs font-semibold text-n-slate-10 uppercase">
-              {{ TXT.custoDoKitMedia }}
-            </p>
-            <div
-              v-for="q in cotacoes.filter(c => !c.manual)"
-              :key="q.fornecedor"
-              class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm"
-              :class="q.entra_na_media ? 'text-n-slate-12' : 'text-n-slate-10'"
-            >
-              <strong class="w-24">{{ q.fornecedor }}</strong>
-              <span
-                class="tabular-nums"
-                :class="q.entra_na_media ? '' : 'line-through'"
-              >
-                {{ reais(q.valor) }}
-              </span>
-              <span class="text-xs text-n-slate-11">{{ q.detalhe }}</span>
-              <span
-                class="text-xs font-semibold"
-                :class="q.entra_na_media ? 'text-n-teal-11' : 'text-n-ruby-11'"
-              >
-                {{ q.entra_na_media ? 'Entra na média' : 'Fora da média' }}
-              </span>
-            </div>
-            <div
-              v-for="(m, i) in cotacoesNaMao"
-              :key="`m${i}`"
-              class="flex flex-col sm:flex-row gap-2"
-            >
-              <input
-                v-model="m.fornecedor"
-                type="text"
-                :placeholder="TXT.fornecedorBelenergyCordeiro"
-                class="!mb-0 h-10 flex-1 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-sm text-n-slate-12"
-              />
-              <div class="flex gap-2">
-                <input
-                  v-model="m.valor"
-                  type="text"
-                  inputmode="decimal"
-                  :placeholder="TXT.kitEstruturaFreteR"
-                  class="!mb-0 h-10 flex-1 sm:w-56 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-sm text-n-slate-12"
-                  @keyup.enter="calcularDre()"
-                  @blur="calcularDre()"
-                />
-                <button
-                  type="button"
-                  class="h-10 w-10 flex-shrink-0 rounded-xl border border-n-weak text-n-slate-11 hover:bg-n-alpha-1 flex items-center justify-center"
-                  :title="TXT.tirarEstaCotacao"
-                  @click="tirarCotacao(i)"
-                >
-                  <span class="i-lucide-x" />
-                </button>
+            <!-- 2. A conta de luz, o telhado e a rede -->
+            <section id="cot-conta" class="cot-sec cot-amber">
+              <div class="cot-head">
+                <span class="cot-ico"><i class="i-lucide-receipt-text" /></span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="cot-title text-n-slate-12">
+                    <span class="cot-n">{{ 2 }}</span> {{ TXT.aContaDeLuz }}
+                  </h2>
+                  <p class="cot-sub text-n-slate-11">{{ TXT.contaSub }}</p>
+                </div>
               </div>
-            </div>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <button
-                type="button"
-                class="text-xs font-semibold text-n-slate-11 hover:text-n-slate-12 flex items-center gap-1"
-                @click="maisCotacao"
-              >
-                <span class="i-lucide-plus" />
-                {{ TXT.acrescentarCotacaoFeitaNa }}
-              </button>
-              <p v-if="media !== null" class="text-sm text-n-slate-12">
-                {{ TXT.mediaUsada }}
-                <strong class="tabular-nums">{{ reais(media) }}</strong>
-              </p>
-            </div>
-          </div>
 
-          <!-- adequação fora da tabela: valor manual, sem inventar -->
-          <div
-            v-if="precisaAdequacao"
-            class="rounded-xl border border-n-amber-7 bg-n-amber-2 p-4 flex flex-col sm:flex-row sm:items-end gap-3"
-          >
-            <p class="flex-1 text-sm text-n-slate-12">
-              {{ TXT.aTabelaDeAdequacao }}
-              {{ escolhida.placas }} {{ TXT.placasCom }}
-              {{ NOME_TIPO[escolhida.tipo].toLowerCase()
-              }}{{ TXT.informeOValorDa }}
-            </p>
-            <label class="sm:w-48 flex flex-col gap-1 text-xs text-n-slate-11">
-              {{ TXT.adequacaoR }}
-              <input
-                v-model="adequacaoNaMao"
-                type="text"
-                inputmode="decimal"
-                class="!mb-0 h-11 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-lg text-n-slate-12"
-                @keyup.enter="calcularDre()"
-              />
-            </label>
-            <button
-              type="button"
-              class="h-11 px-5 rounded-xl text-sm font-semibold border border-n-weak text-n-slate-12 hover:bg-n-alpha-1 disabled:opacity-50"
-              :disabled="dreCarregando || !parseMoney(adequacaoNaMao)"
-              @click="calcularDre()"
-            >
-              {{ TXT.usarEsteValor }}
-            </button>
-          </div>
-
-          <p
-            v-if="dreErro && !(precisaAdequacao && !dre)"
-            class="rounded-xl bg-n-ruby-3 p-4 text-sm text-n-ruby-11"
-          >
-            {{ dreErro }}
-          </p>
-          <p v-if="dreCarregando && !dre" class="text-sm text-n-slate-11">
-            {{ TXT.calculandoOPreco }}
-          </p>
-
-          <template v-if="dre">
-            <!-- o preço -->
-            <div class="flex flex-col gap-3">
-              <p class="text-xs font-semibold text-n-slate-10 uppercase">
-                {{ TXT.lucroLiquidoDoOrcamento }}
-              </p>
-              <div class="flex flex-wrap gap-2">
-                <button
-                  v-for="m in MARGENS"
-                  :key="m"
-                  type="button"
-                  class="h-11 px-4 rounded-xl text-sm border"
-                  :class="
-                    margemAtiva(m)
-                      ? 'border-n-amber-9 bg-n-amber-3 text-n-slate-12 font-semibold'
-                      : 'border-n-weak text-n-slate-11 hover:bg-n-alpha-1'
-                  "
-                  :disabled="dreCarregando"
-                  @click="usarMargem(m)"
-                >
-                  {{ pct(m) }}{{ m === 0.25 ? ' (padrão)' : '' }}
-                </button>
-              </div>
-              <div class="flex flex-col sm:flex-row sm:items-end gap-3">
-                <label
-                  class="flex-1 flex flex-col gap-1 text-xs text-n-slate-11"
-                >
-                  {{ TXT.valorDoProjetoR }}
+              <div class="grid sm:grid-cols-2 gap-4">
+                <label class="cot-field">
+                  <span class="cot-lab text-n-slate-11">{{
+                    TXT.nomeNaProposta
+                  }}</span>
                   <input
-                    v-model="valorNaMao"
+                    v-model="nomeCliente"
+                    type="text"
+                    :placeholder="TXT.nomeDoCliente"
+                    class="cot-input !mb-0 text-n-slate-12"
+                    :disabled="!podeCotar"
+                  />
+                </label>
+                <label class="cot-field">
+                  <span class="cot-lab text-n-slate-11">{{
+                    TXT.contaDeHojeR
+                  }}</span>
+                  <input
+                    v-model="contaHoje"
                     type="text"
                     inputmode="decimal"
-                    class="!mb-0 h-12 rounded-xl border border-n-weak bg-n-solid-1 px-3 text-2xl font-semibold text-n-slate-12"
-                    @keyup.enter="usarValor"
+                    :placeholder="TXT.t300"
+                    class="cot-input cot-input-lg !mb-0 text-n-slate-12"
+                    :disabled="!podeCotar"
+                  />
+                </label>
+              </div>
+
+              <div class="cot-block">
+                <p class="cot-lab text-n-slate-11">
+                  {{ TXT.oQueVaiAcrescentar }}
+                </p>
+                <div
+                  v-for="(a, i) in acrescimos"
+                  :key="i"
+                  class="flex flex-col sm:flex-row gap-2"
+                >
+                  <input
+                    v-model="a.rotulo"
+                    type="text"
+                    :placeholder="TXT.t2AresCondicionados"
+                    class="cot-input !mb-0 flex-1 text-n-slate-12"
+                    :disabled="!podeCotar"
+                  />
+                  <div class="flex gap-2">
+                    <input
+                      v-model="a.valor"
+                      type="text"
+                      inputmode="decimal"
+                      :placeholder="TXT.rAMaisPor"
+                      class="cot-input !mb-0 flex-1 sm:w-44 text-n-slate-12"
+                      :disabled="!podeCotar"
+                    />
+                    <button
+                      type="button"
+                      class="cot-icon-btn text-n-slate-11"
+                      :title="TXT.tirarEstaLinha"
+                      @click="tirarAcrescimo(i)"
+                    >
+                      <span class="i-lucide-x" />
+                    </button>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  class="cot-link self-start"
+                  @click="maisAcrescimo"
+                >
+                  <span class="i-lucide-plus" />
+                  {{ TXT.acrescentarOutro }}
+                </button>
+              </div>
+
+              <div class="cot-tile cot-tile-accent cot-conta">
+                <div class="flex-1 min-w-0">
+                  <p class="cot-lab text-n-slate-11">
+                    {{ TXT.contaConsiderada }}
+                  </p>
+                  <p class="cot-big text-n-slate-12">
+                    {{ reais(contaTotal) }}
+                    <span class="text-sm font-medium text-n-slate-11">{{
+                      TXT.porMes
+                    }}</span>
+                  </p>
+                  <p class="text-xs text-n-slate-11">
+                    {{ reais(contaTotal) }} {{ TXT.r }} {{ tarifaTexto }}
+                    {{ TXT.porKwh }} {{ numero(consumoCalculado) }}
+                    {{ TXT.kwhPorMes }}
+                  </p>
+                </div>
+                <label class="cot-field sm:w-56">
+                  <span class="cot-lab text-n-slate-11">{{
+                    TXT.consumoUsadoNaCotacao
+                  }}</span>
+                  <input
+                    v-model="consumo"
+                    type="text"
+                    inputmode="decimal"
+                    :placeholder="TXT.t490"
+                    class="cot-input cot-input-lg !mb-0 text-n-slate-12"
+                    :disabled="!podeCotar"
+                    @input="ajustarConsumo"
+                  />
+                  <button
+                    v-if="consumoNaMao && consumoCalculado"
+                    type="button"
+                    class="cot-link"
+                    @click="consumoPelaConta"
+                  >
+                    {{ TXT.voltarParaOConsumo }}
+                  </button>
+                </label>
+              </div>
+
+              <div class="grid md:grid-cols-[1fr_auto] gap-5">
+                <div id="cot-telhado" class="cot-block">
+                  <p class="cot-lab text-n-slate-11">{{ TXT.tipoDeTelhado }}</p>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="t in telhados"
+                      :key="t.chave"
+                      type="button"
+                      class="cot-chip text-n-slate-12"
+                      :class="{ 'is-on': telhado === t.chave }"
+                      :disabled="!podeCotar"
+                      @click="telhado = t.chave"
+                    >
+                      {{ t.nome }}
+                    </button>
+                  </div>
+                </div>
+                <div class="cot-block">
+                  <p class="cot-lab text-n-slate-11">{{ TXT.rede }}</p>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="r in REDES"
+                      :key="r.id"
+                      type="button"
+                      class="cot-chip text-n-slate-12"
+                      :class="{ 'is-on': rede === r.id }"
+                      :disabled="!podeCotar"
+                      @click="rede = r.id"
+                    >
+                      {{ r.nome }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                id="cot-cotar"
+                class="cot-actions flex flex-col sm:flex-row sm:items-center gap-3"
+              >
+                <button
+                  type="button"
+                  class="cot-btn"
+                  :disabled="!podeCotar || cotando || !parseMoney(consumo)"
+                  @click="cotar"
+                >
+                  <span
+                    :class="
+                      cotando
+                        ? 'i-lucide-loader-circle animate-spin'
+                        : 'i-lucide-search'
+                    "
+                  />
+                  {{ cotando ? 'Cotando' : 'Cotar nos fornecedores' }}
+                </button>
+                <p class="text-sm text-n-slate-11">
+                  {{
+                    cotando
+                      ? 'Consultando AVT e Bluesun. Leva alguns segundos.'
+                      : `Cotação para ${cidade}, com a estrutura do telhado e o frete.`
+                  }}
+                </p>
+              </div>
+            </section>
+
+            <!-- 3. As opções -->
+            <section v-if="resultado" id="cot-opcoes" class="cot-sec cot-teal">
+              <div class="cot-head">
+                <span class="cot-ico"><i class="i-lucide-boxes" /></span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="cot-title text-n-slate-12">
+                    <span class="cot-n">{{ 3 }}</span> {{ TXT.opcoesDeKit }}
+                  </h2>
+                  <p class="cot-sub text-n-slate-11">
+                    {{ numero(resultado.potencia_necessaria_kwp) }}
+                    {{ TXT.kwpPara }} {{ numero(resultado.consumo_kwh_mes) }}
+                    {{ TXT.kwhPorMes }} · {{ TXT.precoDeCustoDo }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="f in resultado.fornecedores"
+                  :key="f.fornecedor"
+                  class="cot-sup"
+                  :class="f.ok ? (f.falta ? 'is-warn' : 'is-ok') : 'is-bad'"
+                  :title="
+                    f.ok
+                      ? f.falta
+                        ? `Vieram sem ${f.falta}: ficam fora do preço médio.`
+                        : ''
+                      : f.motivo
+                  "
+                >
+                  <span
+                    :class="
+                      f.ok
+                        ? f.falta
+                          ? 'i-lucide-circle-alert'
+                          : 'i-lucide-circle-check'
+                        : 'i-lucide-circle-x'
+                    "
+                  />
+                  <strong>{{ f.fornecedor }}</strong>
+                  <template v-if="f.ok">
+                    {{ f.opcoes }} {{ TXT.opcoes.replace('.', '') }}
+                    <template v-if="f.falta">{{ `· sem ${f.falta}` }}</template>
+                  </template>
+                  <template v-else>{{ f.motivo || 'não respondeu' }}</template>
+                </span>
+              </div>
+
+              <div class="cot-seg cot-seg-full">
+                <button
+                  v-for="t in TIPOS"
+                  :key="t.id"
+                  type="button"
+                  :class="{ 'is-on': tipo === t.id }"
+                  @click="trocarTipo(t.id)"
+                >
+                  {{ t.nome }}
+                </button>
+              </div>
+
+              <p v-if="!opcoesDoTipo.length" class="cot-empty text-n-slate-11">
+                {{ TXT.nenhumaOpcaoDe }} {{ NOME_TIPO[tipo].toLowerCase() }}
+                {{ TXT.voltouVejaOsMotivos }}
+              </p>
+
+              <div class="flex flex-col gap-3">
+                <button
+                  v-for="(o, i) in opcoesDoTipo"
+                  :key="i"
+                  type="button"
+                  class="cot-opt"
+                  :class="{ 'is-on': escolhida === o }"
+                  @click="escolher(o)"
+                >
+                  <span class="cot-opt-price">
+                    <span class="cot-big text-n-slate-12">{{
+                      reais(o.total)
+                    }}</span>
+                    <span class="text-xs text-n-slate-11">
+                      {{ TXT.kit }} {{ reais(o.preco) }}
+                      <template v-if="o.frete !== null">
+                        {{ TXT.frete }} {{ reais(o.frete) }}
+                      </template>
+                    </span>
+                  </span>
+                  <span class="flex-1 min-w-0 flex flex-col gap-1.5">
+                    <span class="flex flex-wrap items-center gap-2 text-xs">
+                      <span
+                        class="cot-pill"
+                        :style="{
+                          background: COR_FORNECEDOR[o.fornecedor] || '#475569',
+                        }"
+                      >
+                        {{ o.fornecedor }}
+                      </span>
+                      <span class="font-semibold text-n-slate-12">
+                        {{ o.placas }} {{ TXT.placas }}
+                        {{ numero(o.potencia_kwp) }} {{ TXT.kwp }}
+                      </span>
+                      <span
+                        class="cot-tag"
+                        :class="o.completa ? 'is-ok' : 'is-bad'"
+                      >
+                        {{
+                          o.completa
+                            ? 'Com estrutura e frete'
+                            : `Sem ${o.falta}`
+                        }}
+                      </span>
+                    </span>
+                    <span class="text-sm text-n-slate-12 break-words">
+                      {{ o.paineis }}
+                    </span>
+                    <span class="text-sm text-n-slate-11 break-words">
+                      {{ o.inversor }}
+                    </span>
+                    <span v-if="o.obs" class="text-xs text-n-slate-10">
+                      {{ o.obs }}
+                    </span>
+                  </span>
+                  <span class="cot-opt-pick">
+                    <span
+                      :class="
+                        escolhida === o
+                          ? 'i-lucide-circle-check-big'
+                          : 'i-lucide-circle'
+                      "
+                    />
+                    {{ escolhida === o ? 'Escolhida' : 'Escolher' }}
+                  </span>
+                </button>
+              </div>
+            </section>
+
+            <!-- 4. Preço e DRE -->
+            <section v-if="escolhida" id="cot-preco" class="cot-sec cot-violet">
+              <div class="cot-head">
+                <span class="cot-ico"><i class="i-lucide-calculator" /></span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="cot-title text-n-slate-12">
+                    <span class="cot-n">{{ 4 }}</span> {{ TXT.precoEDreDo }}
+                  </h2>
+                  <p class="cot-sub text-n-slate-11">
+                    {{ NOME_TIPO[escolhida.tipo] }} · {{ escolhida.placas }}
+                    {{ TXT.placas }} {{ numero(escolhida.potencia_kwp) }}
+                    {{ TXT.kwp }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- custo do kit: média dos fornecedores com cotação completa -->
+              <div class="cot-tile flex flex-col gap-3">
+                <p class="cot-lab text-n-slate-11">{{ TXT.custoDoKitMedia }}</p>
+                <div
+                  v-for="q in cotacoes.filter(c => !c.manual)"
+                  :key="q.fornecedor"
+                  class="cot-row"
+                  :class="
+                    q.entra_na_media ? 'text-n-slate-12' : 'text-n-slate-10'
+                  "
+                >
+                  <strong class="w-24 flex-shrink-0">{{ q.fornecedor }}</strong>
+                  <span
+                    class="tabular-nums font-semibold"
+                    :class="q.entra_na_media ? '' : 'line-through'"
+                  >
+                    {{ reais(q.valor) }}
+                  </span>
+                  <span class="text-xs text-n-slate-11 flex-1 min-w-0">{{
+                    q.detalhe
+                  }}</span>
+                  <span
+                    class="cot-tag"
+                    :class="q.entra_na_media ? 'is-ok' : 'is-bad'"
+                  >
+                    {{ q.entra_na_media ? 'Entra na média' : 'Fora da média' }}
+                  </span>
+                </div>
+                <div
+                  v-for="(m, i) in cotacoesNaMao"
+                  :key="`m${i}`"
+                  class="flex flex-col sm:flex-row gap-2"
+                >
+                  <input
+                    v-model="m.fornecedor"
+                    type="text"
+                    :placeholder="TXT.fornecedorBelenergyCordeiro"
+                    class="cot-input !mb-0 flex-1 text-n-slate-12"
+                  />
+                  <div class="flex gap-2">
+                    <input
+                      v-model="m.valor"
+                      type="text"
+                      inputmode="decimal"
+                      :placeholder="TXT.kitEstruturaFreteR"
+                      class="cot-input !mb-0 flex-1 sm:w-56 text-n-slate-12"
+                      @keyup.enter="calcularDre()"
+                      @blur="calcularDre()"
+                    />
+                    <button
+                      type="button"
+                      class="cot-icon-btn text-n-slate-11"
+                      :title="TXT.tirarEstaCotacao"
+                      @click="tirarCotacao(i)"
+                    >
+                      <span class="i-lucide-x" />
+                    </button>
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+                  <button type="button" class="cot-link" @click="maisCotacao">
+                    <span class="i-lucide-plus" />
+                    {{ TXT.acrescentarCotacaoFeitaNa }}
+                  </button>
+                  <p v-if="media !== null" class="text-sm text-n-slate-12">
+                    {{ TXT.mediaUsada }}
+                    <strong class="tabular-nums">{{ reais(media) }}</strong>
+                  </p>
+                </div>
+              </div>
+
+              <!-- adequação fora da tabela: valor manual, sem inventar -->
+              <div
+                v-if="precisaAdequacao"
+                class="cot-alert flex flex-col sm:flex-row sm:items-end gap-3"
+              >
+                <p class="flex-1 text-sm text-n-slate-12">
+                  {{ TXT.aTabelaDeAdequacao }}
+                  {{ escolhida.placas }} {{ TXT.placasCom }}
+                  {{ NOME_TIPO[escolhida.tipo].toLowerCase()
+                  }}{{ TXT.informeOValorDa }}
+                </p>
+                <label class="cot-field sm:w-48">
+                  <span class="cot-lab text-n-slate-11">{{
+                    TXT.adequacaoR
+                  }}</span>
+                  <input
+                    v-model="adequacaoNaMao"
+                    type="text"
+                    inputmode="decimal"
+                    class="cot-input !mb-0 text-n-slate-12"
+                    @keyup.enter="calcularDre()"
                   />
                 </label>
                 <button
                   type="button"
-                  class="h-12 px-5 rounded-xl text-sm font-semibold border border-n-weak text-n-slate-12 hover:bg-n-alpha-1 disabled:opacity-50"
-                  :disabled="dreCarregando"
-                  @click="usarValor"
+                  class="cot-btn2 text-n-slate-12"
+                  :disabled="dreCarregando || !parseMoney(adequacaoNaMao)"
+                  @click="calcularDre()"
                 >
-                  {{ TXT.recalcularComEsteValor }}
+                  {{ TXT.usarEsteValor }}
                 </button>
               </div>
-            </div>
 
-            <div
-              class="rounded-xl p-4 flex flex-wrap items-baseline gap-x-4 gap-y-1"
-              :class="dre.na_faixa ? 'bg-n-teal-3' : 'bg-n-ruby-3'"
-            >
-              <p class="text-2xl font-semibold text-n-slate-12">
-                {{ reais(dre.lucro) }}
-              </p>
-              <p class="text-sm text-n-slate-12">
-                {{ TXT.deLucroLiquido }}{{ pct(dre.margem) }})
-              </p>
               <p
-                class="text-xs font-semibold"
-                :class="dre.na_faixa ? 'text-n-teal-11' : 'text-n-ruby-11'"
+                v-if="dreErro && !(precisaAdequacao && !dre)"
+                class="cot-error"
               >
-                {{
-                  dre.na_faixa
-                    ? 'Dentro da faixa de 18% a 30%'
-                    : 'Fora da faixa de 18% a 30%: confira antes de enviar'
-                }}
+                {{ dreErro }}
               </p>
-            </div>
+              <p v-if="dreCarregando && !dre" class="text-sm text-n-slate-11">
+                {{ TXT.calculandoOPreco }}
+              </p>
 
-            <!-- o DRE -->
-            <div class="grid sm:grid-cols-2 gap-x-8 gap-y-4 text-sm">
-              <div>
-                <p class="text-xs font-semibold text-n-slate-10 uppercase">
-                  {{ TXT.dedutiveis }}
-                </p>
-                <p
-                  v-for="l in dre.dedutiveis.filter(x => x.valor)"
-                  :key="l.nome"
-                  class="flex justify-between gap-3 py-0.5 text-n-slate-12"
-                >
-                  <span>{{ l.nome }}</span>
-                  <span class="tabular-nums whitespace-nowrap">
-                    {{ reais(l.valor) }}
-                  </span>
-                </p>
-                <p class="flex justify-between gap-3 py-0.5 text-n-amber-11">
-                  <span>{{ TXT.imposto }}{{ pct(dre.taxa_imposto) }})</span>
-                  <span class="tabular-nums whitespace-nowrap">
-                    {{ reais(dre.imposto) }}
-                  </span>
-                </p>
-              </div>
-              <div>
-                <p class="text-xs font-semibold text-n-slate-10 uppercase">
-                  {{ TXT.indedutiveis }}
-                </p>
-                <p
-                  v-for="l in dre.indedutiveis.filter(x => x.valor)"
-                  :key="l.nome"
-                  class="flex justify-between gap-3 py-0.5 text-n-slate-12"
-                >
-                  <span>{{ l.nome }}</span>
-                  <span class="tabular-nums whitespace-nowrap">
-                    {{ reais(l.valor) }}
-                  </span>
-                </p>
-                <p
-                  class="flex justify-between gap-3 py-0.5 mt-1 border-t border-n-weak font-semibold text-n-slate-12"
-                >
-                  <span>{{ TXT.custoTotal }}</span>
-                  <span class="tabular-nums whitespace-nowrap">
-                    {{ reais(dre.custo_total) }}
-                  </span>
-                </p>
-              </div>
-            </div>
-            <p class="text-xs text-n-slate-11">
-              {{ TXT.adequacao }}
-              <strong class="text-n-slate-12">
-                {{ dre.adequacao.faixa }} = {{ reais(dre.adequacao.valor) }}
-              </strong>
-              {{
-                dre.adequacao.manual
-                  ? '(a tabela não tem faixa para este projeto)'
-                  : '(tabela de adequação)'
-              }}
-            </p>
+              <template v-if="dre">
+                <!-- o preço -->
+                <div class="cot-block">
+                  <p class="cot-lab text-n-slate-11">
+                    {{ TXT.lucroLiquidoDoOrcamento }}
+                  </p>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      v-for="m in MARGENS"
+                      :key="m"
+                      type="button"
+                      class="cot-chip text-n-slate-12"
+                      :class="{ 'is-on': margemAtiva(m) }"
+                      :disabled="dreCarregando"
+                      @click="usarMargem(m)"
+                    >
+                      {{ pct(m) }}{{ m === 0.25 ? ' · padrão' : '' }}
+                    </button>
+                  </div>
+                </div>
 
-            <div
-              class="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-xs text-n-slate-11"
-            >
-              <div>
-                <p class="font-semibold text-n-slate-10 uppercase">
-                  {{ TXT.quantoCobrarEmCada }}
+                <div class="grid md:grid-cols-2 gap-4">
+                  <div class="cot-tile flex flex-col gap-3">
+                    <label class="cot-field">
+                      <span class="cot-lab text-n-slate-11">{{
+                        TXT.valorDoProjetoR
+                      }}</span>
+                      <input
+                        v-model="valorNaMao"
+                        type="text"
+                        inputmode="decimal"
+                        class="cot-input cot-input-xl !mb-0 text-n-slate-12"
+                        @keyup.enter="usarValor"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      class="cot-btn2 text-n-slate-12 self-start"
+                      :disabled="dreCarregando"
+                      @click="usarValor"
+                    >
+                      <span class="i-lucide-refresh-cw" />
+                      {{ TXT.recalcularComEsteValor }}
+                    </button>
+                  </div>
+                  <div
+                    class="cot-tile cot-lucro"
+                    :class="dre.na_faixa ? 'is-ok' : 'is-bad'"
+                  >
+                    <p class="cot-lab">{{ TXT.lucroLiquido }}</p>
+                    <p class="cot-big">{{ reais(dre.lucro) }}</p>
+                    <p class="text-sm font-semibold">
+                      {{ pct(dre.margem) }} ·
+                      {{
+                        dre.na_faixa
+                          ? 'dentro da faixa de 18% a 30%'
+                          : 'fora da faixa de 18% a 30%: confira'
+                      }}
+                    </p>
+                  </div>
+                </div>
+
+                <!-- o DRE -->
+                <div class="grid md:grid-cols-2 gap-4 text-sm">
+                  <div class="cot-tile">
+                    <p class="cot-lab text-n-slate-11 mb-2">
+                      {{ TXT.dedutiveis }}
+                    </p>
+                    <p
+                      v-for="l in dre.dedutiveis.filter(x => x.valor)"
+                      :key="l.nome"
+                      class="cot-line text-n-slate-12"
+                    >
+                      <span>{{ l.nome }}</span>
+                      <span class="tabular-nums whitespace-nowrap">{{
+                        reais(l.valor)
+                      }}</span>
+                    </p>
+                    <p class="cot-line cot-line-tax">
+                      <span>{{ TXT.imposto }}{{ pct(dre.taxa_imposto) }})</span>
+                      <span class="tabular-nums whitespace-nowrap">{{
+                        reais(dre.imposto)
+                      }}</span>
+                    </p>
+                  </div>
+                  <div class="cot-tile">
+                    <p class="cot-lab text-n-slate-11 mb-2">
+                      {{ TXT.indedutiveis }}
+                    </p>
+                    <p
+                      v-for="l in dre.indedutiveis.filter(x => x.valor)"
+                      :key="l.nome"
+                      class="cot-line text-n-slate-12"
+                    >
+                      <span>{{ l.nome }}</span>
+                      <span class="tabular-nums whitespace-nowrap">{{
+                        reais(l.valor)
+                      }}</span>
+                    </p>
+                    <p class="cot-line cot-line-total text-n-slate-12">
+                      <span>{{ TXT.custoTotal }}</span>
+                      <span class="tabular-nums whitespace-nowrap">{{
+                        reais(dre.custo_total)
+                      }}</span>
+                    </p>
+                  </div>
+                </div>
+                <p class="text-xs text-n-slate-11">
+                  {{ TXT.adequacao }}
+                  <strong class="text-n-slate-12">
+                    {{ dre.adequacao.faixa }} = {{ reais(dre.adequacao.valor) }}
+                  </strong>
+                  {{
+                    dre.adequacao.manual
+                      ? '(a tabela não tem faixa para este projeto)'
+                      : '(tabela de adequação)'
+                  }}
                 </p>
-                <p class="flex justify-between py-0.5">
-                  <span>{{ TXT.lucroDe18 }}</span>
-                  <span class="tabular-nums">
-                    {{ reais(dre.faixa.minimo) }}
-                  </span>
-                </p>
-                <p class="flex justify-between py-0.5 text-n-slate-12">
-                  <span>{{ TXT.lucroDe25Padrao }}</span>
-                  <span class="tabular-nums">
-                    {{ reais(dre.faixa.padrao) }}
-                  </span>
-                </p>
-                <p class="flex justify-between py-0.5">
-                  <span>{{ TXT.lucroDe30 }}</span>
-                  <span class="tabular-nums">
-                    {{ reais(dre.faixa.maximo) }}
-                  </span>
-                </p>
-              </div>
-              <div>
-                <p class="font-semibold text-n-slate-10 uppercase">
-                  {{ TXT.lucroPorSocio }}
-                </p>
-                <p
-                  v-for="socio in dre.socios"
-                  :key="socio.nome"
-                  class="flex justify-between py-0.5"
-                >
-                  <span>{{ socio.nome }} ({{ pct(socio.parte) }})</span>
-                  <span class="tabular-nums">{{ reais(socio.valor) }}</span>
-                </p>
-              </div>
-            </div>
+
+                <div class="grid md:grid-cols-2 gap-4 text-sm">
+                  <div class="cot-tile">
+                    <p class="cot-lab text-n-slate-11 mb-2">
+                      {{ TXT.quantoCobrarEmCada }}
+                    </p>
+                    <p class="cot-line text-n-slate-11">
+                      <span>{{ TXT.lucroDe18 }}</span>
+                      <span class="tabular-nums">{{
+                        reais(dre.faixa.minimo)
+                      }}</span>
+                    </p>
+                    <p class="cot-line font-semibold text-n-slate-12">
+                      <span>{{ TXT.lucroDe25Padrao }}</span>
+                      <span class="tabular-nums">{{
+                        reais(dre.faixa.padrao)
+                      }}</span>
+                    </p>
+                    <p class="cot-line text-n-slate-11">
+                      <span>{{ TXT.lucroDe30 }}</span>
+                      <span class="tabular-nums">{{
+                        reais(dre.faixa.maximo)
+                      }}</span>
+                    </p>
+                  </div>
+                  <div class="cot-tile">
+                    <p class="cot-lab text-n-slate-11 mb-2">
+                      {{ TXT.lucroPorSocio }}
+                    </p>
+                    <p
+                      v-for="socio in dre.socios"
+                      :key="socio.nome"
+                      class="cot-line text-n-slate-12"
+                    >
+                      <span>{{ socio.nome }} ({{ pct(socio.parte) }})</span>
+                      <span class="tabular-nums">{{ reais(socio.valor) }}</span>
+                    </p>
+                  </div>
+                </div>
+              </template>
+            </section>
 
             <!-- 5. gerar os dois documentos -->
-            <div class="border-t border-n-weak pt-5 flex flex-col gap-3">
+            <section v-if="dre" id="cot-proposta" class="cot-sec cot-orange">
+              <div class="cot-head">
+                <span class="cot-ico"><i class="i-lucide-file-text" /></span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="cot-title text-n-slate-12">
+                    <span class="cot-n">{{ 5 }}</span>
+                    {{ TXT.aProposta }}
+                  </h2>
+                  <p class="cot-sub text-n-slate-11">{{ TXT.propostaSub }}</p>
+                </div>
+              </div>
               <div class="flex flex-col sm:flex-row sm:items-center gap-3">
                 <button
                   type="button"
-                  class="h-12 px-6 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-50 bg-[#f59e0b]"
+                  class="cot-btn cot-btn-lg"
                   :disabled="!podeCotar || gerando || !!faltaParaGerar"
                   @click="gerar"
                 >
@@ -1226,40 +1500,37 @@ const TXT = {
                     :class="
                       gerando
                         ? 'i-lucide-loader-circle animate-spin'
-                        : 'i-lucide-file-text'
+                        : 'i-lucide-sparkles'
                     "
                   />
                   {{ gerando ? 'Gerando' : 'Gerar proposta e justificativa' }}
                 </button>
-                <p class="text-xs text-n-slate-10">
+                <p class="text-sm text-n-slate-11">
                   {{
                     faltaParaGerar ||
                     (gerando
                       ? 'Montando os dois PDFs. Leva uns 20 segundos.'
-                      : `Proposta de ${reais(dre.valor_projeto)} para ${nomeCliente}, com a justificativa do orçamento.`)
+                      : `Proposta de ${reais(dre.valor_projeto)} para ${nomeCliente}.`)
                   }}
                 </p>
               </div>
 
-              <div
-                v-if="documentos.arquivos.length"
-                class="flex flex-col gap-2"
-              >
+              <div v-if="documentos.arquivos.length" class="cot-cards">
                 <a
                   v-for="a in documentos.arquivos"
                   :key="a.nome"
                   :href="a.url"
                   :download="a.nome"
-                  class="rounded-xl border border-n-weak p-3 flex items-center gap-3 text-sm text-n-slate-12 hover:bg-n-alpha-1"
+                  class="cot-tile cot-file text-n-slate-12"
                 >
                   <span
-                    class="text-lg text-n-amber-10"
+                    class="cot-file-ico"
                     :class="a.imagem ? 'i-lucide-image' : 'i-lucide-file-text'"
                   />
-                  <span class="flex-1 min-w-0 break-words">{{ a.nome }}</span>
-                  <span
-                    class="text-xs font-semibold text-n-slate-11 flex items-center gap-1"
-                  >
+                  <span class="flex-1 min-w-0 break-words text-sm">{{
+                    a.nome
+                  }}</span>
+                  <span class="cot-link">
                     <span class="i-lucide-download" />
                     {{ TXT.baixar }}
                   </span>
@@ -1267,92 +1538,110 @@ const TXT = {
               </div>
               <p
                 v-if="documentos.aviso"
-                class="rounded-xl bg-n-amber-2 border border-n-amber-7 p-3 text-xs text-n-slate-12"
+                class="cot-alert text-sm text-n-slate-12"
               >
                 {{ documentos.aviso }}
               </p>
               <p
                 v-else-if="!geradorPdfLigado && !documentos.arquivos.length"
-                class="text-xs text-n-slate-10"
+                class="text-xs text-n-slate-11"
               >
                 {{ TXT.oGeradorDePdf }}
               </p>
-            </div>
-          </template>
-        </section>
+            </section>
 
-        <!-- 6. Orçamentos guardados deste cliente -->
-        <section
-          v-if="historico.length"
-          class="rounded-2xl border border-n-weak bg-n-solid-2 p-5 sm:p-6 flex flex-col gap-3"
-        >
-          <h2 class="text-sm font-semibold text-n-slate-12">
-            {{ TXT.orcamentosDesteCliente }}
-          </h2>
-          <div
-            v-for="o in historico"
-            :key="o.id"
-            class="rounded-xl border border-n-weak bg-n-solid-1 p-4 flex flex-col gap-3"
-          >
-            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <p class="text-lg font-semibold text-n-slate-12 tabular-nums">
-                {{ reais(o.valor) }}
-              </p>
-              <p class="text-sm text-n-slate-12">
-                {{ NOME_TIPO[o.tipo] || o.tipo }}
+            <!-- 6. Orçamentos guardados deste cliente -->
+            <section v-if="historico.length" class="cot-sec cot-green">
+              <div class="cot-head">
+                <span class="cot-ico"><i class="i-lucide-history" /></span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="cot-title text-n-slate-12">
+                    {{ TXT.orcamentosDesteCliente }}
+                  </h2>
+                  <p class="cot-sub text-n-slate-11">
+                    {{ TXT.marcarEnviadaDica }}
+                  </p>
+                </div>
+              </div>
+              <div class="cot-cards">
+                <KitQuoteCard
+                  v-for="o in historico"
+                  :key="o.id"
+                  :orcamento="o"
+                  :mostrar-cliente="false"
+                  :pode-editar="podeCotar"
+                  :ocupado="marcando === o.id"
+                  @enviar="marcarEnviada"
+                  @excluir="excluirOrcamento"
+                />
+              </div>
+            </section>
+          </div>
+
+          <!-- resumo fixo ao lado (notebook) -->
+          <aside class="cot-sum cot-orange">
+            <p class="cot-lab text-n-slate-11">{{ TXT.resumo }}</p>
+            <p class="text-base font-bold text-n-slate-12 break-words">
+              {{ nomeCliente || 'Cliente ainda não escolhido' }}
+            </p>
+            <dl class="cot-sum-list">
+              <div>
+                <dt class="text-n-slate-11">{{ TXT.contaConsiderada }}</dt>
+                <dd class="text-n-slate-12">{{ reais(contaTotal) }}</dd>
+              </div>
+              <div>
+                <dt class="text-n-slate-11">{{ TXT.consumoRot }}</dt>
+                <dd class="text-n-slate-12">
+                  {{ consumo ? `${numero(parseMoney(consumo))} kWh` : '—' }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-n-slate-11">{{ TXT.telhadoRede }}</dt>
+                <dd class="text-n-slate-12">
+                  {{ nomeTelhado || '—' }} ·
+                  {{ REDES.find(r => r.id === rede)?.nome }}
+                </dd>
+              </div>
+              <div v-if="escolhida">
+                <dt class="text-n-slate-11">{{ TXT.kitRot }}</dt>
+                <dd class="text-n-slate-12">
+                  {{ NOME_TIPO[escolhida.tipo] }} · {{ escolhida.placas }}
+                  {{ TXT.placas }} {{ numero(escolhida.potencia_kwp) }}
+                  {{ TXT.kwp }}
+                </dd>
+              </div>
+            </dl>
+            <div v-if="dre" class="cot-sum-total">
+              <p class="cot-lab text-n-slate-11">{{ TXT.valorProjeto }}</p>
+              <p class="cot-big text-n-slate-12">
+                {{ reais(dre.valor_projeto) }}
               </p>
               <p
-                class="text-xs font-semibold"
-                :class="o.na_faixa ? 'text-n-teal-11' : 'text-n-ruby-11'"
+                class="text-sm font-semibold"
+                :class="dre.na_faixa ? 'text-n-teal-11' : 'text-n-ruby-11'"
               >
-                {{ TXT.lucroDe }} {{ pct(o.margem) }}
-              </p>
-              <p class="text-xs text-n-slate-10">
-                {{ TXT.geradoEm }} {{ dataHora(o.criado_em) }}
-                <template v-if="o.por">{{ TXT.por }} {{ o.por }}</template>
+                {{ TXT.lucroDe }} {{ reais(dre.lucro) }} ({{ pct(dre.margem) }})
               </p>
             </div>
-            <div v-if="o.arquivos.length" class="flex flex-wrap gap-2">
-              <a
-                v-for="a in o.arquivos"
-                :key="a.nome"
-                :href="a.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="h-9 px-3 rounded-xl border border-n-weak text-xs font-semibold text-n-slate-12 hover:bg-n-alpha-1 inline-flex items-center gap-1.5"
-              >
-                <span
-                  class="text-sm text-n-amber-10"
-                  :class="
-                    String(a.tipo).startsWith('image/')
-                      ? 'i-lucide-image'
-                      : 'i-lucide-file-text'
-                  "
-                />
-                {{ a.nome }}
-              </a>
-            </div>
-            <p v-else class="text-xs text-n-slate-10">{{ TXT.semArquivos }}</p>
-            <p
-              v-if="o.enviado_em"
-              class="text-xs font-semibold text-n-teal-11 flex items-center gap-1.5"
-            >
-              <span class="i-lucide-circle-check" />
-              {{ TXT.enviadaEm }} {{ dataHora(o.enviado_em) }}
-            </p>
             <button
-              v-else-if="podeCotar"
+              v-if="dre"
               type="button"
-              class="self-start h-9 px-4 rounded-xl text-xs font-semibold border border-n-weak text-n-slate-12 hover:bg-n-alpha-1 flex items-center gap-1.5 disabled:opacity-50"
-              :disabled="marcando === o.id"
-              @click="marcarEnviada(o)"
+              class="cot-btn w-full justify-center"
+              :disabled="!podeCotar || gerando || !!faltaParaGerar"
+              @click="gerar"
             >
-              <span class="i-lucide-send" />
-              {{ TXT.marcarEnviada }}
+              <span
+                :class="
+                  gerando
+                    ? 'i-lucide-loader-circle animate-spin'
+                    : 'i-lucide-sparkles'
+                "
+              />
+              {{ gerando ? 'Gerando' : 'Gerar proposta' }}
             </button>
-          </div>
-          <p class="text-xs text-n-slate-10">{{ TXT.marcarEnviadaDica }}</p>
-        </section>
+            <p v-else class="text-xs text-n-slate-11">{{ TXT.valorAparece }}</p>
+          </aside>
+        </div>
 
         <!-- 7. Acessos dos fornecedores (só administrador) -->
         <KitQuoteAccess v-if="isAdmin && !carregando" v-model:acesso="acesso" />
@@ -1368,3 +1657,820 @@ const TXT = {
     />
   </div>
 </template>
+
+<style scoped>
+/* 🎨 Gerador de proposta · rodada visual de 12/11 (pedido do Guilherme: "mais bonita, mais colorida,
+   mais organizada"). Cada etapa é um bloco reto com a sua cor (--c): fio no topo, ícone em quadrado,
+   título grande; campos e chips com contraste; resumo fixo ao lado no notebook. */
+.cot {
+  background: #f3f4f6;
+}
+.dark .cot {
+  background: #0c0d0f;
+}
+.cot-top {
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+}
+.dark .cot-top {
+  background: #121316;
+  border-bottom-color: #26282c;
+}
+.cot-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, #f59e0b, #ea580c);
+}
+.cot-logo > span {
+  width: 17px;
+  height: 17px;
+}
+.cot-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid rgb(15 23 42 / 0.14);
+}
+.dark .cot-ghost {
+  border-color: rgb(255 255 255 / 0.14);
+}
+
+/* etapas */
+.cot-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.cot-step {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+.dark .cot-step {
+  background: #16181b;
+  border-color: #2b2e33;
+}
+.cot-step-dot {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  background: rgb(100 116 139 / 0.14);
+}
+.cot-step-dot > span {
+  width: 16px;
+  height: 16px;
+}
+.cot-step.is-done .cot-step-dot {
+  color: #fff;
+  background: #16a34a;
+}
+.cot-step.is-now {
+  border-color: #ea580c;
+  box-shadow: 0 0 0 3px rgb(234 88 12 / 0.15);
+}
+.cot-step.is-now .cot-step-dot {
+  color: #fff;
+  background: linear-gradient(135deg, #f59e0b, #ea580c);
+}
+.cot-step-txt {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+.cot-step-n {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+}
+.cot-step-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+@media (max-width: 720px) {
+  .cot-step {
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 4px;
+    text-align: center;
+  }
+  .cot-step-n {
+    display: none;
+  }
+  .cot-step-name {
+    font-size: 11px;
+  }
+}
+
+/* layout com o resumo ao lado */
+.cot-grid {
+  display: grid;
+  gap: 32px;
+  align-items: start;
+}
+@media (min-width: 1100px) {
+  .cot-grid {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+
+/* as cores de cada etapa */
+.cot-green {
+  --c: #16a34a;
+}
+.cot-blue {
+  --c: #2563eb;
+}
+.cot-amber {
+  --c: #d97706;
+}
+.cot-teal {
+  --c: #0d9488;
+}
+.cot-violet {
+  --c: #7c3aed;
+}
+.cot-orange {
+  --c: #ea580c;
+}
+
+/* bloco de cada etapa */
+.cot-sec {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 20px;
+  border-radius: 22px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--c) 7%, #fff) 0,
+    #fff 120px
+  );
+  border: 1px solid color-mix(in srgb, var(--c) 26%, #e5e7eb);
+  box-shadow: 0 14px 34px -26px color-mix(in srgb, var(--c) 70%, transparent);
+  scroll-margin-top: 16px;
+}
+@media (min-width: 640px) {
+  .cot-sec {
+    padding: 28px;
+  }
+}
+.cot-sec::before {
+  content: '';
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: -1px;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: var(--c);
+}
+.dark .cot-sec {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--c) 13%, #141518) 0,
+    #141518 140px
+  );
+  border-color: color-mix(in srgb, var(--c) 32%, #26282c);
+  box-shadow: 0 18px 40px -30px color-mix(in srgb, var(--c) 80%, transparent);
+}
+.cot-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.cot-ico {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--c) 78%, #fff),
+    var(--c)
+  );
+  box-shadow: 0 8px 18px -10px var(--c);
+}
+.cot-ico > i {
+  width: 21px;
+  height: 21px;
+}
+.cot-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.cot-n {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--c);
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+}
+.cot-sub {
+  font-size: 13px;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+/* o seletor de cliente (componente do Meu Painel) entra sem a moldura própria */
+.cot-picker :deep(> section) {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.cot-picker :deep(> section > h2) {
+  display: none;
+}
+.cot-picker :deep(> section > div:first-of-type) {
+  margin-top: 0;
+}
+
+/* campos */
+.cot-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cot-lab {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cot-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cot-input {
+  height: 46px !important;
+  width: 100%;
+  padding: 0 14px !important;
+  border-radius: 12px !important;
+  font-size: 15px !important;
+  background: #fff !important;
+  border: 1px solid #d4d8de !important;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.cot-input:focus {
+  outline: none;
+  border-color: var(--c) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 22%, transparent) !important;
+}
+.dark .cot-input {
+  background: #0d0e10 !important;
+  border-color: #34373d !important;
+}
+.dark .cot-input:focus {
+  border-color: var(--c) !important;
+}
+.cot-input-lg {
+  font-size: 20px !important;
+  font-weight: 700;
+}
+.cot-input-xl {
+  height: 56px !important;
+  font-size: 26px !important;
+  font-weight: 800;
+}
+.cot-icon-btn {
+  flex-shrink: 0;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #d4d8de;
+}
+.dark .cot-icon-btn {
+  border-color: #34373d;
+}
+.cot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c);
+}
+.cot-link > span {
+  width: 15px;
+  height: 15px;
+}
+
+/* chips (telhado, rede, lucro) */
+.cot-chip {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+  background: #fff;
+  border: 1px solid #d4d8de;
+  transition: all 0.15s;
+}
+.cot-chip:hover {
+  border-color: var(--c);
+}
+.dark .cot-chip {
+  background: #0d0e10;
+  border-color: #34373d;
+}
+.cot-chip.is-on,
+.dark .cot-chip.is-on {
+  color: #fff;
+  font-weight: 700;
+  background: var(--c);
+  border-color: var(--c);
+  box-shadow: 0 8px 16px -10px var(--c);
+}
+
+/* caixas internas */
+.cot-tile {
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+.dark .cot-tile {
+  background: rgb(255 255 255 / 0.035);
+  border-color: #2b2e33;
+}
+.cot-tile-accent,
+.dark .cot-tile-accent {
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+  border-color: color-mix(in srgb, var(--c) 35%, transparent);
+}
+.cot-conta {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+@media (min-width: 640px) {
+  .cot-conta {
+    flex-direction: row;
+    align-items: flex-end;
+  }
+}
+.cot-big {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+/* botões */
+.cot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 22px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--c) 75%, #fbbf24),
+    var(--c)
+  );
+  box-shadow: 0 12px 24px -14px var(--c);
+  transition: filter 0.15s;
+}
+.cot-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.cot-btn:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+.cot-btn > span {
+  width: 18px;
+  height: 18px;
+}
+.cot-btn-lg {
+  height: 54px;
+  padding: 0 26px;
+  font-size: 16px;
+}
+.cot-btn2 {
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 42px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, #d4d8de);
+}
+.cot-btn2:disabled {
+  opacity: 0.5;
+}
+
+/* controle segmentado (abas e micro × string) */
+.cot-seg {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgb(15 23 42 / 0.06);
+}
+.dark .cot-seg {
+  background: rgb(255 255 255 / 0.06);
+}
+.cot-seg > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #64748b;
+}
+.cot-seg > button.is-on {
+  color: #fff;
+  background: var(--c);
+  box-shadow: 0 6px 14px -8px var(--c);
+}
+.cot-seg-n {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  display: inline-grid;
+  place-items: center;
+  background: rgb(15 23 42 / 0.08);
+}
+.cot-seg > button.is-on .cot-seg-n {
+  background: rgb(255 255 255 / 0.25);
+}
+.cot-seg-full {
+  display: flex;
+}
+.cot-seg-full > button {
+  flex: 1;
+  height: 42px;
+  font-size: 14px;
+}
+
+/* busca e ordem do histórico */
+.cot-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #d4d8de;
+}
+.dark .cot-search {
+  background: #0d0e10;
+  border-color: #34373d;
+}
+.cot-search > span {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.cot-search > input {
+  flex: 1;
+  height: 40px;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-size: 14px;
+}
+.cot-seg-sm > button {
+  height: 34px;
+  font-size: 12px;
+}
+.cot-prefill {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--c) 7%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--c) 40%, transparent);
+}
+
+/* fornecedores e opções */
+.cot-sup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.cot-sup > span {
+  width: 15px;
+  height: 15px;
+}
+.cot-sup.is-ok {
+  color: #0f766e;
+  background: rgb(20 184 166 / 0.14);
+}
+.cot-sup.is-warn {
+  color: #b45309;
+  background: rgb(245 158 11 / 0.16);
+}
+.cot-sup.is-bad {
+  color: #b91c1c;
+  background: rgb(239 68 68 / 0.14);
+}
+.dark .cot-sup.is-ok {
+  color: #5eead4;
+}
+.dark .cot-sup.is-warn {
+  color: #fcd34d;
+}
+.dark .cot-sup.is-bad {
+  color: #fca5a5;
+}
+.cot-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+@media (min-width: 640px) {
+  .cot-opt {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+.cot-opt:hover {
+  border-color: color-mix(in srgb, var(--c) 55%, #e5e7eb);
+}
+.dark .cot-opt {
+  background: #16181b;
+  border-color: #2b2e33;
+}
+.cot-opt.is-on,
+.dark .cot-opt.is-on {
+  border-color: var(--c);
+  background: color-mix(in srgb, var(--c) 9%, transparent);
+  box-shadow: 0 0 0 2px var(--c);
+}
+.cot-opt-price {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+@media (min-width: 640px) {
+  .cot-opt-price {
+    width: 170px;
+  }
+}
+.cot-opt-pick {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+.cot-opt-pick > span {
+  width: 18px;
+  height: 18px;
+}
+.cot-opt.is-on .cot-opt-pick {
+  color: var(--c);
+}
+.cot-pill {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+  color: #fff;
+}
+.cot-tag {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.cot-tag.is-ok {
+  color: #0f766e;
+  background: rgb(20 184 166 / 0.15);
+}
+.cot-tag.is-bad {
+  color: #b91c1c;
+  background: rgb(239 68 68 / 0.13);
+}
+.dark .cot-tag.is-ok {
+  color: #5eead4;
+}
+.dark .cot-tag.is-bad {
+  color: #fca5a5;
+}
+
+/* preço e DRE */
+.cot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 14px;
+}
+.cot-lucro {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.cot-lucro.is-ok,
+.dark .cot-lucro.is-ok {
+  color: #0f766e;
+  background: rgb(20 184 166 / 0.12);
+  border-color: rgb(20 184 166 / 0.4);
+}
+.cot-lucro.is-bad,
+.dark .cot-lucro.is-bad {
+  color: #b91c1c;
+  background: rgb(239 68 68 / 0.1);
+  border-color: rgb(239 68 68 / 0.4);
+}
+.dark .cot-lucro.is-ok {
+  color: #5eead4;
+}
+.dark .cot-lucro.is-bad {
+  color: #fca5a5;
+}
+.cot-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px dashed rgb(15 23 42 / 0.08);
+}
+.dark .cot-line {
+  border-bottom-color: rgb(255 255 255 / 0.07);
+}
+.cot-line:last-child {
+  border-bottom: 0;
+}
+.cot-line-tax {
+  color: #b45309;
+  font-weight: 600;
+}
+.dark .cot-line-tax {
+  color: #fbbf24;
+}
+.cot-line-total {
+  margin-top: 4px;
+  padding-top: 8px;
+  font-weight: 800;
+  border-top: 1px solid rgb(15 23 42 / 0.15);
+}
+.dark .cot-line-total {
+  border-top-color: rgb(255 255 255 / 0.15);
+}
+.cot-alert {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgb(245 158 11 / 0.12);
+  border: 1px solid rgb(245 158 11 / 0.45);
+}
+.cot-error {
+  padding: 14px 16px;
+  border-radius: 14px;
+  font-size: 14px;
+  color: #b91c1c;
+  background: rgb(239 68 68 / 0.1);
+}
+.dark .cot-error {
+  color: #fca5a5;
+}
+.cot-empty {
+  padding: 18px;
+  border-radius: 14px;
+  font-size: 14px;
+  text-align: center;
+  border: 1px dashed rgb(100 116 139 / 0.35);
+}
+
+/* caixas de orçamentos e arquivos */
+.cot-cards {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.cot-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cot-file-ico {
+  width: 22px;
+  height: 22px;
+  color: var(--c);
+}
+
+/* resumo fixo */
+.cot-sum {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  border-radius: 22px;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--c) 30%, #e5e7eb);
+  box-shadow: 0 18px 40px -30px color-mix(in srgb, var(--c) 80%, transparent);
+  border-top: 3px solid var(--c);
+}
+@media (min-width: 1100px) {
+  .cot-sum {
+    position: sticky;
+    top: 0;
+  }
+}
+.dark .cot-sum {
+  background: #141518;
+  border-color: color-mix(in srgb, var(--c) 32%, #26282c);
+  border-top-color: var(--c);
+}
+.cot-sum-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+.cot-sum-list > div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cot-sum-list dt {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.cot-sum-list dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.cot-sum-total {
+  padding: 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--c) 9%, transparent);
+}
+</style>

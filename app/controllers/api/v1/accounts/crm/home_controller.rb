@@ -19,6 +19,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
 
   def show
+    # 🧭 12/11 (LIFE): só a faixa "Jornada do orçamento" (ela tem o período dela: 7, 30 ou 90 dias)
+    return render json: { quote_journey: quote_journey_json } if params[:only] == 'quote_journey'
+
     since, until_at = resolve_range
     # ⚡ item 237 (25/09): o MIOLO pesado (painel do período + desempenho +
     # meta de resposta) fica guardado por pessoa+painel+período: 1 min nos
@@ -964,6 +967,14 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     return my_tasks_by_heat(open_tasks) unless Cevico::Company.for(account).clinic?
 
     { count: open_tasks.count, by_heat: false, items: open_tasks.limit(40).map { |t| my_task_item(t) } }
+  end
+
+  # 🧭 jornada do orçamento (Crm::QuoteJourney): quem chegou no período e até onde andou; 5 min de cache
+  def quote_journey_json
+    days = Crm::QuoteJourney.days(params[:days])
+    Rails.cache.fetch(['cevico:quote_journey:v1', account.id, days], expires_in: 5.minutes) do
+      JSON.parse(Crm::QuoteJourney.new(account, days: days).call.to_json)
+    end
   end
 
   def my_tasks_by_heat(open_tasks)
