@@ -1,8 +1,13 @@
 name: Gerador de PDF da LIFE
 
-# Constrói a imagem do gerador de PDF da proposta (docker/life-proposta). Só roda quando pedido.
+# Constrói a imagem do gerador de PDF da proposta (docker/life-proposta): quando pedido ou quando
+# a pasta do gerador muda (o pedido manual só funciona com o fluxo no ramo principal).
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'docker/life-proposta/**'
+      - '.github/workflows/life-proposta-pdf.yml'
 
 jobs:
   build:
