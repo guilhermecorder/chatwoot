@@ -469,6 +469,8 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       Crm::MediaReadingJob.perform_later(message.id) if Crm::MediaReadingService.message_has_media?(message)
 
       key = responder_owner_for(conversation, agents)
+      # 🕶️ 12/11 (LIFE): quem só OBSERVA a coluna (sombra_stage_ids) escreve a nota de sombra ao lado do dono
+      Crm::ResponderShadowJob.enqueue_observers(conversation, message, agents, key)
       return if key.blank?
 
       if Crm::ResponderAgentJob.live_mode?(agents[key])
