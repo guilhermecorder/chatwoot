@@ -1112,9 +1112,44 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   def render_message(text, conversation)
     name = sanitized_first_name(conversation.contact)
     out = text.to_s.gsub(/\[nome\]/i) { name.presence || 'oi' }
+    out = fill_quote_fields(out, conversation.contact) if out.match?(/\[(economia|resumo)[a-z_0-9]*\]/i)
     out = out.gsub(/\b(oi|olá|ola|opa)([\s,]+)oi\b/i, '\1') if name.blank?
     out.gsub(/ {2,}/, ' ')
   end
+
+  # 12/11 (LIFE): dados do orçamento mais novo do cliente (Gerador de proposta) nas mensagens do robô:
+  #   [economia] / [economia_ano] = "R$ 3.600 por ano"   [economia_mes] = "R$ 300"   [economia_25] = "R$ 257.000"
+  #   [resumo] = endereço público da imagem do resumo (cabeçalho de imagem do modelo do WhatsApp)
+  QUOTE_FIELDS = {
+    'economia' => ->(q) { "#{brl(q.payload.dig('proposta', 'economia', 'anual'))} por ano" },
+    'economia_ano' => ->(q) { brl(q.payload.dig('proposta', 'economia', 'anual')) },
+    'economia_mes' => ->(q) { brl(q.payload.dig('proposta', 'economia', 'mensal')) },
+    'economia_25' => ->(q) { brl(q.payload.dig('proposta', 'economia', 'em_25_anos')) },
+    'resumo' => ->(q) { quote_image_url(q) }
+  }.freeze
+
+  def fill_quote_fields(text, contact)
+    quote = contact && Crm::Quote.ativos.where(contact: contact).recent.first
+    text.gsub(/\[(economia(?:_ano|_mes|_25)?|resumo)\]/i) do
+      key = Regexp.last_match(1).downcase
+      value = quote && QUOTE_FIELDS[key].call(quote)
+      value.presence || (key == 'resumo' ? '' : 'na sua conta de luz')
+    end
+  end
+
+  def self.brl(value)
+    amount = value.to_f.round
+    amount.positive? ? "R$ #{amount.to_s.reverse.scan(/\d{1,3}/).join('.').reverse}" : nil
+  end
+
+  def self.quote_image_url(quote)
+    image = quote.files.find { |f| f.content_type.to_s.start_with?('image/') }
+    host = ENV.fetch('FRONTEND_URL', nil)
+    image && host ? Rails.application.routes.url_helpers.rails_blob_url(image, host: host) : nil
+  end
+
+  def brl(value) = self.class.brl(value)
+  def quote_image_url(quote) = self.class.quote_image_url(quote)
 
   def sanitized_first_name(contact)
     raw = contact&.name.to_s

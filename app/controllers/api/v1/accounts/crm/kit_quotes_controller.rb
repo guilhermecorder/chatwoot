@@ -7,6 +7,10 @@
 class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   before_action :require_administrator!, only: [:update_access]
 
+  DELIVERY_ERRORS = {
+    sem_conversa: 'Este cliente não tem conversa no WhatsApp da Life (ou o modelo "orçamento pronto" não saiu).',
+    sem_arquivos: 'Este orçamento não tem o PDF guardado: gere de novo com o gerador de PDF ligado.'
+  }.freeze
   NO_RENDERER = 'O gerador de PDF ainda não está ligado neste servidor. Os números do orçamento estão prontos.'.freeze
 
   def show
@@ -60,29 +64,53 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
 
   # 📚 Os orçamentos já gerados, do mais novo ao mais antigo: os deste cliente (contact_id) ou,
   # sem cliente, os da conta inteira (caixas "Orçamentos gerados" no topo do gerador).
+  # lixeira=1: os excluídos (só o dono da conta vê). A resposta diz se a lixeira está disponível.
   def history
-    scope = Crm::Quote.where(account: Current.account)
-    if params[:contact_id].present?
-      contact = contact_from(params[:contact_id])
-      return render json: { orcamentos: [] } unless contact
+    trash = params[:lixeira] == '1'
+    return render json: { error: 'Só o dono da conta vê a lixeira.' }, status: :forbidden if trash && !trash_access?
 
-      scope = scope.where(contact: contact)
-    end
-    list = scope.recent.includes(:user, :contact).with_attached_files.limit(params[:contact_id].present? ? 20 : 60)
-    render json: { orcamentos: list.map { |quote| quote_json(quote) } }
+    scope = history_scope(trash)
+    return render json: { orcamentos: [] } unless scope
+
+    list = scope.recent.includes(:user, :contact, :deleted_by).with_attached_files.limit(params[:contact_id].present? ? 20 : 60)
+    render json: { orcamentos: list.map { |quote| quote_json(quote) }, lixeira: trash_info }
   end
 
-  # 🗑️ Exclui um orçamento guardado (e os PDFs dele). Quem pode: o administrador ou quem gerou.
+  # 🗑️ Manda o orçamento para a LIXEIRA (12/11): fica registrado quem excluiu, quando e o motivo; os PDFs
+  # ficam guardados. Quem pode: o administrador ou quem gerou. Restaurar é só do dono da conta.
   def discard
-    quote = Crm::Quote.find_by(account: Current.account, id: params[:id])
+    quote = Crm::Quote.ativos.find_by(account: Current.account, id: params[:id])
     return render json: { error: 'Orçamento não encontrado.' }, status: :not_found unless quote
     unless Current.account_user&.administrator? || quote.user_id == Current.user.id
       return render json: { error: 'Só o administrador ou quem gerou pode excluir este orçamento.' }, status: :forbidden
     end
+    return render json: { error: 'Diga o motivo da exclusão.' }, status: :unprocessable_entity if params[:motivo].to_s.strip.blank?
 
-    quote.files.purge_later
-    quote.destroy!
+    quote.trash!(Current.user, params[:motivo])
     render json: { ok: true, id: quote.id }
+  end
+
+  # ♻️ Volta da lixeira (só o dono da conta).
+  def restore
+    return render json: { error: 'Só o dono da conta restaura orçamentos.' }, status: :forbidden unless trash_access?
+
+    quote = Crm::Quote.na_lixeira.find_by(account: Current.account, id: params[:id])
+    return render json: { error: 'Orçamento não encontrado na lixeira.' }, status: :not_found unless quote
+
+    quote.restore!
+    render json: { orcamento: quote_json(quote) }
+  end
+
+  # 📨 Envia o orçamento pelo WhatsApp com a pergunta de fechamento (Crm::KitQuote::Delivery). Fora da janela de
+  # 24 h, sai o modelo "orçamento pronto" e o atendente envia quando o cliente responder.
+  def deliver
+    quote = Crm::Quote.ativos.find_by(account: Current.account, id: params[:id])
+    return render json: { error: 'Orçamento não encontrado.' }, status: :not_found unless quote
+
+    result = Crm::KitQuote::Delivery.new(quote, sender: Current.user).call
+    return render json: { error: DELIVERY_ERRORS[result] }, status: :unprocessable_entity if DELIVERY_ERRORS.key?(result)
+
+    render json: { situacao: result.to_s, orcamento: quote_json(quote.reload) }
   end
 
   # 🏷️ A proposta foi enviada ao cliente: marca o orçamento e põe a etiqueta `orcamento-enviado`
@@ -156,6 +184,8 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     ).call
     files = rendered(documents)
     saved = save_quote(documents, dre, files['arquivos'])
+    # guardado no cliente: os PDFs abrem pela lista; a resposta não carrega o base64 de volta (fica leve)
+    files = files.merge('arquivos' => []) if saved
     documents.merge('dre' => dre).merge(files).merge('orcamento' => saved && quote_json(saved))
   end
 
@@ -167,9 +197,10 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     quote = Crm::Quote.create!(
       account: Current.account, contact: contact, user: Current.user, kind: dre['tipo'], price: dre['valor_projeto'], margin: dre['margem'],
       payload: documents.merge('dre' => dre, 'cliente' => client, 'conta' => bill, 'telhado' => params[:telhado].to_s,
-                               'opcao' => option, 'cotacoes' => quotes)
+                               'opcao' => option, 'cotacoes' => quotes, 'piso_negociacao' => floor_price)
     )
     quote.attach_rendered(files)
+    Crm::KitQuote::CardUpdate.call(quote)
     quote
   end
 
@@ -193,12 +224,51 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
   def quote_extra(quote)
     until_at = valid_until(quote)
     { cliente: { id: quote.contact_id, nome: quote.contact&.name.presence || quote.payload.dig('cliente', 'nome') },
-      valida_ate: until_at.iso8601, valido: until_at.future? }
+      valida_ate: until_at.iso8601, valido: until_at.future?, piso: quote.payload['piso_negociacao'],
+      aguardando_envio: quote.payload[Crm::KitQuote::Delivery::WAITING_KEY].present? }.merge(trash_json(quote))
+  end
+
+  # 🤝 piso de negociação: o preço com 20% de lucro (só para quem negocia; o atendente não vê)
+  def floor_price
+    { 'margem' => 0.2, 'valor' => dre_calculator.result(nil, margin: 0.2)['valor_projeto'] }
+  rescue StandardError
+    nil
+  end
+
+  # nil quando o cliente pedido não é desta conta
+  def history_scope(trash)
+    scope = Crm::Quote.where(account: Current.account)
+    scope = trash ? scope.na_lixeira : scope.ativos
+    return scope if params[:contact_id].blank?
+
+    contact = contact_from(params[:contact_id])
+    contact && scope.where(contact: contact)
+  end
+
+  def trash_json(quote)
+    return {} unless quote.trashed?
+
+    { excluido_em: quote.deleted_at.iso8601, excluido_por: quote.deleted_by&.name, motivo: quote.delete_reason }
+  end
+
+  # Lixeira: o dono da conta (owner_ids da tela de Acessos). Sem dono configurado, qualquer administrador.
+  def trash_access?
+    return false unless Current.account_user&.administrator?
+
+    perms = CrmSetting.find_by(account: Current.account)&.agent_permissions || {}
+    owners = Cevico::Access.owner_ids(perms)
+    owners.empty? || owners.include?(Current.user.id.to_s)
+  end
+
+  def trash_info
+    return { disponivel: false } unless trash_access?
+
+    { disponivel: true, total: Crm::Quote.na_lixeira.where(account: Current.account).count }
   end
 
   # A proposta vale N dias (Crm::KitQuote::Proposal grava 'validade_dias'; padrão 7) até o fim do dia.
   def valid_until(quote)
-    days = quote.payload.dig('proposta', 'validade_dias').to_i
+    days = (quote.payload.dig('proposta', 'proposta', 'validade_dias') || quote.payload.dig('proposta', 'validade_dias')).to_i
     (quote.created_at.in_time_zone('America/Sao_Paulo') + (days.positive? ? days : 7).days).end_of_day
   end
 

@@ -399,3 +399,6 @@ p b, p strong { color: inherit; font-weight: 700; }
 .investe div { text-align: right; }
 .investe b { display: block; font-size: 26px; letter-spacing: -0.02em; }
 .investe small { display: block; font-size: 14px; color: var(--fraco); margin-top: 2px; }
+
+/* 12/11: prazo de instalação em letra pequena na tela 10 (pedido do Guilherme) */
+.prazo-instalacao { font-size: 11px; opacity: 0.8; margin-top: 14px; max-width: 92%; }

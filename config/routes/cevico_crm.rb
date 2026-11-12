@@ -24,7 +24,9 @@ namespace :crm do
     get :ready # 🔓 o botão "Gerar orçamento" da conversa já pode abrir?
     get :history # 📚 orçamentos guardados deste cliente
     post :sent # 🏷️ a proposta foi enviada ao cliente (etiqueta orcamento-enviado)
-    post :discard # 🗑️ exclui um orçamento guardado
+    post :discard # 🗑️ manda um orçamento guardado para a lixeira (com motivo)
+    post :restore # ♻️ volta da lixeira (só o dono da conta)
+    post :deliver # 📨 envia pelo WhatsApp com a pergunta de fechamento
   end
   resources :campaigns, only: [:index, :show, :create, :destroy] do
     member do

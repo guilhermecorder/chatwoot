@@ -49,10 +49,10 @@ RSpec.describe Crm::KitQuote::Proposal do
   end
 
   it 'monta a justificativa: consumo, sistema, cotações e média', :aggregate_failures do
-    expect(justification['consumo']).to include('total_reais' => 500.0, 'total_kwh' => 490, 'tarifa' => 1.035)
+    expect(justification['consumo']).to include('total_reais' => 500.0, 'total_kwh' => 490, 'tarifa' => 0.95)
     today, extra = justification.dig('consumo', 'linhas')
-    expect(today).to eq('rotulo' => 'Conta de luz hoje', 'reais' => 300.0, 'kwh' => 290, 'nota' => 'R$ 300 ÷ R$ 1,035 por kWh')
-    expect(extra).to eq('rotulo' => '2 ares-condicionados', 'reais' => 200.0, 'kwh' => 200, 'nota' => 'estimativa')
+    expect(today).to eq('rotulo' => 'Conta de luz hoje', 'reais' => 300.0, 'kwh' => 316, 'nota' => 'R$ 300 ÷ R$ 0,950 por kWh')
+    expect(extra).to eq('rotulo' => '2 ares-condicionados', 'reais' => 200.0, 'kwh' => 174, 'nota' => 'estimativa')
     expect(justification['sistema']).to include(
       'formula' => '490 kWh ÷ (4,91 h de sol × 30 dias × 80% de aproveitamento) = 4,16 kWp', 'potencia_necessaria_kwp' => 4.16,
       'placas' => 7, 'potencia_placa_w' => 630, 'potencia_kwp' => 4.41, 'producao_kwh_mes' => 520, 'cobertura' => 1.06,
@@ -121,7 +121,7 @@ RSpec.describe Crm::KitQuote::Proposal do
 
     it 'usa a adequação do string, calcula o consumo pela tarifa e pede para confirmar a garantia do inversor', :aggregate_failures do
       expect(justification['adequacao']).to include('valor' => 760.0, 'faixa' => 'inversor string, 4 a 8 placas')
-      expect(proposal['conta']).to eq('valor_mensal' => 500.0, 'consumo_kwh_mes' => 483)
+      expect(proposal['conta']).to eq('valor_mensal' => 500.0, 'consumo_kwh_mes' => 526)
       expect(proposal['garantias'].last).to include('item' => 'Inversor', 'anos' => 10)
       expect(justification['conferir']).to include('Garantia do inversor (10 anos): confirmar com o fabricante.')
       expect(proposal.dig('sistema', 'inversores').first).to include('quantidade' => 1, 'tipo' => 'Inversor')

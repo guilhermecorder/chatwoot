@@ -7,21 +7,25 @@
 #
 # Table name: crm_quotes
 #
-#  id         :bigint           not null, primary key
-#  kind       :string
-#  margin     :decimal(6, 4)
-#  payload    :jsonb            not null
-#  price      :decimal(12, 2)   default(0.0), not null
-#  sent_at    :datetime
-#  created_at :datetime         not null
-#  updated_at :datetime         not null
-#  account_id :bigint           not null
-#  contact_id :bigint           not null
-#  user_id    :bigint
+#  id            :bigint           not null, primary key
+#  delete_reason :string
+#  deleted_at    :datetime
+#  kind          :string
+#  margin        :decimal(6, 4)
+#  payload       :jsonb            not null
+#  price         :decimal(12, 2)   default(0.0), not null
+#  sent_at       :datetime
+#  created_at    :datetime         not null
+#  updated_at    :datetime         not null
+#  account_id    :bigint           not null
+#  contact_id    :bigint           not null
+#  deleted_by_id :bigint
+#  user_id       :bigint
 #
 # Indexes
 #
 #  index_crm_quotes_on_account_id_and_contact_id_and_created_at  (account_id,contact_id,created_at)
+#  index_crm_quotes_on_account_id_and_deleted_at                 (account_id,deleted_at)
 #
 class Crm::Quote < ApplicationRecord
   self.table_name = 'crm_quotes'
@@ -34,7 +38,24 @@ class Crm::Quote < ApplicationRecord
 
   validates :price, numericality: { greater_than: 0 }
 
+  belongs_to :deleted_by, class_name: 'User', optional: true
+
   scope :recent, -> { order(created_at: :desc, id: :desc) }
+  # 🗑️ lixeira (12/11): excluir só marca; os PDFs ficam e o dono da conta restaura
+  scope :ativos, -> { where(deleted_at: nil) }
+  scope :na_lixeira, -> { where.not(deleted_at: nil) }
+
+  def trash!(user, reason)
+    update!(deleted_at: Time.current, deleted_by: user, delete_reason: reason.to_s.strip.first(300).presence)
+  end
+
+  def restore!
+    update!(deleted_at: nil, deleted_by: nil, delete_reason: nil)
+  end
+
+  def trashed?
+    deleted_at.present?
+  end
 
   def sent?
     sent_at.present?

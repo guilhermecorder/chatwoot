@@ -107,11 +107,15 @@ export const prefillFromSummary = (summary = []) => {
   const find = pattern =>
     summary.find(line => pattern.test(String(line.label || '')))?.value || '';
   const bill = find(/conta de luz/i).match(/R\$\s*([\d.]+(?:,\d{1,2})?)/);
+  // consumo médio em kWh: do campo "Consumo médio" ou escrito junto da conta ("350 kWh")
+  const kwhText = `${find(/consumo m[eé]dio/i)} ${find(/conta de luz/i)}`;
+  const kwh = kwhText.match(/([\d.]+)\s*kwh/i);
   const city = find(/^cidade$/i)
     .split(/[/,-]/)[0]
     .trim();
   return {
     hoje: bill ? parseMoney(bill[1]) : 0,
+    kwh: kwh ? parseMoney(kwh[1]) : 0,
     acrescimo: find(/aumentar/i).trim(),
     cidade: city,
     telhado: roofFromText(find(/telhado/i)),

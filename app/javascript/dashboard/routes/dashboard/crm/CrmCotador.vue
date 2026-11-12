@@ -66,7 +66,7 @@ const MARGENS = [0.18, 0.25, 0.3];
 const carregando = ref(true);
 const acesso = ref({});
 const cidade = ref('');
-const tarifa = ref(1.035);
+const tarifa = ref(0.95);
 const telhados = ref([]);
 const geradorPdfLigado = ref(false);
 
@@ -101,6 +101,8 @@ const historico = ref([]);
 const marcando = ref(0);
 // 0. todos os orçamentos gerados da conta, em caixas no topo (12/11, pedido do Guilherme)
 const gerados = ref([]);
+// 🗑️ lixeira (12/11): só o dono da conta vê; quem excluiu e o motivo ficam registrados
+const lixeira = reactive({ disponivel: false, total: 0, lista: [] });
 const aba = ref('validos');
 const pickerKey = ref(0);
 
@@ -144,6 +146,8 @@ async function carregarGerados() {
   try {
     const { data } = await CrmAPI.getKitQuoteHistory();
     gerados.value = data.orcamentos || [];
+    lixeira.disponivel = !!data.lixeira?.disponivel;
+    lixeira.total = data.lixeira?.total || 0;
     // abre na aba que tem alguma coisa (Valendo → Enviados → Todos)
     if (!gerados.value.some(ABAS.find(x => x.id === aba.value).filtro)) {
       aba.value = ABAS.find(x => gerados.value.some(x.filtro))?.id || 'todos';
@@ -152,11 +156,29 @@ async function carregarGerados() {
     gerados.value = [];
   }
 }
-const contagem = computed(() =>
-  Object.fromEntries(
+const contagem = computed(() => ({
+  ...Object.fromEntries(
     ABAS.map(a => [a.id, gerados.value.filter(a.filtro).length])
-  )
+  ),
+  lixeira: lixeira.total,
+}));
+const abasVisiveis = computed(() =>
+  lixeira.disponivel
+    ? [...ABAS, { id: 'lixeira', nome: 'Lixeira', filtro: () => true }]
+    : ABAS
 );
+const carregarLixeira = async () => {
+  try {
+    const { data } = await CrmAPI.getKitQuoteTrash();
+    lixeira.lista = data.orcamentos || [];
+    lixeira.total = lixeira.lista.length;
+  } catch {
+    lixeira.lista = [];
+  }
+};
+watch(aba, atual => {
+  if (atual === 'lixeira') carregarLixeira();
+});
 // histórico em ordem (12/11): mais novos, mais antigos ou maior valor, com busca pelo nome
 const ORDENS = [
   { id: 'novos', nome: 'Mais novos' },
@@ -172,8 +194,11 @@ const semAcento = t =>
     .toLowerCase();
 const geradosDaAba = computed(() => {
   const termo = semAcento(busca.value.trim());
-  const lista = gerados.value
-    .filter(ABAS.find(a => a.id === aba.value).filtro)
+  const base = aba.value === 'lixeira' ? lixeira.lista : gerados.value;
+  const filtro = (ABAS.find(a => a.id === aba.value) || { filtro: () => true })
+    .filtro;
+  const lista = base
+    .filter(filtro)
     .filter(o => !termo || semAcento(o.cliente?.nome).includes(termo));
   const quando = o => new Date(o.criado_em).getTime();
   if (ordem.value === 'antigos')
@@ -194,15 +219,49 @@ const abrirCliente = async orcamento => {
   await router.replace({ query: { contact: orcamento.cliente.id } });
   pickerKey.value += 1;
 };
-const excluirOrcamento = async orcamento => {
+const excluirOrcamento = async (orcamento, motivo) => {
   if (marcando.value) return;
   marcando.value = orcamento.id;
   try {
-    await CrmAPI.discardKitQuote(orcamento.id);
+    await CrmAPI.discardKitQuote(orcamento.id, motivo);
     trocarNasListas(orcamento.id, null);
-    useAlert('Orçamento excluído.');
+    lixeira.total += 1;
+    useAlert('Orçamento foi para a lixeira.');
   } catch (e) {
     useAlert(erroDe(e, 'Não foi possível excluir o orçamento.'));
+  } finally {
+    marcando.value = 0;
+  }
+};
+// 📨 envia pelo WhatsApp (proposta + resumo + pergunta de fechamento)
+const enviarWhatsapp = async orcamento => {
+  if (marcando.value) return;
+  marcando.value = orcamento.id;
+  try {
+    const { data } = await CrmAPI.deliverKitQuote(orcamento.id);
+    trocarNasListas(orcamento.id, data.orcamento);
+    useAlert(
+      data.situacao === 'enviado'
+        ? 'Enviado pelo WhatsApp com a pergunta de fechamento.'
+        : 'Fora da janela de 24 h: foi o aviso "seu orçamento está pronto". Quando o cliente responder, o atendente manda a proposta.'
+    );
+  } catch (e) {
+    useAlert(erroDe(e, 'Não foi possível enviar pelo WhatsApp.'));
+  } finally {
+    marcando.value = 0;
+  }
+};
+const restaurarOrcamento = async orcamento => {
+  if (marcando.value) return;
+  marcando.value = orcamento.id;
+  try {
+    const { data } = await CrmAPI.restoreKitQuote(orcamento.id);
+    lixeira.lista = lixeira.lista.filter(o => o.id !== orcamento.id);
+    lixeira.total = lixeira.lista.length;
+    gerados.value = [data.orcamento, ...gerados.value];
+    useAlert('Orçamento restaurado.');
+  } catch (e) {
+    useAlert(erroDe(e, 'Não foi possível restaurar.'));
   } finally {
     marcando.value = 0;
   }
@@ -232,6 +291,10 @@ watch(cliente, person => {
   // aproveita o que o atendente já anotou (conta de luz, o que vai aumentar, cidade)
   const lido = prefillFromSummary(person.summary || []);
   if (lido.hoje && !contaHoje.value) contaHoje.value = String(lido.hoje);
+  if (lido.kwh && !consumo.value) {
+    consumoNaMao.value = true;
+    consumo.value = String(lido.kwh);
+  }
   if (lido.acrescimo && !acrescimos.value[0].rotulo) {
     acrescimos.value[0].rotulo = lido.acrescimo;
   }
@@ -246,7 +309,7 @@ const lidoDoCliente = computed(() =>
 );
 const temDadosDoCliente = computed(() => {
   const l = lidoDoCliente.value;
-  return !!(l && (l.hoje || l.acrescimo || l.cidade || l.telhado));
+  return !!(l && (l.hoje || l.kwh || l.acrescimo || l.cidade || l.telhado));
 });
 const preenchido = ref('');
 watch(cliente, () => {
@@ -260,6 +323,11 @@ const preencherDoCliente = () => {
   if (l.hoje) {
     contaHoje.value = String(l.hoje);
     feito.push(`conta de ${reais(l.hoje)}`);
+  }
+  if (l.kwh) {
+    consumoNaMao.value = true;
+    consumo.value = String(l.kwh);
+    feito.push(`consumo de ${numero(l.kwh)} kWh`);
   }
   if (l.acrescimo) {
     acrescimos.value = [{ rotulo: l.acrescimo, valor: '' }];
@@ -354,6 +422,22 @@ const usarValor = () => {
   margemEscolhida.value = null;
   calcularDre({ valor: valorNaMao.value });
 };
+// barra do lucro (12/11, pedido do Guilherme): o vendedor arrasta a % e o DRE recalcula
+const BARRA = { min: 0.1, max: 0.4, passo: 0.005 };
+const margemBarra = ref(0.25);
+watch(dre, atual => {
+  if (atual?.margem) margemBarra.value = Number(atual.margem);
+});
+let barraTimer = null;
+const arrastarMargem = evento => {
+  margemBarra.value = Number(evento.target.value);
+  clearTimeout(barraTimer);
+  barraTimer = setTimeout(() => usarMargem(margemBarra.value), 350);
+};
+const corDaBarra = computed(() => {
+  const m = margemBarra.value;
+  return m >= 0.18 - 0.0005 && m <= 0.3 + 0.0005 ? '#0d9488' : '#dc2626';
+});
 const margemAtiva = margem =>
   margemEscolhida.value !== null &&
   Math.abs(margemEscolhida.value - margem) < 0.0005;
@@ -458,13 +542,28 @@ const gerar = async () => {
     documentos.valor = data.dre?.valor_projeto || 0;
     gerado.value = true;
     aba.value = 'validos';
-    if (data.orcamento)
+    if (data.orcamento) {
       await Promise.all([carregarHistorico(), carregarGerados()]);
-    if ((data.arquivos || []).length) {
+      useAlert('Proposta pronta e guardada em "Orçamentos deste cliente".');
+    } else if ((data.arquivos || []).length) {
       useAlert('Proposta e justificativa prontas.');
     }
   } catch (e) {
-    useAlert(erroDe(e, 'Não foi possível gerar os documentos.'));
+    // a conexão pode cair enquanto o servidor ainda termina e guarda a proposta:
+    // antes de dizer que deu erro, confere se ela apareceu na lista do cliente
+    const antes = new Set(historico.value.map(o => o.id));
+    await new Promise(r => {
+      setTimeout(r, 4000);
+    });
+    await Promise.all([carregarHistorico(), carregarGerados()]);
+    const nova = historico.value.find(o => !antes.has(o.id));
+    if (nova) {
+      gerado.value = true;
+      aba.value = 'validos';
+      useAlert('Proposta pronta e guardada em "Orçamentos deste cliente".');
+    } else {
+      useAlert(erroDe(e, 'Não foi possível gerar os documentos.'));
+    }
   } finally {
     gerando.value = false;
   }
@@ -672,6 +771,7 @@ const TXT = {
   lucroPorSocio: 'Lucro por sócio',
   baixar: 'Baixar',
   tutorial: 'Tutorial',
+  faixaBoa: 'faixa boa: 18% a 30%',
   etapas: 'Etapas do orçamento',
   orcGerados: 'Orçamentos gerados',
   orcGeradosSub:
@@ -761,7 +861,10 @@ const TXT = {
         </nav>
 
         <!-- 0. Orçamentos gerados (toda a conta) -->
-        <section v-if="gerados.length" class="cot-sec cot-green">
+        <section
+          v-if="gerados.length || lixeira.total"
+          class="cot-sec cot-green"
+        >
           <div class="cot-head">
             <span class="cot-ico"><i class="i-lucide-folder-check" /></span>
             <div class="min-w-0 flex-1">
@@ -770,7 +873,7 @@ const TXT = {
             </div>
             <div class="cot-seg">
               <button
-                v-for="a in ABAS"
+                v-for="a in abasVisiveis"
                 :key="a.id"
                 type="button"
                 :class="{ 'is-on': aba === a.id }"
@@ -808,11 +911,14 @@ const TXT = {
               v-for="o in geradosDaAba"
               :key="o.id"
               :orcamento="o"
+              :na-lixeira="aba === 'lixeira'"
               :pode-editar="podeCotar"
               :ocupado="marcando === o.id"
               @enviar="marcarEnviada"
+              @whatsapp="enviarWhatsapp"
               @abrir="abrirCliente"
               @excluir="excluirOrcamento"
+              @restaurar="restaurarOrcamento"
             />
           </div>
           <p v-else class="cot-empty text-n-slate-11">{{ TXT.nenhumNaAba }}</p>
@@ -1323,6 +1429,30 @@ const TXT = {
                   <p class="cot-lab text-n-slate-11">
                     {{ TXT.lucroLiquidoDoOrcamento }}
                   </p>
+                  <div class="cot-range">
+                    <input
+                      type="range"
+                      class="cot-range-in"
+                      :min="BARRA.min"
+                      :max="BARRA.max"
+                      :step="BARRA.passo"
+                      :value="margemBarra"
+                      :style="{
+                        '--fill': `${((margemBarra - BARRA.min) / (BARRA.max - BARRA.min)) * 100}%`,
+                        '--bar': corDaBarra,
+                      }"
+                      :disabled="!podeCotar"
+                      @input="arrastarMargem"
+                    />
+                    <span class="cot-range-val" :style="{ color: corDaBarra }">
+                      {{ pct(margemBarra) }}
+                    </span>
+                  </div>
+                  <div class="cot-range-marks text-n-slate-10">
+                    <span>{{ pct(BARRA.min) }}</span>
+                    <span>{{ TXT.faixaBoa }}</span>
+                    <span>{{ pct(BARRA.max) }}</span>
+                  </div>
                   <div class="flex flex-wrap gap-2">
                     <button
                       v-for="m in MARGENS"
@@ -1572,6 +1702,7 @@ const TXT = {
                   :pode-editar="podeCotar"
                   :ocupado="marcando === o.id"
                   @enviar="marcarEnviada"
+                  @whatsapp="enviarWhatsapp"
                   @excluir="excluirOrcamento"
                 />
               </div>
@@ -2157,6 +2288,56 @@ const TXT = {
   flex: 1;
   height: 42px;
   font-size: 14px;
+}
+
+/* barra do lucro */
+.cot-range {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.cot-range-in {
+  flex: 1;
+  height: 8px;
+  border-radius: 999px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: linear-gradient(
+    90deg,
+    var(--bar) 0 var(--fill),
+    rgb(100 116 139 / 0.25) var(--fill) 100%
+  );
+  cursor: pointer;
+}
+.cot-range-in::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #fff;
+  border: 3px solid var(--bar);
+  box-shadow: 0 4px 12px -4px rgb(0 0 0 / 0.4);
+}
+.cot-range-in::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #fff;
+  border: 3px solid var(--bar);
+}
+.cot-range-val {
+  min-width: 68px;
+  text-align: right;
+  font-size: 24px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.cot-range-marks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: -4px;
 }
 
 /* busca e ordem do histórico */

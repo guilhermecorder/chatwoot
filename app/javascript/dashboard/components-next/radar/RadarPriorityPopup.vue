@@ -5,6 +5,9 @@
 // ignorar: clicar fora treme a janela, mostra "Essa é a prioridade
 // máxima. 😊", o card fica azulzinho e o botão Atender agora pulsa —
 // cobrança amigável e bem-humorada, do jeito CEVICO.
+// 🔓 12/11/2026 (LIFE, pedido do Guilherme: "está atrapalhando o Fernando"): a janela NÃO bloqueia mais a
+// tela (dá para clicar em tudo e abrir outras abas). Fica só a janelinha no canto, PULSANDO, e a cor muda
+// com a espera: verde até 15 min, amarela até 30 min, vermelha pulsando forte depois de 30 min.
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useMapGetter } from 'dashboard/composables/store';
@@ -15,10 +18,12 @@ const route = useRoute();
 const accountId = useMapGetter('getCurrentAccountId');
 
 const alert = ref(null);
-const calmed = ref(false); // depois da 1ª tentativa de fuga: azul + recado
-const shaking = ref(false);
 const leaving = ref(false);
 let timer = null;
+// relógio da espera: conta a partir do que o servidor disse no aviso
+const shownAt = ref(0);
+const now = ref(Date.now());
+let clock = null;
 
 const ACK_KEY = 'cevico_radar_ack'; // conversa atendida → não repete por 15 min
 const ackMap = () => {
@@ -49,7 +54,6 @@ const dismissQuietly = () => {
   setTimeout(() => {
     alert.value = null;
     leaving.value = false;
-    calmed.value = false;
   }, 350);
 };
 
@@ -67,7 +71,7 @@ const poll = async () => {
     const { data } = await CrmAPI.radarPing();
     const a = data.alert;
     if (a && !isAcked(a.conversation_id)) {
-      calmed.value = false;
+      shownAt.value = Date.now();
       alert.value = a;
     }
   } catch {
@@ -78,20 +82,39 @@ const poll = async () => {
 onMounted(() => {
   setTimeout(poll, 4000); // respiro após o login
   timer = setInterval(poll, 90 * 1000);
+  clock = setInterval(() => {
+    now.value = Date.now();
+  }, 30 * 1000);
 });
-onBeforeUnmount(() => clearInterval(timer));
+onBeforeUnmount(() => {
+  clearInterval(timer);
+  clearInterval(clock);
+});
 
-// tentativa de clicar em outra coisa: tremidinha + recado + vira azul
-const blockEscape = () => {
-  shaking.value = true;
-  calmed.value = true;
-  setTimeout(() => {
-    shaking.value = false;
-  }, 450);
+// minutos de espera agora (o do aviso + o tempo que a janelinha já está na tela)
+const waitingNow = computed(() => {
+  const base = Number(alert.value?.waiting_minutes) || 0;
+  return base + Math.max(0, Math.floor((now.value - shownAt.value) / 60000));
+});
+// verde → amarelo (15 min) → vermelho pulsando forte (30 min)
+const level = computed(() => {
+  if (waitingNow.value >= 30) return 'red';
+  if (waitingNow.value >= 15) return 'amber';
+  return 'green';
+});
+const BACKGROUND = {
+  green: 'linear-gradient(135deg, #059669, #4ADE80)',
+  amber: 'linear-gradient(135deg, #D97706, #FBBF24)',
+  red: 'linear-gradient(135deg, #B91C1C, #F87171)',
+};
+const BUTTON_TEXT = {
+  green: 'text-emerald-600',
+  amber: 'text-amber-700',
+  red: 'text-red-700',
 };
 
 const waitingLabel = computed(() => {
-  const m = alert.value?.waiting_minutes;
+  const m = waitingNow.value;
   if (!m) return '';
   return m >= 60
     ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`
@@ -126,7 +149,6 @@ const attendNow = () => {
   setTimeout(() => {
     alert.value = null;
     leaving.value = false;
-    calmed.value = false;
   }, 350);
   router.push(`/app/accounts/${accountId.value}/conversations/${id}`);
 };
@@ -134,18 +156,12 @@ const attendNow = () => {
 
 <template>
   <Teleport to="body">
-    <div v-if="alert" class="fixed inset-0 z-[9998]" @click="blockEscape" />
     <div
       v-if="alert"
       class="cevico-genie fixed bottom-6 right-6 z-[9999] w-[340px] rounded-2xl text-white shadow-2xl overflow-hidden"
-      :class="[
-        shaking ? 'cevico-shake' : '',
-        leaving ? 'cevico-genie-out' : '',
-      ]"
+      :class="[leaving ? 'cevico-genie-out' : '', `cevico-radar-${level}`]"
       :style="{
-        background: calmed
-          ? 'linear-gradient(135deg, #0369A1, #2563EB)'
-          : 'linear-gradient(135deg, #059669, #4ADE80)',
+        background: BACKGROUND[level],
         transition: 'background .6s ease',
       }"
     >
@@ -154,7 +170,7 @@ const attendNow = () => {
           <span class="i-lucide-radar text-lg" />
           <p class="text-sm font-bold flex-1">
             {{
-              calmed
+              level === 'red'
                 ? 'Essa é a prioridade máxima. 😊'
                 : kindLabel || 'Paciente quente esperando!'
             }}
@@ -176,9 +192,10 @@ const attendNow = () => {
         </p>
         <button
           class="mt-3 w-full py-2.5 rounded-xl font-bold text-sm bg-white shadow"
-          :class="
-            calmed ? 'text-blue-700 cevico-btn-pulse' : 'text-emerald-600'
-          "
+          :class="[
+            BUTTON_TEXT[level],
+            level === 'red' ? 'cevico-btn-pulse' : '',
+          ]"
           @click.stop="attendNow"
         >
           {{ isAgentAlert ? 'Ver conversa →' : 'Atender agora →' }}
@@ -220,26 +237,44 @@ const attendNow = () => {
     opacity: 0;
   }
 }
-/* tremidinha simpática quando tentam fugir */
-.cevico-shake {
-  animation: cevicoShake 0.45s ease;
+/* a janelinha pulsa sempre; depois de 30 min, vermelha e pulsando mais forte e mais rápido */
+.cevico-radar-green,
+.cevico-radar-amber {
+  animation:
+    cevicoGenieIn 0.55s cubic-bezier(0.22, 1.1, 0.35, 1),
+    cevicoRadarPulse 2.4s ease-in-out 0.6s infinite;
 }
-@keyframes cevicoShake {
+.cevico-radar-red {
+  animation:
+    cevicoGenieIn 0.55s cubic-bezier(0.22, 1.1, 0.35, 1),
+    cevicoRadarPulseRed 1.1s ease-in-out 0.6s infinite;
+}
+@keyframes cevicoRadarPulse {
   0%,
   100% {
-    margin-right: 0;
+    box-shadow:
+      0 12px 30px rgba(0, 0, 0, 0.25),
+      0 0 0 0 rgba(255, 255, 255, 0.35);
   }
-  20% {
-    margin-right: 10px;
+  50% {
+    box-shadow:
+      0 12px 30px rgba(0, 0, 0, 0.25),
+      0 0 0 10px rgba(255, 255, 255, 0);
   }
-  40% {
-    margin-right: -8px;
+}
+@keyframes cevicoRadarPulseRed {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow:
+      0 12px 30px rgba(0, 0, 0, 0.3),
+      0 0 0 0 rgba(248, 113, 113, 0.75);
   }
-  60% {
-    margin-right: 6px;
-  }
-  80% {
-    margin-right: -4px;
+  50% {
+    transform: scale(1.03);
+    box-shadow:
+      0 12px 30px rgba(0, 0, 0, 0.3),
+      0 0 0 16px rgba(248, 113, 113, 0);
   }
 }
 /* botão pulsando depois do recado */
@@ -259,7 +294,9 @@ const attendNow = () => {
 }
 @media (prefers-reduced-motion: reduce) {
   .cevico-genie,
-  .cevico-shake,
+  .cevico-radar-green,
+  .cevico-radar-amber,
+  .cevico-radar-red,
   .cevico-btn-pulse,
   .cevico-genie-out {
     animation: none;

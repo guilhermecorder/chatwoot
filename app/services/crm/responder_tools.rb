@@ -68,13 +68,17 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   # roteiro (1º: o Fernando apresentando a Life para quem vai receber o orçamento).
   # Mesma lista ai_config['imagens_roteiro'], arquivos .ogg/.opus/.mp3/.m4a.
   AUDIO_TOOL_NAME = 'enviar_audio'.freeze
+  # 📨 12/11 (LIFE): manda o orçamento gerado (PDF + resumo + pergunta de fechamento) quando o cliente
+  # responde ao modelo "orçamento pronto" (Crm::KitQuote::Delivery). Só aparece se há orçamento por enviar.
+  QUOTE_TOOL_NAME = 'enviar_orcamento'.freeze
   FAKE_TASK_WORDS = [
     'placeholder', 'ignorar', 'ignore', 'nenhum', 'nenhuma', 'cancelado', 'cancelada', 'não usar', 'nao usar',
     'não aplic', 'nao aplic', 'não necess', 'nao necess', 'desnecess', 'sem necessidade', 'not needed',
     'nevermind', 'never mind', 'nunca mind', 'n/a', 'teste', 'test', 'dummy', 'xxx'
   ].freeze
   FAKE_TASK_RE = /\A\W*(#{FAKE_TASK_WORDS.map { |w| Regexp.escape(w) }.join('|')})/i
-  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME, IMAGE_TOOL_NAME, AUDIO_TOOL_NAME, SUMMARY_TOOL_NAME]).freeze
+  ALL_NAMES = (NAMES + [TASK_TOOL_NAME, STAGE_TOOL_NAME, IMAGE_TOOL_NAME, AUDIO_TOOL_NAME, SUMMARY_TOOL_NAME,
+                        QUOTE_TOOL_NAME]).freeze
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
   # 🩺 item 251: o Atendente de Pós-operatório abre tarefa para a equipe.
@@ -99,12 +103,13 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   # definições para a API (input_schema em JSON Schema)
-  def definitions # rubocop:disable Metrics/CyclomaticComplexity
+  def definitions # rubocop:disable Metrics/CyclomaticComplexity, Metrics/AbcSize, Metrics/PerceivedComplexity
     list = base_definitions
     list << task_definition if TASK_TOOL_KEYS.include?(@agent_key)
     list << stage_definition if TASK_TOOL_KEYS.include?(@agent_key) && crm_etapas.any?
     list << image_definition if TASK_TOOL_KEYS.include?(@agent_key) && script_images.any?
     list << audio_definition if TASK_TOOL_KEYS.include?(@agent_key) && script_audios.any?
+    list << quote_definition if TASK_TOOL_KEYS.include?(@agent_key) && pending_quote
     list + summary_definitions
   end
 
@@ -347,7 +352,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   # executa a ferramenta pedida pela IA; devolve o Hash que vai como JSON no tool_result
-  def call(name, input) # rubocop:disable Metrics/CyclomaticComplexity
+  def call(name, input) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/AbcSize, Metrics/MethodLength
     args = (input || {}).to_h.transform_keys(&:to_s)
     case name.to_s
     when 'buscar_consulta' then buscar(args)
@@ -360,6 +365,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     when SUMMARY_TOOL_NAME then anotar_cliente(args)
     when IMAGE_TOOL_NAME then enviar_imagem(args)
     when AUDIO_TOOL_NAME then enviar_audio(args)
+    when QUOTE_TOOL_NAME then enviar_orcamento
     else
       { ok: false, motivo: "Ferramenta desconhecida: #{name}" }
     end
@@ -687,6 +693,42 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     activity_note!("📝 #{agent_name} anotou na ficha do cliente: #{resumo}") if changed.any?
     log_acao(SUMMARY_TOOL_NAME, true, "anotou na ficha: #{resumo}")
     { ok: true, anotado: changed }
+  end
+
+  # 📨 orçamento gerado e ainda não enviado a este cliente (o mais novo)
+  def pending_quote
+    return @pending_quote if defined?(@pending_quote)
+
+    @pending_quote = @contact && Crm::Quote.ativos.where(account: @account, contact: @contact, sent_at: nil).recent.first
+  end
+
+  def quote_definition
+    {
+      name: QUOTE_TOOL_NAME,
+      description: "Envia ao cliente o ORÇAMENTO JÁ PRONTO (#{Crm::KitQuote::CardUpdate.new(pending_quote).summary_text}): o PDF da proposta, " \
+                   'a imagem do resumo e a pergunta de fechamento ("É interessante para você fazer esse investimento agora?"). ' \
+                   'Use quando o cliente pedir o orçamento ou responder à mensagem "seu orçamento está pronto" (ex.: "pode mandar"). ' \
+                   'Uma vez por orçamento.',
+      input_schema: { type: 'object', properties: {}, additionalProperties: false }
+    }
+  end
+
+  def enviar_orcamento
+    return refuse(QUOTE_TOOL_NAME, 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
+    return refuse(QUOTE_TOOL_NAME, 'Não há orçamento pronto por enviar: diga que o Fernando te manda assim que ficar pronto.') if pending_quote.nil?
+
+    test_conversation = @simulation && Crm::AgentSimulator.simulated?(@conversation)
+    unless @live
+      log_acao(QUOTE_TOOL_NAME, true, "enviaria o orçamento ##{pending_quote.id} (simulado)")
+      return { simulado: true, ok: true, mensagem: 'Em sombra nada foi enviado; ao vivo o PDF, o resumo e a pergunta de fechamento iriam agora.' }
+    end
+    return refuse(QUOTE_TOOL_NAME, 'Conversa de teste: o orçamento não é enviado aqui.') if test_conversation
+
+    Crm::KitQuote::Delivery.new(pending_quote, agent_key: @agent_key).deliver!
+    log_acao(QUOTE_TOOL_NAME, true, "enviou o orçamento ##{pending_quote.id}")
+    { ok: true, enviado: true,
+      aviso: 'O orçamento JÁ FOI ENVIADO: PDF da proposta, imagem do resumo e a pergunta de fechamento "É interessante para você ' \
+             'fazer esse investimento agora?". NÃO repita a pergunta nem mande outro balão agora: espere a resposta do cliente.' }
   end
 
   # 🖼️ imagem pronta do roteiro → mensagem com anexo na conversa (Crm::ScriptImages).

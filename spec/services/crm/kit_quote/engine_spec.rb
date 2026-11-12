@@ -60,7 +60,7 @@ RSpec.describe Crm::KitQuote::Engine do
       ] }.to_json)
   end
 
-  it 'calcula a potência e junta as opções dos dois fornecedores, até 7, da mais barata à mais cara' do
+  it 'calcula a potência e junta até 15 opções de cada fornecedor, da mais cara à mais barata' do
     stub_avt_official_denied
     stub_avt_session
     stub_bluesun
@@ -73,15 +73,17 @@ RSpec.describe Crm::KitQuote::Engine do
       a_hash_including('fornecedor' => 'Bluesun', 'ok' => true, 'opcoes' => 6)
     )
     options = result['opcoes']
-    expect(options.size).to eq(7)
-    expect(options.map { |o| o['preco'] }).to eq(options.map { |o| o['preco'] }.sort)
+    expect(options.size).to eq(9)
+    totais = options.map { |o| (o['total'] || o['preco']).to_f }
+    expect(totais).to eq(totais.sort.reverse)
     expect(options.map { |o| o.values_at('fornecedor', 'tipo') }.uniq)
       .to include(%w[AVT string], %w[AVT micro], %w[Bluesun string], %w[Bluesun micro])
-    cheapest_avt = options.find { |o| o['fornecedor'] == 'AVT' }
+    cheapest_avt = options.select { |o| o['fornecedor'] == 'AVT' && o['tipo'] == 'string' }.min_by { |o| o['preco'] }
     expect(cheapest_avt).to include('paineis' => '9 × DAH 620W | BIFACIAL', 'inversor' => 'INVERSOR HYX-S3.6K-S2',
                                     'preco' => 7033.04, 'potencia_kwp' => 5.58,
                                     'obs' => 'rede bifásica cotada como monofásica 220 V')
-    expect(options.first).to include('fornecedor' => 'Bluesun', 'preco' => 6764.81, 'frete' => 169.45, 'obs' => 'inclui seguro')
+    expect(options.select { |o| o['fornecedor'] == 'Bluesun' }.min_by { |o| o['preco'] })
+      .to include('preco' => 6764.81, 'frete' => 169.45, 'obs' => 'inclui seguro')
   end
 
   it 'manda o consumo e a rede para a Bluesun' do
@@ -216,9 +218,9 @@ RSpec.describe Crm::KitQuote::Engine do
         body['incluir_estrutura'] == 1 && body['id_tipo_estrutura_telhado'] == 47
       end)
       expect(result['telhado']).to eq('chave' => 'ceramica', 'nome' => 'Telha cerâmica')
-      bluesun = result['opcoes'].find { |o| o['fornecedor'] == 'Bluesun' }
+      bluesun = result['opcoes'].select { |o| o['fornecedor'] == 'Bluesun' }.min_by { |o| o['total'] }
       expect(bluesun).to include('estrutura' => true, 'completa' => true, 'falta' => '', 'frete' => 169.45, 'total' => 6934.26)
-      avt = result['opcoes'].find { |o| o['fornecedor'] == 'AVT' }
+      avt = result['opcoes'].select { |o| o['fornecedor'] == 'AVT' }.min_by { |o| o['total'] }
       expect(avt).to include('estrutura' => false, 'completa' => false, 'falta' => 'estrutura do telhado e frete', 'total' => 7033.04)
       expect(result['fornecedores'].find { |f| f['fornecedor'] == 'AVT' }).to include('completas' => 0, 'falta' => 'estrutura do telhado e frete')
     end

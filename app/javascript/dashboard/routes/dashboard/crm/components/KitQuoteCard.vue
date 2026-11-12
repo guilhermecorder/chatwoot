@@ -10,8 +10,16 @@ const props = defineProps({
   mostrarCliente: { type: Boolean, default: true },
   podeEditar: { type: Boolean, default: false },
   ocupado: { type: Boolean, default: false },
+  // lixeira (só o dono vê): mostra quem excluiu e o motivo, e o botão Restaurar
+  naLixeira: { type: Boolean, default: false },
 });
-const emit = defineEmits(['enviar', 'abrir', 'excluir']);
+const emit = defineEmits([
+  'enviar',
+  'abrir',
+  'excluir',
+  'restaurar',
+  'whatsapp',
+]);
 
 const NOME_TIPO = {
   micro: 'Micro inversor',
@@ -40,6 +48,20 @@ const pct = v =>
 // enviado (verde) · valendo (laranja) · vencido (cinza)
 const situacao = computed(() => {
   const o = props.orcamento;
+  if (props.naLixeira) {
+    return {
+      cor: '#dc2626',
+      icone: 'i-lucide-trash-2',
+      texto: `Excluído em ${dia(o.excluido_em)}`,
+    };
+  }
+  if (!o.enviado_em && o.aguardando_envio) {
+    return {
+      cor: '#2563eb',
+      icone: 'i-lucide-hourglass',
+      texto: 'Aguardando o cliente responder',
+    };
+  }
   if (o.enviado_em) {
     return {
       cor: '#16a34a',
@@ -61,19 +83,33 @@ const situacao = computed(() => {
   };
 });
 
+// excluir = mandar para a lixeira, com o motivo (fica registrado quem excluiu)
 const excluir = () => {
   const o = props.orcamento;
   // eslint-disable-next-line no-alert
-  const ok = window.confirm(
-    `Excluir o orçamento de ${reais(o.valor)}${o.cliente?.nome ? ` de ${o.cliente.nome}` : ''}? Os PDFs dele também saem.`
+  const motivo = window.prompt(
+    `Excluir o orçamento de ${reais(o.valor)}${o.cliente?.nome ? ` de ${o.cliente.nome}` : ''}?\n\nEle vai para a lixeira e fica registrado quem excluiu. Qual o motivo?`
   );
-  if (ok) emit('excluir', o);
+  if (motivo === null) return;
+  if (!motivo.trim()) {
+    // eslint-disable-next-line no-alert
+    window.alert('Escreva o motivo para excluir.');
+    return;
+  }
+  emit('excluir', o, motivo.trim());
 };
 const TXT = {
   geradoPor: 'por',
   semArquivos: 'Sem PDF guardado',
   marcarEnviada: 'Marcar como enviada',
   abrir: 'Abrir',
+  piso: 'Piso para negociar (20%):',
+  whats: 'Enviar pelo WhatsApp',
+  whatsDica:
+    'Manda a proposta, o resumo e a pergunta de fechamento. Fora da janela de 24 h, manda antes o aviso "seu orçamento está pronto".',
+  alguem: 'Alguém',
+  excluiu: 'excluiu',
+  restaurar: 'Restaurar',
   excluir: 'Excluir',
   lucro: 'lucro',
 };
@@ -98,6 +134,9 @@ const TXT = {
           >
             {{ pct(orcamento.margem) }}
           </span>
+        </p>
+        <p v-if="orcamento.piso?.valor" class="qc-floor">
+          {{ TXT.piso }} {{ reais(orcamento.piso.valor) }}
         </p>
         <p class="text-[11px] text-n-slate-10 mt-0.5">
           {{ dia(orcamento.criado_em) }}
@@ -140,7 +179,25 @@ const TXT = {
     </div>
     <p v-else class="text-xs text-n-slate-10">{{ TXT.semArquivos }}</p>
 
-    <footer class="qc-foot">
+    <p v-if="naLixeira" class="qc-trash text-n-slate-12">
+      <strong>{{ orcamento.excluido_por || TXT.alguem }}</strong>
+      {{ TXT.excluiu }}
+      <template v-if="orcamento.motivo">
+        {{ `· “${orcamento.motivo}”` }}
+      </template>
+    </p>
+    <footer v-if="naLixeira" class="qc-foot">
+      <button
+        type="button"
+        class="qc-act qc-act-main"
+        :disabled="ocupado"
+        @click="emit('restaurar', orcamento)"
+      >
+        <span class="i-lucide-rotate-ccw" />
+        {{ TXT.restaurar }}
+      </button>
+    </footer>
+    <footer v-else class="qc-foot">
       <button
         v-if="podeEditar"
         type="button"
@@ -152,14 +209,25 @@ const TXT = {
         <span class="i-lucide-trash-2" />
       </button>
       <button
+        v-if="podeEditar && !orcamento.enviado_em && orcamento.arquivos?.length"
+        type="button"
+        class="qc-act qc-act-wa"
+        :disabled="ocupado"
+        :title="TXT.whatsDica"
+        @click="emit('whatsapp', orcamento)"
+      >
+        <span class="i-lucide-message-circle" />
+        {{ TXT.whats }}
+      </button>
+      <button
         v-if="podeEditar && !orcamento.enviado_em"
         type="button"
-        class="qc-act qc-act-main"
+        class="qc-act text-n-slate-12"
         :disabled="ocupado"
+        :title="TXT.marcarEnviada"
         @click="emit('enviar', orcamento)"
       >
-        <span class="i-lucide-send" />
-        {{ TXT.marcarEnviada }}
+        <span class="i-lucide-check-check" />
       </button>
       <button
         v-if="mostrarCliente && orcamento.cliente?.id"
@@ -274,6 +342,20 @@ const TXT = {
   width: 14px;
   height: 14px;
 }
+.qc-floor {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #7c3aed;
+}
+.qc-act-wa {
+  color: #fff;
+  background: #16a34a;
+  border-color: #16a34a;
+}
+.qc-act-wa:hover {
+  background: #15803d;
+}
 .qc-act-main {
   color: #fff;
   background: #16a34a;
@@ -286,6 +368,12 @@ const TXT = {
   color: #dc2626;
   padding: 0 8px;
   margin-right: auto;
+}
+.qc-trash {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgb(220 38 38 / 0.08);
 }
 .qc-act:disabled {
   opacity: 0.5;

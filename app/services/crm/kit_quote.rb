@@ -25,10 +25,10 @@ module Crm::KitQuote
     'ibge' => '3538709',
     'incidencia_solar' => 4.91,
     'perda' => 0.20,
-    'max_opcoes' => 7,
+    'max_opcoes' => 15, # por fornecedor
     # R$ por kWh para passar a conta de luz para consumo (mesma relação da proposta do
     # Residencial Potengi: R$ 4.400 para 4.250 kWh). O consumo calculado pode ser ajustado na tela.
-    'tarifa' => 1.035,
+    'tarifa' => 0.95, # R$ por kWh (Guilherme, 12/11: "o cálculo fica mais correto"; era 1,035)
     # Serviço que transforma os dados do orçamento em PDF (o gerador aprovado, em Python + Chrome).
     # Sem endereço, o sistema monta os dados e avisa que o PDF não pôde ser gerado.
     'gerador_pdf' => { 'url' => nil, 'token' => nil },

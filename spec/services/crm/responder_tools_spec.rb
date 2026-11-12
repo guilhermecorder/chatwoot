@@ -23,7 +23,7 @@ RSpec.describe Crm::ResponderTools do
     it 'expõe as ferramentas da Agenda + abrir_tarefa (#458) com input_schema; o Agente de Ligação só as da Agenda' do
       defs = tools.definitions
       so_media = [described_class::STAGE_TOOL_NAME, described_class::IMAGE_TOOL_NAME, described_class::AUDIO_TOOL_NAME,
-                  described_class::SUMMARY_TOOL_NAME]
+                  described_class::SUMMARY_TOOL_NAME, described_class::QUOTE_TOOL_NAME]
       expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES - so_media)
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).to eq(described_class::NAMES)
       expect(defs).to all(include(:description, :input_schema))

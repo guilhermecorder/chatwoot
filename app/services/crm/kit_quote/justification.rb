@@ -27,8 +27,8 @@ class Crm::KitQuote::Justification
   private
 
   def consumption
-    note = "A tarifa de R$ #{@budget.decimal(@budget.tariff, 3)} por kWh é a mesma relação da proposta do " \
-           'Residencial Potengi (R$ 4.400 para 4.250 kWh).'
+    note = "A tarifa de R$ #{@budget.decimal(@budget.tariff, 3)} por kWh é a referência da Life para a conta da CPFL " \
+           '(valor da conta ÷ tarifa = consumo em kWh).'
     note += ' O consumo que vai aumentar é estimativa.' if @budget.additions.any?
     { 'linhas' => consumption_lines, 'total_reais' => @budget.bill_total.round(2), 'total_kwh' => @budget.kwh_total.round,
       'tarifa' => @budget.tariff, 'nota' => note }

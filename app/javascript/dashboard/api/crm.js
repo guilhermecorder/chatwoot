@@ -1762,9 +1762,26 @@ class CrmAPI extends ApiClient {
     });
   }
 
-  // 🗑️ exclui um orçamento guardado (administrador ou quem gerou)
-  discardKitQuote(id) {
-    return axios.post(`${this.url}/kit_quote/discard`, { id });
+  // 🗑️ manda um orçamento para a lixeira, com o motivo (administrador ou quem gerou)
+  discardKitQuote(id, motivo) {
+    return axios.post(`${this.url}/kit_quote/discard`, { id, motivo });
+  }
+
+  // 📨 envia o orçamento pelo WhatsApp com a pergunta de fechamento
+  deliverKitQuote(id) {
+    return axios.post(`${this.url}/kit_quote/deliver`, { id });
+  }
+
+  // ♻️ volta da lixeira (só o dono da conta)
+  restoreKitQuote(id) {
+    return axios.post(`${this.url}/kit_quote/restore`, { id });
+  }
+
+  // 🗑️ os orçamentos da lixeira (só o dono da conta)
+  getKitQuoteTrash() {
+    return axios.get(`${this.url}/kit_quote/history`, {
+      params: { lixeira: '1' },
+    });
   }
 
   // 🏷️ a proposta foi enviada ao cliente (etiqueta orcamento-enviado)

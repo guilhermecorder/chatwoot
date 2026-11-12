@@ -59,10 +59,17 @@ const quando = iso =>
 
 const estado = id => {
   const a = props.acesso?.[id] || {};
-  if (id === 'avt' && a.login) {
+  // 12/11: a AVT pôs verificação de robô no login, então o usuário e a senha salvos não
+  // entram mais sozinhos. Sessão vencida = amarelo, com o que fazer.
+  if (
+    id === 'avt' &&
+    a.sessao !== 'ok' &&
+    (a.login || a.sessao === 'vencida')
+  ) {
     return {
-      cor: 'verde',
-      texto: 'Entra sozinha com o usuário e a senha salvos',
+      cor: 'amarelo',
+      texto:
+        'Sessão venceu: entre no portal da AVT e cole a sessão de novo (vale cerca de 1 hora)',
     };
   }
   if (id === 'avt' && a.token && a.sessao !== 'ok') {

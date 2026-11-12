@@ -27,7 +27,7 @@ RSpec.describe 'Cotador de kits — rota do CRM', type: :request do
     get base, headers: admin.create_new_auth_token, as: :json
 
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body).to include('cidade' => 'Piracicaba/SP', 'max_opcoes' => 7)
+    expect(response.parsed_body).to include('cidade' => 'Piracicaba/SP', 'max_opcoes' => 15)
     expect(response.parsed_body['acesso']).to include(
       'avt' => a_hash_including('sessao' => 'sem', 'token' => false, 'id_cliente' => false),
       'bluesun' => a_hash_including('sessao' => 'sem')
@@ -176,8 +176,14 @@ RSpec.describe 'Cotador de kits — rota do CRM', type: :request do
         sent = JSON.parse(req.body)
         sent.dig('proposta', 'investimento', 'preco_total').to_i == 12_880 && sent.dig('justificativa', 'adequacao', 'valor').to_i == 550
       end)
-      expect(response.parsed_body['arquivos'].pluck('nome')).to eq(%w[Proposta-Adriana.pdf Justificativa-Adriana.pdf])
+      # guardado no cliente: os PDFs ficam no orçamento e a resposta não traz o base64 de volta
+      expect(response.parsed_body['arquivos']).to eq([])
+      expect(response.parsed_body.dig('orcamento', 'arquivos').pluck('nome')).to eq(%w[Proposta-Adriana.pdf Justificativa-Adriana.pdf])
       expect(response.parsed_body['aviso']).to be_nil
+
+      # cliente digitado (fora da base): os PDFs voltam na resposta para baixar
+      post "#{base}/documents", params: payload.merge(cliente: { nome: 'Cliente de balcão' }), headers: admin.create_new_auth_token, as: :json
+      expect(response.parsed_body['arquivos'].pluck('nome')).to eq(%w[Proposta-Adriana.pdf Justificativa-Adriana.pdf])
     end
 
     it 'não perde os números quando o gerador de PDF falha' do
@@ -291,19 +297,39 @@ RSpec.describe 'Cotador de kits — rota do CRM', type: :request do
       expect(lista.last['enviado_em']).to be_present
     end
 
-    it 'exclui o orçamento (administrador ou quem gerou) e nega para os outros', :aggregate_failures do
+    it 'excluir manda para a LIXEIRA com quem excluiu e o motivo; só o dono vê e restaura', :aggregate_failures do
       do_admin = quote(ana, created_at: 1.day.ago)
       do_atendente = quote(bia, created_at: 1.day.ago, user: agent)
+      Cevico::SettingMerge.merge!(account, :agent_permissions) { |p| p.merge('owner_ids' => [admin.id]) }
+      outro_admin = create(:user, account: account, role: :administrator)
 
       post "#{base}/discard", params: { id: do_admin.id }, headers: admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:unprocessable_entity) # sem motivo
+
+      post "#{base}/discard", params: { id: do_admin.id, motivo: 'cliente desistiu' }, headers: outro_admin.create_new_auth_token, as: :json
       expect(response).to have_http_status(:ok)
-      expect(Crm::Quote.exists?(do_admin.id)).to be(false)
+      expect(do_admin.reload).to have_attributes(deleted_by_id: outro_admin.id, delete_reason: 'cliente desistiu')
+      expect(do_admin.files).to be_empty # nada foi apagado do anexo (não tinha); o registro fica
 
-      post "#{base}/discard", params: { id: 0 }, headers: admin.create_new_auth_token, as: :json
+      get "#{base}/history", headers: admin.create_new_auth_token, as: :json
+      expect(response.parsed_body['orcamentos'].pluck('id')).to eq([do_atendente.id])
+      expect(response.parsed_body['lixeira']).to eq('disponivel' => true, 'total' => 1)
+
+      get "#{base}/history", params: { lixeira: '1' }, headers: outro_admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:forbidden)
+
+      get "#{base}/history", params: { lixeira: '1' }, headers: admin.create_new_auth_token, as: :json
+      expect(response.parsed_body['orcamentos'].first).to include('id' => do_admin.id, 'motivo' => 'cliente desistiu',
+                                                                  'excluido_por' => outro_admin.name)
+
+      post "#{base}/restore", params: { id: do_admin.id }, headers: outro_admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:forbidden)
+      post "#{base}/restore", params: { id: do_admin.id }, headers: admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(do_admin.reload.deleted_at).to be_nil
+
+      post "#{base}/discard", params: { id: 0, motivo: 'x' }, headers: admin.create_new_auth_token, as: :json
       expect(response).to have_http_status(:not_found)
-
-      post "#{base}/discard", params: { id: do_atendente.id }, headers: admin.create_new_auth_token, as: :json
-      expect(Crm::Quote.exists?(do_atendente.id)).to be(false)
     end
   end
 

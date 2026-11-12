@@ -108,12 +108,17 @@ describe('proposalBuilder', () => {
     ];
     expect(prefillFromSummary(summary)).toEqual({
       hoje: 300,
+      kwh: 0,
       acrescimo: 'vai pôr 2 ar-condicionados',
       cidade: 'Piracicaba',
       telhado: 'metalica',
     });
+    expect(
+      prefillFromSummary([{ label: 'Consumo médio', value: '350 kWh por mês' }])
+    ).toEqual(expect.objectContaining({ hoje: 0, kwh: 350 }));
     expect(prefillFromSummary([])).toEqual({
       hoje: 0,
+      kwh: 0,
       acrescimo: '',
       cidade: '',
       telhado: '',

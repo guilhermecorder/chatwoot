@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_11_11_210000) do
+ActiveRecord::Schema[7.2].define(version: 2026_11_12_180000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1691,7 +1691,11 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_11_210000) do
     t.datetime "sent_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "deleted_at"
+    t.bigint "deleted_by_id"
+    t.string "delete_reason"
     t.index ["account_id", "contact_id", "created_at"], name: "index_crm_quotes_on_account_id_and_contact_id_and_created_at"
+    t.index ["account_id", "deleted_at"], name: "index_crm_quotes_on_account_id_and_deleted_at"
   end
 
   create_table "crm_script_versions", force: :cascade do |t|
