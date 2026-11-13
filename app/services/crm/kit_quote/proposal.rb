@@ -61,11 +61,25 @@ class Crm::KitQuote::Proposal
     ]
   end
 
-  # A economia mostrada é a conta inteira (como nas propostas aprovadas).
+  # A economia é a conta MENOS a taxa mínima da CPFL, que continua (Guilherme, 13/11/2026: "precisamos descontar a
+  # taxa mínima e trazer clareza pro cliente"). A proposta e o resumo mostram a observação com o valor da taxa.
   def economy
-    yearly = @budget.bill_total * 12
-    { 'mensal' => @budget.bill_total.round(2), 'anual' => yearly.round(2),
-      'em_10_anos' => @budget.round_to(yearly * ECONOMY_10, 500), 'em_25_anos' => @budget.round_to(yearly * ECONOMY_25, 1000) }
+    monthly = @budget.monthly_saving
+    yearly = monthly * 12
+    { 'mensal' => monthly, 'anual' => yearly.round(2),
+      'em_10_anos' => @budget.round_to(yearly * ECONOMY_10, 500), 'em_25_anos' => @budget.round_to(yearly * ECONOMY_25, 1000),
+      'conta_mensal' => @budget.bill_total.round(2), 'taxa_minima' => minimum_fee_block, 'observacao' => minimum_fee_note }
+  end
+
+  def minimum_fee_block
+    { 'valor' => @budget.minimum_fee, 'kwh' => @budget.minimum_kwh, 'rede' => Crm::KitQuote::Budget::GRID_NAMES[@budget.grid] }
+  end
+
+  # "Sua conta não zera: continua a taxa mínima da CPFL, de R$ 47,50 por mês (...). A economia já está com ela descontada."
+  def minimum_fee_note
+    "Sua conta de luz não zera: continua a taxa mínima da CPFL, de #{@budget.money(@budget.minimum_fee)} por mês " \
+      "(o mínimo de #{@budget.minimum_kwh} kWh que toda ligação #{Crm::KitQuote::Budget::GRID_NAMES[@budget.grid]} paga), " \
+      'mais a iluminação pública que já vem na conta. A economia mostrada aqui já está com essa taxa descontada.'
   end
 
   def investment

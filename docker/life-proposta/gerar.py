@@ -174,6 +174,20 @@ def preparar(dados):
     f["eco_mes_n"] = reais_n(eco_mes)
     f["conta_eco"] = reais(eco_mes)
     f["eco_mes_classe"] = "longo" if len(f["eco_mes_n"]) > 6 else ""
+    # Taxa mínima da CPFL (opcional, 13/11/2026): a conta não zera, e a economia já vem com a taxa descontada.
+    # economia.taxa_minima = {valor, kwh, rede} · economia.conta_mensal · economia.observacao (frase para o pé da tela)
+    eco = dados["economia"]
+    taxa = eco.get("taxa_minima") or {}
+    f["taxa_minima"] = reais(taxa["valor"]) if taxa.get("valor") else ""
+    f["conta_base"] = reais(eco.get("conta_mensal") or dados["conta"]["valor_mensal"])
+    f["eco_sub"] = "por mês, já descontada a taxa mínima da CPFL" if f["taxa_minima"] else "por mês"
+    if f["taxa_minima"]:
+        f["recap_classe"] = (f["recap_classe"] + " com-taxa").strip()
+        conta_base = float(eco.get("conta_mensal") or dados["conta"]["valor_mensal"])
+        if abs(conta_base - float(taxa["valor"]) - float(eco_mes)) > 0.5:
+            f["avisos_dados"].append(
+                f"Conta ({f['conta_base']}) menos a taxa mínima ({f['taxa_minima']}) não dá a economia mensal ({f['conta_eco']}). A tela 7 mostra os três; confira."
+            )
     f["eco_ano"] = reais(pegar(dados, "economia.anual"))
     f["eco_10"] = reais(pegar(dados, "economia.em_10_anos"))
     f["eco_25"] = reais(pegar(dados, "economia.em_25_anos"))

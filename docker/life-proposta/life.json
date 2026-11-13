@@ -1,5 +1,5 @@
 {
-  "_leia": "Textos fixos da Life. Valem para toda proposta. O JSON do orçamento pode trocar qualquer campo daqui repetindo a mesma chave.",
+  "_leia": "Textos fixos da Life. Valem para todo orçamento (para o cliente, o nome é orçamento, não proposta). O JSON do orçamento pode trocar qualquer campo daqui repetindo a mesma chave.",
 
   "vendedor": {
     "nome": "Fernando",
@@ -29,12 +29,27 @@
     "legenda": "Prints do perfil da Life no Google, novembro de 2026."
   },
 
-  "roteiro": [
-    { "titulo": "O projeto", "texto": "Tudo o que será entregue para você." },
-    { "titulo": "A instalação", "texto": "Como a gente instala no seu imóvel." },
-    { "titulo": "Prazos e garantias", "texto": "A sua tranquilidade, por escrito." },
-    { "titulo": "O investimento", "texto": "Valor total e formas de pagamento." }
-  ],
+  "avaliacoes_fim": {
+    "nota": "5,0 no Google, 227 avaliações",
+    "titulo": "Quem já instalou recomenda",
+    "prints": ["modelo/img/aval-fabiana.jpg", "modelo/img/aval-juliano.jpg"],
+    "reserva": ["modelo/img/aval-marcos.jpg"],
+    "link": "https://maps.google.com/?cid=10211778744911460461"
+  },
+
+  "indice": {
+    "destaques": [
+      { "titulo": "Seu orçamento", "texto": "Valor, parcelas e validade", "alvo": "investimento", "cor": "amarelo" },
+      { "titulo": "Sua economia", "texto": "Quanto fica no seu bolso por mês", "alvo": "economia", "cor": "verde" }
+    ],
+    "itens": [
+      { "titulo": "Quem vai cuidar de você", "alvo": "fernando" },
+      { "titulo": "O que você recebe", "alvo": "entrega" },
+      { "titulo": "Instalação e prazo", "alvo": "instalacao" },
+      { "titulo": "Garantias", "alvo": "garantias" },
+      { "titulo": "Tudo em uma tela", "alvo": "resumo" }
+    ]
+  },
 
   "instalacao": [
     { "titulo": "O equipamento chega", "texto": "Direto no seu imóvel, pronto para instalar." },
@@ -59,7 +74,7 @@
     "salto_depois": "Você leva um sistema mais moderno por uma pequena parte desse valor.",
     "validade_motivo": "O preço acompanha o dólar e pode mudar depois dessa data.",
     "prazo_instalacao": "Prazo de instalação: de 25 a 40 dias, contados depois da visita técnica e da assinatura do contrato. Ele depende da chegada do equipamento e da liberação da {distribuidora}.",
-    "pergunta_final": "Gostou da proposta e ela cabe no seu orçamento?",
+    "pergunta_final": "Gostou do orçamento e ele cabe no seu bolso?",
     "abraco": "Vai ser uma honra ajudar você a instalar um sistema de energia solar de alta tecnologia no seu imóvel.",
     "despedida": "Um grande abraço e conte comigo."
   }

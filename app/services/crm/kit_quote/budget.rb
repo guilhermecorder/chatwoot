@@ -67,6 +67,29 @@ class Crm::KitQuote::Budget
     bill['hoje'].to_f + additions.sum { |a| a['valor'].to_f }
   end
 
+  # 💡 A CONTA NÃO ZERA (Guilherme, 13/11/2026): com energia solar continua a taxa mínima da CPFL (custo de
+  # disponibilidade da ANEEL: 30 kWh na ligação monofásica, 50 na bifásica, 100 na trifásica) — a economia mostrada
+  # ao cliente já vem com ela descontada. Sem a rede informada, bifásica (a mais comum nas casas).
+  MINIMUM_KWH = { 'monofasico' => 30, 'bifasico' => 50, 'trifasico' => 100 }.freeze
+  GRID_NAMES = { 'monofasico' => 'monofásica', 'bifasico' => 'bifásica', 'trifasico' => 'trifásica' }.freeze
+
+  def grid
+    MINIMUM_KWH.key?(bill['rede'].to_s) ? bill['rede'].to_s : 'bifasico'
+  end
+
+  def minimum_kwh
+    MINIMUM_KWH.fetch(grid)
+  end
+
+  def minimum_fee
+    (minimum_kwh * tariff).round(2)
+  end
+
+  # o que o cliente deixa de pagar por mês: a conta (com os acréscimos) menos a taxa mínima que continua
+  def monthly_saving
+    [bill_total - minimum_fee, 0].max.round(2)
+  end
+
   # O consumo informado na tela; sem ele, a conta inteira dividida pela tarifa.
   def kwh_total
     bill['consumo_kwh'].to_f.positive? ? bill['consumo_kwh'].to_f : (bill_total / tariff).round

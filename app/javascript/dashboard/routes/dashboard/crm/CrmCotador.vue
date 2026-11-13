@@ -528,6 +528,8 @@ const gerar = async () => {
           hoje: contaHoje.value,
           acrescimos: acrescimos.value.filter(a => parseMoney(a.valor) > 0),
           consumo_kwh: consumo.value,
+          // a taxa mínima da CPFL que continua depende da ligação (13/11)
+          rede: rede.value,
         },
         telhado: resultado.value?.telhado?.chave || telhado.value,
         opcao: escolhida.value,

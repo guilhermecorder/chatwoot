@@ -3,110 +3,133 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=390">
-<title>Proposta Life Energia Solar: {{cliente.nome}}</title>
+<title>Orçamento Life Energia Solar: {{cliente.nome}}</title>
 <link rel="stylesheet" href="proposta.css">
 </head>
 <body>
 <!--
-  Modelo da proposta da LIFE. Cada section com a classe "tela" vira uma página do PDF.
+  Modelo do ORÇAMENTO da LIFE (para o cliente, o nome é "orçamento", não "proposta"). Cada section "tela" vira uma página do PDF.
   As marcações entre chaves duplas estão explicadas no README.md (campos do JSON, "f." = valor já formatado,
-  blocos "se", "nao" e "cada"; chaves triplas = SVG pronto, sem escapar). O "i" de classe "arco" e o
-  comentário "pe" são preenchidos pelo gerar.py (sol do progresso e rodapé com o número da tela).
+  blocos "se", "nao" e "cada"; chaves triplas = SVG pronto, sem escapar). O comentário "pe" é preenchido
+  pelo gerar.py (rodapé com o número da tela). Cada tela termina com um "gancho": frase curta + setas que leva
+  para a próxima (é um link interno, como os botões do índice da tela 2; os alvos são os id das sections).
   Vidro: o elemento com data-vidro (a tela ou uma foto) leva a cópia desfocada; cada .vidro dentro dele
   recebe essa cópia na posição certa pelo script do fim da página.
-  A ORDEM das telas é o esqueleto aprovado pelo Guilherme: não trocar.
+  A ORDEM das telas é o esqueleto aprovado pelo Guilherme (12/11/2026: índice na tela 2; 13/11: avaliações do Google no fim): não trocar.
 -->
 
-<!-- 1. CAPA -->
+<!-- 1. CAPA (é o que aparece na prévia do PDF no WhatsApp: tem que convidar a abrir) -->
 <section class="tela capa" data-vidro="img/capa-vidro.jpg">
   <img class="fundo" src="img/capa.jpg" alt="">
   <div class="topo"><img src="img/life-logo-claro.png" alt="Life Energia Solar"><span>{{f.data}}</span></div>
-  <h1>Sua jornada rumo à energia solar</h1>
+  <h1>Abra seu orçamento</h1>
   <div class="vidro escuro capa-cartao empurra">
-    <p class="para">Proposta para</p>
+    <p class="para">Orçamento de sistema de energia solar para</p>
     <p class="cliente">{{cliente.nome}}</p>
     <p class="frase">{{textos.capa_frase}}</p>
+    <p class="capa-validade">Válido até {{f.validade}}</p>
   </div>
+  <a class="gancho" href="#indice"><span>Deslize para abrir</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
+  <!--pe-->
+</section>
+
+<!-- 2. ÍNDICE COM BOTÕES (quem quiser pular o caminho, pula; o orçamento fica bem visível) -->
+<section class="tela vidrada indice" id="indice" data-vidro="img/fundo-sol-vidro.jpg">
+  <img class="fundo" src="img/fundo-sol.jpg" alt="">
+  <h1>O que você vai encontrar aqui</h1>
+  {{#cada indice.destaques}}
+  <a class="botao-indice {{cor}}" href="#{{alvo}}"><span><b>{{titulo}}</b><small>{{texto}}</small></span><svg class="avancar" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5.5l6.5 6.5L9 18.5"/></svg></a>
+  {{/cada}}
+  <div class="vidro escuro lista-indice">
+    {{#cada indice.itens}}<a href="#{{alvo}}"><span>{{titulo}}</span><svg class="avancar" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5.5l6.5 6.5L9 18.5"/></svg></a>{{/cada}}
+  </div>
+  <a class="gancho" href="#fernando"><span>Ou siga na ordem</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 2. QUEM SOU EU -->
-<section class="tela escura">
-  <i class="arco"></i>
+<section class="tela escura" id="fernando">
   <img class="retrato" src="{{f.foto_vendedor}}" alt="{{vendedor.nome}}">
   <h1>Muito prazer, eu sou o {{vendedor.nome}}.</h1>
   <p>{{vendedor.nome_completo}}, {{vendedor.cargo}}.</p>
   <p class="forte">{{vendedor.objetivo}}</p>
+  <a class="gancho" href="#life"><span>Conheça a Life</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 3. QUEM É A LIFE -->
-<section class="tela escura">
-  <i class="arco"></i>
+<section class="tela escura" id="life">
   <img class="retrato loja" src="img/loja.jpg" alt="Loja da Life Energia Solar">
   <h1>Quem é a {{empresa.nome}}</h1>
   <p class="forte">{{empresa.manchete}}</p>
   <ul class="fatos">
     {{#cada empresa.fatos}}<li>{{.}}</li>{{/cada}}
   </ul>
+  <a class="gancho" href="#clientes"><span>Veja quem já instalou</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 4. ALGUNS CLIENTES (prints do Google) -->
-<section class="tela escura prints">
-  <i class="arco"></i>
+<section class="tela escura prints" id="clientes">
   <h1>Alguns dos nossos clientes</h1>
   <figure class="print perfil"><img src="{{prints.perfil}}" alt="Perfil da Life no Google"></figure>
   {{#cada prints.avaliacoes}}<figure class="print aval"><img src="{{.}}" alt="Avaliação no Google"></figure>{{/cada}}
   {{#se prints.legenda}}<p class="legenda">{{prints.legenda}}</p>{{/se}}
-  <!--pe-->
-</section>
-
-<!-- 5. O QUE VAMOS COBRIR -->
-<section class="tela escura">
-  <i class="arco"></i>
-  <h1>O que você vai ver nesta proposta</h1>
-  <ol class="passos">
-    {{#cada roteiro}}<li><b>{{titulo}}</b><span>{{texto}}</span></li>{{/cada}}
-  </ol>
+  <a class="gancho" href="#combinado"><span>Antes dos números, um combinado</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 6 e 7. COMBINADO? -->
-<section class="tela ouro centro combinado">
-  <i class="arco"></i>
+<section class="tela ouro centro combinado" id="combinado">
   <p>{{textos.combinado}}</p>
   <p class="sim">Combinado?</p>
   <div class="foto-fernando" data-vidro="{{f.foto_vidro}}">
     <img src="{{f.foto_vendedor}}" alt="{{vendedor.nome}}">
     <div class="vidro escuro"><b>{{vendedor.nome}}</b><span>{{empresa.nome}}</span></div>
   </div>
+  <a class="gancho" href="#economia"><span>Agora, o seu projeto</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
-<!-- 8. RECAPITULANDO O PROJETO (com conta.composicao, mostra como a conta foi calculada) -->
-<section class="tela vidrada {{f.recap_classe}}" data-vidro="img/fundo-verde-vidro.jpg">
+<!-- 8. RECAPITULANDO O PROJETO (com conta.composicao, mostra como a conta foi calculada; com economia.taxa_minima,
+     mostra a conta em linhas: conta hoje, menos a taxa mínima da CPFL, igual à economia. A conta nunca "zera".) -->
+<section class="tela vidrada {{f.recap_classe}}" id="economia" data-vidro="img/fundo-verde-vidro.jpg">
   <img class="fundo" src="img/fundo-verde.jpg" alt="">
-  <i class="arco"></i>
   <h1>Recapitulando o seu projeto</h1>
-  {{#se f.composicao}}
+  {{#se f.composicao}}{{#nao f.taxa_minima}}
   <div class="vidro escuro conta-conta">
     <p class="rot">Como calculamos a sua conta</p>
     {{#cada f.composicao}}<div class="parte"><span>{{#se mais}}<i>+</i>{{/se}}{{#nao mais}}<i class="vazio"></i>{{/nao}}{{rotulo}}</span><b>{{valor}}</b></div>{{/cada}}
     <div class="parte total"><span><i>=</i>Sua conta por mês</span><b>{{f.conta}}</b></div>
   </div>
-  {{/se}}
-  {{#nao f.composicao}}
+  {{/nao}}{{/se}}
+  {{#nao f.composicao}}{{#nao f.taxa_minima}}
   <div class="vidro escuro conta-hoje">
     <div><p class="rot">Sua conta de luz hoje</p><b>{{f.conta}} <small>/mês</small></b></div>
     <span class="chip">{{f.cidade}}</span>
   </div>
-  {{/nao}}
+  {{/nao}}{{/nao}}
+  {{#nao f.taxa_minima}}
   <div class="vidro eco">
     <p class="rot">Você economiza, em média</p>
     <p class="valorzao neon-verde {{f.eco_mes_classe}}"><span class="rs">R$</span>{{f.eco_mes_n}}<span class="mes">por mês</span></p>
     <p class="depois">por mês</p>
   </div>
+  {{/nao}}
+  {{#se f.taxa_minima}}
+  <div class="vidro eco eco-conta">
+    {{#se f.composicao}}
+    <p class="rot">Como calculamos a sua economia</p>
+    {{#cada f.composicao}}<div class="parte"><span>{{#se mais}}<i>+</i>{{/se}}{{#nao mais}}<i class="vazio"></i>{{/nao}}{{rotulo}}</span><b>{{valor}}</b></div>{{/cada}}
+    <div class="parte subtotal"><span><i class="soma">=</i>Sua conta por mês</span><b>{{f.conta}}</b></div>
+    {{/se}}
+    {{#nao f.composicao}}<div class="parte"><span><i class="vazio"></i>Sua conta de luz hoje</span><b>{{f.conta_base}}</b></div>{{/nao}}
+    <div class="parte"><span><i class="menos">−</i>Taxa mínima da CPFL</span><b>{{f.taxa_minima}}</b></div>
+    <div class="parte resultado"><span><i class="igual">=</i>Você economiza, em média</span></div>
+    <p class="valorzao neon-verde {{f.eco_mes_classe}}"><span class="rs">R$</span>{{f.eco_mes_n}}</p>
+    <p class="ja">por mês, já descontada a taxa mínima da CPFL</p>
+  </div>
+  {{/se}}
   <div class="vidro escuro barras">
     {{#cada f.barras}}
     <div class="barra {{classe}}">
@@ -115,14 +138,14 @@
     </div>
     {{/cada}}
   </div>
-  <p class="nota empurra" style="padding-top:12px">{{textos.rodape_estimativa}}</p>
+  <p class="nota empurra" style="padding-top:12px">{{#se economia.observacao}}{{economia.observacao}} {{/se}}{{textos.rodape_estimativa}}</p>
+  <a class="gancho" href="#entrega"><span>Veja o que você recebe</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 9. O QUE SERÁ ENTREGUE -->
-<section class="tela vidrada" data-vidro="img/fundo-sol-vidro.jpg">
+<section class="tela vidrada" id="entrega" data-vidro="img/fundo-sol-vidro.jpg">
   <img class="fundo" src="img/fundo-sol.jpg" alt="">
-  <i class="arco"></i>
   <h1>O que será entregue</h1>
   <div class="grade {{f.equip_classe}}">
     {{#cada f.equipamentos}}
@@ -144,12 +167,12 @@
       <p class="sub">{{f.producao_ano}} kWh por ano.<br>Sistema de {{f.potencia}} kWp.</p>
     </div>
   </div>
+  <a class="gancho" href="#detalhes"><span>Veja os detalhes técnicos</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 9 (continuação). DETALHES TÉCNICOS -->
-<section class="tela clara">
-  <i class="arco"></i>
+<section class="tela clara" id="detalhes">
   <h1>Detalhes técnicos</h1>
   <div class="grade">
     <div class="bloco ficha largo"><span class="ico vermelho">{{{f.icones.pino}}}</span><div><p class="rot">Cidade</p><b>{{f.cidade}}</b></div></div>
@@ -160,13 +183,13 @@
     <div class="bloco ficha"><span class="ico cinza">{{{f.icones.peso}}}</span><p class="rot">Peso no telhado</p><b>{{f.peso}} <small>kg</small></b></div>
     <div class="bloco ficha"><span class="ico ciano">{{{f.icones.sol}}}</span><p class="rot">Sol por dia</p><b>{{f.incidencia}} <small>kWh/m²</small></b></div>
   </div>
+  <a class="gancho" href="#instalacao"><span>Como é a instalação</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 10. INSTALAÇÃO EM 3 PASSOS -->
-<section class="tela vidrada" data-vidro="img/fundo-azul-vidro.jpg">
+<section class="tela vidrada" id="instalacao" data-vidro="img/fundo-azul-vidro.jpg">
   <img class="fundo" src="img/fundo-azul.jpg" alt="">
-  <i class="arco"></i>
   <h1>Instalação em {{f.passos_qtd}} passos</h1>
   <img class="retrato obra" src="img/obra-instalacao.jpg" alt="Obra da Life">
   <div class="vidro escuro passos-vidro">
@@ -175,12 +198,12 @@
     </ol>
   </div>
   <p class="nota prazo-instalacao">{{textos.prazo_instalacao}}</p>
+  <a class="gancho" href="#garantias"><span>Conheça as garantias</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 11. GARANTIAS (tela azul: confiança e contraste) -->
-<section class="tela azul garantias">
-  <i class="arco"></i>
+<section class="tela azul garantias" id="garantias">
   <span class="escudo">{{{f.icones.escudo}}}</span>
   <h1>Garantias de longa duração</h1>
   <div class="lista-azul">
@@ -191,13 +214,13 @@
   {{#se garantia_geracao.titulo}}
   <div class="selo empurra"><span class="ico verde">{{{f.icones.check}}}</span><div><b>{{garantia_geracao.titulo}}</b><p>{{garantia_geracao.texto}}</p></div></div>
   {{/se}}
+  <a class="gancho" href="#salto"><span>Quanto isso custava antes</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 13. SALTO NO TEMPO -->
-<section class="tela vidrada centro" data-vidro="img/fundo-sol-vidro.jpg">
+<section class="tela vidrada centro" id="salto" data-vidro="img/fundo-sol-vidro.jpg">
   <img class="fundo" src="img/fundo-sol.jpg" alt="">
-  <i class="arco"></i>
   <h1>Um salto no tempo</h1>
   <div class="vidro escuro antes-cartao">
     <span class="chip laranja">Há poucos anos</span>
@@ -210,13 +233,13 @@
     <span class="chip verde">Hoje</span>
     <p>{{textos.salto_depois}}</p>
   </div>
+  <a class="gancho" href="#investimento"><span>Veja o seu orçamento</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 14. INVESTIMENTO E FORMAS DE PAGAMENTO (tudo junto; a opção indicada aparece em destaque) -->
-<section class="tela vidrada investimento" data-vidro="img/fundo-sol-vidro.jpg">
+<section class="tela vidrada investimento" id="investimento" data-vidro="img/fundo-sol-vidro.jpg">
   <img class="fundo" src="img/fundo-sol.jpg" alt="">
-  <i class="arco"></i>
   <h1>Qual será o seu investimento?</h1>
   <div class="vidro escuro preco-cartao">
     <div class="preco-linha"><p class="rot">Valor total do projeto</p><p class="riscado">{{f.antes_de}}</p></div>
@@ -231,14 +254,14 @@
   {{#se investimento.cartao}}
   <div class="vidro escuro cartao-linha"><span class="ico laranja">{{{f.icones.cartao}}}</span><p><b>Cartão de crédito:</b> {{investimento.cartao}}</p></div>
   {{/se}}
-  <p class="validade-linha empurra"><b>Válida até {{f.validade}}.</b> {{textos.validade_motivo}}</p>
+  <p class="validade-linha empurra"><b>Válido até {{f.validade}}.</b> {{textos.validade_motivo}}</p>
+  <a class="gancho" href="#proximos"><span>Gostou? Veja o próximo passo</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 15. PRÓXIMOS PASSOS -->
-<section class="tela vidrada" data-vidro="img/fundo-sol-vidro.jpg">
+<section class="tela vidrada" id="proximos" data-vidro="img/fundo-sol-vidro.jpg">
   <img class="fundo" src="img/fundo-sol.jpg" alt="">
-  <i class="arco"></i>
   <h1>Próximos passos</h1>
   <div class="vidro escuro investe"><span>Seu investimento</span><div><b>{{f.preco}}</b>{{#se f.indicada}}<small>ou {{f.indicada.parcelas}}x de {{f.indicada.valor}}</small>{{/se}}</div></div>
   <div class="empurra">
@@ -246,12 +269,12 @@
     <p class="pergunta">{{textos.pergunta_final}}</p>
     <a class="botao" href="{{f.link_whatsapp}}">Responder no WhatsApp</a>
   </div>
+  <a class="gancho" href="#abraco"><span>Um recado do Fernando</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
 <!-- 16. ABRAÇO FINAL -->
-<section class="tela escura centro abraco">
-  <i class="arco"></i>
+<section class="tela escura centro abraco" id="abraco">
   <img class="rosto" src="{{f.foto_vendedor}}" alt="{{vendedor.nome}}">
   <h1>Um abraço da {{empresa.nome}}</h1>
   <p>{{textos.abraco}}</p>
@@ -259,27 +282,38 @@
   <p class="assina">{{vendedor.nome}}</p>
   <p class="cargo">{{empresa.nome}}</p>
   <p class="onde" style="margin-top:34px">{{empresa.endereco}}</p>
+  <a class="gancho" href="#resumo"><span>Seu orçamento em uma tela</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
   <!--pe-->
 </section>
 
-<!-- 17. RESUMO DA PROPOSTA (último card: tudo o que importa numa tela, com a validade em vermelho) -->
-<section class="tela vidrada resumo-tela" data-vidro="img/fundo-azul-vidro.jpg">
+<!-- 17. RESUMO DO ORÇAMENTO (último card: tudo o que importa numa tela, com a validade em vermelho) -->
+<section class="tela vidrada resumo-tela" id="resumo" data-vidro="img/fundo-azul-vidro.jpg">
   <img class="fundo" src="img/fundo-azul.jpg" alt="">
-  <i class="arco"></i>
-  <p class="rot">Resumo da sua proposta</p>
+  <p class="rot">Resumo do seu orçamento</p>
   <h1>{{cliente.nome}}</h1>
   <p class="r-local">{{f.cidade}}, {{f.data}}</p>
   <div class="vidro escuro r-cartao">
     <div class="r-item r-largo"><span>Investimento</span><b>{{f.preco}}</b>{{#se f.indicada}}<small>ou {{f.indicada.parcelas}}x de {{f.indicada.valor}}</small>{{/se}}</div>
-    <div class="r-item"><span>Economia, em média</span><b class="c-verde-neon">{{f.conta_eco}}</b><small>por mês</small></div>
+    <div class="r-item"><span>Economia, em média</span><b class="c-verde-neon">{{f.conta_eco}}</b><small>{{f.eco_sub}}</small></div>
     <div class="r-item"><span>Sistema</span><b>{{f.potencia}} kWp</b><small>{{f.placas_total}} placas</small></div>
     <div class="r-item"><span>Produção</span><b>{{f.producao_mes}}</b><small>kWh por mês</small></div>
     <div class="r-item"><span>Garantia</span><b>até {{f.garantia_max}} anos</b><small>{{f.garantia_max_item}}</small></div>
   </div>
   <div class="r-validade empurra">
     <span class="ico vermelho">{{{f.icones.relogio}}}</span>
-    <div><b>Válida até {{f.validade}}</b><p>{{f.validade_dias}} dias a partir de {{f.data}}. {{textos.validade_motivo}}</p></div>
+    <div><b>Válido até {{f.validade}}</b><p>{{f.validade_dias}} dias a partir de {{f.data}}. {{textos.validade_motivo}}</p></div>
   </div>
+  <a class="gancho" href="#avaliacoes"><span>Veja o que dizem os clientes</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>
+  <!--pe-->
+</section>
+
+<!-- 17. O QUE DIZEM OS CLIENTES (prints reais do Google, para ancorar a confiança no fim) -->
+<section class="tela escura avaliacoes-fim" id="avaliacoes">
+  <p class="rot">{{avaliacoes_fim.nota}}</p>
+  <h1>{{avaliacoes_fim.titulo}}</h1>
+  {{#cada avaliacoes_fim.prints}}<figure class="print aval"><img src="{{.}}" alt="Avaliação no Google"></figure>{{/cada}}
+  <a class="link-google" href="{{avaliacoes_fim.link}}">Ver todas as avaliações no Google</a>
+  <a class="gancho volta" href="#indice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17.5l6-6 6 6M6 11.5l6-6 6 6"/></svg><span>Voltar ao índice</span></a>
   <!--pe-->
 </section>
 
@@ -297,9 +331,9 @@ document.querySelectorAll('.vidro').forEach(function (el) {
 });
 /* 2) Marca a tela em que o conteúdo passou do espaço útil; o gerar.py lê isso e avisa. */
 document.querySelectorAll('.tela').forEach(function (t) {
-  var limite = t.getBoundingClientRect().bottom - (t.classList.contains('capa') ? 60 : 70), pior = 0;
+  var limite = t.getBoundingClientRect().bottom - (t.classList.contains('capa') ? 88 : 94), pior = 0;
   Array.prototype.forEach.call(t.children, function (c) {
-    if (/\b(pe|arco|fundo)\b/.test(c.getAttribute('class') || '')) return;
+    if (/\b(pe|arco|fundo|gancho)\b/.test(c.getAttribute('class') || '')) return;
     var sobra = c.getBoundingClientRect().bottom - limite;
     if (sobra > pior) pior = sobra;
   });

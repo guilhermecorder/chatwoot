@@ -292,7 +292,8 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     @bill ||= begin
       given = params[:conta] || {}
       additions = Array(given[:acrescimos]).map { |a| { 'rotulo' => a[:rotulo].to_s.squish.first(60), 'valor' => money(a[:valor]) } }
-      { 'hoje' => money(given[:hoje]), 'acrescimos' => additions, 'consumo_kwh' => given[:consumo_kwh].to_s.tr(',', '.').to_f }
+      { 'hoje' => money(given[:hoje]), 'acrescimos' => additions, 'consumo_kwh' => given[:consumo_kwh].to_s.tr(',', '.').to_f,
+        'rede' => (given[:rede].presence || params[:rede]).to_s }
     end
   end
 

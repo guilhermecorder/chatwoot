@@ -139,7 +139,7 @@ class Crm::KitQuote::AutoBuild
   end
 
   def bill
-    { 'hoje' => data['hoje'], 'acrescimos' => additions, 'consumo_kwh' => kwh.to_f }
+    { 'hoje' => data['hoje'], 'acrescimos' => additions, 'consumo_kwh' => kwh.to_f, 'rede' => GRID }
   end
 
   def render(documents)

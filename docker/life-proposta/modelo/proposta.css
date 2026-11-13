@@ -38,14 +38,14 @@ body {
   width: 390px;
   height: 760px;
   overflow: hidden;
-  padding: 84px 28px 76px;
+  padding: 58px 28px 100px;   /* o alto ficou livre (saiu a linha do progresso); o pé guarda o gancho + rodapé */
   display: flex;
   flex-direction: column;
   break-after: page;
   page-break-after: always;
 }
 .tela:last-of-type { break-after: auto; page-break-after: auto; }
-.tela > :not(.fundo):not(.arco):not(.pe) { position: relative; z-index: 1; }
+.tela > :not(.fundo):not(.arco):not(.pe):not(.gancho) { position: relative; z-index: 1; }
 .tela > .fundo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; display: block; }
 
 .escura, .vidrada { background: var(--carbono); color: #fff; --fraco: rgba(255,255,255,.68); --linha: rgba(255,255,255,.16); --destaque: var(--sol); }
@@ -141,17 +141,19 @@ p b, p strong { color: inherit; font-weight: 700; }
 .ouro .pe .nome, .clara .pe .nome { display: block; }
 
 /* ---------- 1. capa ---------- */
-.capa { padding: 0 24px 66px; color: #fff; --fraco: rgba(255,255,255,.82); }
+.capa { padding: 0 24px 96px; color: #fff; --fraco: rgba(255,255,255,.82); }
 .capa::before { content: ""; position: absolute; inset: 0 0 auto; height: 330px; z-index: 1; background: linear-gradient(to bottom, rgba(12,14,30,.55), rgba(12,14,30,0)); }
 .capa::after { content: ""; position: absolute; inset: auto 0 0; height: 150px; z-index: 1; background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0)); }
 .capa .topo { height: 70px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; color: #fff; }
 .capa .topo img { width: 78px; }
-.capa h1 { font-size: 44px; line-height: 1.0; letter-spacing: -0.035em; margin: 10px 0 0; }
+.capa h1 { font-size: 50px; line-height: .98; letter-spacing: -0.04em; margin: 12px 0 0; }
 .capa-cartao { padding: 14px 18px 16px; }
-.capa-cartao .para { font-size: 14px; margin: 0 0 2px; color: rgba(255,255,255,.8); }
+.capa-cartao .para { font-size: 14px; line-height: 1.3; margin: 0 0 4px; color: rgba(255,255,255,.86); }
 .capa-cartao .cliente { font-size: 25px; line-height: 1.12; font-weight: 700; letter-spacing: -0.015em; color: var(--sol); margin: 0 0 6px; }
 .capa-cartao .frase { font-size: 15px; line-height: 1.38; margin: 0; color: #fff; }
-.capa .pe .nome { display: block; color: #fff; }
+.capa .pe .nome { display: none; }
+.capa-validade { font-size: 13px; font-weight: 600; margin: 8px 0 0; color: var(--sol); }
+.capa .pe { justify-content: flex-end; }
 .capa .pe img { display: none; }
 .capa .pe { color: rgba(255,255,255,.85); }
 
@@ -241,6 +243,44 @@ p b, p strong { color: inherit; font-weight: 700; }
 .longa .eco { padding: 8px 20px; }
 .longa .eco .valorzao { font-size: 48px; }
 .longa .barra { padding: 6px 0; }
+/* com a taxa mínima da CPFL: conta de hoje − taxa mínima = economia */
+.eco-conta { padding: 10px 18px 12px; }
+.eco-conta .parte span i.menos { background: #FF453A; color: #fff; }
+.eco-conta .rot { margin: 2px 0 2px; }
+.eco-conta .parte span i.soma { background: #fff; }
+.eco-conta .parte.subtotal span { color: #fff; font-weight: 600; }
+.eco-conta .parte.subtotal b { color: var(--sol); }
+.eco-conta .parte span i.igual { background: #3DF56E; color: #06210F; }
+.eco-conta .parte.resultado { border-top: 1px solid rgba(255,255,255,.22); margin-top: 4px; padding: 10px 0 0; }
+.eco-conta .parte.resultado span { color: #fff; font-weight: 600; }
+.eco-conta .valorzao { font-size: 52px; margin: 2px 0 0 28px; }
+.eco-conta .ja { font-size: 14px; line-height: 1.3; color: rgba(255,255,255,.86); margin: 3px 0 0 28px; }
+.eco-conta .valorzao.longo { font-size: 44px; }
+.detalhada .eco-conta .valorzao { font-size: 44px; }
+.detalhada .eco.eco-conta { padding: 6px 18px 10px; }
+.com-taxa h1 { margin-bottom: 12px; }
+.com-taxa .barras { padding: 2px 18px; }
+.com-taxa .barra { padding: 8px 0; }
+.com-taxa .barra .lin { margin-bottom: 6px; }
+.com-taxa .barra.forte .lin b { font-size: 22px; }
+.com-taxa .nota { font-size: 11px; line-height: 1.34; padding-top: 8px !important; }
+.com-taxa.detalhada .barra { padding: 5px 0; }
+.com-taxa.detalhada .barra .lin { margin-bottom: 4px; }
+.com-taxa.detalhada .barra .trilho { height: 6px; }
+.com-taxa.detalhada .conta-conta { padding: 10px 18px 8px; }
+.com-taxa.detalhada .parte { padding: 4px 0; }
+.com-taxa.detalhada .parte.total { margin-top: 2px; padding-top: 6px; }
+.com-taxa.detalhada .parte.total b { font-size: 21px; }
+.com-taxa.detalhada .vidro + .vidro { margin-top: 8px; }
+.com-taxa.detalhada .barras { padding: 0 18px; }
+.com-taxa.detalhada .eco-conta .valorzao { font-size: 42px; }
+.com-taxa.longa .parte { padding: 3px 0; }
+.com-taxa.longa .parte span { font-size: 15px; }
+.com-taxa.longa .eco-conta .valorzao { font-size: 38px; }
+.com-taxa.longa .eco-conta .valorzao.longo { font-size: 34px; }
+.com-taxa.longa .barra { padding: 4px 0; }
+.com-taxa.longa .nota { font-size: 10.5px; }
+.com-taxa.detalhada h1 { margin-bottom: 10px; }
 .eco { padding: 16px 20px 16px; }
 .eco .valorzao { font-size: 66px; }
 .eco .depois { font-size: 16px; color: var(--fraco); margin: 6px 0 0; }
@@ -402,3 +442,44 @@ p b, p strong { color: inherit; font-weight: 700; }
 
 /* 12/11: prazo de instalação em letra pequena na tela 10 (pedido do Guilherme) */
 .prazo-instalacao { font-size: 11px; opacity: 0.8; margin-top: 14px; max-width: 92%; }
+
+/* ---------- gancho: a frase + setas que leva para a próxima tela (no lugar da antiga linha do progresso) ---------- */
+.gancho {
+  position: absolute; left: 0; right: 0; bottom: 44px; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  font-size: 13.5px; font-weight: 700; letter-spacing: -0.005em; text-decoration: none;
+  color: var(--sol);
+}
+.gancho svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.ouro .gancho { color: var(--tinta); }
+.clara .gancho { color: #007AFF; }
+.azul .gancho { color: #fff; }
+.capa .gancho { color: #fff; font-size: 14px; }
+.gancho.volta { color: var(--fraco); font-weight: 600; }
+
+/* ---------- 2. índice com botões ---------- */
+.indice h1 { margin-bottom: 18px; }
+.botao-indice {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 17px 18px 17px 20px; border-radius: 22px; margin-bottom: 10px; text-decoration: none;
+}
+.botao-indice b { display: block; font-size: 23px; line-height: 1.1; letter-spacing: -0.02em; }
+.botao-indice small { display: block; font-size: 14px; line-height: 1.3; margin-top: 3px; }
+.botao-indice.amarelo { background: var(--sol); color: var(--tinta); }
+.botao-indice.amarelo small { color: rgba(21,22,26,.78); }
+.botao-indice.verde { background: #30D158; color: #06210F; }
+.botao-indice.verde small { color: rgba(6,33,15,.8); }
+.avancar { width: 22px; height: 22px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.lista-indice { padding: 2px 18px; margin-top: 4px; }
+.lista-indice a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; text-decoration: none; color: #fff; font-size: 17px; font-weight: 600; }
+.lista-indice a + a { border-top: 1px solid rgba(255,255,255,.14); }
+.lista-indice .avancar { width: 18px; height: 18px; color: var(--fraco); }
+
+/* A foto do card de resumo (JPG do follow-up) é tirada da tela, não do PDF: nela o "Voltar ao índice" não aparece. */
+@media screen { .resumo-tela .gancho { display: none; } }
+
+/* ---------- 17. o que dizem os clientes (prints reais do Google) ---------- */
+.avaliacoes-fim h1 { margin-bottom: 16px; }
+.avaliacoes-fim .rot { color: var(--sol); margin-bottom: 4px; }
+.avaliacoes-fim .print { margin: 0 -8px 12px; border-radius: 18px; }
+.link-google { align-self: center; margin-top: 4px; font-size: 14px; font-weight: 600; color: #fff; text-decoration: underline; text-decoration-color: rgba(255,255,255,.4); text-underline-offset: 3px; }
