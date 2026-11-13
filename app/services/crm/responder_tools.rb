@@ -602,6 +602,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     outcome = Crm::HandoffTask.open!(account: @account, contact: @contact, conversation: @conversation, agent_key: @agent_key,
                                      motivo: motivo, detalhes: args['detalhes'], urgencia: urgencia, due_at: due_at)
     task = outcome[:task]
+    Crm::JourneyLabel.bill_received!(@contact) if Crm::JourneyLabel.quote_task?(motivo)
     verb = outcome[:created] ? 'abriu' : 'complementou'
     log_acao('abrir_tarefa', true, "#{verb} tarefa ##{task.id} (#{urgencia})#{quando_txt} p/ #{task.assignee&.name || 'equipe'}: #{motivo}")
     { ok: true, id: task.id, criada: outcome[:created], responsavel: task.assignee&.name, urgencia: urgencia, prazo: task.due_at&.iso8601 }
@@ -913,12 +914,14 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   def auto_quote_definition
     {
       name: AUTO_QUOTE_TOOL_NAME,
-      description: 'Gera o ORÇAMENTO OFICIAL deste cliente agora e envia sozinho em uns 30 segundos (PDF + pergunta de fechamento). ' \
+      description: 'Monta o ORÇAMENTO OFICIAL deste cliente agora; o sistema chama o cliente sozinho em alguns minutos com o PDF ' \
+                   'e a pergunta de fechamento. ' \
                    'Use quando a ficha já tem o valor da conta de luz e o tipo de telhado (anote antes com anotar_cliente) e o ' \
                    'cliente já respondeu se vai aumentar o consumo (anote em consumo_futuro o que e quantos: ex. ' \
                    '"2 ar-condicionados de 12 mil", "carro elétrico", "piscina aquecida"; o sistema soma na conta sozinho). ' \
-                   'Na mesma resposta diga só, curto: "Já estou gerando o seu orçamento aqui, consultando os valores ' \
-                   'atualizados. Em alguns segundos te mando, ok?" e não abra tarefa de orçamento. Uma vez por cliente.',
+                   'Na mesma resposta diga só, curto: "Me dá uns instantes aqui que eu já estou montando o seu orçamento, ' \
+                   'com os valores atualizados do sistema. Assim que ficar pronto eu te chamo, combinado?" e não abra tarefa ' \
+                   'de orçamento. Uma vez por cliente.',
       input_schema: { type: 'object', properties: {}, additionalProperties: false }
     }
   end
@@ -941,23 +944,26 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
     unless @live
       log_acao(AUTO_QUOTE_TOOL_NAME, true, 'geraria e enviaria o orçamento automático (simulado)')
-      return { simulado: true, ok: true, mensagem: 'Em sombra nada é gerado; ao vivo o orçamento sairia em ~30 s.' }
+      return { simulado: true, ok: true, mensagem: 'Em sombra nada é gerado; ao vivo o orçamento sairia em alguns minutos.' }
     end
     if @simulation && Crm::AgentSimulator.simulated?(@conversation)
       return refuse(AUTO_QUOTE_TOOL_NAME, 'Conversa de teste: o orçamento automático não roda aqui.')
     end
 
     Crm::KitQuoteAutoJob.enqueue!(@conversation, @agent_key)
-    activity_note!('⚡ Orçamento automático pedido pelo atendente: gerando (cotação + PDF) e envia sozinho em ~30 s.')
+    espera = Crm::KitQuoteAutoJob.delay_for(@account, @agent_key)
+    activity_note!("⚡ Orçamento automático pedido pelo atendente: montando (cotação + PDF); vai para o cliente em ~#{(espera / 60.0).ceil} min.")
     log_acao(AUTO_QUOTE_TOOL_NAME, true, 'orçamento automático em geração')
     { ok: true, gerando: true,
-      aviso: 'O orçamento JÁ ESTÁ SENDO GERADO e vai sozinho em ~30 s com a pergunta de fechamento. Agora diga só que já está ' \
-             'gerando e que em alguns segundos manda. Não mande valor, não faça outra pergunta e não abra tarefa de orçamento.' }
+      aviso: 'O orçamento JÁ ESTÁ SENDO MONTADO e o sistema chama o cliente sozinho em alguns minutos, com o PDF e a pergunta de ' \
+             'fechamento. Agora diga só que precisa de uns instantes, que já está montando e que chama assim que ficar pronto. ' \
+             'Não mande valor, não faça outra pergunta e não abra tarefa de orçamento.' }
   end
 
   def open_handoff_quote!(motivo)
     Crm::HandoffTask.open!(account: @account, contact: @contact, conversation: @conversation, agent_key: @agent_key,
                            motivo: motivo, urgencia: 'alta')
+    Crm::JourneyLabel.bill_received!(@contact)
     true
   rescue StandardError => e
     Rails.logger.warn "[Crm::ResponderTools] tarefa do orçamento: #{e.message}"

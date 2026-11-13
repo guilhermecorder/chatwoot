@@ -49,4 +49,62 @@ RSpec.describe Crm::KitQuoteAutoJob do
     described_class.enqueue!(conversation, 'atendente_agendamento')
     expect(described_class.running?(conversation.reload)).to be(true)
   end
+
+  describe '⏱️ timer: monta na hora e só manda quando a espera completa' do
+    let(:quote) do
+      Crm::Quote.create!(account: account, contact: contact, price: 12_880, kind: 'micro', payload: { 'opcao' => { 'placas' => 7 } }).tap do |q|
+        q.files.attach(io: StringIO.new('%PDF-1'), filename: 'Proposta-Marcos.pdf', content_type: 'application/pdf')
+      end
+    end
+
+    before do
+      allow(Crm::KitQuote::AutoBuild).to receive(:new).and_return(
+        instance_double(Crm::KitQuote::AutoBuild, call: Crm::KitQuote::AutoBuild::Result.new(status: :pronto, quote: quote))
+      )
+    end
+
+    it 'pronto antes da hora: guarda, agenda o envio e nada sai para o cliente ainda', :aggregate_failures do
+      described_class.enqueue!(conversation, 'atendente_agendamento') # espera padrão 180 s
+
+      expect { described_class.perform_now(conversation.id, 'atendente_agendamento') }
+        .to have_enqueued_job(described_class).with(conversation.id, 'atendente_agendamento', quote.id)
+      expect(conversation.messages.outgoing).to be_empty
+      expect(conversation.reload.additional_attributes.dig('cevico_orcamento_auto', 'status')).to eq('pronto')
+      expect(described_class.running?(conversation)).to be(true)
+      expect(quote.reload.sent_at).to be_nil
+    end
+
+    it 'na hora: manda o orçamento e a pergunta de fechamento', :aggregate_failures do
+      described_class.enqueue!(conversation, 'atendente_agendamento')
+      described_class.perform_now(conversation.id, 'atendente_agendamento')
+
+      travel 3.minutes do
+        described_class.perform_now(conversation.id, 'atendente_agendamento', quote.id)
+      end
+
+      expect(conversation.messages.outgoing.order(:id).last.content).to include('É interessante para você fazer esse investimento agora?')
+      expect(quote.reload.sent_at).to be_present
+    end
+
+    it 'não manda se a equipe já enviou outro orçamento nesse meio tempo' do
+      described_class.enqueue!(conversation, 'atendente_agendamento')
+      described_class.perform_now(conversation.id, 'atendente_agendamento')
+      Crm::Quote.create!(account: account, contact: contact, price: 13_000, kind: 'micro', payload: {}, sent_at: 1.minute.from_now)
+
+      travel 3.minutes do
+        described_class.perform_now(conversation.id, 'atendente_agendamento', quote.id)
+      end
+
+      expect(conversation.messages.outgoing).to be_empty
+    end
+
+    it 'espera 0 na configuração = manda assim que fica pronto' do
+      setting = CrmSetting.find_or_create_by!(account: account)
+      setting.update!(ai_config: { 'agents' => { 'atendente_agendamento' => { 'orcamento_espera_segundos' => 0 } } })
+      described_class.enqueue!(conversation, 'atendente_agendamento')
+      described_class.perform_now(conversation.id, 'atendente_agendamento')
+
+      expect(quote.reload.sent_at).to be_present
+    end
+  end
 end

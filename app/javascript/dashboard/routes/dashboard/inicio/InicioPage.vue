@@ -5424,6 +5424,15 @@ onUnmounted(() => {
         <CvVitrine :paineis="vitrinePaineis" lembrar="cevico:vitrine:inicio" />
       </div>
 
+      <!-- 🧭 13/11 (LIFE, Guilherme "levar a jornada do orçamento para o painel novo, pode ir"):
+           a mesma faixa do Clássico, no alto do Novo — só fora da clínica -->
+      <div
+        v-if="!organizeMode && !estiloClassico && tasksByHeat"
+        class="cvg-arejado-jornada"
+      >
+        <QuoteJourneyStrip />
+      </div>
+
       <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin).
            19/10 (Guilherme): o Meu Painel novo conta SÓ a CEVICO — o Oftalmofácil
            fica no ambiente dele (CRM → Oftalmofácil), nunca aqui -->
