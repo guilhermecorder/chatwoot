@@ -194,14 +194,10 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     contact = contact_from(client['contact_id'])
     return nil unless contact
 
-    quote = Crm::Quote.create!(
-      account: Current.account, contact: contact, user: Current.user, kind: dre['tipo'], price: dre['valor_projeto'], margin: dre['margem'],
-      payload: documents.merge('dre' => dre, 'cliente' => client, 'conta' => bill, 'telhado' => params[:telhado].to_s,
-                               'opcao' => option, 'cotacoes' => quotes, 'piso_negociacao' => floor_price)
+    Crm::KitQuote::Save.call(
+      account: Current.account, contact: contact, user: Current.user, documents: documents, dre: dre, floor: floor_price, files: files,
+      input: { 'cliente' => client, 'conta' => bill, 'telhado' => params[:telhado].to_s, 'opcao' => option, 'cotacoes' => quotes }
     )
-    quote.attach_rendered(files)
-    Crm::KitQuote::CardUpdate.call(quote)
-    quote
   end
 
   def contact_from(id)

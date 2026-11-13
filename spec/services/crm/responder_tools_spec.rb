@@ -23,7 +23,8 @@ RSpec.describe Crm::ResponderTools do
     it 'expõe as ferramentas da Agenda + abrir_tarefa (#458) com input_schema; o Agente de Ligação só as da Agenda' do
       defs = tools.definitions
       so_media = [described_class::STAGE_TOOL_NAME, described_class::IMAGE_TOOL_NAME, described_class::AUDIO_TOOL_NAME,
-                  described_class::SUMMARY_TOOL_NAME, described_class::QUOTE_TOOL_NAME]
+                  described_class::SUMMARY_TOOL_NAME, described_class::QUOTE_TOOL_NAME,
+                  described_class::AUTO_QUOTE_TOOL_NAME]
       expect(defs.pluck(:name)).to eq(described_class::ALL_NAMES - so_media)
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).to eq(described_class::NAMES)
       expect(defs).to all(include(:description, :input_schema))
@@ -609,5 +610,58 @@ RSpec.describe Crm::ResponderTools do
 
   it 'ferramenta desconhecida não quebra' do
     expect(tools.call('apagar_tudo', {})).to include(ok: false)
+  end
+
+  # ⚡ 12/11 (LIFE): orçamento automático — só com a chave ligada no atendente; gera em segundo plano e manda sozinho
+  describe 'gerar_orcamento' do
+    let(:name) { described_class::AUTO_QUOTE_TOOL_NAME }
+
+    before do
+      CrmSetting.find_or_create_by!(account: account).update!(ai_config: {
+                                                                'agents' => { 'atendente_agendamento' => { 'orcamento_automatico' => true } },
+                                                                'ficha_cliente' => { 'campos' => %w[conta telhado consumo_futuro]
+                                                                  .map { |k| { 'chave' => k, 'rotulo' => k } } }
+                                                              })
+    end
+
+    def ficha(values)
+      Crm::ClientSummary.write!(contact, values, by: 'Atendente')
+    end
+
+    it 'só aparece com a chave ligada e sem orçamento por enviar', :aggregate_failures do
+      expect(tools(agent_key: 'atendente_agendamento').definitions.pluck(:name)).to include(name)
+      expect(tools(agent_key: 'atendente_pos').definitions.pluck(:name)).not_to include(name)
+      Crm::Quote.create!(account: account, contact: contact, price: 10_000)
+      expect(tools(agent_key: 'atendente_agendamento').definitions.pluck(:name)).not_to include(name)
+    end
+
+    it 'ao vivo, com conta e telhado na ficha, coloca o orçamento para gerar e avisa o atendente', :aggregate_failures do
+      ficha('conta' => 'R$ 300', 'telhado' => 'cerâmica', 'consumo_futuro' => 'não')
+      expect { tools(live: true, agent_key: 'atendente_agendamento').call(name, {}) }.to have_enqueued_job(Crm::KitQuoteAutoJob)
+      expect(Crm::KitQuoteAutoJob.running?(conversation.reload)).to be(true)
+      expect(tools(agent_key: 'atendente_agendamento').definitions.pluck(:name)).not_to include(name)
+    end
+
+    it 'sem o telhado recusa e manda perguntar' do
+      ficha('conta' => 'R$ 300')
+      result = tools(live: true, agent_key: 'atendente_agendamento').call(name, {})
+      expect(result).to include(ok: false, motivo: include('telhado'))
+    end
+
+    it 'aumento da tabela (ar-condicionado) gera sozinho' do
+      ficha('conta' => 'R$ 300', 'telhado' => 'cerâmica', 'consumo_futuro' => '2 ar-condicionados')
+      expect { tools(live: true, agent_key: 'atendente_agendamento').call(name, {}) }.to have_enqueued_job(Crm::KitQuoteAutoJob)
+    end
+
+    it 'aumento fora da tabela não gera: abre tarefa para a equipe', :aggregate_failures do
+      ficha('conta' => 'R$ 300', 'telhado' => 'cerâmica', 'consumo_futuro' => 'uma sauna')
+      expect { tools(live: true, agent_key: 'atendente_agendamento').call(name, {}) }.not_to have_enqueued_job(Crm::KitQuoteAutoJob)
+      expect(account.tasks.last.title).to include('aumento de consumo previsto')
+    end
+
+    it 'em sombra só simula' do
+      ficha('conta' => 'R$ 300', 'telhado' => 'cerâmica')
+      expect(tools(agent_key: 'atendente_agendamento').call(name, {})).to include(simulado: true)
+    end
   end
 end

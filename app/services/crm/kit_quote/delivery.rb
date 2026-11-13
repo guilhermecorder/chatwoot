@@ -42,7 +42,7 @@ class Crm::KitQuote::Delivery
   # janela aberta: os arquivos e a pergunta de fechamento
   def deliver!
     first = @quote.contact&.name.to_s.split.first
-    say!("Pronto#{", #{first}" if first.present?}! Aqui está o seu orçamento de energia solar:")
+    say!("Pronto#{", #{first}" if first.present?}! Aqui está o seu orçamento oficial de energia solar:")
     attach_message!(proposal_file, :file)
     say!(self.class.closing_text(@quote.contact&.name))
     mark_sent!

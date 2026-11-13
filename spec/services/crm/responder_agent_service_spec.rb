@@ -55,7 +55,8 @@ RSpec.describe Crm::ResponderAgentService do
     expect(calls.first[:tools].pluck(:name))
       .to eq(Crm::ResponderTools::ALL_NAMES - [Crm::ResponderTools::STAGE_TOOL_NAME, Crm::ResponderTools::IMAGE_TOOL_NAME,
                                                Crm::ResponderTools::AUDIO_TOOL_NAME, Crm::ResponderTools::SUMMARY_TOOL_NAME,
-                                               Crm::ResponderTools::QUOTE_TOOL_NAME])
+                                               Crm::ResponderTools::QUOTE_TOOL_NAME,
+                                               Crm::ResponderTools::AUTO_QUOTE_TOOL_NAME])
     expect(calls.first[:output_config][:format][:type]).to eq('json_schema')
     history = calls.last[:messages]
     expect(history.size).to eq(3)
