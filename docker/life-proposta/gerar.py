@@ -9,6 +9,7 @@ Só usa a biblioteca padrão do Python e o Google Chrome (sem janela) que já es
 Campos do JSON: ver README.md.
 """
 import argparse
+import urllib.parse
 import base64
 import copy
 import datetime as dt
@@ -203,8 +204,23 @@ def preparar(dados):
         for i, (rotulo, campo) in enumerate(marcos)
     ]
 
+    # 13/11 (Guilherme): a economia em 1, 10 e 25 anos, grande e destacada
+    f["eco_marcos"] = [
+        {"rotulo": r, "valor": reais(dados["economia"][c]), "classe": "forte" if i == 2 else ""}
+        for i, (r, c) in enumerate([("Em 1 ano", "anual"), ("Em 10 anos", "em_10_anos"), ("Em 25 anos", "em_25_anos")])
+    ]
+
     # equipamento
-    pegar(dados, "telhado.tipo")
+    tipo_telhado = str(pegar(dados, "telhado.tipo")).lower()
+    # 13/11: foto do tipo de telhado na tela dos detalhes técnicos
+    if any(k in tipo_telhado for k in ("metál", "metal", "zinco", "aço", "aco", "galvalume", "sanduí")):
+        f["foto_telhado"] = "img/telhado-metalico.jpg"
+    elif any(k in tipo_telhado for k in ("fibro", "eternit", "ondulad", "amianto")):
+        f["foto_telhado"] = "img/telhado-fibrocimento.jpg"
+    elif any(k in tipo_telhado for k in ("laje", "prédio", "predio", "plan", "solo", "chão", "chao")):
+        f["foto_telhado"] = "img/telhado-laje.jpg"
+    else:
+        f["foto_telhado"] = "img/telhado-ceramica.jpg"
     paineis = lista(pegar(dados, "sistema.paineis"))
     inversores = lista(pegar(dados, "sistema.inversores"))
     f["paineis"] = [
@@ -223,8 +239,10 @@ def preparar(dados):
         }
         for i in inversores
     ]
-    f["equipamentos"] = [dict(e, cor="amarelo", icone=ICONES["placa"]) for e in f["paineis"]] + [
-        dict(e, cor=("azul", "ciano")[i % 2], icone=ICONES["inversor"]) for i, e in enumerate(f["inversores"])
+    f["equipamentos"] = [dict(e, cor="amarelo", icone=ICONES["placa"], foto="img/painel.jpg") for e in f["paineis"]] + [
+        dict(e, cor=("azul", "ciano")[i % 2], icone=ICONES["inversor"],
+             foto="img/microinversor.jpg" if "micro" in e["nome"].lower() else "img/inversor.jpg")
+        for i, e in enumerate(f["inversores"])
     ]
     f["equip_classe"] = "compacta" if len(f["equipamentos"]) > 2 else ""
     potencia = pegar(dados, "sistema.potencia_kwp", obrigatorio=False)
@@ -239,9 +257,25 @@ def preparar(dados):
     f["area"] = decimal(pegar(dados, "sistema.area_m2"), 1)
     f["peso"] = numero(pegar(dados, "sistema.peso_kg"))
     f["incidencia"] = decimal(pegar(dados, "sistema.incidencia_solar"))
+    # 13/11: detalhes técnicos em checklist (foto do telhado em cima)
+    f["ficha"] = [
+        {"rotulo": "Cidade", "valor": f["cidade"]},
+        {"rotulo": "Telhado", "valor": str(dados["telhado"]["tipo"])},
+        {"rotulo": "Consumo médio", "valor": f"{f['consumo']} kWh/mês"},
+        {"rotulo": "Potência do sistema", "valor": f"{f['potencia']} kWp"},
+        {"rotulo": "Área no telhado", "valor": f"{f['area']} m²"},
+        {"rotulo": "Peso no telhado", "valor": f"{f['peso']} kg"},
+        {"rotulo": "Sol por dia", "valor": f"{f['incidencia']} kWh/m²"},
+    ]
     if not lista(dados.get("garantias")):
         raise Erro("Falta a lista \"garantias\" no JSON.")
-    f["garantias"] = [dict(g, cor=CORES[i % 3]) for i, g in enumerate(lista(dados["garantias"]))]
+    # 13/11: na tela só o essencial ("25 anos de desempenho"); o resto do texto ("no mínimo 80%…") vai para a última tela
+    f["garantias"] = [
+        dict(g, cor=CORES[i % 3], curto=str(g.get("cobre", "")).split(":")[0].strip(),
+             detalhe=str(g.get("cobre", "")).split(":", 1)[1].strip() if ":" in str(g.get("cobre", "")) else "")
+        for i, g in enumerate(lista(dados["garantias"]))
+    ]
+    f["garantias_detalhe"] = [g for g in f["garantias"] if g["detalhe"]]
     maior = max(lista(dados["garantias"]), key=lambda g: float(g["anos"]))
     f["garantia_max"], f["garantia_max_item"] = numero(maior["anos"]), maior["item"]
     f["placas_total"] = numero(sum(p["quantidade"] for p in paineis))
@@ -266,6 +300,12 @@ def preparar(dados):
     ]
     f["indicada"] = f["financiamento"][marcada] if opcoes else ""
     f["tem_pagamento"] = bool(f["financiamento"] or dados["investimento"].get("cartao"))
+    # 13/11 (Guilherme): ancoragem "há 15 anos custava cerca de 3x" (riscado) e o cartão em destaque (6x sem juros)
+    antes15 = dados["investimento"].get("preco_15_anos") or round(float(preco) * 3 / 1000) * 1000
+    f["antes15"] = reais(antes15)
+    seis = round(float(preco) / 6, 2)
+    f["cartao_6x"] = reais(seis)
+    f["cartao_6x_n"] = reais_n(seis)
 
     # gente e contato
     f["foto_vendedor"] = pegar(dados, "vendedor.foto")
@@ -278,6 +318,9 @@ def preparar(dados):
     ]
     zap = re.sub(r"\D", "", str(pegar(dados, "empresa.whatsapp")))
     f["link_whatsapp"] = f"https://wa.me/{zap}"
+    nome_cli = dados["cliente"]["nome"]
+    f["link_visita"] = f"https://wa.me/{zap}?text=" + urllib.parse.quote(f"Oi, Fernando! Aqui é {nome_cli}. Quero agendar a visita técnica.")
+    f["link_agora_nao"] = f"https://wa.me/{zap}?text=" + urllib.parse.quote(f"Oi, Fernando! Aqui é {nome_cli}. Ainda não é o meu momento.")
     f["estrelas"] = ESTRELAS
 
     # troca {distribuidora} e {cliente} dentro dos textos fixos

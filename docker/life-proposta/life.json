@@ -1,6 +1,5 @@
 {
   "_leia": "Textos fixos da Life. Valem para todo orçamento (para o cliente, o nome é orçamento, não proposta). O JSON do orçamento pode trocar qualquer campo daqui repetindo a mesma chave.",
-
   "vendedor": {
     "nome": "Fernando",
     "nome_completo": "Fernando Guimaro Srair",
@@ -10,7 +9,6 @@
     "foto_rosto": "modelo/img/fernando-rosto.jpg",
     "foto_vidro": "modelo/img/fernando-vidro.jpg"
   },
-
   "empresa": {
     "nome": "Life Energia Solar",
     "manchete": "A Life já fez 1.000 projetos em Piracicaba e região.",
@@ -22,50 +20,90 @@
     "google": "4,9 no Google, com 216 avaliações (out/2026)",
     "whatsapp": "5519988504691"
   },
-
   "prints": {
     "perfil": "modelo/img/google-perfil.jpg",
-    "avaliacoes": ["modelo/img/aval-deunicio.jpg", "modelo/img/aval-andrea.jpg"],
+    "avaliacoes": [
+      "modelo/img/aval-deunicio.jpg",
+      "modelo/img/aval-andrea.jpg"
+    ],
     "legenda": "Prints do perfil da Life no Google, novembro de 2026."
   },
-
   "avaliacoes_fim": {
     "nota": "5,0 no Google, 227 avaliações",
     "titulo": "Quem já instalou recomenda",
-    "prints": ["modelo/img/aval-fabiana.jpg", "modelo/img/aval-juliano.jpg"],
-    "reserva": ["modelo/img/aval-marcos.jpg"],
+    "prints": [
+      "modelo/img/aval-fabiana.jpg",
+      "modelo/img/aval-juliano.jpg"
+    ],
+    "reserva": [
+      "modelo/img/aval-marcos.jpg"
+    ],
     "link": "https://maps.google.com/?cid=10211778744911460461"
   },
-
   "indice": {
     "destaques": [
-      { "titulo": "Seu orçamento", "texto": "Valor, parcelas e validade", "alvo": "investimento", "cor": "amarelo" },
-      { "titulo": "Sua economia", "texto": "Quanto fica no seu bolso por mês", "alvo": "economia", "cor": "verde" }
+      {
+        "titulo": "Seu orçamento",
+        "texto": "Valor, parcelas e validade",
+        "alvo": "investimento",
+        "cor": "amarelo"
+      },
+      {
+        "titulo": "Sua economia",
+        "texto": "Quanto fica no seu bolso por mês",
+        "alvo": "economia",
+        "cor": "verde"
+      }
     ],
     "itens": [
-      { "titulo": "Quem vai cuidar de você", "alvo": "fernando" },
-      { "titulo": "O que você recebe", "alvo": "entrega" },
-      { "titulo": "Instalação e prazo", "alvo": "instalacao" },
-      { "titulo": "Garantias", "alvo": "garantias" },
-      { "titulo": "Tudo em uma tela", "alvo": "resumo" }
+      {
+        "titulo": "Quem vai cuidar de você",
+        "alvo": "fernando"
+      },
+      {
+        "titulo": "O que você recebe",
+        "alvo": "entrega"
+      },
+      {
+        "titulo": "Instalação",
+        "alvo": "instalacao"
+      },
+      {
+        "titulo": "Sua garantia",
+        "alvo": "garantias"
+      },
+      {
+        "titulo": "Tudo em uma tela",
+        "alvo": "resumo"
+      },
+      {
+        "titulo": "Os detalhes",
+        "alvo": "letras"
+      }
     ]
   },
-
   "instalacao": [
-    { "titulo": "O equipamento chega", "texto": "Direto no seu imóvel, pronto para instalar." },
-    { "titulo": "A gente instala", "texto": "E cuida de toda a papelada da {distribuidora} para você." },
-    { "titulo": "Energia ligada", "texto": "Você começa a produzir a sua energia e a economizar." }
+    {
+      "titulo": "O equipamento chega",
+      "texto": "Direto no seu imóvel, pronto para instalar."
+    },
+    {
+      "titulo": "A gente instala",
+      "texto": "E cuida de toda a papelada da {distribuidora} para você."
+    },
+    {
+      "titulo": "Energia ligada",
+      "texto": "Você começa a produzir a sua energia e a economizar."
+    }
   ],
-
   "garantia_geracao": {
     "titulo": "Produção garantida em contrato",
-    "texto": "Se o sistema não produzir a energia combinada, a gente aumenta o sistema para você, sem custo."
+    "texto": "Se não estiver funcionando, a gente troca.",
+    "detalhe": "Se o sistema não produzir a energia combinada no contrato, a Life aumenta o sistema para você, sem custo."
   },
-
   "investimento": {
     "cartao": "6x sem juros ou até 20x no cartão (favor nos consultar)"
   },
-
   "textos": {
     "capa_frase": "Uma chance de reduzir a sua conta de luz por décadas.",
     "combinado": "Se você gostar e couber no seu orçamento, a gente fecha.",
@@ -74,8 +112,16 @@
     "salto_depois": "Você leva um sistema mais moderno por uma pequena parte desse valor.",
     "validade_motivo": "O preço acompanha o dólar e pode mudar depois dessa data.",
     "prazo_instalacao": "Prazo de instalação: de 25 a 40 dias, contados depois da visita técnica e da assinatura do contrato. Ele depende da chegada do equipamento e da liberação da {distribuidora}.",
-    "pergunta_final": "Gostou do orçamento e ele cabe no seu bolso?",
+    "pergunta_final": "É possível para você fazer esse investimento?",
     "abraco": "Vai ser uma honra ajudar você a instalar um sistema de energia solar de alta tecnologia no seu imóvel.",
-    "despedida": "Um grande abraço e conte comigo."
+    "despedida": "Um grande abraço e conte comigo.",
+    "proximo_passo": "Se sim, o próximo passo é agendar a visita técnica.",
+    "proximo_detalhe": "Na visita a gente confere o telhado, já faz a pré-análise do crédito e cuida da consulta na CPFL.",
+    "agora_nao_titulo": "Ainda não é o seu momento?",
+    "agora_nao": "Tudo bem. Nos avise, por gentileza, para a gente encerrar o seu atendimento.",
+    "antes15": "Há 15 anos, um sistema como este custava cerca de",
+    "nota_antes15": "Há 15 anos: valor de referência de um sistema parecido naquela época, só para comparação.",
+    "nota_financiamento": "Financiamento: parcelas estimadas, sujeitas à análise de crédito do banco.",
+    "nota_cartao": "Cartão: 6x sem juros; de 7x a 20x, com os juros da operadora (favor nos consultar)."
   }
 }

@@ -483,3 +483,156 @@ p b, p strong { color: inherit; font-weight: 700; }
 .avaliacoes-fim .rot { color: var(--sol); margin-bottom: 4px; }
 .avaliacoes-fim .print { margin: 0 -8px 12px; border-radius: 18px; }
 .link-google { align-self: center; margin-top: 4px; font-size: 14px; font-weight: 600; color: #fff; text-decoration: underline; text-decoration-color: rgba(255,255,255,.4); text-underline-offset: 3px; }
+
+/* ---------- 10. instalação: cabe também com a fonte do servidor (Inter, mais larga que a do iPhone) ---------- */
+#instalacao h1 { font-size: 29px; white-space: nowrap; margin-bottom: 14px; }
+#instalacao .obra { height: 150px; margin-bottom: 14px; }
+#instalacao .passos-vidro { padding: 16px 18px 14px; }
+#instalacao .passos-vidro li { padding-bottom: 16px; }
+#instalacao .passos-vidro li:last-child { padding-bottom: 0; }
+#instalacao .prazo-instalacao { padding-top: 10px; }
+
+/* =====================================================================================================
+   13/11/2026 · Reformulação pedida pelo Guilherme: telas limpas, só o principal, grande e com contraste;
+   as letras miúdas vão para a última tela ("Os detalhes"). Fotos reais das peças, do telhado e da instalação.
+   ===================================================================================================== */
+/* 7. sua economia */
+.eco-limpa h1 { font-size: 40px; margin-bottom: 16px; }
+.eco-mes { padding: 20px 22px; }
+.eco-mes .valorzao { font-size: 92px; }
+.eco-mes .valorzao.longo { font-size: 70px; }
+.eco-mes .por { font-size: 20px; font-weight: 600; color: #fff; margin: 6px 0 0; }
+.marcos { display: grid; gap: 10px; margin-top: 12px; }
+.marco { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; margin: 0 !important; }
+.marco span { font-size: 18px; font-weight: 600; color: rgba(255,255,255,.86); }
+.marco b { font-size: 30px; letter-spacing: -0.03em; white-space: nowrap; }
+.marco.forte { border: 1.5px solid #3DF56E; }
+.marco.forte span { color: #fff; }
+.marco.forte b { font-size: 38px; color: #3DF56E; }
+.ver-detalhe { font-size: 14px; font-weight: 600; color: rgba(255,255,255,.7); text-decoration: none; padding-top: 14px; }
+
+/* 8. o que você recebe (tela branca, peças com foto) */
+.entrega-limpa h1 { font-size: 36px; }
+.peca { display: grid; grid-template-columns: 148px 1fr; gap: 16px; align-items: center; background: #F2F2F7; border-radius: 26px; padding: 10px; }
+.peca + .peca { margin-top: 12px; }
+.peca img { width: 148px; height: 128px; object-fit: cover; border-radius: 18px; display: block; background: #E5E5EA; }
+.peca .qtd { display: block; font-size: 58px; line-height: .95; font-weight: 800; letter-spacing: -0.05em; color: #111114; }
+.peca b { display: block; font-size: 21px; line-height: 1.15; letter-spacing: -0.015em; color: #111114; margin-top: 4px; }
+.peca .que { display: block; font-size: 16px; color: #6E6E73; margin-top: 2px; }
+.entrega-limpa:has(.peca:nth-of-type(3)) .peca img { height: 96px; }
+.entrega-limpa:has(.peca:nth-of-type(3)) .peca .qtd { font-size: 44px; }
+.producao-linha { display: flex; gap: 12px; align-items: center; background: #E9F9EE; border-radius: 22px; padding: 14px 16px; }
+.producao-linha p { font-size: 16px; line-height: 1.38; color: #1F4D30; margin: 0; }
+.producao-linha p b { color: #0B6B2E; }
+
+/* 9. detalhes técnicos: foto do telhado + checklist */
+#detalhes h1 { font-size: 36px; }
+.foto-telhado { width: 100%; height: 200px; object-fit: cover; border-radius: 24px; display: block; margin-bottom: 10px; flex: none; }
+ul.check { list-style: none; margin: 0; padding: 0 4px; }
+ul.check li { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 11px 0; border-top: 1px solid #E5E5EA; }
+ul.check li:first-child { border-top: 0; }
+ul.check .ok { width: 24px; height: 24px; border-radius: 50%; background: #30D158; display: grid; place-items: center; }
+ul.check .ok svg { width: 14px; height: 14px; stroke: #fff; fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+ul.check .r { font-size: 16px; color: #6E6E73; }
+ul.check b { font-size: 18px; color: #111114; letter-spacing: -0.01em; text-align: right; }
+
+/* 10. instalação: foto maior (alguém instalando) */
+#instalacao .obra { height: 210px; object-position: 50% 40%; }
+
+/* 11. sua garantia: grande */
+.garantias h1 { font-size: 40px; margin-bottom: 16px; }
+.garantias .gar { grid-template-columns: 112px 1fr; padding: 16px 0; }
+.azul .gar .anos { font-size: 66px; }
+.azul .gar b { font-size: 25px; letter-spacing: -0.02em; }
+.azul .gar div span { font-size: 17px; }
+.garantias .selo b { font-size: 22px; }
+.garantias .selo p { font-size: 18px; color: #0B6B2E; font-weight: 600; }
+
+/* 12. seu investimento: ancoragem + cartão em destaque + financiamento em segundo plano */
+.antes15 { font-size: 15px; line-height: 1.35; color: rgba(255,255,255,.82); margin: 0 0 10px; }
+.antes15 s { display: block; font-size: 24px; font-weight: 700; color: #fff; text-decoration-color: var(--laranja); text-decoration-thickness: 3px; margin-top: 2px; }
+.preco-cartao .rot.hoje { color: var(--sol); font-size: 16px; margin: 0 0 2px; }
+.preco-cartao .valorzao { font-size: 60px; }
+.cartao-destaque { border: 2px solid var(--sol); padding: 16px 20px; --vidro-tinta: linear-gradient(165deg, rgba(245,179,1,.30), rgba(245,179,1,.12)); }
+.cartao-destaque .seis { font-size: 30px; line-height: 1.1; font-weight: 600; color: #fff; margin: 10px 0 2px; letter-spacing: -0.02em; }
+.cartao-destaque .seis b { font-weight: 800; }
+.cartao-destaque .sem { font-size: 18px; color: #fff; margin: 0; }
+.fin-linha { padding: 12px 18px; }
+.fin-linha .rot { margin-bottom: 6px; }
+.fin-ops { display: flex; justify-content: space-between; gap: 8px; }
+.fin-ops span { font-size: 15px; color: rgba(255,255,255,.8); white-space: nowrap; }
+.fin-ops b { color: #fff; }
+.investimento .validade-linha { font-size: 16px; }
+
+/* 13. próximo passo */
+#proximos .pergunta { font-size: 38px; margin: 26px 0 16px; }
+#proximos .forte { font-size: 21px; color: #fff; }
+.nota-passo { font-size: 14px; line-height: 1.4; margin: 12px 0 0; text-align: center; }
+
+/* 14. ainda não é o seu momento */
+.abraco h1 { font-size: 34px; }
+.botao.claro { background: #fff; color: var(--tinta); margin-top: 18px; width: 100%; }
+.abraco .assina { font-size: 19px; margin-top: 24px; }
+
+/* 15. resumo grande */
+.resumo-tela h1 { font-size: 42px; margin: 2px 0 14px; }
+.r-grande { padding: 16px 20px; }
+.r-grande span, .r-eco span, .r-duas span { display: block; font-size: 15px; font-weight: 600; color: rgba(255,255,255,.8); }
+.r-grande b { display: block; font-size: 50px; letter-spacing: -0.04em; line-height: 1.05; margin-top: 2px; white-space: nowrap; }
+.r-grande small { display: block; font-size: 17px; color: #fff; margin-top: 4px; }
+.r-eco { border: 1.5px solid #3DF56E; padding: 14px 20px; }
+.r-eco b { display: block; font-size: 42px; letter-spacing: -0.035em; line-height: 1.05; margin-top: 2px; }
+.r-eco b em { font-style: normal; font-size: 18px; font-weight: 600; color: #fff; margin-left: 6px; letter-spacing: 0; }
+.r-eco small { display: block; font-size: 16px; color: #fff; margin-top: 2px; }
+.r-duas { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.r-duas .vidro { padding: 14px 16px; margin: 0 !important; }
+.r-duas b { display: block; font-size: 26px; letter-spacing: -0.02em; margin-top: 2px; white-space: nowrap; }
+.r-duas small { display: block; font-size: 14px; color: rgba(255,255,255,.8); }
+.resumo-tela .r-validade { align-items: center; padding: 14px 18px; }
+.resumo-tela .r-validade b { font-size: 22px; }
+
+/* 17. os detalhes (letras miúdas, só aqui) */
+.letras h1 { font-size: 32px; margin-bottom: 8px; }
+.bloco-letra { padding: 11px 0; border-top: 1px solid #E5E5EA; }
+.bloco-letra:first-of-type { border-top: 0; }
+.bloco-letra b { display: block; font-size: 15px; color: #111114; margin-bottom: 4px; }
+.bloco-letra p { font-size: 12.5px; line-height: 1.45; color: #3A3A3C; margin: 0 0 5px; }
+
+/* 13/11 (2): capa com o casal livre em cima; título desce para perto do cartão */
+.capa h1 { margin-top: auto; margin-bottom: 14px; text-shadow: 0 2px 18px rgba(0,0,0,.35); }
+.capa::after { height: 430px; background: linear-gradient(to top, rgba(0,0,0,.72) 0%, rgba(0,0,0,.45) 55%, rgba(0,0,0,0) 100%); }
+.capa::before { height: 150px; }
+.marco span { white-space: nowrap; }
+.marco.forte b { font-size: 34px; }
+.peca img { height: 150px; }
+#proximos .botao { margin-top: 28px; }
+.capa::after { z-index: 0; }
+/* 13/11 (3): a tela dos detalhes cabe também com a fonte do servidor (Inter, mais larga) */
+.letras { padding-top: 46px; }
+.letras h1 { font-size: 28px; margin-bottom: 4px; }
+.bloco-letra { padding: 8px 0; }
+.bloco-letra b { font-size: 14px; margin-bottom: 3px; }
+.bloco-letra p { font-size: 11.5px; line-height: 1.4; margin-bottom: 3px; }
+
+/* 13/11 (4): título no TOPO (orçamento + nome + Life), casal sorrindo no meio, cartão leve embaixo */
+.capa::before { height: 360px; z-index: 0; background: linear-gradient(to bottom, rgba(10,12,24,.78) 0%, rgba(10,12,24,.5) 55%, rgba(10,12,24,0) 100%); }
+.capa::after { height: 250px; background: linear-gradient(to top, rgba(0,0,0,.66) 0%, rgba(0,0,0,.3) 60%, rgba(0,0,0,0) 100%); }
+.capa .topo, .capa-titulo, .capa-cartao, .capa .gancho { position: relative; z-index: 2; }
+.capa-titulo { margin-top: 6px; text-shadow: 0 2px 16px rgba(0,0,0,.4); }
+.capa-titulo .para { font-size: 16px; font-weight: 600; margin: 0 0 4px; color: rgba(255,255,255,.9); }
+.capa-titulo h1 { font-size: 44px; line-height: 1.02; letter-spacing: -0.035em; margin: 0; color: var(--sol); text-shadow: 0 2px 18px rgba(0,0,0,.45); }
+.capa-titulo .empresa { font-size: 17px; font-weight: 600; margin: 8px 0 0; color: #fff; }
+.capa-cartao { margin-top: auto; padding: 12px 16px 14px; }
+.capa-cartao .frase { font-size: 15px; }
+.capa::before, .capa::after { z-index: 1; }
+.capa::before { height: 340px; background: linear-gradient(to bottom, rgba(8,10,22,.82) 0%, rgba(8,10,22,.62) 50%, rgba(8,10,22,0) 100%); }
+.capa-cartao { margin-bottom: 44px; }
+
+/* 13/11 (5), Guilherme: "depois da garantia, a gente já começa a esverdear… o momento pede permissão": do investimento ao fim, verde no lugar do amarelo */
+.verdinho { --sol: #30D158; --laranja: #30D158; --destaque: #30D158; }
+.verdinho .cartao-destaque { border-color: #30D158; --vidro-tinta: linear-gradient(165deg, rgba(48,209,88,.32), rgba(48,209,88,.12)); }
+.verdinho .antes15 s { text-decoration-color: rgba(255,255,255,.85); }
+.verdinho .ico.vermelho { background: #30D158; }
+.verdinho .ico.vermelho svg { stroke: var(--tinta); }
+.verdinho .r-validade { background: rgba(48,209,88,.14); border-color: rgba(48,209,88,.7); }
+.verdinho .r-validade b { color: #fff; }
