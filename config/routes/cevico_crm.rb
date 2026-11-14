@@ -27,6 +27,7 @@ namespace :crm do
     post :discard # 🗑️ manda um orçamento guardado para a lixeira (com motivo)
     post :restore # ♻️ volta da lixeira (só o dono da conta)
     post :deliver # 📨 envia pelo WhatsApp com a pergunta de fechamento
+    post :edit # ✏️ edita nome/cidade/telhado/validade e gera os PDFs de novo
   end
   resources :campaigns, only: [:index, :show, :create, :destroy] do
     member do

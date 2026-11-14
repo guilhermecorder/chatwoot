@@ -113,6 +113,19 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     render json: { situacao: result.to_s, orcamento: quote_json(quote.reload) }
   end
 
+  # ✏️ Edita os dados de apresentação (nome, cidade/UF, telhado, validade) e gera os PDFs de novo (Crm::KitQuote::Edit).
+  def edit # rubocop:disable Metrics/AbcSize, Rails/ActionOrder
+    quote = Crm::Quote.ativos.find_by(account: Current.account, id: params[:id])
+    return render json: { error: 'Orçamento não encontrado.' }, status: :not_found unless quote
+    unless Current.account_user&.administrator? || quote.user_id.nil? || quote.user_id == Current.user.id
+      return render json: { error: 'Só o administrador ou quem gerou pode editar este orçamento.' }, status: :forbidden
+    end
+
+    changes = params.permit(:nome, :cidade, :uf, :telhado, :validade_dias).to_h
+    result = Crm::KitQuote::Edit.new(quote, changes, Crm::KitQuote::Renderer.new(store.config)).call
+    render json: { orcamento: quote_json(quote.reload), aviso: result.aviso }
+  end
+
   # 🏷️ A proposta foi enviada ao cliente: marca o orçamento e põe a etiqueta `orcamento-enviado`
   # (Crm::QuoteSent). A etiqueta leva o cartão para "Orçamento Enviado" e inicia o acompanhamento.
   def sent
@@ -219,9 +232,15 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
   # quem é o cliente e até quando a proposta vale (caixas "Orçamentos gerados")
   def quote_extra(quote)
     until_at = valid_until(quote)
-    { cliente: { id: quote.contact_id, nome: quote.contact&.name.presence || quote.payload.dig('cliente', 'nome') },
+    { cliente: { id: quote.contact_id, nome: quote_client_name(quote) },
       valida_ate: until_at.iso8601, valido: until_at.future?, piso: quote.payload['piso_negociacao'],
-      aguardando_envio: quote.payload[Crm::KitQuote::Delivery::WAITING_KEY].present? }.merge(trash_json(quote))
+      aguardando_envio: quote.payload[Crm::KitQuote::Delivery::WAITING_KEY].present?,
+      editavel: Crm::KitQuote::Edit.current(quote) }.merge(trash_json(quote))
+  end
+
+  # o nome editado no orçamento (Crm::KitQuote::Edit) vale mais que o do contato
+  def quote_client_name(quote)
+    quote.payload.dig('proposta', 'cliente', 'nome').presence || quote.contact&.name.presence || quote.payload.dig('cliente', 'nome')
   end
 
   # 🤝 piso de negociação: o preço com 20% de lucro (só para quem negocia; o atendente não vê)

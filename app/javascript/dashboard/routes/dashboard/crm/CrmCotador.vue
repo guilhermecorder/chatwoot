@@ -251,6 +251,23 @@ const enviarWhatsapp = async orcamento => {
     marcando.value = 0;
   }
 };
+// ✏️ editar o orçamento gerado (nome, cidade, telhado, validade): os PDFs saem de novo
+const editarOrcamento = async (orcamento, dados) => {
+  if (marcando.value) return;
+  marcando.value = orcamento.id;
+  try {
+    const { data } = await CrmAPI.editKitQuote(orcamento.id, dados);
+    trocarNasListas(orcamento.id, data.orcamento);
+    // o card do orçamento automático (definido mais abaixo) também troca
+    // eslint-disable-next-line no-use-before-define
+    if (auto.orcamento?.id === orcamento.id) auto.orcamento = data.orcamento;
+    useAlert(data.aviso || 'Orçamento atualizado, com os PDFs novos.');
+  } catch (e) {
+    useAlert(erroDe(e, 'Não foi possível editar o orçamento.'));
+  } finally {
+    marcando.value = 0;
+  }
+};
 const restaurarOrcamento = async orcamento => {
   if (marcando.value) return;
   marcando.value = orcamento.id;
@@ -1074,6 +1091,7 @@ const TXT = {
                 @enviar="marcarEnviada"
                 @whatsapp="enviarWhatsapp"
                 @excluir="excluirOrcamento"
+                @editar="editarOrcamento"
               />
             </div>
             <button
@@ -1146,6 +1164,7 @@ const TXT = {
               @whatsapp="enviarWhatsapp"
               @abrir="abrirCliente"
               @excluir="excluirOrcamento"
+              @editar="editarOrcamento"
               @restaurar="restaurarOrcamento"
             />
           </div>
@@ -1942,6 +1961,7 @@ const TXT = {
                   @enviar="marcarEnviada"
                   @whatsapp="enviarWhatsapp"
                   @excluir="excluirOrcamento"
+                  @editar="editarOrcamento"
                 />
               </div>
             </section>

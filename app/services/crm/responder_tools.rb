@@ -578,7 +578,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   end
 
   # ── 🩺 tarefa para a equipe (item 251) ──────────────────────────────────
-  def abrir_tarefa(args) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def abrir_tarefa(args) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     return refuse('abrir_tarefa', 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
 
     motivo = args['motivo'].to_s.strip.first(120)
@@ -589,6 +589,9 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     urgencia = args['urgencia'].to_s == 'alta' ? 'alta' : 'normal'
     # urgência nunca é barrada (na clínica "dor" é motivo de verdade)
     return refuse('abrir_tarefa', 'Sem motivo real: NÃO abra tarefa. Só responda ao cliente.') if fake_motivo?(motivo, urgencia)
+
+    automatic = auto_quote_instead(motivo)
+    return refuse('abrir_tarefa', automatic) if automatic
 
     due_at, erro = task_due_at(args)
     return refuse('abrir_tarefa', erro) if erro
@@ -958,6 +961,26 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
       aviso: 'O orçamento JÁ ESTÁ SENDO MONTADO e o sistema chama o cliente sozinho em alguns minutos, com o PDF e a pergunta de ' \
              'fechamento. Agora diga só que precisa de uns instantes, que já está montando e que chama assim que ficar pronto. ' \
              'Não mande valor, não faça outra pergunta e não abra tarefa de orçamento.' }
+  end
+
+  # 13/11 (LIFE, caso do Regis): com o orçamento automático ligado a IA seguiu o roteiro antigo ("te mando entre hoje e
+  # segunda" + tarefa "Orçamento: conta recebida") e o orçamento não saiu sozinho. Com a ferramenta disponível e a ficha
+  # completa, a tarefa de orçamento é recusada e a IA é mandada para o gerar_orcamento. Aumento fora da tabela segue
+  # com a equipe (tarefa liberada).
+  def auto_quote_instead(motivo) # rubocop:disable Metrics/CyclomaticComplexity
+    return nil unless Crm::JourneyLabel.quote_task?(motivo) && auto_quote_available?
+    return nil if Crm::KitQuote::AutoBuild.missing(@contact)
+
+    increase = Crm::KitQuote::ClientData.new(@contact).call['aumento']
+    return nil if increase && Crm::KitQuote::Increase.parse(increase)[:desconhecido]
+
+    if motivo.match?(/conta recebida/i) && increase.nil?
+      return 'NÃO abra tarefa de orçamento: o orçamento é AUTOMÁTICO. Se ainda não perguntou, pergunte se ele vai aumentar o ' \
+             'consumo (ar-condicionado, piscina…), sem falar de prazo; se ele já respondeu, chame gerar_orcamento agora.'
+    end
+
+    'NÃO abra tarefa de orçamento: o orçamento é AUTOMÁTICO. Chame gerar_orcamento agora (o sistema já soma o aumento de ' \
+      'consumo) e diga só que precisa de uns instantes e que chama assim que ficar pronto. Não fale de "amanhã" nem de segunda.'
   end
 
   def open_handoff_quote!(motivo)

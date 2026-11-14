@@ -1772,6 +1772,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/kit_quote/deliver`, { id });
   }
 
+  // ✏️ edita nome/cidade/telhado/validade de um orçamento gerado e gera os PDFs de novo
+  editKitQuote(id, dados) {
+    return axios.post(`${this.url}/kit_quote/edit`, { id, ...dados });
+  }
+
   // ♻️ volta da lixeira (só o dono da conta)
   restoreKitQuote(id) {
     return axios.post(`${this.url}/kit_quote/restore`, { id });

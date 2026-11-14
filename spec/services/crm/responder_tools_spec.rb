@@ -663,5 +663,33 @@ RSpec.describe Crm::ResponderTools do
       ficha('conta' => 'R$ 300', 'telhado' => 'cerâmica')
       expect(tools(agent_key: 'atendente_agendamento').call(name, {})).to include(simulado: true)
     end
+
+    describe 'trava: tarefa de orçamento com o automático disponível (caso do Regis, 13/11)' do
+      let(:t) { tools(live: true, agent_key: 'atendente_agendamento') }
+
+      it 'conta recebida com a ficha completa: recusa a tarefa e manda perguntar o consumo / gerar', :aggregate_failures do
+        ficha('conta' => 'R$ 500', 'telhado' => 'cerâmica')
+        result = t.call('abrir_tarefa', { 'motivo' => 'Orçamento: conta recebida', 'urgencia' => 'normal' })
+        expect(result).to include(ok: false, motivo: include('AUTOMÁTICO', 'aumentar o consumo'))
+        expect(account.tasks.count).to eq(0)
+      end
+
+      it 'aumento da tabela: recusa a tarefa e manda chamar gerar_orcamento' do
+        ficha('conta' => 'R$ 500', 'telhado' => 'cerâmica', 'consumo_futuro' => 'vai instalar 1 ar-condicionado')
+        result = t.call('abrir_tarefa', { 'motivo' => 'Orçamento: aumento de consumo previsto · 1 ar', 'urgencia' => 'normal' })
+        expect(result).to include(ok: false, motivo: include('gerar_orcamento'))
+      end
+
+      it 'aumento fora da tabela: a tarefa sai normal (fica com a equipe)' do
+        ficha('conta' => 'R$ 500', 'telhado' => 'cerâmica', 'consumo_futuro' => 'uma sauna')
+        result = t.call('abrir_tarefa', { 'motivo' => 'Orçamento: aumento de consumo previsto · sauna', 'urgencia' => 'normal' })
+        expect(result).to include(ok: true)
+      end
+
+      it 'sem o telhado na ficha: a tarefa sai normal' do
+        ficha('conta' => 'R$ 500')
+        expect(t.call('abrir_tarefa', { 'motivo' => 'Orçamento: conta recebida', 'urgencia' => 'normal' })).to include(ok: true)
+      end
+    end
   end
 end

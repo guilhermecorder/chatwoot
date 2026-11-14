@@ -1,7 +1,7 @@
 <script setup>
 // 📦 Caixa de um orçamento guardado (Gerador de proposta, LIFE · 12/11): cliente, valor, até quando
 // vale (7 dias), se já foi enviado, os PDFs e as ações (marcar como enviada, abrir o cliente, excluir).
-import { computed } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { formatMoney as reais } from 'dashboard/helper/proposalBuilder';
 
 const props = defineProps({
@@ -19,6 +19,7 @@ const emit = defineEmits([
   'excluir',
   'restaurar',
   'whatsapp',
+  'editar',
 ]);
 
 const NOME_TIPO = {
@@ -98,7 +99,42 @@ const excluir = () => {
   }
   emit('excluir', o, motivo.trim());
 };
+// ✏️ editar (13/11): nome, cidade/UF, telhado e validade; os PDFs saem de novo
+const editando = ref(false);
+const form = reactive({
+  nome: '',
+  cidade: '',
+  uf: '',
+  telhado: '',
+  validade_dias: 7,
+});
+const abrirEdicao = () => {
+  const e = props.orcamento.editavel || {};
+  Object.assign(form, {
+    nome: e.nome || props.orcamento.cliente?.nome || '',
+    cidade: e.cidade || '',
+    uf: e.uf || '',
+    telhado: e.telhado || '',
+    validade_dias: e.validade_dias || 7,
+  });
+  editando.value = true;
+};
+const salvarEdicao = () => {
+  if (!form.nome.trim()) return;
+  emit('editar', props.orcamento, { ...form });
+  editando.value = false;
+};
 const TXT = {
+  editar: 'Editar',
+  editarDica:
+    'Corrigir nome, cidade, telhado ou validade. Os PDFs são gerados de novo.',
+  salvar: 'Salvar e gerar os PDFs',
+  cancelar: 'Cancelar',
+  fNome: 'Nome do cliente',
+  fCidade: 'Cidade',
+  fUf: 'UF',
+  fTelhado: 'Tipo de telhado',
+  fValidade: 'Vale por (dias)',
   geradoPor: 'por',
   semArquivos: 'Sem PDF guardado',
   marcarEnviada: 'Marcar como enviada',
@@ -179,6 +215,51 @@ const TXT = {
     </div>
     <p v-else class="text-xs text-n-slate-10">{{ TXT.semArquivos }}</p>
 
+    <form
+      v-if="editando && !naLixeira"
+      class="qc-edit"
+      @submit.prevent="salvarEdicao"
+    >
+      <label class="qc-campo qc-largo">
+        <span>{{ TXT.fNome }}</span>
+        <input v-model="form.nome" maxlength="80" required />
+      </label>
+      <label class="qc-campo">
+        <span>{{ TXT.fCidade }}</span>
+        <input v-model="form.cidade" maxlength="60" />
+      </label>
+      <label class="qc-campo qc-uf">
+        <span>{{ TXT.fUf }}</span>
+        <input v-model="form.uf" maxlength="2" />
+      </label>
+      <label class="qc-campo">
+        <span>{{ TXT.fTelhado }}</span>
+        <input v-model="form.telhado" maxlength="40" />
+      </label>
+      <label class="qc-campo qc-uf">
+        <span>{{ TXT.fValidade }}</span>
+        <input
+          v-model.number="form.validade_dias"
+          type="number"
+          min="1"
+          max="30"
+        />
+      </label>
+      <div class="qc-largo flex justify-end gap-1.5">
+        <button
+          type="button"
+          class="qc-act text-n-slate-12"
+          @click="editando = false"
+        >
+          {{ TXT.cancelar }}
+        </button>
+        <button type="submit" class="qc-act qc-act-main" :disabled="ocupado">
+          <span class="i-lucide-save" />
+          {{ TXT.salvar }}
+        </button>
+      </div>
+    </form>
+
     <p v-if="naLixeira" class="qc-trash text-n-slate-12">
       <strong>{{ orcamento.excluido_por || TXT.alguem }}</strong>
       {{ TXT.excluiu }}
@@ -207,6 +288,17 @@ const TXT = {
         @click="excluir"
       >
         <span class="i-lucide-trash-2" />
+      </button>
+      <button
+        v-if="podeEditar && !editando"
+        type="button"
+        class="qc-act text-n-slate-12"
+        :title="TXT.editarDica"
+        :disabled="ocupado"
+        @click="abrirEdicao"
+      >
+        <span class="i-lucide-pencil" />
+        {{ TXT.editar }}
       </button>
       <button
         v-if="podeEditar && !orcamento.enviado_em && orcamento.arquivos?.length"
@@ -374,6 +466,40 @@ const TXT = {
   padding: 8px 10px;
   border-radius: 10px;
   background: rgb(220 38 38 / 0.08);
+}
+.qc-edit {
+  display: grid;
+  grid-template-columns: 1fr 64px;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgb(15 23 42 / 0.04);
+}
+.dark .qc-edit {
+  background: rgb(255 255 255 / 0.05);
+}
+.qc-largo {
+  grid-column: 1 / -1;
+}
+.qc-campo {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.qc-campo input {
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  border: 1px solid rgb(15 23 42 / 0.15);
+  background: #fff;
+  margin: 0;
+}
+.dark .qc-campo input {
+  background: #0f1113;
+  border-color: rgb(255 255 255 / 0.15);
 }
 .qc-act:disabled {
   opacity: 0.5;
