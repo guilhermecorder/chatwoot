@@ -88,7 +88,7 @@ RSpec.describe 'Cotador de kits — rota do CRM', type: :request do
 
     expect(response).to have_http_status(:ok)
     body = response.parsed_body
-    expect(body['potencia_necessaria_kwp']).to eq(5.09)
+    expect(body['potencia_necessaria_kwp']).to eq(5.6) # 600 kWh + 10% de folga
     expect(body['opcoes']).to contain_exactly(a_hash_including('fornecedor' => 'Bluesun', 'preco' => 6764.81, 'tipo' => 'string'))
     avt = body['fornecedores'].find { |f| f['fornecedor'] == 'AVT' }
     expect(avt).to include('ok' => false)
@@ -125,6 +125,45 @@ RSpec.describe 'Cotador de kits — rota do CRM', type: :request do
     expect(response.parsed_body['adequacao']).to include('valor' => 1900.0, 'manual' => true)
   end
 
+  it 'mostra os botões de aumento e lê o que o cliente disse que vai aumentar (15/11)', :aggregate_failures do
+    get base, headers: admin.create_new_auth_token, as: :json
+    expect(response.parsed_body['aumentos'].pluck('chave')).to include('ar_12', 'chuveiro', 'piscina')
+
+    get "#{base}/increase", params: { texto: 'vai colocar 2 ar-condicionados e uma sauna' }, headers: admin.create_new_auth_token
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body['itens'].first).to include('rotulo' => '2 ar-condicionados', 'kwh' => 180, 'chave' => 'ar_12', 'qtd' => 2)
+    expect(response.parsed_body['desconhecido']).to eq('uma sauna')
+  end
+
+  it 'mostra o que o cliente disse: ficha, aumento pela tabela e as frases dele sobre consumo (15/11)', :aggregate_failures do
+    CrmSetting.create!(account: account, ai_config: { 'ficha_cliente' => { 'campos' => [
+                         { 'chave' => 'conta', 'rotulo' => 'Conta de luz' }, { 'chave' => 'consumo_futuro', 'rotulo' => 'Vai aumentar o consumo' }
+                       ] } })
+    contact = create(:contact, account: account, additional_attributes: { 'ficha_cliente' => {
+                       'conta' => { 'valor' => 'R$ 380' }, 'consumo_futuro' => { 'valor' => 'vai pôr 2 ar-condicionados e piscina' }
+                     } })
+    conversation = create(:conversation, account: account, contact: contact)
+    create(:message, account: account, conversation: conversation, inbox: conversation.inbox, message_type: :incoming,
+                     content: 'Bom dia! Ano que vem vou colocar ar condicionado nos quartos')
+    create(:message, account: account, conversation: conversation, inbox: conversation.inbox, message_type: :incoming, content: 'Obrigado')
+
+    get "#{base}/facts", params: { contact_id: contact.id }, headers: admin.create_new_auth_token
+    body = response.parsed_body
+    expect(body['ficha'].pluck('valor')).to include('R$ 380', 'vai pôr 2 ar-condicionados e piscina')
+    expect(body.dig('aumento', 'itens').sum { |i| i['kwh'] }).to eq(280)
+    expect(body['frases'].pluck('texto')).to eq(['Bom dia! Ano que vem vou colocar ar condicionado nos quartos'])
+  end
+
+  it 'monta na mão: pede a quantidade de placas escolhida e marca as opções que batem (15/11)', :aggregate_failures do
+    stub_bluesun
+    post "#{base}/update_access", params: { fornecedor: 'bluesun', sessao: bluesun_session }, headers: admin.create_new_auth_token, as: :json
+    post base, params: { consumo: 600, rede: 'bifasico', placas: 8, potencia_w: 630 }, headers: admin.create_new_auth_token, as: :json
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body['montagem']).to include('placas' => 8, 'potencia_w' => 630, 'exatas' => 1)
+    expect(response.parsed_body['opcoes'].first).to include('placas' => 8, 'montagem' => true)
+  end
+
   it 'cota com a estrutura do telhado quando o telhado é informado' do
     stub_bluesun
     post "#{base}/update_access", params: { fornecedor: 'bluesun', sessao: bluesun_session }, headers: admin.create_new_auth_token, as: :json
@@ -134,6 +173,32 @@ RSpec.describe 'Cotador de kits — rota do CRM', type: :request do
     expect(response.parsed_body['telhado']).to eq('chave' => 'ceramica', 'nome' => 'Telha cerâmica')
     expect(response.parsed_body['opcoes'].first).to include('completa' => true, 'total' => 6934.26)
     expect(response.parsed_body.dig('medias', 'string', 'media')).to eq(6934.26)
+  end
+
+  it 'mostra a prévia e manda a mensagem de fechamento com os números da proposta (16/11)', :aggregate_failures do
+    channel = create(:channel_whatsapp, account: account, sync_templates: false, validate_provider_config: false)
+    inbox = create(:inbox, account: account, channel: channel)
+    contact = create(:contact, account: account, name: 'Maria Souza', phone_number: '+5519999990000')
+    conversation = create(:conversation, account: account, inbox: inbox, contact: contact)
+    quote = Crm::Quote.create!(account: account, contact: contact, price: 18_900, kind: 'micro', payload: { 'proposta' => {
+                                 'investimento' => { 'preco_total' => 18_900, 'financiamento' => [{ 'parcelas' => 60, 'valor' => 520 }] }
+                               } })
+
+    get "#{base}/followup", params: { id: quote.id, tipo: 'pagamento' }, headers: admin.create_new_auth_token
+    expect(response.parsed_body).to include('janela_aberta' => false, 'modelo_aprovado' => false)
+    expect(response.parsed_body['texto']).to include('R$ 31.200 no total')
+
+    post "#{base}/send_followup", params: { id: quote.id, tipo: 'pagamento' }, headers: admin.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body['error']).to include('aguarda aprovação da Meta')
+
+    create(:message, conversation: conversation, account: account, inbox: inbox, message_type: :incoming, content: 'oi')
+    post "#{base}/send_followup", params: { id: quote.id, tipo: 'pagamento' }, headers: admin.create_new_auth_token, as: :json
+    expect(response.parsed_body).to eq('situacao' => 'enviado')
+    expect(conversation.messages.outgoing.last.content).to include('6x sem juros: R$ 3.150 por mês')
+
+    get "#{base}/followup", params: { id: quote.id, tipo: 'outro' }, headers: admin.create_new_auth_token
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 
   describe 'documentos do orçamento (proposta + justificativa)' do

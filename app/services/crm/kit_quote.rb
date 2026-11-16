@@ -25,6 +25,9 @@ module Crm::KitQuote
     'ibge' => '3538709',
     'incidencia_solar' => 4.91,
     'perda' => 0.20,
+    # 📏 FOLGA (Guilherme, 16/11/2026: "sempre calcular uns 10% acima do uso: se vai usar 500 kWh, precisa de 550 no
+    # mínimo"). O kit é dimensionado para consumo × (1 + folga); a economia continua a da conta de hoje.
+    'folga' => 0.10,
     'max_opcoes' => 15, # por fornecedor
     # R$ por kWh para passar a conta de luz para consumo (mesma relação da proposta do
     # Residencial Potengi: R$ 4.400 para 4.250 kWh). O consumo calculado pode ser ajustado na tela.
@@ -79,6 +82,16 @@ module Crm::KitQuote
   # kWp para cobrir o consumo: consumo / (sol do dia × 30 dias × aproveitamento)
   def needed_kwp(kwh_month, sun, loss)
     kwh_month.to_f / (sun.to_f * 30 * (1 - loss.to_f))
+  end
+
+  # o consumo para o qual o kit é dimensionado: o da conta + a folga
+  def sized_kwh(kwh_month, config)
+    (kwh_month.to_f * (1 + config['folga'].to_f)).round(1)
+  end
+
+  # quanto o kit produz por mês (o mesmo número que vai na proposta)
+  def production(kwp, config)
+    kwp.to_f * config['incidencia_solar'].to_f * 30 * (1 - config['perda'].to_f)
   end
 
   def panels_for(kwp, panel_watts)

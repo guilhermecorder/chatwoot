@@ -11,6 +11,12 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     sem_conversa: 'Este cliente não tem conversa no WhatsApp da Life (ou o modelo "orçamento pronto" não saiu).',
     sem_arquivos: 'Este orçamento não tem o PDF guardado: gere de novo com o gerador de PDF ligado.'
   }.freeze
+  FOLLOWUP_ERRORS = {
+    sem_conversa: 'Este cliente não tem conversa no WhatsApp da Life.',
+    sem_dados: 'A proposta deste orçamento não tem os números dessa mensagem.',
+    modelo_pendente: 'A conversa está fora da janela de 24 h e o modelo dessa mensagem ainda aguarda aprovação da Meta. ' \
+                     'Quando o cliente responder, dá para mandar como texto.'
+  }.freeze
   NO_RENDERER = 'O gerador de PDF ainda não está ligado neste servidor. Os números do orçamento estão prontos.'.freeze
 
   def show
@@ -19,8 +25,24 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
       acesso: store.status, cidade: "#{config['cidade']}/#{config['uf']}", max_opcoes: config['max_opcoes'],
       tarifa: config['tarifa'], telhados: Crm::KitQuote::ROOFS.map { |key, name| { chave: key, nome: name } },
       margem_padrao: Crm::KitQuote::Dre::STANDARD_MARGIN, faixa: [Crm::KitQuote::Dre::RANGE.begin, Crm::KitQuote::Dre::RANGE.end],
-      gerador_pdf: Crm::KitQuote::Renderer.new(config).available?
+      gerador_pdf: Crm::KitQuote::Renderer.new(config).available?,
+      # ➕ 15/11: os botões de aumento de consumo (tabela aprovada em 13/11)
+      aumentos: Crm::KitQuote::Increase::BUTTONS
     }
+  end
+
+  # 🗣️ 15/11: o que o cliente disse que vai aumentar ("vai pôr 2 ar-condicionados") → itens da tabela, com kWh.
+  # desconhecido = o trecho que a tabela não cobre (fica para quem monta o orçamento estimar).
+  def increase
+    render json: Crm::KitQuote::Increase.parse(params[:texto].to_s.first(300))
+  end
+
+  # 🗣️ 15/11: a caixa em destaque do Gerador — ficha do cliente, o aumento lido pela tabela e as frases do cliente
+  def facts
+    contact = contact_from(params[:contact_id])
+    return render json: { ficha: [], aumento: nil, frases: [] } unless contact
+
+    render json: Crm::KitQuote::ConversationFacts.new(contact).call
   end
 
   def create
@@ -29,9 +51,8 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
       return render json: { error: 'Informe o consumo médio da conta de luz, em kWh por mês.' }, status: :unprocessable_entity
     end
 
-    result = Crm::KitQuote::Engine.new(store.config, store.secrets, store)
-                                  .run(kwh_month: kwh, grid: params[:rede].to_s, roof: params[:telhado].to_s)
-    render json: result.merge('acesso' => store.status)
+    result = params[:placas].present? ? assembly_result : engine(store.config).run(kwh_month: kwh, **grid_and_roof)
+    render json: result.merge('acesso' => store.status) if result
   end
 
   # DRE projetado de um kit: preço médio dos fornecedores com cotação completa + regras da planilha.
@@ -113,6 +134,26 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
     render json: { situacao: result.to_s, orcamento: quote_json(quote.reload) }
   end
 
+  # 💬 Mensagem de fechamento com os números da proposta (Crm::KitQuote::Followup): ?id=&tipo=pagamento|prazo
+  def followup
+    quote = Crm::Quote.ativos.find_by(account: Current.account, id: params[:id])
+    return render json: { error: 'Orçamento não encontrado.' }, status: :not_found unless quote
+    return render json: { error: 'Tipo de mensagem desconhecido.' }, status: :unprocessable_entity unless Crm::KitQuote::Followup.kind?(params[:tipo])
+
+    render json: Crm::KitQuote::Followup.new(quote, params[:tipo]).preview
+  end
+
+  def send_followup
+    quote = Crm::Quote.ativos.find_by(account: Current.account, id: params[:id])
+    return render json: { error: 'Orçamento não encontrado.' }, status: :not_found unless quote
+    return render json: { error: 'Tipo de mensagem desconhecido.' }, status: :unprocessable_entity unless Crm::KitQuote::Followup.kind?(params[:tipo])
+
+    result = Crm::KitQuote::Followup.new(quote, params[:tipo], sender: Current.user).call
+    return render json: { error: FOLLOWUP_ERRORS[result] }, status: :unprocessable_entity if FOLLOWUP_ERRORS.key?(result)
+
+    render json: { situacao: result.to_s }
+  end
+
   # ✏️ Edita os dados de apresentação (nome, cidade/UF, telhado, validade) e gera os PDFs de novo (Crm::KitQuote::Edit).
   def edit # rubocop:disable Metrics/AbcSize, Rails/ActionOrder
     quote = Crm::Quote.ativos.find_by(account: Current.account, id: params[:id])
@@ -148,6 +189,26 @@ class Api::V1::Accounts::Crm::KitQuotesController < Api::V1::Accounts::BaseContr
   end
 
   private
+
+  # 🧩 15/11: montar na mão — N placas de um tamanho (e marca), com o preço real da cotação (Crm::KitQuote::Assembly)
+  def assembly_result
+    unless Crm::KitQuote::Assembly.valid?(params[:placas], params[:potencia_w])
+      render json: { error: 'Escolha a quantidade de placas e o tamanho da placa.' }, status: :unprocessable_entity
+      return nil
+    end
+
+    config = store.config.merge('max_opcoes' => 100) # todas as opções: a montagem pode estar entre as que o corte deixaria de fora
+    Crm::KitQuote::Assembly.new(engine(config), config)
+                           .run(panels: params[:placas], watts: params[:potencia_w], brand: params[:marca], **grid_and_roof)
+  end
+
+  def engine(config)
+    Crm::KitQuote::Engine.new(config, store.secrets, store)
+  end
+
+  def grid_and_roof
+    { grid: params[:rede].to_s, roof: params[:telhado].to_s }
+  end
 
   # ---------- DRE
 

@@ -2,6 +2,8 @@
 // 📦 Caixa de um orçamento guardado (Gerador de proposta, LIFE · 12/11): cliente, valor, até quando
 // vale (7 dias), se já foi enviado, os PDFs e as ações (marcar como enviada, abrir o cliente, excluir).
 import { computed, reactive, ref } from 'vue';
+import { useAlert } from 'dashboard/composables';
+import CrmAPI from 'dashboard/api/crm';
 import { formatMoney as reais } from 'dashboard/helper/proposalBuilder';
 
 const props = defineProps({
@@ -124,7 +126,66 @@ const salvarEdicao = () => {
   emit('editar', props.orcamento, { ...form });
   editando.value = false;
 };
+// 💬 mensagem de fechamento com os números da proposta (16/11, Guilherme: "um botão para gerar automático, puxar esses
+// números do orçamento? E os que têm validade"): prévia → enviar na conversa do cliente
+const fechamento = ref(null); // { tipo, texto, falta, janela_aberta, modelo_aprovado, tem_conversa }
+const fechamentoOcupado = ref(false);
+const erroDe = (e, padrao) => e?.response?.data?.error || padrao;
+const abrirFechamento = async tipo => {
+  if (fechamento.value?.tipo === tipo) {
+    fechamento.value = null;
+    return;
+  }
+  fechamentoOcupado.value = true;
+  try {
+    const { data } = await CrmAPI.getKitQuoteFollowup(props.orcamento.id, tipo);
+    fechamento.value = data;
+  } catch (e) {
+    useAlert(erroDe(e, 'Não foi possível montar a mensagem.'));
+  } finally {
+    fechamentoOcupado.value = false;
+  }
+};
+const podeMandarFechamento = computed(() => {
+  const f = fechamento.value;
+  return !!f?.texto && f.tem_conversa && (f.janela_aberta || f.modelo_aprovado);
+});
+const avisoFechamento = computed(() => {
+  const f = fechamento.value;
+  if (!f) return '';
+  if (!f.texto) return `Esta proposta não tem ${f.falta.join(' e ')}.`;
+  if (!f.tem_conversa) return 'Este cliente não tem conversa no WhatsApp.';
+  if (f.janela_aberta) return 'A conversa está aberta: sai como mensagem.';
+  if (f.modelo_aprovado)
+    return 'Fora da janela de 24 h: sai como modelo aprovado.';
+  return 'Fora da janela de 24 h e o modelo ainda aguarda aprovação da Meta. Quando o cliente responder, dá para mandar.';
+});
+const mandarFechamento = async () => {
+  if (!podeMandarFechamento.value) return;
+  fechamentoOcupado.value = true;
+  try {
+    await CrmAPI.sendKitQuoteFollowup(
+      props.orcamento.id,
+      fechamento.value.tipo
+    );
+    useAlert('Mensagem enviada na conversa do cliente.');
+    fechamento.value = null;
+  } catch (e) {
+    useAlert(erroDe(e, 'Não foi possível enviar a mensagem.'));
+  } finally {
+    fechamentoOcupado.value = false;
+  }
+};
+
 const TXT = {
+  fechamento: 'Mensagem de fechamento',
+  fechPagamento: 'Forma de pagamento',
+  fechPrazo: 'Prazo',
+  fechPagamentoDica:
+    'Financiamento × cartão em 6x sem juros, com os números desta proposta.',
+  fechPrazoDica:
+    'Até quando o orçamento vale e quanto ele deixa de economizar por mês.',
+  fechMandar: 'Mandar no WhatsApp',
   editar: 'Editar',
   editarDica:
     'Corrigir nome, cidade, telhado ou validade. Os PDFs são gerados de novo.',
@@ -214,6 +275,63 @@ const TXT = {
       </a>
     </div>
     <p v-else class="text-xs text-n-slate-10">{{ TXT.semArquivos }}</p>
+
+    <section v-if="podeEditar && !naLixeira" class="qc-fech">
+      <p class="qc-fech-rot text-n-slate-11">{{ TXT.fechamento }}</p>
+      <div class="flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          class="qc-act text-n-slate-12"
+          :class="{ 'qc-act-on': fechamento?.tipo === 'pagamento' }"
+          :title="TXT.fechPagamentoDica"
+          :disabled="ocupado || fechamentoOcupado"
+          @click="abrirFechamento('pagamento')"
+        >
+          <span class="i-lucide-credit-card" />
+          {{ TXT.fechPagamento }}
+        </button>
+        <button
+          type="button"
+          class="qc-act text-n-slate-12"
+          :class="{ 'qc-act-on': fechamento?.tipo === 'prazo' }"
+          :title="TXT.fechPrazoDica"
+          :disabled="ocupado || fechamentoOcupado"
+          @click="abrirFechamento('prazo')"
+        >
+          <span class="i-lucide-calendar-clock" />
+          {{ TXT.fechPrazo }}
+        </button>
+      </div>
+      <div v-if="fechamento" class="qc-fech-previa">
+        <p v-if="fechamento.texto" class="qc-fech-texto">
+          {{ fechamento.texto }}
+        </p>
+        <p
+          class="qc-fech-aviso"
+          :class="podeMandarFechamento ? 'text-n-teal-11' : 'text-n-amber-11'"
+        >
+          {{ avisoFechamento }}
+        </p>
+        <div class="flex justify-end gap-1.5">
+          <button
+            type="button"
+            class="qc-act text-n-slate-12"
+            @click="fechamento = null"
+          >
+            {{ TXT.cancelar }}
+          </button>
+          <button
+            type="button"
+            class="qc-act qc-act-wa"
+            :disabled="!podeMandarFechamento || fechamentoOcupado"
+            @click="mandarFechamento"
+          >
+            <span class="i-lucide-send" />
+            {{ TXT.fechMandar }}
+          </button>
+        </div>
+      </div>
+    </section>
 
     <form
       v-if="editando && !naLixeira"
@@ -503,5 +621,48 @@ const TXT = {
 }
 .qc-act:disabled {
   opacity: 0.5;
+}
+.qc-fech {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.qc-fech-rot {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.qc-act-on {
+  border-color: #ea580c;
+  background: rgb(234 88 12 / 0.1);
+}
+.qc-fech-previa {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgb(15 23 42 / 0.04);
+}
+.dark .qc-fech-previa {
+  background: rgb(255 255 255 / 0.05);
+}
+.qc-fech-texto {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #dcf8c6;
+  color: #111b21;
+}
+.dark .qc-fech-texto {
+  background: #005c4b;
+  color: #e9edef;
+}
+.qc-fech-aviso {
+  font-size: 11px;
+  font-weight: 600;
 }
 </style>

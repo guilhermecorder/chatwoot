@@ -142,7 +142,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/stages' => { node: 'crm.funis', actions: { 'index' => %w[crm view] } },
     'crm/contacts' => { node: 'crm', view: %w[index history detect_value detect_values_bulk] },
     'crm/funnels' => { node: 'crm', view: %w[acquisition clinic] },
-    'crm/kit_quotes' => { node: 'crm.cotador', view: %w[show ready history] }, # ☀️ cotador de kits (LIFE)
+    'crm/kit_quotes' => { node: 'crm.cotador', view: %w[show ready history increase facts followup] }, # ☀️ cotador de kits (LIFE)
     'crm/campaigns' => { node: 'crm.campanhas', view: %w[index show results templates] },
     'crm/call_campaigns' => { node: 'crm.campanhas', view: %w[index show] },
     'crm/segments' => { node: 'crm.campanhas', view: %w[index show base preview results members dashboard] }, # 🧪 item 383

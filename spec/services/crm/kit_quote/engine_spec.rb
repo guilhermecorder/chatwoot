@@ -65,7 +65,7 @@ RSpec.describe Crm::KitQuote::Engine do
     stub_avt_session
     stub_bluesun
 
-    result = described_class.new(config, secrets).run(kwh_month: 600, grid: 'bifasico')
+    result = described_class.new(config, secrets).run(kwh_month: 600, margin: false, grid: 'bifasico')
 
     expect(result['potencia_necessaria_kwp']).to eq(5.09)
     expect(result['fornecedores']).to contain_exactly(
@@ -91,7 +91,7 @@ RSpec.describe Crm::KitQuote::Engine do
     stub_avt_session
     stub_bluesun
 
-    described_class.new(config, secrets).run(kwh_month: 600, grid: 'trifasico')
+    described_class.new(config, secrets).run(kwh_month: 600, margin: false, grid: 'trifasico')
 
     expect(WebMock).to(have_requested(:post, "#{bluesun_api}/v1/orcamentos/geracao/simulacao").with do |req|
       body = JSON.parse(req.body)
@@ -111,7 +111,7 @@ RSpec.describe Crm::KitQuote::Engine do
     end
     stub_bluesun
 
-    result = described_class.new(config, secrets).run(kwh_month: 600)
+    result = described_class.new(config, secrets).run(kwh_month: 600, margin: false)
 
     expect(result['fornecedores'].first).to include('fornecedor' => 'AVT', 'caminho' => 'API oficial', 'opcoes' => 2)
     expect(result['opcoes'].select { |o| o['fornecedor'] == 'AVT' }.map { |o| o['preco'] }).to contain_exactly(7000.0, 8900.0)
@@ -123,7 +123,7 @@ RSpec.describe Crm::KitQuote::Engine do
     stub_bluesun
     sem_avt = secrets.merge('avt_sessao' => nil)
 
-    result = described_class.new(config, sem_avt).run(kwh_month: 600)
+    result = described_class.new(config, sem_avt).run(kwh_month: 600, margin: false)
 
     avt = result['fornecedores'].find { |f| f['fornecedor'] == 'AVT' }
     expect(avt['ok']).to be(false)
@@ -142,7 +142,7 @@ RSpec.describe Crm::KitQuote::Engine do
     vencida = secrets.merge('avt_sessao' => { 'accessToken' => 'velha', 'expirationDate' => 1.hour.ago.iso8601 },
                             'avt_login' => { 'email' => 'life@exemplo.com', 'senha' => 'segredo' })
 
-    result = described_class.new(config, vencida, store).run(kwh_month: 600)
+    result = described_class.new(config, vencida, store).run(kwh_month: 600, margin: false)
 
     expect(login).to have_been_requested.once
     expect(store).to have_received(:save_session!).with('avt', a_hash_including('accessToken' => 'sessao-nova', 'urlApi' => avt_base))
@@ -157,7 +157,7 @@ RSpec.describe Crm::KitQuote::Engine do
     stub_request(:post, "#{avt_base}/api/v2/account/login").to_return(status: 401, body: 'Usuário ou senha inválidos')
     sem_sessao = secrets.merge('avt_sessao' => nil, 'avt_login' => { 'email' => 'life@exemplo.com', 'senha' => 'errada' })
 
-    result = described_class.new(config, sem_sessao).run(kwh_month: 600)
+    result = described_class.new(config, sem_sessao).run(kwh_month: 600, margin: false)
 
     avt = result['fornecedores'].find { |f| f['fornecedor'] == 'AVT' }
     expect(avt).to include('ok' => false)
@@ -171,7 +171,7 @@ RSpec.describe Crm::KitQuote::Engine do
     stub_request(:post, "#{avt_base}/api/Pedido/BuscarCombinacoes").to_return(status: 400, body: 'Acesso Negado!!!')
     stub_bluesun
 
-    result = described_class.new(config, secrets).run(kwh_month: 600)
+    result = described_class.new(config, secrets).run(kwh_month: 600, margin: false)
 
     avt = result['fornecedores'].find { |f| f['fornecedor'] == 'AVT' }
     expect(avt).to include('ok' => false)
@@ -187,7 +187,7 @@ RSpec.describe Crm::KitQuote::Engine do
       .to_return(status: 200, body: { data: [bluesun_kit('inversor_ongrid', 5.04, 6764.81)] }.to_json)
     allow_any_instance_of(Crm::KitQuote::Http).to receive(:sleep) # rubocop:disable RSpec/AnyInstance
 
-    result = described_class.new(config, secrets).run(kwh_month: 600)
+    result = described_class.new(config, secrets).run(kwh_month: 600, margin: false)
 
     expect(result['fornecedores'].find { |f| f['fornecedor'] == 'Bluesun' }).to include('ok' => true, 'opcoes' => 1)
   end
@@ -197,7 +197,7 @@ RSpec.describe Crm::KitQuote::Engine do
     stub_avt_session
     vencida = secrets.merge('bluesun_sessao' => { 'token' => 'x', 'expires_at' => 1.hour.ago.to_i })
 
-    result = described_class.new(config, vencida).run(kwh_month: 600)
+    result = described_class.new(config, vencida).run(kwh_month: 600, margin: false)
 
     bluesun = result['fornecedores'].find { |f| f['fornecedor'] == 'Bluesun' }
     expect(bluesun).to include('ok' => false)
@@ -211,7 +211,7 @@ RSpec.describe Crm::KitQuote::Engine do
       stub_avt_session
       stub_bluesun
 
-      result = described_class.new(config, secrets).run(kwh_month: 600, grid: 'bifasico', roof: 'ceramica')
+      result = described_class.new(config, secrets).run(kwh_month: 600, margin: false, grid: 'bifasico', roof: 'ceramica')
 
       expect(WebMock).to(have_requested(:post, "#{bluesun_api}/v1/orcamentos/geracao/simulacao").with do |req|
         body = JSON.parse(req.body)
@@ -230,7 +230,7 @@ RSpec.describe Crm::KitQuote::Engine do
       stub_avt_session
       stub_bluesun
 
-      result = described_class.new(config, secrets).run(kwh_month: 600, roof: 'palha')
+      result = described_class.new(config, secrets).run(kwh_month: 600, margin: false, roof: 'palha')
 
       expect(WebMock).to(have_requested(:post, "#{bluesun_api}/v1/orcamentos/geracao/simulacao").with do |req|
         JSON.parse(req.body).values_at('incluir_estrutura', 'id_tipo_estrutura_telhado') == [0, nil]
@@ -245,7 +245,7 @@ RSpec.describe Crm::KitQuote::Engine do
       stub_avt_session
       stub_bluesun
 
-      medias = described_class.new(config, secrets).run(kwh_month: 600, roof: 'ceramica')['medias']
+      medias = described_class.new(config, secrets).run(kwh_month: 600, margin: false, roof: 'ceramica')['medias']
 
       # string: Bluesun completa (6.764,81 + frete 169,45) entra; AVT (sem estrutura e sem frete) fica fora
       expect(medias['string']).to include('fornecedores_na_media' => 1, 'media' => 6934.26)
@@ -285,7 +285,7 @@ RSpec.describe Crm::KitQuote::Engine do
                                                                     .to_return(status: 200, body: nova.to_json)
       store = instance_double(Crm::KitQuote::Store, save_session!: {})
 
-      result = described_class.new(config, vencida, store).run(kwh_month: 600)
+      result = described_class.new(config, vencida, store).run(kwh_month: 600, margin: false)
 
       expect(renew).to have_been_requested.once
       expect(store).to have_received(:save_session!).with('bluesun', hash_including('token' => 'nova', 'refresh_token' => 'chave-2'))
@@ -300,7 +300,7 @@ RSpec.describe Crm::KitQuote::Engine do
       stub_avt_session
       stub_request(:post, "#{bluesun_api}/v1/validar_token").to_return(status: 401, body: '{}')
 
-      result = described_class.new(config, vencida).run(kwh_month: 600)
+      result = described_class.new(config, vencida).run(kwh_month: 600, margin: false)
 
       expect(result['fornecedores'].find { |f| f['fornecedor'] == 'Bluesun' }).to include('ok' => false, 'motivo' => a_string_including('venceu'))
     end
@@ -311,9 +311,64 @@ RSpec.describe Crm::KitQuote::Engine do
       stub_bluesun
 
       described_class.new(config, secrets.merge('bluesun_sessao' => vencida['bluesun_sessao'].merge('expires_at' => 1.hour.from_now.to_i)))
-                     .run(kwh_month: 600)
+                     .run(kwh_month: 600, margin: false)
 
       expect(WebMock).not_to have_requested(:post, "#{bluesun_api}/v1/validar_token")
+    end
+  end
+
+  # (os exemplos acima pedem margin: false — o assunto ali é o fornecedor, não a folga)
+  describe 'folga de 10% (Guilherme, 16/11: "se vai usar 500 kWh, precisa de 550 no mínimo")' do
+    let(:com_folga) { config }
+    let(:bluesun_pedidos) { [] }
+
+    # a Bluesun arredonda pelo sol dela: devolve um kit de string com ~ (consumo ÷ 125) kWp em placas de 630 W
+    def stub_bluesun_que_arredonda
+      stub_request(:get, "#{bluesun_api}/v1/orcamentos/geracao/servicos/seguro_engenharia")
+        .to_return(status: 200, body: [{ id: 'seguro-1' }].to_json)
+      stub_request(:post, "#{bluesun_api}/v1/orcamentos/geracao/simulacao").to_return do |request|
+        kwh = JSON.parse(request.body)['consumo_medio']
+        bluesun_pedidos << kwh
+        placas = (kwh / 125.0 / 0.63).round
+        kit = bluesun_kit('inversor_ongrid', (placas * 0.63).round(2), 5000 + (placas * 500))
+        kit[:quantidade_painel] = placas
+        { status: 200, body: { data: [kit] }.to_json }
+      end
+    end
+
+    it 'pede o consumo + 10% e, se o kit voltou abaixo disso, pede de novo e tira o kit pequeno', :aggregate_failures do
+      stub_avt_official_denied
+      stub_bluesun_que_arredonda
+      sem_avt = secrets.merge('avt_sessao' => nil)
+
+      result = described_class.new(com_folga, sem_avt).run(kwh_month: 500)
+
+      expect(result).to include('consumo_kwh_mes' => 500.0, 'consumo_dimensionado' => 550.0, 'folga' => 0.1)
+      expect(bluesun_pedidos.first).to eq(550)
+      expect(bluesun_pedidos.size).to eq(2)
+      producoes = result['opcoes'].map { |o| Crm::KitQuote.production(o['potencia_kwp'], com_folga) }
+      expect(producoes).to all(be >= 549)
+    end
+
+    it 'não pede de novo quando o kit já produz o consumo + 10%' do
+      stub_avt_official_denied
+      stub_bluesun
+      sem_avt = secrets.merge('avt_sessao' => nil)
+
+      result = described_class.new(com_folga, sem_avt).run(kwh_month: 500)
+
+      expect(WebMock).to have_requested(:post, "#{bluesun_api}/v1/orcamentos/geracao/simulacao").once
+      expect(result['potencia_necessaria_kwp']).to eq(4.67)
+    end
+
+    it 'montar na mão (margin: false) pede o consumo exato, sem folga' do
+      stub_avt_official_denied
+      stub_bluesun_que_arredonda
+      sem_avt = secrets.merge('avt_sessao' => nil)
+
+      described_class.new(com_folga, sem_avt).run(kwh_month: 500, margin: false)
+
+      expect(bluesun_pedidos.first).to eq(500)
     end
   end
 end

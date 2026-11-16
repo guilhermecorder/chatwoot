@@ -111,6 +111,13 @@
     "rodape_estimativa": "Valores estimados; variam com consumo, telhado e irradiação.",
     "salto_depois": "Você leva um sistema mais moderno por uma pequena parte desse valor.",
     "validade_motivo": "O preço acompanha o dólar e pode mudar depois dessa data.",
+    "aviso_inicial_titulo": "Este é um orçamento inicial",
+    "aviso_inicial": [
+      "Ele foi feito pela sua conta de luz, antes da visita técnica.",
+      "Na visita, a gente confere o telhado, a sombra e o padrão da CPFL.",
+      "Na maioria das vezes, o orçamento se mantém. Às vezes precisa de um ajuste, como trocar para microinversor ou pôr mais placas por causa de sombra.",
+      "Se mudar alguma coisa, a gente te mostra antes de fechar."
+    ],
     "prazo_instalacao": "Prazo de instalação: de 25 a 40 dias, contados depois da visita técnica e da assinatura do contrato. Ele depende da chegada do equipamento e da liberação da {distribuidora}.",
     "pergunta_final": "É possível para você fazer esse investimento?",
     "abraco": "Vai ser uma honra ajudar você a instalar um sistema de energia solar de alta tecnologia no seu imóvel.",

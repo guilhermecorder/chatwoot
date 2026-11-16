@@ -40,14 +40,29 @@ watch(
       paused: v?.paused === true,
       reason: v?.reason || null,
       by: v?.by || null,
+      at: v?.at || null,
+      resume_at: v?.paused === true ? state.value.resume_at : null,
     };
+    // ⏱️ pausou agora: busca de novo para saber quando a IA volta sozinha
+    if (v?.paused === true) load();
   },
   { deep: true }
 );
 
 const paused = computed(() => state.value?.paused === true);
 const live = computed(() => state.value?.live === true);
+// ⏱️ 15/11: com o relógio ligado, o próprio botão diz a hora em que a IA volta ("IA volta 14:32")
+const horaDaVolta = computed(() => {
+  const at = state.value?.resume_at;
+  return at
+    ? new Date(at).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '';
+});
 const label = computed(() => {
+  if (paused.value && horaDaVolta.value) return `IA volta ${horaDaVolta.value}`;
   if (paused.value) return 'IA desligada';
   return live.value ? 'IA ligada' : 'IA em sombra';
 });
@@ -63,7 +78,11 @@ const hint = computed(() => {
   if (!s) return '';
   if (s.paused) {
     const why = REASONS[s.reason] || s.reason_text || 'pausada';
-    return `Atendente IA desligada nesta conversa: ${why}${s.by ? ` (${s.by})` : ''}. Toque para ligar de novo.`;
+    // ⏱️ 13/11: a IA volta sozinha alguns minutos depois da última mensagem da equipe
+    const volta = s.resume_at
+      ? ` Volta sozinha por volta das ${new Date(s.resume_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} se ninguém da equipe escrever.`
+      : '';
+    return `Atendente IA desligada nesta conversa: ${why}${s.by ? ` (${s.by})` : ''}.${volta} Toque para ligar de novo.`;
   }
   return live.value
     ? 'Atendente IA respondendo sozinha nesta conversa. Qualquer mensagem sua pausa; toque para desligar.'

@@ -270,9 +270,23 @@
     <p>{{textos.nota_cartao}} {{#se f.financiamento}}{{textos.nota_financiamento}} {{/se}}{{textos.nota_antes15}}</p>
     <p>Válido até {{f.validade}} ({{f.validade_dias}} dias a partir de {{f.data}}). {{textos.validade_motivo}}</p>
   </div>
+  {{#se textos.aviso_inicial}}<a class="gancho" href="#inicial"><span>Antes de fechar</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5l6 6 6-6M6 12.5l6 6 6-6"/></svg></a>{{/se}}
+  {{#nao textos.aviso_inicial}}<a class="gancho volta" href="#indice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17.5l6-6 6 6M6 11.5l6-6 6 6"/></svg><span>Voltar ao índice</span></a>{{/nao}}
+  <!--pe-->
+</section>
+
+<!-- 18. ORÇAMENTO INICIAL (15/11, Guilherme: "no fim do orçamento, um aviso: é um orçamento inicial, feito antes da
+     visita técnica; na maioria das vezes ele se mantém, mas pode precisar de ajuste") -->
+{{#se textos.aviso_inicial}}
+<section class="tela clara inicial" id="inicial">
+  <span class="ico amarelo grande">{{{f.icones.casa}}}</span>
+  <p class="rot">Antes de fechar</p>
+  <h1>{{textos.aviso_inicial_titulo}}</h1>
+  {{#cada textos.aviso_inicial}}<p class="inicial-p">{{.}}</p>{{/cada}}
   <a class="gancho volta" href="#indice"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17.5l6-6 6 6M6 11.5l6-6 6 6"/></svg><span>Voltar ao índice</span></a>
   <!--pe-->
 </section>
+{{/se}}
 
 <script>
 /* 1) Vidro: cópia desfocada do fundo atrás de cada cartão, na posição exata (o PDF não imprime backdrop-filter). */

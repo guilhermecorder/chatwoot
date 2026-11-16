@@ -101,8 +101,13 @@ class Crm::KitQuote::Budget
 
   # ---------- sistema
 
+  # o kit é dimensionado para o consumo + a folga (10%, Guilherme 16/11)
+  def sized_kwh
+    Crm::KitQuote.sized_kwh(kwh_total, config)
+  end
+
   def needed_kwp
-    Crm::KitQuote.needed_kwp(kwh_total, config['incidencia_solar'], config['perda'])
+    Crm::KitQuote.needed_kwp(sized_kwh, config['incidencia_solar'], config['perda'])
   end
 
   def kwp

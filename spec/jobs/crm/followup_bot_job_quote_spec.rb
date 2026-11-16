@@ -64,4 +64,36 @@ RSpec.describe Crm::FollowupBotJob do
                      content: 'Combinado, qualquer dúvida me chama', created_at: sent_at + 27.hours)
     expect(pending_days(plan)).to eq([60])
   end
+
+  describe '16/11: números da proposta na mensagem' do
+    let(:proposal) do
+      { 'economia' => { 'mensal' => 380 },
+        'investimento' => { 'preco_total' => 18_900, 'financiamento' => [{ 'parcelas' => 60, 'valor' => 520 }] } }
+    end
+    let(:step) do
+      { 'delay_value' => 2, 'delay_unit' => 'days',
+        'message' => 'Oi, [nome]! Em [financiamento] sai [financiamento_total]; no cartão, 6x de [cartao_6x]. Vale até [validade].' }
+    end
+    let(:job) { described_class.new }
+
+    it 'preenche com os números da proposta do cliente', :aggregate_failures do
+      Crm::Quote.create!(account: account, contact: contact, price: 18_900, kind: 'micro', payload: { 'proposta' => proposal })
+      expect(job.send(:missing_quote_numbers, step, conversation)).to eq([])
+      expect(job.send(:render_message, step['message'], conversation))
+        .to eq("Oi, Ivan! Em 60x de R$ 520 sai R$ 31.200; no cartão, 6x de R$ 3.150. Vale até #{(sent_at + 7.days).strftime('%d/%m')}.")
+    end
+
+    it 'sem financiamento na proposta (ou sem orçamento): a etapa diz o que falta para pular', :aggregate_failures do
+      expect(job.send(:missing_quote_numbers, step, conversation)).to contain_exactly('financiamento', 'financiamento_total', 'cartao_6x', 'validade')
+      Crm::Quote.create!(account: account, contact: contact, price: 18_900, kind: 'micro',
+                         payload: { 'proposta' => proposal.merge('investimento' => { 'preco_total' => 18_900 }) })
+      expect(job.send(:missing_quote_numbers, step, conversation)).to contain_exactly('financiamento', 'financiamento_total')
+    end
+
+    it 'os campos de economia de 12/11 continuam com o texto neutro, sem pular' do
+      eco = { 'message' => 'Economia de [economia_mes].' }
+      expect(job.send(:missing_quote_numbers, eco, conversation)).to eq([])
+      expect(job.send(:render_message, eco['message'], conversation)).to eq('Economia de na sua conta de luz.')
+    end
+  end
 end

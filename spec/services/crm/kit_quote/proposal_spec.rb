@@ -63,7 +63,8 @@ RSpec.describe Crm::KitQuote::Proposal do
     expect(today).to eq('rotulo' => 'Conta de luz hoje', 'reais' => 300.0, 'kwh' => 316, 'nota' => 'R$ 300 ÷ R$ 0,950 por kWh')
     expect(extra).to eq('rotulo' => '2 ares-condicionados', 'reais' => 200.0, 'kwh' => 174, 'nota' => 'estimativa')
     expect(justification['sistema']).to include(
-      'formula' => '490 kWh ÷ (4,91 h de sol × 30 dias × 80% de aproveitamento) = 4,16 kWp', 'potencia_necessaria_kwp' => 4.16,
+      'formula' => '(490 kWh + 10% de folga = 539 kWh) ÷ (4,91 h de sol × 30 dias × 80% de aproveitamento) = 4,57 kWp',
+      'potencia_necessaria_kwp' => 4.57,
       'placas' => 7, 'potencia_placa_w' => 630, 'potencia_kwp' => 4.41, 'producao_kwh_mes' => 520, 'cobertura' => 1.06,
       'equipamento' => '7 placas Helius 630 W + 2 microinversores Growatt 2,5K + estrutura para telha cerâmica'
     )

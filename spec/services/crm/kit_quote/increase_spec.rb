@@ -29,4 +29,18 @@ RSpec.describe Crm::KitQuote::Increase do
     expect(described_class.parse('piscina com aquecedor de resistência')[:desconhecido]).to be_present
     expect(described_class.parse('ar condicionado no começo do ano')[:desconhecido]).to be_nil
   end
+
+  # ➕ botões do Gerador (15/11)
+  it 'tem um botão por aparelho com os mesmos kWh da tabela', :aggregate_failures do
+    buttons = described_class::BUTTONS.index_by { |b| b['chave'] }
+    expect(buttons.dig('ar_12', 'kwh')).to eq(90)
+    expect(buttons.dig('chuveiro', 'kwh')).to eq(70)
+    expect(buttons.dig('piscina_aquecida', 'kwh')).to eq(400)
+    expect(buttons.dig('carro', 'kwh')).to eq(200)
+  end
+
+  it 'o que veio da conversa aponta para o botão certo, com a quantidade', :aggregate_failures do
+    itens = described_class.parse('vai pôr 2 ar-condicionados de 18 mil, um chuveiro e piscina aquecida')[:itens]
+    expect(itens.map { |i| i.values_at('chave', 'qtd') }).to eq([['ar_18', 2], ['chuveiro', 1], ['piscina_aquecida', 1]])
+  end
 end

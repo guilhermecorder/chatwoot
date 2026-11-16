@@ -200,6 +200,12 @@ crm_responder_rescue_job:
   class: 'Crm::ResponderRescueJob'
   queue: low
 
+# ⏱️ 15/11 (LIFE): a IA volta sozinha N min (padrão 3) depois da última mensagem da equipe (ai_config.auto_resume)
+crm_responder_auto_resume_job:
+  cron: '* * * * *'
+  class: 'Crm::ResponderAutoResumeJob'
+  queue: high
+
 # 🗺️ Mensagens da jornada (item 168): a cada 15 min planeja os envios do dia
 # (cirurgia amanhã, consulta hoje, entrou na coluna…) e despacha os que já
 # chegaram na hora — só nas contas com mensagem ativa

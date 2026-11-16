@@ -69,6 +69,8 @@ const cidade = ref('');
 const tarifa = ref(0.95);
 const telhados = ref([]);
 const geradorPdfLigado = ref(false);
+// ➕ 15/11: botões de aumento de consumo (tabela aprovada, vem do servidor)
+const aumentos = ref([]);
 
 // 2. a conta
 const nomeCliente = ref('');
@@ -299,6 +301,49 @@ const marcarEnviada = async orcamento => {
   }
 };
 
+// ── 🗣️ o que o cliente disse na conversa (15/11): caixa em destaque, para estimar certo ──
+const conversa = reactive({
+  carregando: false,
+  ficha: [],
+  aumento: null,
+  frases: [],
+});
+const carregarConversa = async person => {
+  conversa.ficha = [];
+  conversa.aumento = null;
+  conversa.frases = [];
+  if (!person?.contact_id) return;
+  conversa.carregando = true;
+  try {
+    const { data } = await CrmAPI.getKitQuoteFacts(person.contact_id);
+    if (cliente.value?.contact_id !== person.contact_id) return;
+    conversa.ficha = data.ficha || [];
+    conversa.aumento = data.aumento || null;
+    conversa.frases = data.frases || [];
+  } catch {
+    // sem a caixa: o resto do gerador segue normal
+  } finally {
+    conversa.carregando = false;
+  }
+};
+watch(cliente, carregarConversa);
+const temConversa = computed(
+  () =>
+    conversa.ficha.length > 0 ||
+    !!conversa.aumento ||
+    conversa.frases.length > 0
+);
+// a ficha sem a linha do aumento (ela já aparece grande, logo acima)
+const fichaSemAumento = computed(() =>
+  conversa.ficha.filter(l => !/aumentar/i.test(String(l.rotulo || '')))
+);
+const quandoFoi = iso => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+};
+
 // ── 1. cliente ───────────────────────────────────────────────────────────
 watch(cliente, person => {
   router.replace({ query: person ? { contact: person.contact_id } : {} });
@@ -385,6 +430,88 @@ const tirarAcrescimo = i => {
   if (!acrescimos.value.length) maisAcrescimo();
 };
 
+// ➕ 15/11 (Guilherme: "botões para ir somando aumento de consumo: +1 ar-condicionado, +2, chuveiro, piscina…"):
+// cada toque soma 1 aparelho da tabela aprovada; a linha mostra a quantidade e os kWh, e a conta em R$ pela tarifa.
+const emReais = kwh => (kwh * tarifa.value).toFixed(2).replace('.', ',');
+const botaoDe = chave => aumentos.value.find(b => b.chave === chave);
+const atualizarLinha = linha => {
+  const b = botaoDe(linha.chave);
+  if (!b) return;
+  linha.kwh = b.kwh * linha.qtd;
+  // igual ao orçamento automático: "2 ar-condicionados (12.000 BTU)", "chuveiro elétrico"
+  linha.rotulo = linha.qtd > 1 ? `${linha.qtd} ${b.plural}` : b.rotulo;
+  linha.valor = emReais(linha.kwh);
+};
+const linhaVazia = a =>
+  !String(a.rotulo || '').trim() && !parseMoney(a.valor) && !a.chave;
+const somarAumento = (chave, qtd = 1) => {
+  const b = botaoDe(chave);
+  if (!b) return;
+  let linha = acrescimos.value.find(a => a.chave === chave);
+  if (!linha) {
+    acrescimos.value = acrescimos.value.filter(a => !linhaVazia(a));
+    acrescimos.value.push({ chave, qtd: 0, rotulo: '', valor: '', kwh: 0 });
+    linha = acrescimos.value[acrescimos.value.length - 1];
+  }
+  linha.qtd += qtd;
+  atualizarLinha(linha);
+};
+const mudarQtd = (i, passo) => {
+  const linha = acrescimos.value[i];
+  if (!linha?.chave) return;
+  if (linha.qtd + passo <= 0) {
+    tirarAcrescimo(i);
+    return;
+  }
+  linha.qtd += passo;
+  atualizarLinha(linha);
+};
+const qtdNoBotao = chave =>
+  acrescimos.value.find(a => a.chave === chave)?.qtd || 0;
+// o que veio da conversa entra de uma vez (cada item no botão dele; o que não tem botão, com os kWh da tabela)
+const aumentoSomado = ref(false);
+watch(cliente, () => {
+  aumentoSomado.value = false;
+});
+const somarDaConversa = () => {
+  const itens = conversa.aumento?.itens || [];
+  if (!itens.length) return;
+  acrescimos.value = acrescimos.value.filter(
+    a => !linhaVazia(a) && a.rotulo !== conversa.aumento.texto
+  );
+  itens.forEach(item => {
+    if (item.chave && botaoDe(item.chave)) {
+      somarAumento(item.chave, item.qtd || 1);
+    } else {
+      acrescimos.value.push({
+        rotulo: item.rotulo,
+        valor: emReais(item.kwh),
+        kwh: item.kwh,
+      });
+    }
+  });
+  aumentoSomado.value = true;
+};
+const kwhDoAumento = computed(() =>
+  (conversa.aumento?.itens || []).reduce((t, i) => t + (i.kwh || 0), 0)
+);
+// kWh que os acréscimos somam (os da tabela pelos kWh; os digitados, pelo R$ ÷ tarifa)
+const kwhAcrescimos = computed(() =>
+  acrescimos.value.reduce(
+    (t, a) =>
+      t +
+      (a.kwh || (tarifa.value > 0 ? parseMoney(a.valor) / tarifa.value : 0)),
+    0
+  )
+);
+// consumo digitado na mão (ou lido da ficha em kWh): o aumento soma em cima dele também
+watch(kwhAcrescimos, (novo, antigo) => {
+  if (!consumoNaMao.value) return;
+  const base = parseMoney(consumo.value);
+  if (!base) return;
+  consumo.value = String(Math.max(Math.round(base + novo - antigo), 0));
+});
+
 // ── 4. preço e DRE (sempre calculado no servidor) ────────────────────────
 const cotacoes = computed(() =>
   quotesFor(resultado.value?.medias, escolhida.value, cotacoesNaMao.value)
@@ -466,9 +593,58 @@ const tirarCotacao = i => {
   calcularDre();
 };
 
+// ── 🧩 montar na mão (15/11, Guilherme: "trocar a quantidade de placas, 4 → 5 ou 6, outro modelo, outro tamanho,
+// e ver o preço mudar"). O fornecedor monta pelo consumo; o servidor acha o consumo que dá N placas do tamanho
+// escolhido e devolve o kit REAL (Crm::KitQuote::Assembly). O consumo do cliente não muda.
+const montagem = reactive({ placas: 0, chave: '', cotando: false });
+const modelosVistos = ref([]);
+const chaveModelo = o => {
+  const p = o?.equipamento?.placa;
+  return p?.potencia_w ? `${p.marca || ''}|${Math.round(p.potencia_w)}` : '';
+};
+const guardarModelos = opcoes => {
+  const lista = [...modelosVistos.value];
+  (opcoes || []).forEach(o => {
+    const chave = chaveModelo(o);
+    if (!chave || lista.some(m => m.chave === chave)) return;
+    const p = o.equipamento.placa;
+    lista.push({
+      chave,
+      marca: p.marca || '',
+      watts: Math.round(p.potencia_w),
+    });
+  });
+  modelosVistos.value = lista.sort((a, b) => a.watts - b.watts);
+};
+const modeloEscolhido = computed(() =>
+  modelosVistos.value.find(m => m.chave === montagem.chave)
+);
+const montado = computed(() => resultado.value?.montagem || null);
+const kwpMontado = computed(() =>
+  modeloEscolhido.value
+    ? (montagem.placas * modeloEscolhido.value.watts) / 1000
+    : 0
+);
+// quanto o kit montado produz por mês, frente ao consumo do cliente
+const producaoDe = kwp =>
+  Math.round(
+    kwp *
+      (resultado.value?.incidencia_solar || 4.91) *
+      30 *
+      (1 - (resultado.value?.perda ?? 0.2))
+  );
+const coberturaMontada = computed(() => {
+  const kwh = parseMoney(consumo.value);
+  return kwh ? Math.round((producaoDe(kwpMontado.value) / kwh) * 100) : 0;
+});
+const opcoesValidas = computed(() => {
+  const todas = resultado.value?.opcoes || [];
+  return montado.value?.exatas ? todas.filter(o => o.montagem) : todas;
+});
+
 // ── 3. cotação ───────────────────────────────────────────────────────────
 const opcoesDoTipo = computed(() =>
-  (resultado.value?.opcoes || []).filter(o => o.tipo === tipo.value)
+  opcoesValidas.value.filter(o => o.tipo === tipo.value)
 );
 const escolher = opcao => {
   escolhida.value = opcao;
@@ -479,7 +655,7 @@ const escolher = opcao => {
 };
 const trocarTipo = novo => {
   tipo.value = novo;
-  const melhor = bestOption(resultado.value?.opcoes, novo);
+  const melhor = bestOption(opcoesValidas.value, novo);
   if (melhor) {
     escolher(melhor);
   } else {
@@ -487,10 +663,12 @@ const trocarTipo = novo => {
     dre.value = null;
   }
 };
-const cotar = async () => {
+// mao: { placas, potencia_w, marca } = montar na mão; sem ele, o kit sai pelo consumo da conta
+const cotar = async (mao = null) => {
   if (cotando.value) return;
   cotando.value = true;
-  resultado.value = null;
+  montagem.cotando = !!mao;
+  if (!mao) resultado.value = null;
   escolhida.value = null;
   dre.value = null;
   dreErro.value = '';
@@ -499,20 +677,55 @@ const cotar = async () => {
       consumo: consumo.value,
       rede: rede.value,
       telhado: telhado.value,
+      ...(mao || {}),
     });
     resultado.value = data;
     acesso.value = data.acesso || acesso.value;
+    guardarModelos(data.opcoes);
+    if (!mao) {
+      montagem.placas = 0;
+      montagem.chave = '';
+    }
     // já abre na opção completa mais barata do tipo escolhido (ou do outro, se só ele veio)
     const comOpcao = [tipo.value, ...TIPOS.map(t => t.id)].find(t =>
-      bestOption(data.opcoes, t)
+      bestOption(opcoesValidas.value, t)
     );
     if (comOpcao) trocarTipo(comOpcao);
   } catch (e) {
     useAlert(erroDe(e, 'Não foi possível cotar agora. Tente de novo.'));
   } finally {
     cotando.value = false;
+    montagem.cotando = false;
   }
 };
+
+// a montagem parte do kit escolhido (mesma placa, mesma quantidade) e cota de novo a cada mudança
+let montarTimer = null;
+const cotarMontagem = () => {
+  clearTimeout(montarTimer);
+  montarTimer = setTimeout(() => {
+    const m = modeloEscolhido.value;
+    if (!m || montagem.placas < 1) return;
+    cotar({ placas: montagem.placas, potencia_w: m.watts, marca: m.marca });
+  }, 700);
+};
+const abrirMontagem = () => {
+  const base =
+    escolhida.value || bestOption(resultado.value?.opcoes, tipo.value);
+  montagem.chave = chaveModelo(base) || modelosVistos.value[0]?.chave || '';
+  montagem.placas = base?.placas || 4;
+};
+const mudarPlacas = passo => {
+  if (!montagem.chave) abrirMontagem();
+  montagem.placas = Math.min(Math.max(montagem.placas + passo, 1), 200);
+  cotarMontagem();
+};
+const trocarModelo = chave => {
+  if (!montagem.placas) abrirMontagem();
+  montagem.chave = chave;
+  cotarMontagem();
+};
+const voltarPeloConsumo = () => cotar();
 
 // ── 5. proposta + justificativa ──────────────────────────────────────────
 const paraArquivo = ({ nome, tipo: mime, base64 }) => {
@@ -543,7 +756,9 @@ const gerar = async () => {
         },
         conta: {
           hoje: contaHoje.value,
-          acrescimos: acrescimos.value.filter(a => parseMoney(a.valor) > 0),
+          acrescimos: acrescimos.value
+            .filter(a => parseMoney(a.valor) > 0)
+            .map(a => ({ rotulo: a.rotulo, valor: a.valor })),
           consumo_kwh: consumo.value,
           // a taxa mínima da CPFL que continua depende da ligação (13/11)
           rede: rede.value,
@@ -607,6 +822,27 @@ const auto = reactive({
   orcamento: null,
 });
 const autoPedido = ref(route.query.auto === '1');
+
+// ⚡ "a proposta recalcula na hora": o consumo mudou (somou um aparelho, trocou a conta) e já tinha cotação
+// pelo consumo → cota de novo sozinho. Com o kit montado na mão, o kit fica (só a conta da proposta muda).
+let recotarTimer = null;
+const consumoMudou = ref(false);
+watch(consumo, kwh => {
+  clearTimeout(recotarTimer);
+  consumoMudou.value = false;
+  if (!resultado.value || montado.value || auto.rodando) return;
+  if (
+    Math.round(parseMoney(kwh)) ===
+    Math.round(resultado.value.consumo_kwh_mes || 0)
+  )
+    return;
+  if (parseMoney(kwh) < 30) return;
+  consumoMudou.value = true;
+  recotarTimer = setTimeout(() => {
+    consumoMudou.value = false;
+    cotar();
+  }, 1200);
+});
 const esperarPreco = async () => {
   const limite = Date.now() + 60000;
   while (dreCarregando.value && Date.now() < limite) {
@@ -709,6 +945,7 @@ const carregar = async () => {
     tarifa.value = data.tarifa || tarifa.value;
     telhados.value = data.telhados || [];
     geradorPdfLigado.value = !!data.gerador_pdf;
+    aumentos.value = data.aumentos || [];
   } catch (e) {
     useAlert(erroDe(e, 'Não foi possível abrir o gerador de proposta.'));
   } finally {
@@ -827,6 +1064,31 @@ onMounted(async () => {
 onBeforeUnmount(soltarArquivos);
 // textos da tela (fora do template, como pede o eslint do projeto)
 const TXT = {
+  // 🗣️ / ➕ / 🧩 15/11
+  disseTitulo: 'O que o cliente disse na conversa',
+  disseCarregando: 'Lendo a ficha e a conversa do cliente…',
+  disseVaiAumentar: 'Vai aumentar o consumo:',
+  disseSomar: 'Somar na conta',
+  disseSomado: 'Somado na conta',
+  disseNaoCobre: 'A tabela não cobre',
+  disseEstime:
+    'Estime com o Anderson e acrescente o valor na mão, logo abaixo.',
+  disseFrases: 'Frases do cliente sobre consumo:',
+  menosUm: 'Tirar 1',
+  maisUm: 'Mais 1',
+  valorPelaTabela: 'Pela tabela de aumento de consumo × tarifa',
+  recotando: 'O consumo mudou: cotando de novo…',
+  montarTitulo: 'Montar na mão',
+  montarSub:
+    'Troque a quantidade ou o modelo da placa: o sistema cota de novo no fornecedor e o preço muda. A conta de luz do cliente continua a mesma.',
+  montarPlacas: 'Placas',
+  montarModelo: 'Modelo da placa',
+  montarGera: 'gera',
+  montarDoConsumo: 'do consumo',
+  montarVoltar: 'Voltar para o kit pelo consumo',
+  montarSemKit:
+    'O fornecedor não montou um kit com essa quantidade dessa placa. Tente outra quantidade ou outro modelo.',
+  montadoNaMao: 'montado na mão',
   autoTitulo: 'Orçamento automático de',
   autoSub:
     'O sistema faz sozinho o que você faria: puxa os dados, cota, calcula o preço e gera a proposta. Nada vai para o cliente sem você apertar Enviar.',
@@ -1238,6 +1500,82 @@ const TXT = {
                 </div>
               </div>
 
+              <!-- 🗣️ 15/11: o que o cliente disse na conversa, em destaque (preto e amarelo) -->
+              <div
+                v-if="cliente && (temConversa || conversa.carregando)"
+                id="cot-disse"
+                class="cot-disse"
+              >
+                <p class="cot-disse-rot">
+                  <span class="i-lucide-message-circle-warning" />
+                  {{ TXT.disseTitulo }}
+                </p>
+                <p
+                  v-if="conversa.carregando && !temConversa"
+                  class="cot-disse-fraco"
+                >
+                  {{ TXT.disseCarregando }}
+                </p>
+                <template v-if="conversa.aumento">
+                  <p class="cot-disse-aumento">
+                    {{ TXT.disseVaiAumentar }}
+                    <b>{{ `“${conversa.aumento.texto}”` }}</b>
+                  </p>
+                  <div
+                    v-if="conversa.aumento.itens?.length"
+                    class="cot-disse-tabela"
+                  >
+                    <span
+                      v-for="(item, i) in conversa.aumento.itens"
+                      :key="i"
+                      class="cot-disse-item"
+                    >
+                      {{ item.rotulo }} <b>{{ `+${numero(item.kwh)} kWh` }}</b>
+                    </span>
+                    <button
+                      type="button"
+                      class="cot-disse-btn"
+                      :class="{ 'is-on': aumentoSomado }"
+                      :disabled="!podeCotar"
+                      @click="somarDaConversa"
+                    >
+                      <span
+                        :class="
+                          aumentoSomado ? 'i-lucide-check' : 'i-lucide-plus'
+                        "
+                      />
+                      {{
+                        aumentoSomado
+                          ? TXT.disseSomado
+                          : `${TXT.disseSomar} (+${numero(kwhDoAumento)} kWh ≈ ${reais(kwhDoAumento * tarifa)} na conta)`
+                      }}
+                    </button>
+                  </div>
+                  <p
+                    v-if="conversa.aumento.desconhecido"
+                    class="cot-disse-alerta"
+                  >
+                    <span class="i-lucide-triangle-alert" />
+                    {{ TXT.disseNaoCobre }}
+                    <b>{{ `“${conversa.aumento.desconhecido}”.` }}</b>
+                    {{ TXT.disseEstime }}
+                  </p>
+                </template>
+                <dl v-if="fichaSemAumento.length" class="cot-disse-ficha">
+                  <div v-for="(l, i) in fichaSemAumento" :key="i">
+                    <dt>{{ l.rotulo }}</dt>
+                    <dd>{{ l.valor }}</dd>
+                  </div>
+                </dl>
+                <div v-if="conversa.frases.length" class="cot-disse-frases">
+                  <p class="cot-disse-fraco">{{ TXT.disseFrases }}</p>
+                  <blockquote v-for="(f, i) in conversa.frases" :key="i">
+                    {{ `“${f.texto}”` }}
+                    <small>{{ quandoFoi(f.em) }}</small>
+                  </blockquote>
+                </div>
+              </div>
+
               <div class="grid sm:grid-cols-2 gap-4">
                 <label class="cot-field">
                   <span class="cot-lab text-n-slate-11">{{
@@ -1270,12 +1608,59 @@ const TXT = {
                 <p class="cot-lab text-n-slate-11">
                   {{ TXT.oQueVaiAcrescentar }}
                 </p>
+                <!-- ➕ 15/11: um toque = +1 aparelho da tabela aprovada -->
+                <div v-if="aumentos.length" class="cot-aum">
+                  <button
+                    v-for="b in aumentos"
+                    :key="b.chave"
+                    type="button"
+                    class="cot-aum-btn text-n-slate-12"
+                    :class="{ 'is-on': qtdNoBotao(b.chave) }"
+                    :disabled="!podeCotar"
+                    :title="`+${b.kwh} kWh por mês cada`"
+                    @click="somarAumento(b.chave)"
+                  >
+                    <span class="i-lucide-plus" />
+                    {{ b.curto }}
+                    <span v-if="qtdNoBotao(b.chave)" class="cot-aum-n">{{
+                      qtdNoBotao(b.chave)
+                    }}</span>
+                  </button>
+                </div>
                 <div
                   v-for="(a, i) in acrescimos"
                   :key="i"
                   class="flex flex-col sm:flex-row gap-2"
                 >
+                  <div v-if="a.chave" class="cot-aum-linha flex-1">
+                    <div class="cot-qtd">
+                      <button
+                        type="button"
+                        :title="TXT.menosUm"
+                        :disabled="!podeCotar"
+                        @click="mudarQtd(i, -1)"
+                      >
+                        <span class="i-lucide-minus" />
+                      </button>
+                      <b>{{ a.qtd }}</b>
+                      <button
+                        type="button"
+                        :title="TXT.maisUm"
+                        :disabled="!podeCotar"
+                        @click="mudarQtd(i, 1)"
+                      >
+                        <span class="i-lucide-plus" />
+                      </button>
+                    </div>
+                    <span class="text-sm text-n-slate-12 min-w-0 flex-1">
+                      {{ a.rotulo.replace(/^\d+ /, '') }}
+                      <span class="text-n-slate-11">
+                        {{ ` · +${numero(a.kwh)} kWh` }}</span
+                      >
+                    </span>
+                  </div>
                   <input
+                    v-else
                     v-model="a.rotulo"
                     type="text"
                     :placeholder="TXT.t2AresCondicionados"
@@ -1290,6 +1675,8 @@ const TXT = {
                       :placeholder="TXT.rAMaisPor"
                       class="cot-input !mb-0 flex-1 sm:w-44 text-n-slate-12"
                       :disabled="!podeCotar"
+                      :readonly="!!a.chave"
+                      :title="a.chave ? TXT.valorPelaTabela : ''"
                     />
                     <button
                       type="button"
@@ -1410,7 +1797,9 @@ const TXT = {
                   {{
                     cotando
                       ? 'Consultando AVT e Bluesun. Leva alguns segundos.'
-                      : `Cotação para ${cidade}, com a estrutura do telhado e o frete.`
+                      : consumoMudou
+                        ? TXT.recotando
+                        : `Cotação para ${cidade}, com a estrutura do telhado e o frete.`
                   }}
                 </p>
               </div>
@@ -1424,10 +1813,21 @@ const TXT = {
                   <h2 class="cot-title text-n-slate-12">
                     <span class="cot-n">{{ 3 }}</span> {{ TXT.opcoesDeKit }}
                   </h2>
-                  <p class="cot-sub text-n-slate-11">
+                  <p v-if="montado" class="cot-sub text-n-slate-11">
+                    {{ TXT.montadoNaMao }}: {{ montado.placas }}
+                    {{ TXT.placas }} {{ numero(montado.kwp) }} {{ TXT.kwp }} ·
+                    {{ TXT.precoDeCustoDo }}
+                  </p>
+                  <p v-else class="cot-sub text-n-slate-11">
                     {{ numero(resultado.potencia_necessaria_kwp) }}
                     {{ TXT.kwpPara }} {{ numero(resultado.consumo_kwh_mes) }}
-                    {{ TXT.kwhPorMes }} · {{ TXT.precoDeCustoDo }}
+                    {{ TXT.kwhPorMes }}
+                    <template v-if="resultado.folga">
+                      <b class="text-n-slate-12">{{
+                        `+ ${Math.round(resultado.folga * 100)}% de folga = ${numero(resultado.consumo_dimensionado)} kWh`
+                      }}</b>
+                    </template>
+                    · {{ TXT.precoDeCustoDo }}
                   </p>
                 </div>
               </div>
@@ -1462,6 +1862,104 @@ const TXT = {
                   </template>
                   <template v-else>{{ f.motivo || 'não respondeu' }}</template>
                 </span>
+              </div>
+
+              <!-- 🧩 15/11: montar na mão — quantidade e modelo de placa, preço real da cotação -->
+              <div id="cot-montar" class="cot-montar">
+                <div class="flex flex-wrap items-center gap-2 justify-between">
+                  <p class="cot-lab text-n-slate-12">
+                    <span class="i-lucide-wrench" /> {{ TXT.montarTitulo }}
+                  </p>
+                  <button
+                    v-if="montado"
+                    type="button"
+                    class="cot-link"
+                    :disabled="cotando"
+                    @click="voltarPeloConsumo"
+                  >
+                    <span class="i-lucide-undo-2" />
+                    {{ TXT.montarVoltar }}
+                  </button>
+                </div>
+                <p class="text-xs text-n-slate-11">{{ TXT.montarSub }}</p>
+                <div class="cot-montar-linha">
+                  <div class="cot-field">
+                    <span class="cot-lab text-n-slate-11">{{
+                      TXT.montarPlacas
+                    }}</span>
+                    <div class="cot-qtd cot-qtd-lg">
+                      <button
+                        type="button"
+                        :title="TXT.menosUm"
+                        :disabled="!podeCotar || cotando"
+                        @click="mudarPlacas(-1)"
+                      >
+                        <span class="i-lucide-minus" />
+                      </button>
+                      <b>{{ montagem.placas || escolhida?.placas || '—' }}</b>
+                      <button
+                        type="button"
+                        :title="TXT.maisUm"
+                        :disabled="!podeCotar || cotando"
+                        @click="mudarPlacas(1)"
+                      >
+                        <span class="i-lucide-plus" />
+                      </button>
+                    </div>
+                  </div>
+                  <div class="cot-field flex-1 min-w-0">
+                    <span class="cot-lab text-n-slate-11">{{
+                      TXT.montarModelo
+                    }}</span>
+                    <div class="flex flex-wrap gap-2">
+                      <button
+                        v-for="m in modelosVistos"
+                        :key="m.chave"
+                        type="button"
+                        class="cot-chip text-n-slate-12"
+                        :class="{
+                          'is-on':
+                            (montagem.chave || chaveModelo(escolhida)) ===
+                            m.chave,
+                        }"
+                        :disabled="!podeCotar || cotando"
+                        @click="trocarModelo(m.chave)"
+                      >
+                        {{ `${m.marca} ${m.watts} W` }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <p v-if="montagem.chave" class="cot-montar-conta">
+                  <span
+                    v-if="montagem.cotando"
+                    class="i-lucide-loader-circle animate-spin"
+                  />
+                  {{ `${montagem.placas} × ${modeloEscolhido?.marca || ''}` }}
+                  {{ `${modeloEscolhido?.watts} W =` }}
+                  <b>{{ `${numero(kwpMontado)} kWp` }}</b>
+                  {{ `· ${TXT.montarGera}` }}
+                  <b>{{ `~${numero(producaoDe(kwpMontado))} kWh/mês` }}</b>
+                  <template v-if="coberturaMontada">
+                    ·
+                    <b
+                      :class="
+                        coberturaMontada < 110
+                          ? 'text-n-ruby-11'
+                          : 'text-n-teal-11'
+                      "
+                      >{{ coberturaMontada }}%</b
+                    >
+                    {{ TXT.montarDoConsumo }}
+                  </template>
+                </p>
+                <p
+                  v-if="montado && !montagem.cotando && !montado.exatas"
+                  class="cot-disse-alerta cot-alerta-claro"
+                >
+                  <span class="i-lucide-triangle-alert" />
+                  {{ TXT.montarSemKit }}
+                </p>
               </div>
 
               <div class="cot-seg cot-seg-full">
@@ -1973,6 +2471,14 @@ const TXT = {
             <p class="text-base font-bold text-n-slate-12 break-words">
               {{ nomeCliente || 'Cliente ainda não escolhido' }}
             </p>
+            <p
+              v-if="conversa.aumento"
+              class="cot-sum-disse"
+              @click="irPara('cot-disse')"
+            >
+              <span class="i-lucide-message-circle-warning" />
+              {{ `${TXT.disseVaiAumentar} “${conversa.aumento.texto}”` }}
+            </p>
             <dl class="cot-sum-list">
               <div>
                 <dt class="text-n-slate-11">{{ TXT.contaConsiderada }}</dt>
@@ -1997,6 +2503,9 @@ const TXT = {
                   {{ NOME_TIPO[escolhida.tipo] }} · {{ escolhida.placas }}
                   {{ TXT.placas }} {{ numero(escolhida.potencia_kwp) }}
                   {{ TXT.kwp }}
+                  <span v-if="escolhida.montagem" class="cot-tag is-ok">{{
+                    TXT.montadoNaMao
+                  }}</span>
                 </dd>
               </div>
             </dl>
@@ -2048,6 +2557,271 @@ const TXT = {
 </template>
 
 <style scoped>
+/* 🗣️ 15/11: o que o cliente disse — preto e amarelo, alto contraste nos dois temas */
+.cot-disse {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: #0b0b0c;
+  border: 2px solid #ffd60a;
+  color: #fff;
+}
+.cot-disse-rot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ffd60a;
+}
+.cot-disse-rot > span {
+  width: 18px;
+  height: 18px;
+}
+.cot-disse-aumento {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.85);
+}
+.cot-disse-aumento b {
+  display: block;
+  margin-top: 2px;
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 800;
+  color: #ffd60a;
+}
+.cot-disse-tabela {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cot-disse-item {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+}
+.cot-disse-item b {
+  color: #ffd60a;
+}
+.cot-disse-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #ffd60a;
+  color: #0b0b0c;
+  font-size: 14px;
+  font-weight: 800;
+}
+.cot-disse-btn.is-on {
+  background: #30d158;
+}
+.cot-disse-btn:disabled {
+  opacity: 0.5;
+}
+.cot-disse-alerta {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 69, 58, 0.18);
+  border: 1px solid #ff453a;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.cot-disse-alerta > span {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  color: #ff6b61;
+}
+.cot-alerta-claro {
+  color: rgb(var(--ruby-11));
+}
+.cot-disse-ficha {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px 16px;
+  margin: 0;
+}
+.cot-disse-ficha dt {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.cot-disse-ficha dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+.cot-disse-frases {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cot-disse-frases blockquote {
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid #ffd60a;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.cot-disse-frases small {
+  margin-left: 6px;
+  color: rgba(255, 255, 255, 0.5);
+}
+.cot-disse-fraco {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.cot-sum-disse {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #0b0b0c;
+  border: 1.5px solid #ffd60a;
+  color: #ffd60a;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.cot-sum-disse > span {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+}
+/* ➕ botões de aumento */
+.cot-aum {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cot-aum-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1.5px solid rgb(var(--slate-7));
+  background: rgb(var(--slate-2));
+  font-size: 13px;
+  font-weight: 600;
+}
+.cot-aum-btn:hover:not(:disabled) {
+  border-color: #d97706;
+}
+.cot-aum-btn.is-on {
+  border-color: #d97706;
+  background: rgba(217, 119, 6, 0.12);
+}
+.cot-aum-btn > span:first-child {
+  width: 13px;
+  height: 13px;
+}
+.cot-aum-n {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #d97706;
+  color: #fff;
+  font-size: 12px;
+  text-align: center;
+}
+.cot-aum-linha {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--slate-6));
+  background: rgb(var(--slate-2));
+}
+.cot-qtd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.cot-qtd > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgb(var(--slate-7));
+  color: rgb(var(--slate-12));
+}
+.cot-qtd > button:disabled {
+  opacity: 0.4;
+}
+.cot-qtd > b {
+  min-width: 22px;
+  text-align: center;
+  font-size: 16px;
+  color: rgb(var(--slate-12));
+}
+.cot-qtd-lg > button {
+  width: 40px;
+  height: 40px;
+}
+.cot-qtd-lg > b {
+  min-width: 44px;
+  font-size: 26px;
+}
+/* 🧩 montar na mão */
+.cot-montar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1.5px dashed rgb(var(--teal-8));
+  background: rgb(var(--teal-2));
+}
+.cot-montar .cot-lab > span {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+.cot-montar-linha {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+}
+.cot-montar-conta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 14px;
+  color: rgb(var(--slate-12));
+}
 /* 🎨 Gerador de proposta · rodada visual de 12/11 (pedido do Guilherme: "mais bonita, mais colorida,
    mais organizada"). Cada etapa é um bloco reto com a sua cor (--c): fio no topo, ícone em quadrado,
    título grande; campos e chips com contraste; resumo fixo ao lado no notebook. */

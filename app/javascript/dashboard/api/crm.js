@@ -1734,8 +1734,23 @@ class CrmAPI extends ApiClient {
   }
 
   // telhado: com ele a cotação já vem com a estrutura (entra na média do kit)
-  createKitQuote({ consumo, rede, telhado }) {
-    return axios.post(`${this.url}/kit_quote`, { consumo, rede, telhado });
+  // 🧩 15/11: com placas + potencia_w (+ marca) = montar na mão (o preço continua o da cotação real)
+  createKitQuote({ consumo, rede, telhado, placas, potencia_w, marca }) {
+    return axios.post(`${this.url}/kit_quote`, {
+      consumo,
+      rede,
+      telhado,
+      placas,
+      potencia_w,
+      marca,
+    });
+  }
+
+  // 🗣️ 15/11: o que o cliente disse na conversa (ficha, aumento pela tabela, frases dele)
+  getKitQuoteFacts(contactId) {
+    return axios.get(`${this.url}/kit_quote/facts`, {
+      params: { contact_id: contactId },
+    });
   }
 
   // 📄 proposta do cliente + justificativa do orçamento (dados sempre; PDFs quando o gerador está ligado)
@@ -1770,6 +1785,17 @@ class CrmAPI extends ApiClient {
   // 📨 envia o orçamento pelo WhatsApp com a pergunta de fechamento
   deliverKitQuote(id) {
     return axios.post(`${this.url}/kit_quote/deliver`, { id });
+  }
+
+  // 💬 mensagem de fechamento com os números da proposta (16/11): tipo = 'pagamento' | 'prazo'
+  getKitQuoteFollowup(id, tipo) {
+    return axios.get(`${this.url}/kit_quote/followup`, {
+      params: { id, tipo },
+    });
+  }
+
+  sendKitQuoteFollowup(id, tipo) {
+    return axios.post(`${this.url}/kit_quote/send_followup`, { id, tipo });
   }
 
   // ✏️ edita nome/cidade/telhado/validade de um orçamento gerado e gera os PDFs de novo

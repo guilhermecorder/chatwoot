@@ -1,6 +1,6 @@
 # Resumo da conversa para o card do painel lateral: estágio do CRM,
 # etiquetas, métricas de responsividade e a análise de IA (armazenada).
-class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Accounts::BaseController
+class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
   before_action :conversation
 
   # GET /api/v1/accounts/:account_id/crm/conversation_summary?conversation_id=X
@@ -158,8 +158,19 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
       reason: state['reason'],
       reason_text: REASON_TEXT[state['reason'].to_s] || state['reason'],
       by: state['by'],
-      at: state['at']
+      at: state['at'],
+      # ⏱️ 13/11: quando a IA volta sozinha (ai_config.auto_resume) — nil = não volta
+      resume_at: auto_resume_at(cfg, state)
     }
+  end
+
+  def auto_resume_at(cfg, state)
+    auto = Crm::ResponderAutoResumeJob.config(CrmSetting.new(ai_config: cfg))
+    return nil if auto.nil?
+
+    Crm::ResponderAutoResumeJob.resume_at(@conversation, state, auto['minutes'])&.iso8601
+  rescue StandardError
+    nil
   end
 
   def followup_json

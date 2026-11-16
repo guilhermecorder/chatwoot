@@ -21,6 +21,8 @@ namespace :crm do
     post :update_access
     post :dre
     post :documents # 📄 proposta do cliente + justificativa do orçamento
+    get :facts # 🗣️ o que o cliente disse na conversa (caixa em destaque do Gerador, 15/11)
+    get :increase # 🗣️ o que o cliente disse que vai aumentar → itens da tabela (15/11)
     get :ready # 🔓 o botão "Gerar orçamento" da conversa já pode abrir?
     get :history # 📚 orçamentos guardados deste cliente
     post :sent # 🏷️ a proposta foi enviada ao cliente (etiqueta orcamento-enviado)
@@ -28,6 +30,8 @@ namespace :crm do
     post :restore # ♻️ volta da lixeira (só o dono da conta)
     post :deliver # 📨 envia pelo WhatsApp com a pergunta de fechamento
     post :edit # ✏️ edita nome/cidade/telhado/validade e gera os PDFs de novo
+    get :followup # 💬 prévia da mensagem de fechamento com os números da proposta (pagamento / prazo, 16/11)
+    post :send_followup # 💬 envia essa mensagem na conversa do cliente
   end
   resources :campaigns, only: [:index, :show, :create, :destroy] do
     member do

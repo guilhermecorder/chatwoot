@@ -50,12 +50,20 @@ class Crm::KitQuote::Justification
     end
   end
 
+  # "600 kWh + 10% de folga = 660 kWh" (sem folga configurada: só "600 kWh")
+  def sized_text
+    folga = @budget.config['folga'].to_f
+    return "#{@budget.kwh_total.round} kWh" unless folga.positive?
+
+    "(#{@budget.kwh_total.round} kWh + #{(folga * 100).round}% de folga = #{@budget.sized_kwh.round} kWh)"
+  end
+
   def sizing
     config = @budget.config
     use = ((1 - config['perda'].to_f) * 100).round
     production = @budget.monthly_production
     {
-      'formula' => "#{@budget.kwh_total.round} kWh ÷ (#{@budget.decimal(config['incidencia_solar'])} h de sol × 30 dias × " \
+      'formula' => "#{sized_text} ÷ (#{@budget.decimal(config['incidencia_solar'])} h de sol × 30 dias × " \
                    "#{use}% de aproveitamento) = #{@budget.decimal(@budget.needed_kwp)} kWp",
       'potencia_necessaria_kwp' => @budget.needed_kwp.round(2), 'placas' => @budget.panels,
       'potencia_placa_w' => @budget.panel['potencia_w'], 'potencia_kwp' => @budget.kwp.round(2), 'producao_kwh_mes' => production,
@@ -122,12 +130,21 @@ class Crm::KitQuote::Justification
   end
 
   def checklist
-    [additions_check, adequacy_check, quotes_check, range_check, financing_check, warranty_check, before_check].compact
+    [additions_check, coverage_check, adequacy_check, quotes_check, range_check, financing_check, warranty_check, before_check].compact
   end
 
   def additions_check
     additions = @budget.additions
     "Consumo que vai aumentar (#{additions.pluck('rotulo').join(', ')}) é estimativa: confirmar com o cliente." if additions.any?
+  end
+
+  # folga de 10% (16/11): o kit que produz menos que o consumo + folga vira aviso (ex.: montado na mão com menos placas)
+  def coverage_check
+    need = @budget.sized_kwh
+    production = @budget.monthly_production
+    return if production >= need - 1
+
+    "ATENÇÃO: o kit produz #{production} kWh/mês, abaixo do consumo + folga (#{need.round} kWh). Conferir as placas."
   end
 
   # O Guilherme pediu: a adequação sempre descrita, com a faixa usada e o valor.

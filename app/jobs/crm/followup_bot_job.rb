@@ -374,14 +374,21 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     outcome = nudge_content(bot, conversation, chosen)
     if outcome[:text].nil?
-      note = settle_ai_failure(bot, conversation, plan, chosen, outcome)
-      return record_skip(run, events, conversation, 'ia_sem_texto', note)
+      reason, note = unsent_reason(bot, conversation, plan, chosen, outcome)
+      return record_skip(run, events, conversation, reason, note)
     end
 
     send_nudge(bot, conversation, chosen, outcome[:text])
     pace_count!(conversation.inbox_id)
     run[:sent] += 1
     events << event_for(conversation, 'sent', note: step_label(chosen[:step]))
+  end
+
+  # nada para enviar: falta número da proposta (16/11: a etapa pula, não sai texto pela metade) ou a IA não escreveu
+  def unsent_reason(bot, conversation, plan, chosen, outcome)
+    return ['sem_dados_orcamento', "Etapa pulada: a proposta não tem #{outcome[:missing_quote].join(', ')}"] if outcome[:missing_quote].present?
+
+    ['ia_sem_texto', settle_ai_failure(bot, conversation, plan, chosen, outcome)]
   end
 
   def record_skip(run, events, conversation, reason, note)
@@ -399,7 +406,12 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # Devolve { text:, config_error: } — text nil = nada para enviar.
   def nudge_content(bot, conversation, chosen)
     step = chosen[:step]
-    return { text: render_message(step['message'], conversation) } unless Crm::FollowupBot.ai_step?(step)
+    unless Crm::FollowupBot.ai_step?(step)
+      missing = missing_quote_numbers(step, conversation)
+      return { text: nil, missing_quote: missing } if missing.any?
+
+      return { text: render_message(step['message'], conversation) }
+    end
 
     @ai_calls = @ai_calls.to_i + 1
     result = Crm::FollowupAiNudgeService.new(conversation: conversation, bot: bot, step: step).call
@@ -1112,44 +1124,36 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   def render_message(text, conversation)
     name = sanitized_first_name(conversation.contact)
     out = text.to_s.gsub(/\[nome\]/i) { name.presence || 'oi' }
-    out = fill_quote_fields(out, conversation.contact) if out.match?(/\[(economia|resumo)[a-z_0-9]*\]/i)
+    out = fill_quote_fields(out, conversation.contact) if QUOTE_FIELD.match?(out)
     out = out.gsub(/\b(oi|olá|ola|opa)([\s,]+)oi\b/i, '\1') if name.blank?
     out.gsub(/ {2,}/, ' ')
   end
 
-  # 12/11 (LIFE): dados do orçamento mais novo do cliente (Gerador de proposta) nas mensagens do robô:
-  #   [economia] / [economia_ano] = "R$ 3.600 por ano"   [economia_mes] = "R$ 300"   [economia_25] = "R$ 257.000"
-  #   [resumo] = endereço público da imagem do resumo (cabeçalho de imagem do modelo do WhatsApp)
-  QUOTE_FIELDS = {
-    'economia' => ->(q) { "#{brl(q.payload.dig('proposta', 'economia', 'anual'))} por ano" },
-    'economia_ano' => ->(q) { brl(q.payload.dig('proposta', 'economia', 'anual')) },
-    'economia_mes' => ->(q) { brl(q.payload.dig('proposta', 'economia', 'mensal')) },
-    'economia_25' => ->(q) { brl(q.payload.dig('proposta', 'economia', 'em_25_anos')) },
-    'resumo' => ->(q) { quote_image_url(q) }
-  }.freeze
+  # 12/11 (LIFE): dados do orçamento mais novo do cliente (Gerador de proposta) nas mensagens do robô.
+  # 16/11: + [preco] [cartao_6x] [financiamento] [financiamento_total] [validade] (follow-up de fechamento com os números
+  # da proposta). Os campos e os formatos estão em Crm::KitQuote::Numbers.
+  QUOTE_FIELD = /\[(#{Crm::KitQuote::Numbers::KEYS.join('|')})\]/i
+  # sem o dado na proposta: os de 12/11 caem num texto neutro (como já estava no ar); os de 16/11 PULAM a etapa
+  QUOTE_FALLBACK = { 'economia' => 'na sua conta de luz', 'economia_ano' => 'na sua conta de luz',
+                     'economia_mes' => 'na sua conta de luz', 'economia_25' => 'na sua conta de luz', 'resumo' => '' }.freeze
 
   def fill_quote_fields(text, contact)
-    quote = contact && Crm::Quote.ativos.where(contact: contact).recent.first
-    text.gsub(/\[(economia(?:_ano|_mes|_25)?|resumo)\]/i) do
+    numbers = Crm::KitQuote::Numbers.for(contact)
+    text.gsub(QUOTE_FIELD) do
       key = Regexp.last_match(1).downcase
-      value = quote && QUOTE_FIELDS[key].call(quote)
-      value.presence || (key == 'resumo' ? '' : 'na sua conta de luz')
+      (numbers && numbers[key]).presence || QUOTE_FALLBACK.fetch(key, '')
     end
   end
 
-  def self.brl(value)
-    amount = value.to_f.round
-    amount.positive? ? "R$ #{amount.to_s.reverse.scan(/\d{1,3}/).join('.').reverse}" : nil
-  end
+  # etapa que usa um número da proposta que este cliente não tem (sem orçamento, sem financiamento…) → não sai
+  def missing_quote_numbers(step, conversation)
+    keys = [step['message'], step['template_params'].to_json].join(' ').scan(QUOTE_FIELD).flatten.map(&:downcase).uniq
+    keys -= QUOTE_FALLBACK.keys
+    return [] if keys.empty?
 
-  def self.quote_image_url(quote)
-    image = quote.files.find { |f| f.content_type.to_s.start_with?('image/') }
-    host = ENV.fetch('FRONTEND_URL', nil)
-    image && host ? Rails.application.routes.url_helpers.rails_blob_url(image, host: host) : nil
+    numbers = Crm::KitQuote::Numbers.for(conversation.contact)
+    keys.reject { |key| numbers && numbers[key].present? }
   end
-
-  def brl(value) = self.class.brl(value)
-  def quote_image_url(quote) = self.class.quote_image_url(quote)
 
   def sanitized_first_name(contact)
     raw = contact&.name.to_s
