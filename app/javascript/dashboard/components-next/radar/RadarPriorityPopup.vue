@@ -64,12 +64,26 @@ watch(
   }
 );
 
+// 🔓 16/11/2026 (LIFE): com a janelinha aberta, a checagem continua — se o servidor não devolve mais o aviso
+// dessa conversa (a equipe já falou com a pessoa, a tarefa foi concluída), ela sai sozinha, sem precisar clicar.
+const releaseIfGone = a => {
+  if (a && a.conversation_id === alert.value.conversation_id) return;
+  leaving.value = true;
+  setTimeout(() => {
+    alert.value = null;
+    leaving.value = false;
+  }, 350);
+};
+
 const poll = async () => {
-  if (document.visibilityState !== 'visible' || alert.value || onMeuPainel())
-    return;
+  if (document.visibilityState !== 'visible' || onMeuPainel()) return;
   try {
     const { data } = await CrmAPI.radarPing();
     const a = data.alert;
+    if (alert.value) {
+      releaseIfGone(a);
+      return;
+    }
     if (a && !isAcked(a.conversation_id)) {
       shownAt.value = Date.now();
       alert.value = a;

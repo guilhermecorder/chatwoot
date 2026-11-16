@@ -47,4 +47,51 @@ RSpec.describe Crm::AgentAlert do
   it 'kind desconhecido não grava nem explode' do
     expect(described_class.push(account: account, kind: 'agente_voou', task: task, conversation: conversation, agent_key: 'atendente_pos')).to be_nil
   end
+
+  describe 'aviso de "pediu atenção" sai quando a equipe fala com a pessoa (16/11/2026)' do
+    let(:alert) do
+      described_class.push(account: account, kind: 'atendimento_atencao', task: task, conversation: conversation,
+                           agent_key: 'atendente_agendamento')
+    end
+
+    it 'continua aberto enquanto ninguém da equipe escreveu (cliente e robô não contam)' do
+      alert
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, sender: contact)
+      robot = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing)
+      robot.update!(sender: nil)
+      expect(described_class.still_open?(account, alert)).to be(true)
+    end
+
+    it 'sai quando alguém da equipe responde depois do aviso' do
+      alert
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, sender: assignee)
+      expect(described_class.still_open?(account, alert)).to be(false)
+    end
+
+    it 'nota interna não conta como conversar com a pessoa' do
+      alert
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, sender: assignee,
+                       private: true)
+      expect(described_class.still_open?(account, alert)).to be(true)
+    end
+
+    it 'resposta de ANTES do aviso não destrava' do
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, sender: assignee,
+                       created_at: 2.hours.ago)
+      expect(described_class.still_open?(account, alert)).to be(true)
+    end
+
+    it 'sai quando a tarefa é concluída' do
+      alert
+      task.update!(status: :done)
+      expect(described_class.still_open?(account, alert)).to be(false)
+    end
+
+    it 'aviso de consulta remarcada segue a regra antiga (resposta não tira)' do
+      remarcou = described_class.push(account: account, kind: 'agente_remarcou', task: task, conversation: conversation,
+                                      agent_key: 'atendente_pos')
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, sender: assignee)
+      expect(described_class.still_open?(account, remarcou)).to be(true)
+    end
+  end
 end

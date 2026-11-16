@@ -39,10 +39,26 @@ class Crm::AgentAlert
     created = Time.zone.parse(alert['created_at'].to_s)
     return false if created.nil? || created < TTL.ago
     return robot_still_open?(alert) if alert['kind'] == ROBOT_KIND
+    return false if RELEASED_BY_REPLY.include?(alert['kind']) && released?(account, alert, created)
 
     account.tasks.exists?(id: alert['task_id'])
   rescue ArgumentError
     false
+  end
+
+  # 🔓 16/11/2026 (LIFE, pedido do Guilherme: "essa mensagem está travada, vamos precisar destravar depois que ele
+  # conversar com a pessoa"): o aviso de "pediu atenção" / "chegou o dia" SAI quando alguém da equipe escreve para
+  # a pessoa na conversa depois do aviso, ou quando a tarefa dele é concluída.
+  RELEASED_BY_REPLY = (ATTENTION_KINDS + [DUE_KIND]).freeze
+
+  def self.released?(account, alert, created)
+    return true if account.tasks.where(id: alert['task_id']).done.exists?
+
+    conversation = alert['conversation_id'].present? && account.conversations.find_by(display_id: alert['conversation_id'])
+    return false unless conversation
+
+    conversation.messages.where(message_type: %i[outgoing template], sender_type: 'User', private: false)
+                .exists?(['created_at > ?', created])
   end
 
   # 🚨 #217: o robô (ou a fila 'sidekiq', que não está em CronHealth::JOBS)

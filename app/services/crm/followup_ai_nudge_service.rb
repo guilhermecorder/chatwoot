@@ -73,6 +73,11 @@ class Crm::FollowupAiNudgeService
     @step = step || {}
   end
 
+  # 16/11 (LIFE): a cutucada passa pela mesma trava do atendente (sem diminutivo e sem frase passiva), se a conta ligou
+  def plain(text)
+    Crm::PlainWords.enabled?(@account) ? Crm::PlainWords.clean(text).to_s.squish : text
+  end
+
   # { text: '...' } ou { error: '...' }
   def call
     return { error: 'Configure a chave da API em Integrações → Claude.', config_error: true } if api_key.blank?
@@ -83,7 +88,7 @@ class Crm::FollowupAiNudgeService
     parsed = ask_ai(transcript)
     return { error: parsed[:error] } if parsed[:error].present?
 
-    text = parsed['mensagem'].to_s.squish
+    text = plain(parsed['mensagem'].to_s.squish)
     return { error: 'A IA não escreveu a mensagem.' } if text.blank?
 
     { text: text[0, MAX_CHARS], reason: parsed['motivo'].to_s }

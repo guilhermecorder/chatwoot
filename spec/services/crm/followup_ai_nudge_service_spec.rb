@@ -58,6 +58,16 @@ RSpec.describe Crm::FollowupAiNudgeService do
     expect(described_class.new(conversation: vazia, step: step).call[:error]).to eq('Conversa vazia.')
   end
 
+  it '16/11 (LIFE): com sem_diminutivo ligado, a cutucada sai sem diminutivo e sem frase passiva', :aggregate_failures do
+    stub_ai({ mensagem: 'Maria, me manda o valor rapidinho que eu calculo certinho. Qualquer dúvida é só me chamar!' }.to_json)
+    expect(described_class.new(conversation: conversation, step: step).call[:text]).to include('rapidinho') # desligado: igual
+
+    CrmSetting.find_by(account: account).update!(ai_config: { 'api_key' => 'sk-teste', 'sem_diminutivo' => true })
+    text = described_class.new(conversation: conversation, step: step).call[:text]
+    expect(text).not_to match(/rapidinho|certinho|dúvida/)
+    expect(text).to include('rápido')
+  end
+
   describe 'empresa que não é clínica (06/11 · LIFE)' do
     it 'usa o texto neutro com o nome da empresa, sem paciente nem CEVICO', :aggregate_failures do
       Cevico::Company.save!(account, { 'name' => 'Life Energia Solar', 'segment' => 'outro' })

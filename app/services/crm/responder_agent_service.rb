@@ -131,6 +131,8 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
     result = JSON.parse(text).symbolize_keys
     result[:acoes] = tools ? tools.acoes : []
+    # 🧹 16/11 (LIFE): sem diminutivo e sem frase passiva, quando a conta liga (balão que fica vazio sai)
+    result[:mensagens] = Array(result[:mensagens]).map { |m| Crm::PlainWords.clean(m) }.compact_blank if Crm::PlainWords.enabled?(@account)
     # 💬 08/11: texto espaçado (uma linha em branco entre as frases) quando a conta liga
     result[:mensagens] = Array(result[:mensagens]).map { |m| Crm::TextSpacing.space(m) } if Crm::TextSpacing.enabled?(@account)
     result
