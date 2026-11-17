@@ -1,18 +1,21 @@
 <script setup>
-// 🧭 12/11/2026 (LIFE, pedido do Guilherme): JORNADA DO ORÇAMENTO no Meu
-// Painel — quem chegou no período e até onde andou (conta pedida, conta
-// recebida, orçamento gerado, orçamento enviado, fechado), a conversão de
+// 🧭 12/11/2026 (LIFE, pedido do Guilherme): JORNADA DA VENDA no Meu
+// Painel — quem chegou no período e até onde andou, a conversão de
 // cada etapa para a seguinte, dois saltos (chegou → recebeu orçamento,
 // chegou → fechou) e a mesma conta por fonte de tráfego.
+// ☀️ 16/11/2026: etapas no fluxo da energia solar (novos contatos →
+// sondagem → conta para orçamento → orçamento enviado → crédito
+// pré-aprovado → proposta de fechamento → contrato fechado) e o período
+// pela régua normal do sistema (hoje, ontem, 7 dias, semana passada…).
 // Pouco texto, número grande, cartões retos. A régua está em
 // app/services/crm/quote_journey.rb.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import CrmAPI from 'dashboard/api/crm';
+import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 
 const TXT = {
-  title: 'Jornada do orçamento',
+  title: 'Jornada da venda',
   subtitle: 'Quem chegou no período e até onde já andou',
-  days: 'dias',
   next: 'seguem',
   ofLeads: 'de quem chegou',
   sources: 'Por fonte',
@@ -23,7 +26,18 @@ const TXT = {
   arrow: '→',
 };
 
-const days = ref(30);
+// o período escolhido fica lembrado neste navegador (só comodidade)
+const PERIOD_KEY = 'cevico:jornada:periodo';
+const savedPeriod = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PERIOD_KEY) || 'null');
+    if (saved?.preset) return saved;
+  } catch {
+    // sem memória do navegador: segue no padrão
+  }
+  return { preset: 'last7', from: '', to: '' };
+};
+const periodo = ref(savedPeriod());
 const journey = ref(null);
 const loading = ref(false);
 const failed = ref(false);
@@ -34,12 +48,10 @@ const jumps = computed(() =>
   (journey.value?.jumps || []).filter(j => j.pct !== null)
 );
 const sources = computed(() => journey.value?.sources || []);
-const periods = computed(() => journey.value?.periods || [7, 30, 90]);
 const leads = computed(() => steps.value[0]?.count || 0);
 
 const pctText = value =>
   value === null || value === undefined ? '' : `${value}%`;
-const periodText = p => `${p} ${TXT.days}`;
 const jumpText = jump => `${jump.from_label} ${TXT.arrow} ${jump.to_label}`;
 const barWidth = step => `${Math.max(step.of_leads ?? 0, step.count ? 4 : 0)}%`;
 
@@ -51,7 +63,9 @@ const load = async () => {
   try {
     const { data } = await CrmAPI.getHome({
       only: 'quote_journey',
-      days: days.value,
+      preset: periodo.value.preset,
+      from: periodo.value.from,
+      to: periodo.value.to,
     });
     if (mine === seq) journey.value = data.quote_journey;
   } catch {
@@ -60,11 +74,18 @@ const load = async () => {
     if (mine === seq) loading.value = false;
   }
 };
-const pickDays = value => {
-  if (days.value === value) return;
-  days.value = value;
-  load();
-};
+watch(
+  periodo,
+  value => {
+    try {
+      localStorage.setItem(PERIOD_KEY, JSON.stringify(value));
+    } catch {
+      // sem memória do navegador: só não lembra na próxima visita
+    }
+    load();
+  },
+  { deep: true }
+);
 
 onMounted(load);
 </script>
@@ -82,25 +103,16 @@ onMounted(load);
           </h2>
           <p class="text-[11px] text-n-slate-9 mt-0.5">{{ TXT.subtitle }}</p>
         </div>
-        <div class="qj-periods" role="group">
-          <button
-            v-for="p in periods"
-            :key="p"
-            class="qj-period"
-            :class="days === p ? 'qj-period-on' : ''"
-            :aria-pressed="days === p"
-            @click="pickDays(p)"
-          >
-            {{ periodText(p) }}
-          </button>
-        </div>
+      </div>
+      <div class="qj-ruler">
+        <PeriodRuler v-model="periodo" glass />
       </div>
 
       <p v-if="failed" class="qj-note">{{ TXT.error }}</p>
       <p v-else-if="!journey && loading" class="qj-note">{{ TXT.loading }}</p>
 
       <template v-else-if="journey">
-        <!-- as 6 etapas: número grande + quantos seguem para a próxima -->
+        <!-- as 7 etapas: número grande + quantos seguem para a próxima -->
         <ol class="qj-steps" :class="loading ? 'qj-dim' : ''">
           <li
             v-for="(step, index) in steps"
@@ -183,24 +195,9 @@ onMounted(load);
   gap: 10px 12px;
   margin-bottom: 14px;
 }
-.qj-periods {
-  display: flex;
-  gap: 6px;
-}
-.qj-period {
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: 9px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #475569;
-  background: rgba(100, 116, 139, 0.1);
-  border: 1px solid rgba(100, 116, 139, 0.22);
-}
-.qj-period-on {
-  color: #fff;
-  background: #1e293b;
-  border-color: #1e293b;
+.qj-ruler {
+  margin: -4px 0 14px;
+  max-width: 100%;
 }
 .qj-note {
   padding: 14px 0 4px;
@@ -222,12 +219,12 @@ onMounted(load);
 }
 @container (min-width: 520px) {
   .qj-steps {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
-@container (min-width: 860px) {
+@container (min-width: 940px) {
   .qj-steps {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 }
 .qj-step {
@@ -244,7 +241,7 @@ onMounted(load);
 .qj-step-0 {
   border-top-color: #1e293b;
 }
-.qj-step-5 {
+.qj-step-6 {
   border-top-color: #16a34a;
 }
 .qj-label {
@@ -277,7 +274,7 @@ onMounted(load);
 .qj-step-0 .qj-bar-fill {
   background: #1e293b;
 }
-.qj-step-5 .qj-bar-fill {
+.qj-step-6 .qj-bar-fill {
   background: #16a34a;
 }
 .qj-next {
@@ -342,7 +339,7 @@ onMounted(load);
 }
 .qj-row {
   display: grid;
-  grid-template-columns: minmax(72px, 1.4fr) repeat(6, minmax(0, 1fr)) minmax(
+  grid-template-columns: minmax(72px, 1.4fr) repeat(7, minmax(0, 1fr)) minmax(
       54px,
       1fr
     );
@@ -388,20 +385,13 @@ onMounted(load);
   display: none;
 }
 /* celular: período numa linha só dele; cada fonte vira um bloco (nome + conversão em cima,
-   os seis números embaixo, cada um com o nome da etapa) */
+   os sete números embaixo, cada um com o nome da etapa) */
 @container (max-width: 520px) {
-  .qj-periods {
-    flex-basis: 100%;
-  }
-  .qj-period {
-    flex: 1;
-    min-height: 36px;
-  }
   .qj-row-head {
     display: none;
   }
   .qj-row {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px 2px;
     padding: 10px 8px;
     font-size: 15px;
@@ -456,16 +446,6 @@ onMounted(load);
 }
 
 /* tema escuro */
-:global(.dark .qj-period) {
-  color: rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-:global(.dark .qj-period-on) {
-  color: #0f172a;
-  background: #fff;
-  border-color: #fff;
-}
 :global(.dark .qj-note),
 :global(.dark .qj-label),
 :global(.dark .qj-sources-title),
@@ -481,7 +461,7 @@ onMounted(load);
 :global(.dark .qj-step-0) {
   border-top-color: #e2e8f0;
 }
-:global(.dark .qj-step-5) {
+:global(.dark .qj-step-6) {
   border-top-color: #22c55e;
 }
 :global(.dark .qj-step-0 .qj-bar-fill) {

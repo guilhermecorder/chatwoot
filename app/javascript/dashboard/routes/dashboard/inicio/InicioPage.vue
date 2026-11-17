@@ -96,6 +96,7 @@ const {
   word: cevicoWord,
   spaceName,
   openSpaceLabel,
+  isClinic,
 } = useCevicoAccess();
 const canSeeRevenue = computed(
   () => isAdmin.value || cevicoCan('financeiro', 'edit')
@@ -3742,7 +3743,7 @@ const gestorSignals = computed(() => {
     sigs.push({
       level: 'red',
       icon: 'i-lucide-radar',
-      text: `${alerts} paciente(s) quente(s) sem atendimento (Radar)`,
+      text: `${alerts} ${cevicoWord('paciente')}(s) quente(s) sem atendimento (Radar)`,
     });
   const waiting = data.value.unanswered ?? 0;
   if (waiting > 8)
@@ -4860,8 +4861,20 @@ const HERO_LEADS = {
   gestor:
     'O processo inteiro num olhar: chegada, agendamento, comparecimento e fechamento.',
 };
+// ☀️ 16/11/2026 (LIFE, Guilherme: "mudar a nomenclatura… para o mercado de energia solar"): fora da clínica o
+// painel fala de venda — nada de consulta, agendamento ou paciente
+const HERO_LEAD_VENDA =
+  'Do novo contato ao contrato: quem chegou, quem recebeu orçamento e quem ainda espera resposta.';
+// o nome do painel no cabeçalho: fora da clínica, "Agendamento" vira "Vendas"
+const heroPanelLabel = computed(() => {
+  const p = currentPanel.value || {};
+  return !isClinic.value && (p.base || p.key) === 'agendamento'
+    ? 'Vendas'
+    : p.label;
+});
 const heroLead = computed(() => {
   const p = currentPanel.value || {};
+  if (!isClinic.value && !p.custom) return HERO_LEAD_VENDA;
   if (p.custom)
     return 'Painel montado no Construtor — os seus indicadores, do seu jeito.';
   // variante por pessoa herda a frase do painel-base
@@ -4894,26 +4907,31 @@ const heroPulse = computed(() => {
       label: 'aguardando resposta',
       route: 'home',
       alert: waiting > 0,
-      title: 'Conversas em que o paciente falou por último',
+      title: `Conversas em que o ${cevicoWord('paciente')} falou por último`,
     },
-    {
+  ];
+  // ☀️ 16/11/2026 (LIFE): "consultas hoje" só existe na clínica
+  if (isClinic.value)
+    items.push({
       key: 'today',
       icon: 'i-lucide-calendar-check',
       value: d.appointments_today ?? 0,
       label: 'consultas hoje',
       route: 'agenda_board',
       title: 'Abrir a Agenda',
-    },
-  ];
+    });
   if (hot)
     items.push({
       key: 'radar',
       icon: 'i-lucide-radar',
       value: hot,
-      label: hot === 1 ? 'paciente quente' : 'pacientes quentes',
+      label:
+        hot === 1
+          ? `${cevicoWord('paciente')} quente`
+          : `${cevicoWord('paciente_plural')} quentes`,
       route: 'crm_board',
       alert: true,
-      title: 'Radar de Oportunidades: pacientes quentes sem atendimento',
+      title: `Radar de Oportunidades: ${cevicoWord('paciente_plural')} quentes sem atendimento`,
     });
   return items;
 });
@@ -5294,7 +5312,7 @@ onUnmounted(() => {
               </button>
               <span class="cevico-hero-chip" :title="currentPanel.desc">
                 <span :class="currentPanel.icon" class="text-xs" />
-                Painel de {{ currentPanel.label
+                Painel de {{ heroPanelLabel
                 }}<template v-if="currentPanel.who">
                   · {{ currentPanel.who }}</template
                 >
@@ -5436,8 +5454,10 @@ onUnmounted(() => {
       <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin).
            19/10 (Guilherme): o Meu Painel novo conta SÓ a CEVICO — o Oftalmofácil
            fica no ambiente dele (CRM → Oftalmofácil), nunca aqui -->
+      <!-- ☀️ 16/11/2026 (LIFE): a Visão geral é a jornada do PACIENTE (agendou, confirmou, veio, operou) — só
+           na clínica. Fora dela, quem conta a história é a faixa "Jornada da venda" aí em cima -->
       <VisaoGeral
-        v-if="!organizeMode && !estiloClassico"
+        v-if="!organizeMode && !estiloClassico && isClinic"
         source="cevico"
         :vars="cvVars"
       />
@@ -6091,7 +6111,7 @@ onUnmounted(() => {
                        os três custos e quem trouxe os agendamentos. Só para quem
                        vê o Financeiro & CAC; some sem gasto no período. -->
                   <div
-                    v-if="canSeeCostBySource && costTimeline"
+                    v-if="canSeeCostBySource && costTimeline && isClinic"
                     class="cv-block mb-6"
                   >
                     <div class="p-4 sm:p-5">
@@ -6517,8 +6537,8 @@ onUnmounted(() => {
                         <h2 class="text-sm font-bold text-n-slate-12">
                           {{
                             radarQueue.length === 1
-                              ? '1 paciente quente sem atendimento'
-                              : `${radarQueue.length} pacientes quentes sem atendimento`
+                              ? `1 ${cevicoWord('paciente')} quente sem atendimento`
+                              : `${radarQueue.length} ${cevicoWord('paciente_plural')} quentes sem atendimento`
                           }}
                         </h2>
                         <!-- 📈 eficácia (item 83): o Radar gerando consulta de verdade -->
@@ -8604,7 +8624,7 @@ onUnmounted(() => {
                       }}
                       aguardando resposta
                     </span>
-                    <span class="cv-chip"
+                    <span v-if="isClinic" class="cv-chip"
                       ><span class="i-lucide-calendar-check text-xs" />{{
                         data.appointments_today ?? 0
                       }}

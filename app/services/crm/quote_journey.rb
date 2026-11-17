@@ -1,61 +1,63 @@
-# 🧭 JORNADA DO ORÇAMENTO (12/11/2026 · LIFE, pedido do Guilherme): "gosto de ver a conversão de uma
+# 🧭 JORNADA DA VENDA (12/11/2026 · LIFE, pedido do Guilherme): "gosto de ver a conversão de uma
 # etapa para outra, os indicadores de cada etapa e de cada fonte de tráfego… de uma forma mais
 # simplificada, com menos texto e mais objetividade."
+# ☀️ 16/11/2026 (pedido do Guilherme): "mudar a nomenclatura… para o mercado de energia solar". O fluxo é o dele:
+# novo contato → sondagem → conta para o orçamento → orçamento gerado e enviado → pré-aprovação do crédito →
+# proposta de fechamento → contrato fechado (daí instalação e pós-venda). E o período é a régua normal do sistema
+# (hoje, ontem, 7 dias, semana passada…).
 #
 # Como conta (uma régua só, explicável):
 #   · pega quem CHEGOU no período (os leads novos do Meu Painel — Crm::LeadsUniverse);
 #   · para cada pessoa, vê até onde ela já andou na jornada, com o que o sistema registrou:
-#       pedido   = o cartão entrou na coluna "Solicitação da Conta"
+#       sondagem = alguma informação anotada no resumo do cliente, ou o cartão entrou em "Solicitação da Conta"
 #       conta    = conta anotada no resumo do cliente, tarefa "Orçamento: conta recebida" ou cartão
 #                  na coluna "Orçamento a fazer"
-#       gerado   = orçamento criado no Gerador (Crm::Quote) ou cartão em "Orçamento pronto"
 #       enviado  = orçamento marcado como enviado, etiqueta `orcamento-enviado` ou cartão em
 #                  "Orçamento Enviado"
-#       fechado  = cartão em "Contrato Assinado"
+#       credito  = etiqueta `credito-pre-aprovado` (no contato ou na conversa) ou cartão numa coluna de crédito
+#       proposta = cartão na coluna "Negociação" (ou "Proposta de fechamento")
+#       fechado  = cartão em "Contrato Assinado", "Homologação", "Instalação" ou no pós-venda
 #   · quem chegou a uma etapa conta também nas anteriores (o funil nunca "cresce" no meio);
-#   · conversão = desta etapa para a seguinte; mais dois saltos (lead → enviado, lead → fechado);
+#   · conversão = desta etapa para a seguinte; mais dois saltos (novo → orçamento, novo → contrato);
 #   · fonte = a etiqueta de origem da conversa (anúncio, formulário, site, direto; Crm::WhatsappOrigin).
 #
 # As colunas são achadas pelo NOME no funil principal (com os nomes antigos também). Coluna que
 # não existe na conta só deixa aquele sinal de fora — os outros continuam valendo.
 class Crm::QuoteJourney
-  PERIODS = [7, 30, 90].freeze
-  DEFAULT_DAYS = 30
   STEPS = [
-    { key: 'leads', label: 'Chegaram', short: 'Chegaram' },
-    { key: 'pedido', label: 'Conta pedida', short: 'Pedida' },
-    { key: 'conta', label: 'Conta recebida', short: 'Recebida' },
-    { key: 'gerado', label: 'Orçamento gerado', short: 'Gerado' },
-    { key: 'enviado', label: 'Orçamento enviado', short: 'Enviado' },
-    { key: 'fechado', label: 'Fechado', short: 'Fechado' }
+    { key: 'leads', label: 'Novos contatos', short: 'Novos' },
+    { key: 'sondagem', label: 'Sondagem', short: 'Sondagem' },
+    { key: 'conta', label: 'Conta para orçamento', short: 'Conta' },
+    { key: 'enviado', label: 'Orçamento enviado', short: 'Orçamento' },
+    { key: 'credito', label: 'Crédito pré-aprovado', short: 'Crédito' },
+    { key: 'proposta', label: 'Proposta de fechamento', short: 'Proposta' },
+    { key: 'fechado', label: 'Contrato fechado', short: 'Contrato' }
   ].freeze
   STAGE_NAMES = {
-    'pedido' => /\Asolicitacao da conta\z/,
+    'sondagem' => /\A(sondagem|solicitacao da conta)\z/,
     'conta' => /\A(orcamento a fazer|recebimento da conta)\z/,
-    'gerado' => /\A(orcamento pronto|orcamento gerado)\z/,
     'enviado' => /\Aorcamento enviado\z/,
-    'fechado' => /\Acontrato assinado\z/
+    'credito' => /credito|pre.?aprovac/,
+    'proposta' => /\A(negociacao|proposta.*)\z/,
+    'fechado' => /\A(contrato (assinado|fechado)|homologacao|instalacao)\z|pos.?venda/
   }.freeze
+  CREDIT_LABELS = %w[credito-pre-aprovado credito-aprovado].freeze
   JUMPS = [%w[leads enviado], %w[leads fechado]].freeze
   SOURCES = Crm::WhatsappOrigin::LABELS.invert.freeze # 'origem-anuncio' => 'anuncio'
   SOURCE_LABELS = { 'anuncio' => 'Anúncio', 'formulario' => 'Formulário', 'site' => 'Site', 'direto' => 'Direto',
                     'sem_origem' => 'Sem origem' }.freeze
   BILL_TASK = 'Orçamento: conta recebida'.freeze
 
-  def self.days(value)
-    PERIODS.include?(value.to_i) ? value.to_i : DEFAULT_DAYS
-  end
-
-  def initialize(account, days: DEFAULT_DAYS, now: Time.current)
+  # since/until_at = o período escolhido na régua normal do sistema (Crm::ResolvesPeriod)
+  def initialize(account, since:, until_at:)
     @account = account
-    @days = self.class.days(days)
-    @now = now
-    @since = now - @days.days
+    @since = since
+    @until = until_at
   end
 
   def call
     reach = lead_ids.index_with { |id| reached_index(id) }
-    { days: @days, periods: PERIODS, since: @since, until: @now,
+    { since: @since, until: @until,
       steps: steps_json(reach.values), jumps: jumps_json(reach.values), sources: sources_json(reach) }
   end
 
@@ -63,7 +65,7 @@ class Crm::QuoteJourney
 
   # quem chegou no período: a mesma régua de "leads novos" do Meu Painel
   def lead_ids
-    @lead_ids ||= Crm::LeadsUniverse.scope(@account, @since, @now).pluck(:id).uniq
+    @lead_ids ||= Crm::LeadsUniverse.scope(@account, @since, @until).pluck(:id).uniq
   end
 
   # índice da etapa mais adiantada que a pessoa alcançou (0 = só chegou)
@@ -71,13 +73,14 @@ class Crm::QuoteJourney
     STEPS.each_index.reverse_each.find { |i| i.zero? || signals[STEPS[i][:key]].include?(contact_id) }
   end
 
-  # por etapa, quem tem o sinal dela: { 'pedido' => Set[contact_id, …], … }
+  # por etapa, quem tem o sinal dela: { 'sondagem' => Set[contact_id, …], … }
   def signals
     @signals ||= {
-      'pedido' => in_stage('pedido'),
+      'sondagem' => in_stage('sondagem') | with_summary_noted,
       'conta' => in_stage('conta') | with_bill_noted | with_bill_task,
-      'gerado' => in_stage('gerado') | quotes(sent: false),
       'enviado' => in_stage('enviado') | quotes(sent: true) | with_sent_label,
+      'credito' => in_stage('credito') | with_credit_label,
+      'proposta' => in_stage('proposta'),
       'fechado' => in_stage('fechado')
     }
   end
@@ -105,6 +108,13 @@ class Crm::QuoteJourney
     Set.new(logged + now_there)
   end
 
+  # a sondagem começou: já tem alguma resposta anotada no resumo do cliente (cidade, telhado, conta…)
+  def with_summary_noted
+    key = Crm::ClientSummary::ATTR_KEY
+    Set.new(@account.contacts.where(id: lead_ids).where("jsonb_typeof(additional_attributes -> ?) = 'object'", key)
+                    .where('additional_attributes -> ? <> ?::jsonb', key, '{}').pluck(:id))
+  end
+
   def with_bill_noted
     key = Crm::ClientSummary::ATTR_KEY
     Set.new(@account.contacts.where(id: lead_ids).where("additional_attributes -> ? -> 'conta' ->> 'valor' <> ''", key).pluck(:id))
@@ -118,6 +128,21 @@ class Crm::QuoteJourney
     scope = Crm::Quote.where(account_id: @account.id, contact_id: lead_ids)
     scope = scope.where.not(sent_at: nil) if sent
     Set.new(scope.distinct.pluck(:contact_id))
+  end
+
+  # crédito pré-aprovado: a etiqueta no contato ou em alguma conversa dele
+  def with_credit_label
+    by_conversation = conversation_rows.select { |conversation_id, _| credit_conversations.key?(conversation_id) }.map(&:last)
+    Set.new(contact_ids_tagged('Contact', CREDIT_LABELS).keys + by_conversation)
+  end
+
+  def credit_conversations
+    @credit_conversations ||= contact_ids_tagged('Conversation', CREDIT_LABELS, conversation_rows.map(&:first))
+  end
+
+  # [[conversation_id, contact_id], …] de quem chegou
+  def conversation_rows
+    @conversation_rows ||= @account.conversations.where(contact_id: lead_ids).order(:id).pluck(:id, :contact_id)
   end
 
   def with_sent_label
@@ -136,6 +161,10 @@ class Crm::QuoteJourney
   # quantos alcançaram cada etapa (quem foi além conta também)
   def counts(reached)
     STEPS.each_index.map { |i| reached.count { |r| r >= i } }
+  end
+
+  def step_index(key)
+    STEPS.index { |step| step[:key] == key }
   end
 
   def pct(part, whole)
@@ -162,9 +191,8 @@ class Crm::QuoteJourney
   # fonte de cada pessoa: a etiqueta de origem das conversas dela
   def source_by_contact
     @source_by_contact ||= begin
-      conversations = @account.conversations.where(contact_id: lead_ids).order(:id).pluck(:id, :contact_id)
-      labels = contact_ids_tagged('Conversation', SOURCES.keys, conversations.map(&:first))
-      conversations.each_with_object({}) do |(conversation_id, contact_id), out|
+      labels = contact_ids_tagged('Conversation', SOURCES.keys, conversation_rows.map(&:first))
+      conversation_rows.each_with_object({}) do |(conversation_id, contact_id), out|
         label = Array(labels[conversation_id]).first
         out[contact_id] ||= SOURCES[label] if label
       end
@@ -178,7 +206,8 @@ class Crm::QuoteJourney
       next if reached.empty?
 
       totals = counts(reached)
-      { key: key, label: label, counts: totals, lead_to_sent: pct(totals[4], totals[0]), lead_to_closed: pct(totals[5], totals[0]) }
+      { key: key, label: label, counts: totals, lead_to_sent: pct(totals[step_index('enviado')], totals[0]),
+        lead_to_closed: pct(totals[step_index('fechado')], totals[0]) }
     end
   end
 end

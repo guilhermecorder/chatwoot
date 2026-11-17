@@ -155,7 +155,7 @@ class Crm::AgentAlert
     case @kind
     when 'nao_confirmou' then 'Ligar para o paciente'
     when DUE_KIND then 'Chamar o cliente agora'
-    when *ATTENTION_KINDS then 'Falar com o paciente agora'
+    when *ATTENTION_KINDS then "Falar com o #{company.word('paciente')} agora"
     else 'Conferir na Agenda'
     end
   end
@@ -196,8 +196,15 @@ class Crm::AgentAlert
     "#{patient_name} respondeu NÃO ao lembrete da consulta de #{when_text} — ligar para remarcar ou cancelar"
   end
 
+  # ☀️ 16/11/2026 (LIFE): fora da clínica não existe "Atendente de Agendamento" nem "paciente"
   def agent_label
+    return 'Atendente de IA' if !company.clinic? && @agent_key.start_with?('atendente')
+
     AGENT_NAMES[@agent_key] || @agent_key
+  end
+
+  def company
+    @company ||= Cevico::Company.for(@account)
   end
 
   def when_text

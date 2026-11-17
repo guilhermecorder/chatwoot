@@ -969,11 +969,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     { count: open_tasks.count, by_heat: false, items: open_tasks.limit(40).map { |t| my_task_item(t) } }
   end
 
-  # 🧭 jornada do orçamento (Crm::QuoteJourney): quem chegou no período e até onde andou; 5 min de cache
+  # 🧭 jornada da venda (Crm::QuoteJourney): quem chegou no período e até onde andou; 5 min de cache.
+  # 16/11: o período é a régua normal do sistema (?preset=today|yesterday|last7|last_week|…|custom&from=&to=)
   def quote_journey_json
-    days = Crm::QuoteJourney.days(params[:days])
-    Rails.cache.fetch(['cevico:quote_journey:v1', account.id, days], expires_in: 5.minutes) do
-      JSON.parse(Crm::QuoteJourney.new(account, days: days).call.to_json)
+    now = Crm::ResolvesPeriod::PERIOD_TZ.now
+    since, until_at = standard_period_range || [(now - 6.days).beginning_of_day, now.end_of_day] # padrão: últimos 7 dias
+    Rails.cache.fetch(['cevico:quote_journey:v2', account.id, since.to_i, until_at.to_i], expires_in: 5.minutes) do
+      JSON.parse(Crm::QuoteJourney.new(account, since: since, until_at: until_at).call.to_json)
     end
   end
 

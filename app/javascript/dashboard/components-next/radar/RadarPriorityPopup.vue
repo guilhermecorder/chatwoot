@@ -12,10 +12,17 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useMapGetter } from 'dashboard/composables/store';
 import CrmAPI from 'dashboard/api/crm';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 
 const router = useRouter();
 const route = useRoute();
 const accountId = useMapGetter('getCurrentAccountId');
+// ☀️ 16/11/2026 (LIFE): fora da clínica é "cliente", não "paciente"
+const { word: cevicoWord } = useCevicoAccess();
+const hotTitle = computed(() => {
+  const who = cevicoWord('paciente');
+  return `${who.charAt(0).toUpperCase()}${who.slice(1)} quente esperando!`;
+});
 
 const alert = ref(null);
 const leaving = ref(false);
@@ -186,7 +193,7 @@ const attendNow = () => {
             {{
               level === 'red'
                 ? 'Essa é a prioridade máxima. 😊'
-                : kindLabel || 'Paciente quente esperando!'
+                : kindLabel || hotTitle
             }}
           </p>
         </div>
