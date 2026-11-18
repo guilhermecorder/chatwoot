@@ -670,6 +670,7 @@ const MENU_LAYOUT = [
     icon: 'i-lucide-megaphone',
     items: [
       'Creatives Center', // anúncios: o topo do funil
+      'Cevico Pages > Copy Bank', // 🪝 item 397: criar o próximo criativo (gancho → história → oferta)
       'Cevico Pages > Pages List', // onde o lead chega
       'Forms', // captação
       'Cevico Pages > Funnel Builder', // conversão
@@ -795,6 +796,7 @@ const TILE_COLORS = {
   'Creatives Center': '#ff9f0a',
   'Pages List': '#0a84ff',
   'Content Planner': '#34c759',
+  'Copy Bank': '#ff375f',
   'Pages Results': '#30d158',
   'Pages Analytics': '#5ac8fa',
   'Funnel Builder': '#ff3b30',
@@ -1551,6 +1553,15 @@ const menuItems = computed(() => {
           icon: 'i-lucide-kanban',
           to: accountScopedRoute('cevico_content_board'),
         },
+        // 🪝 item 397: Banco de Ganchos (nó marketing.criativos)
+        ...[
+          {
+            name: 'Copy Bank',
+            label: 'Banco de Ganchos',
+            icon: 'i-lucide-anchor',
+            to: accountScopedRoute('cevico_copy_bank'),
+          },
+        ].filter(c => show(c.name)),
         // Resultados (marketing.resultados) e funis/testes A/B
         // (marketing.funis) — cada um pelo seu nó (rodada 334)
         ...[

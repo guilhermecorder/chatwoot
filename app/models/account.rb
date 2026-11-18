@@ -82,6 +82,8 @@ class Account < ApplicationRecord
   has_many :cevico_pillars, dependent: :destroy_async
   has_many :cevico_strategies, dependent: :destroy_async
   has_many :cevico_content_items, dependent: :destroy_async
+  has_many :cevico_copy_blocks, dependent: :destroy_async # 🪝 item 397 Banco de Ganchos
+  has_many :cevico_copy_drafts, dependent: :destroy_async
   has_many :cevico_people_profiles, dependent: :destroy_async
   has_many :cevico_goal_plans, dependent: :destroy_async
   has_many :cevico_finance_entries, dependent: :destroy_async

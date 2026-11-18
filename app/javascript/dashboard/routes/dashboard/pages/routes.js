@@ -5,6 +5,7 @@ import TrafficResults from './TrafficResults.vue';
 import ContentBoard from './ContentBoard.vue';
 import ABCenter from './ABCenter.vue';
 import FunnelBuilder from './FunnelBuilder.vue';
+import CopyBank from './CopyBank.vue';
 
 export default {
   routes: [
@@ -49,6 +50,13 @@ export default {
       name: 'cevico_ab_center',
       meta: { permissions: ['administrator', 'agent'] },
       component: ABCenter,
+    },
+    {
+      // 🪝 item 397: Banco de Ganchos — gancho → história → oferta
+      path: frontendURL('accounts/:accountId/pages/ganchos'),
+      name: 'cevico_copy_bank',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: CopyBank,
     },
   ],
 };

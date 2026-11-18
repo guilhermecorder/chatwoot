@@ -1660,6 +1660,51 @@ class CrmAPI extends ApiClient {
     return axios.delete(`${this.url}/content_items/${id}`);
   }
 
+  // ── 🪝 item 397: Banco de Ganchos (gancho → história → oferta) ────
+  getCopyBank() {
+    return axios.get(`${this.url}/copy_bank`);
+  }
+
+  createCopyBlock(data) {
+    return axios.post(`${this.url}/copy_bank/blocks`, { block: data });
+  }
+
+  updateCopyBlock(id, data) {
+    return axios.patch(`${this.url}/copy_bank/blocks/${id}`, { block: data });
+  }
+
+  deleteCopyBlock(id) {
+    return axios.delete(`${this.url}/copy_bank/blocks/${id}`);
+  }
+
+  useCopyBlock(id) {
+    return axios.post(`${this.url}/copy_bank/blocks/${id}/use`);
+  }
+
+  getCopyDrafts() {
+    return axios.get(`${this.url}/copy_bank/drafts`);
+  }
+
+  createCopyDraft(data) {
+    return axios.post(`${this.url}/copy_bank/drafts`, { draft: data });
+  }
+
+  updateCopyDraft(id, data) {
+    return axios.patch(`${this.url}/copy_bank/drafts/${id}`, { draft: data });
+  }
+
+  deleteCopyDraft(id) {
+    return axios.delete(`${this.url}/copy_bank/drafts/${id}`);
+  }
+
+  generateCopyHooks(data) {
+    return axios.post(`${this.url}/copy_bank/generate_hooks`, data);
+  }
+
+  generateCopyText(data) {
+    return axios.post(`${this.url}/copy_bank/generate_copy`, data);
+  }
+
   // ── Ambiente Pessoas (DISC + desenvolvimento + feedbacks) ─────────
   getPeople() {
     return axios.get(`${this.url}/people`);
