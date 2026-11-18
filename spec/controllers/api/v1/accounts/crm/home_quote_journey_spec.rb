@@ -12,7 +12,7 @@ RSpec.describe 'Meu Painel: jornada do orçamento', type: :request do
     Crm::Pipeline.create!(account: account, name: 'Life', position: 0).stages.create!(name: 'Novos Contatos', color: '#000', position: 0)
   end
 
-  it 'devolve as 7 etapas da energia solar, os saltos e as fontes no período pedido', :aggregate_failures do
+  it 'devolve as 10 etapas da energia solar, os saltos e as fontes no período pedido', :aggregate_failures do
     contact = create(:contact, account: account, name: 'Ivan Coral', created_at: 2.days.ago)
     create(:conversation, account: account, inbox: inbox, contact: contact, created_at: 2.days.ago).add_labels(['origem-site'])
 
@@ -23,7 +23,7 @@ RSpec.describe 'Meu Painel: jornada do orçamento', type: :request do
     body = response.parsed_body
     expect(body.keys).to eq(['quote_journey'])
     journey = body['quote_journey']
-    expect(journey['steps'].pluck('key')).to eq(%w[leads sondagem conta enviado credito proposta fechado])
+    expect(journey['steps'].pluck('key')).to eq(%w[leads sondagem conta enviado investimento pagamento credito proposta fechado instalado])
     expect(journey['steps'].first['count']).to eq(1)
     expect(journey['jumps'].pluck('to')).to eq(%w[enviado fechado])
     expect(journey['sources'].pluck('key')).to eq(['site'])

@@ -11,7 +11,11 @@ import PatientSpaceIcon from 'dashboard/routes/dashboard/patient/PatientSpaceIco
 import CevicoCallsCard from 'dashboard/components-next/cevico/calls/CevicoCallsCard.vue';
 import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
 import { useProposalReady } from 'dashboard/composables/useCevicoProposal';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import SaleStepBlock from 'dashboard/components-next/cevico/SaleStepBlock.vue';
 
+// 🧭 18/11 (LIFE): fora da clínica, a etapa da venda com os botões da equipe
+const { isClinic } = useCevicoAccess();
 // 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
 const { spaceName, openSpaceLabel } = useCevicoSpaceName();
 
@@ -261,6 +265,8 @@ const analyzedAgo = computed(() => {
        Jornada (coluna do CRM, etiquetas, indicadores, follow-up),
        Inteligência (análise + ajuda com objeção) e Ligações. -->
   <div class="flex flex-col gap-3">
+    <!-- ══ 🧭 ETAPA DA VENDA (18/11, LIFE): a equipe marca o que já aconteceu ══ -->
+    <SaleStepBlock v-if="!isClinic && contact?.id" :contact-id="contact.id" />
     <!-- ══ JORNADA NO CRM ══ -->
     <div class="cv-side-card p-4">
       <div class="flex items-center flex-wrap gap-2 mb-3">

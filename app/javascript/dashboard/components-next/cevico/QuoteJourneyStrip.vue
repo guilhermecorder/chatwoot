@@ -7,6 +7,10 @@
 // sondagem → conta para orçamento → orçamento enviado → crédito
 // pré-aprovado → proposta de fechamento → contrato fechado) e o período
 // pela régua normal do sistema (hoje, ontem, 7 dias, semana passada…).
+// 🧭 18/11/2026: depois do orçamento o caminho ficou em 6 etapas
+// (investimento possível → forma de pagamento → CPF e crédito → proposta
+// de fechamento → contrato fechado → instalação realizada): 10 no total,
+// em duas linhas de 5 no computador.
 // Pouco texto, número grande, cartões retos. A régua está em
 // app/services/crm/quote_journey.rb.
 import { ref, computed, watch, onMounted } from 'vue';
@@ -112,7 +116,7 @@ onMounted(load);
       <p v-else-if="!journey && loading" class="qj-note">{{ TXT.loading }}</p>
 
       <template v-else-if="journey">
-        <!-- as 7 etapas: número grande + quantos seguem para a próxima -->
+        <!-- as etapas: número grande + quantos seguem para a próxima -->
         <ol class="qj-steps" :class="loading ? 'qj-dim' : ''">
           <li
             v-for="(step, index) in steps"
@@ -219,12 +223,7 @@ onMounted(load);
 }
 @container (min-width: 520px) {
   .qj-steps {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-@container (min-width: 940px) {
-  .qj-steps {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 .qj-step {
@@ -241,7 +240,8 @@ onMounted(load);
 .qj-step-0 {
   border-top-color: #1e293b;
 }
-.qj-step-6 {
+.qj-step-8,
+.qj-step-9 {
   border-top-color: #16a34a;
 }
 .qj-label {
@@ -274,7 +274,8 @@ onMounted(load);
 .qj-step-0 .qj-bar-fill {
   background: #1e293b;
 }
-.qj-step-6 .qj-bar-fill {
+.qj-step-8 .qj-bar-fill,
+.qj-step-9 .qj-bar-fill {
   background: #16a34a;
 }
 .qj-next {
@@ -339,7 +340,7 @@ onMounted(load);
 }
 .qj-row {
   display: grid;
-  grid-template-columns: minmax(72px, 1.4fr) repeat(7, minmax(0, 1fr)) minmax(
+  grid-template-columns: minmax(72px, 1.4fr) repeat(10, minmax(0, 1fr)) minmax(
       54px,
       1fr
     );
@@ -385,13 +386,13 @@ onMounted(load);
   display: none;
 }
 /* celular: período numa linha só dele; cada fonte vira um bloco (nome + conversão em cima,
-   os sete números embaixo, cada um com o nome da etapa) */
+   os números embaixo, cada um com o nome da etapa) */
 @container (max-width: 520px) {
   .qj-row-head {
     display: none;
   }
   .qj-row {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px 2px;
     padding: 10px 8px;
     font-size: 15px;
@@ -406,7 +407,7 @@ onMounted(load);
     font-size: 14px;
   }
   .qj-row > .qj-conv {
-    grid-column: 4 / span 3;
+    grid-column: 4 / span 2;
     order: 1;
     display: inline-flex;
     align-items: baseline;
@@ -461,7 +462,8 @@ onMounted(load);
 :global(.dark .qj-step-0) {
   border-top-color: #e2e8f0;
 }
-:global(.dark .qj-step-6) {
+:global(.dark .qj-step-8),
+:global(.dark .qj-step-9) {
   border-top-color: #22c55e;
 }
 :global(.dark .qj-step-0 .qj-bar-fill) {

@@ -1459,6 +1459,15 @@ class CrmAPI extends ApiClient {
     );
   }
 
+  // 🧭 18/11 (LIFE): etapa da venda do cliente + botões da equipe
+  getSaleSteps(contactId) {
+    return axios.get(`${this.url}/patients/${contactId}/sale_steps`);
+  }
+
+  markSaleStep(contactId, payload) {
+    return axios.post(`${this.url}/patients/${contactId}/sale_step`, payload);
+  }
+
   getClinicalNotes(contactId) {
     return axios.get(`${this.url}/patients/${contactId}/clinical_notes`);
   }

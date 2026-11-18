@@ -22,6 +22,7 @@ import { hexToRgbSpaced, unitsFor } from 'dashboard/helper/cevicoAgenda';
 import { PRICE_UNITS } from 'dashboard/routes/dashboard/settings/precos/priceRows';
 import { useCevicoSpaceName } from 'dashboard/composables/useCevicoSpaceName';
 import ClientSummaryBlock from 'dashboard/components-next/cevico/ClientSummaryBlock.vue';
+import SaleStepBlock from 'dashboard/components-next/cevico/SaleStepBlock.vue';
 import { useCevicoProposal } from 'dashboard/composables/useCevicoProposal';
 
 // 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
@@ -47,7 +48,7 @@ const currentUser = useMapGetter('getCurrentUser');
 const isAdmin = computed(() => currentRole.value === 'administrator');
 // 🔐 rodada 334: pacientes (dados/notas/orçamento) e pacientes.notas_clinicas —
 // a árvore entra POR CIMA do cadeado clínico que já existia (clinical_access)
-const { canEdit } = useCevicoAccess();
+const { canEdit, isClinic, word: cevicoWord } = useCevicoAccess();
 const canEditPatient = computed(() => canEdit('pacientes'));
 
 // ── Dados do paciente ──────────────────────────────────────────────
@@ -1001,7 +1002,8 @@ watch(contactId, () => {
                 </span>
                 <span class="flex items-center gap-1">
                   <span class="i-lucide-clock text-xs" />
-                  paciente desde {{ fmtDate(identity.created_at) }}
+                  {{ cevicoWord('paciente') }} desde
+                  {{ fmtDate(identity.created_at) }}
                 </span>
               </div>
               <!-- 💬📞 chamar o paciente daqui mesmo: conversa nova, ligar, abrir a última conversa -->
@@ -1212,6 +1214,15 @@ watch(contactId, () => {
             </div>
           </div>
         </div>
+
+        <!-- ══ 🧭 Etapa da venda (18/11, LIFE): a equipe marca o que já aconteceu ══ -->
+        <SaleStepBlock
+          v-if="!isClinic && contactId"
+          class="mb-6"
+          variant="block"
+          :contact-id="contactId"
+          :can-edit="canEditPatient"
+        />
 
         <!-- ══ 📝 Resumo do cliente (11/11): o que ele contou ══ -->
         <ClientSummaryBlock

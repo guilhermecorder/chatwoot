@@ -974,7 +974,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def quote_journey_json
     now = Crm::ResolvesPeriod::PERIOD_TZ.now
     since, until_at = standard_period_range || [(now - 6.days).beginning_of_day, now.end_of_day] # padrão: últimos 7 dias
-    Rails.cache.fetch(['cevico:quote_journey:v2', account.id, since.to_i, until_at.to_i], expires_in: 5.minutes) do
+    Rails.cache.fetch(['cevico:quote_journey:v3', account.id, since.to_i, until_at.to_i], expires_in: 5.minutes) do
       JSON.parse(Crm::QuoteJourney.new(account, since: since, until_at: until_at).call.to_json)
     end
   end

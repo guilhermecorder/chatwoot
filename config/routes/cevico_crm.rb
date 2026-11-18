@@ -387,7 +387,12 @@ namespace :crm do
   end
   # Central do Paciente: espaço do paciente + anotações do médico
   resources :patients, only: [:show], controller: 'patients' do
-    member { post :update_profile }
+    member do
+      post :update_profile
+      # 🧭 18/11 (LIFE): etapa da venda do cliente + botões da equipe (Crm::SaleSteps)
+      get :sale_steps
+      post :sale_step
+    end
     # 🔎 item 346: a busca que puxa o paciente (todas as barras de pesquisa)
     collection do
       get :search

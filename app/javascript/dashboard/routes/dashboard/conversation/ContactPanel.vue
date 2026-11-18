@@ -24,8 +24,16 @@ import Draggable from 'vuedraggable';
 import MacrosList from './Macros/List.vue';
 import ShopifyOrdersList from 'dashboard/components/widgets/conversation/ShopifyOrdersList.vue';
 import SidebarActionsHeader from 'dashboard/components-next/SidebarActionsHeader.vue';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import LinearIssuesList from 'dashboard/components/widgets/conversation/linear/IssuesList.vue';
 import LinearSetupCTA from 'dashboard/components/widgets/conversation/linear/LinearSetupCTA.vue';
+
+// ☀️ 18/11/2026 (LIFE): fora da clínica o painel é do "Cliente", não do "Paciente"
+const { word: cevicoWord } = useCevicoAccess();
+const panelTitle = computed(() => {
+  const who = cevicoWord('paciente');
+  return `${who.charAt(0).toUpperCase()}${who.slice(1)}`;
+});
 
 const props = defineProps({
   conversationId: {
@@ -150,7 +158,7 @@ onMounted(() => {
        Apple — identidade, origem, jornada/IA/ligações, e as gavetas
        (Conversa, Notas, Anexos, Conversas anteriores) cada uma no seu cartão -->
   <div class="cv-side w-full">
-    <SidebarActionsHeader title="Paciente" @close="closeContactPanel" />
+    <SidebarActionsHeader :title="panelTitle" @close="closeContactPanel" />
     <div class="px-3 pt-3 pb-8 flex flex-col gap-3">
       <ContactInfo :contact="contact" :channel-type="channelType" />
       <AdOriginCard

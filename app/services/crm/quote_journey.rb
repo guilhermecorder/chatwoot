@@ -5,6 +5,10 @@
 # novo contato → sondagem → conta para o orçamento → orçamento gerado e enviado → pré-aprovação do crédito →
 # proposta de fechamento → contrato fechado (daí instalação e pós-venda). E o período é a régua normal do sistema
 # (hoje, ontem, 7 dias, semana passada…).
+# 🧭 18/11/2026 (pedido do Guilherme): "corrigir o traqueamento… no meu painel ele não está registrando, enquanto na
+# realidade a gente já conseguiu avançar pelo CPF". Depois do orçamento enviado o caminho é: é possível fazer o
+# investimento? → forma de pagamento (cartão ou financiamento) → CPF e pré-aprovação do crédito (só no financiamento;
+# cartão e à vista passam direto) → proposta de fechamento → contrato fechado → instalação realizada.
 #
 # Como conta (uma régua só, explicável):
 #   · pega quem CHEGOU no período (os leads novos do Meu Painel — Crm::LeadsUniverse);
@@ -14,34 +18,56 @@
 #                  na coluna "Orçamento a fazer"
 #       enviado  = orçamento marcado como enviado, etiqueta `orcamento-enviado` ou cartão em
 #                  "Orçamento Enviado"
-#       credito  = etiqueta `credito-pre-aprovado` (no contato ou na conversa) ou cartão numa coluna de crédito
-#       proposta = cartão na coluna "Negociação" (ou "Proposta de fechamento")
-#       fechado  = cartão em "Contrato Assinado", "Homologação", "Instalação" ou no pós-venda
+#       investimento = etiqueta `investimento-possivel` (o cliente disse SIM à pergunta de fechamento)
+#       pagamento = forma de pagamento anotada na ficha (etiqueta `quer-fechar`) ou cartão numa coluna de vistoria
+#       credito  = CPF anotado na ficha, etiqueta `credito-pre-aprovado`, ou forma de pagamento sem crédito
+#                  (cartão, à vista), que não precisa de pré-aprovação
+#       proposta = etiqueta `proposta-de-fechamento` ou cartão na coluna "Negociação"
+#       fechado  = etiqueta `contrato-fechado` ou cartão em "Contrato Assinado", "Homologação" ou "Instalação"
+#       instalado = etiqueta `instalacao-realizada` ou cartão no pós-venda
+#   · as etiquetas valem no contato ou em alguma conversa dele; quem marca: o atendente de IA (ficha do cliente)
+#     e a equipe, pelos botões "Etapa da venda" (Crm::SaleSteps);
 #   · quem chegou a uma etapa conta também nas anteriores (o funil nunca "cresce" no meio);
 #   · conversão = desta etapa para a seguinte; mais dois saltos (novo → orçamento, novo → contrato);
 #   · fonte = a etiqueta de origem da conversa (anúncio, formulário, site, direto; Crm::WhatsappOrigin).
 #
 # As colunas são achadas pelo NOME no funil principal (com os nomes antigos também). Coluna que
 # não existe na conta só deixa aquele sinal de fora — os outros continuam valendo.
-class Crm::QuoteJourney
+class Crm::QuoteJourney # rubocop:disable Metrics/ClassLength
   STEPS = [
     { key: 'leads', label: 'Novos contatos', short: 'Novos' },
     { key: 'sondagem', label: 'Sondagem', short: 'Sondagem' },
     { key: 'conta', label: 'Conta para orçamento', short: 'Conta' },
-    { key: 'enviado', label: 'Orçamento enviado', short: 'Orçamento' },
-    { key: 'credito', label: 'Crédito pré-aprovado', short: 'Crédito' },
+    { key: 'enviado', label: 'Orçamento enviado', short: 'Orçam.' },
+    { key: 'investimento', label: 'Investimento possível', short: 'Possível' },
+    { key: 'pagamento', label: 'Forma de pagamento', short: 'Pagam.' },
+    { key: 'credito', label: 'CPF e crédito', short: 'Crédito' },
     { key: 'proposta', label: 'Proposta de fechamento', short: 'Proposta' },
-    { key: 'fechado', label: 'Contrato fechado', short: 'Contrato' }
+    { key: 'fechado', label: 'Contrato fechado', short: 'Contrato' },
+    { key: 'instalado', label: 'Instalação realizada', short: 'Instalado' }
   ].freeze
   STAGE_NAMES = {
     'sondagem' => /\A(sondagem|solicitacao da conta)\z/,
     'conta' => /\A(orcamento a fazer|recebimento da conta)\z/,
     'enviado' => /\Aorcamento enviado\z/,
+    'pagamento' => /vistoria|visita tecnica/,
     'credito' => /credito|pre.?aprovac/,
     'proposta' => /\A(negociacao|proposta.*)\z/,
-    'fechado' => /\A(contrato (assinado|fechado)|homologacao|instalacao)\z|pos.?venda/
+    'fechado' => /\A(contrato (assinado|fechado)|homologacao|instalacao)\z/,
+    'instalado' => /pos.?venda|instalacao realizada|instalado/
   }.freeze
-  CREDIT_LABELS = %w[credito-pre-aprovado credito-aprovado].freeze
+  # etiquetas de cada etapa (no contato ou na conversa)
+  STEP_LABELS = {
+    'investimento' => %w[investimento-possivel],
+    'pagamento' => %w[quer-fechar],
+    'credito' => %w[credito-pre-aprovado credito-aprovado],
+    'proposta' => %w[proposta-de-fechamento],
+    'fechado' => %w[contrato-fechado],
+    'instalado' => %w[instalacao-realizada]
+  }.freeze
+  # forma de pagamento que NÃO passa por pré-aprovação de crédito (cartão, à vista)
+  NO_CREDIT_PAYMENT = /cart|vista|pix|dinheiro|boleto/i
+  FINANCING = /financ/i
   JUMPS = [%w[leads enviado], %w[leads fechado]].freeze
   SOURCES = Crm::WhatsappOrigin::LABELS.invert.freeze # 'origem-anuncio' => 'anuncio'
   SOURCE_LABELS = { 'anuncio' => 'Anúncio', 'formulario' => 'Formulário', 'site' => 'Site', 'direto' => 'Direto',
@@ -49,16 +75,23 @@ class Crm::QuoteJourney
   BILL_TASK = 'Orçamento: conta recebida'.freeze
 
   # since/until_at = o período escolhido na régua normal do sistema (Crm::ResolvesPeriod)
-  def initialize(account, since:, until_at:)
+  # contact_ids = em vez do período, só estas pessoas (a etapa de UM cliente: Crm::SaleSteps)
+  def initialize(account, since: nil, until_at: nil, contact_ids: nil)
     @account = account
     @since = since
     @until = until_at
+    @lead_ids = Array(contact_ids).map(&:to_i).uniq if contact_ids
   end
 
   def call
     reach = lead_ids.index_with { |id| reached_index(id) }
     { since: @since, until: @until,
       steps: steps_json(reach.values), jumps: jumps_json(reach.values), sources: sources_json(reach) }
+  end
+
+  # índice da etapa mais adiantada que a pessoa alcançou (0 = só chegou)
+  def reached_index(contact_id)
+    STEPS.each_index.reverse_each.find { |i| i.zero? || signals[STEPS[i][:key]].include?(contact_id) }
   end
 
   private
@@ -68,20 +101,29 @@ class Crm::QuoteJourney
     @lead_ids ||= Crm::LeadsUniverse.scope(@account, @since, @until).pluck(:id).uniq
   end
 
-  # índice da etapa mais adiantada que a pessoa alcançou (0 = só chegou)
-  def reached_index(contact_id)
-    STEPS.each_index.reverse_each.find { |i| i.zero? || signals[STEPS[i][:key]].include?(contact_id) }
-  end
-
   # por etapa, quem tem o sinal dela: { 'sondagem' => Set[contact_id, …], … }
   def signals
-    @signals ||= {
+    @signals ||= quote_signals.merge(closing_signals)
+  end
+
+  # até o orçamento enviado
+  def quote_signals
+    {
       'sondagem' => in_stage('sondagem') | with_summary_noted,
       'conta' => in_stage('conta') | with_bill_noted | with_bill_task,
-      'enviado' => in_stage('enviado') | quotes(sent: true) | with_sent_label,
-      'credito' => in_stage('credito') | with_credit_label,
-      'proposta' => in_stage('proposta'),
-      'fechado' => in_stage('fechado')
+      'enviado' => in_stage('enviado') | quotes(sent: true) | with_sent_label
+    }
+  end
+
+  # do "é possível?" até a instalação
+  def closing_signals
+    {
+      'investimento' => labeled('investimento'),
+      'pagamento' => in_stage('pagamento') | labeled('pagamento') | with_payment_noted,
+      'credito' => in_stage('credito') | labeled('credito') | with_cpf_noted | with_payment_without_credit,
+      'proposta' => in_stage('proposta') | labeled('proposta'),
+      'fechado' => in_stage('fechado') | labeled('fechado'),
+      'instalado' => in_stage('instalado') | labeled('instalado')
     }
   end
 
@@ -130,14 +172,35 @@ class Crm::QuoteJourney
     Set.new(scope.distinct.pluck(:contact_id))
   end
 
-  # crédito pré-aprovado: a etiqueta no contato ou em alguma conversa dele
-  def with_credit_label
-    by_conversation = conversation_rows.select { |conversation_id, _| credit_conversations.key?(conversation_id) }.map(&:last)
-    Set.new(contact_ids_tagged('Contact', CREDIT_LABELS).keys + by_conversation)
+  # a etiqueta da etapa no contato ou em alguma conversa dele
+  def labeled(key)
+    names = STEP_LABELS[key]
+    tagged = contact_ids_tagged('Conversation', names, conversation_rows.map(&:first))
+    by_conversation = conversation_rows.select { |conversation_id, _| tagged.key?(conversation_id) }.map(&:last)
+    Set.new(contact_ids_tagged('Contact', names).keys + by_conversation)
   end
 
-  def credit_conversations
-    @credit_conversations ||= contact_ids_tagged('Conversation', CREDIT_LABELS, conversation_rows.map(&:first))
+  # { contact_id => 'cartão: 6x' } de quem tem o campo da ficha preenchido
+  def ficha_values(field)
+    @ficha_values ||= {}
+    @ficha_values[field] ||= begin
+      key = Crm::ClientSummary::ATTR_KEY
+      @account.contacts.where(id: lead_ids).where("additional_attributes -> ? -> ? ->> 'valor' <> ''", key, field)
+              .pluck(:id, :additional_attributes).to_h.transform_values { |attrs| attrs.dig(key, field, 'valor').to_s }
+    end
+  end
+
+  def with_payment_noted
+    Set.new(ficha_values('forma_pagamento').keys)
+  end
+
+  def with_cpf_noted
+    Set.new(ficha_values('cpf').keys)
+  end
+
+  # cartão e à vista não passam por pré-aprovação: a etapa do crédito já está resolvida
+  def with_payment_without_credit
+    Set.new(ficha_values('forma_pagamento').select { |_, value| value.match?(NO_CREDIT_PAYMENT) && !value.match?(FINANCING) }.keys)
   end
 
   # [[conversation_id, contact_id], …] de quem chegou

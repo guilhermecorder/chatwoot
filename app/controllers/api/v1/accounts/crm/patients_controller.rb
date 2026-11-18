@@ -74,6 +74,25 @@ class Api::V1::Accounts::Crm::PatientsController < Api::V1::Accounts::BaseContro
     render json: profile_response(contact)
   end
 
+  # GET /crm/patients/:id/sale_steps — 🧭 18/11 (LIFE): até onde este cliente andou na Jornada da venda
+  def sale_steps
+    render json: Crm::SaleSteps.for(Current.account.contacts.find(params[:id]))
+  end
+
+  # POST /crm/patients/:id/sale_step — a equipe marca (ou desfaz) uma etapa pelos botões "Etapa da venda"
+  def sale_step
+    contact = Current.account.contacts.find(params[:id])
+    step = params[:step].to_s
+    done = if ActiveModel::Type::Boolean.new.cast(params[:undo])
+             Crm::SaleSteps.unmark!(contact, step, by: Current.user.name)
+           else
+             Crm::SaleSteps.mark!(contact, step, by: Current.user.name, payment: params[:payment])
+           end
+    return render json: { error: 'Esta etapa não é marcada por aqui.' }, status: :unprocessable_entity unless done
+
+    render json: Crm::SaleSteps.for(contact.reload)
+  end
+
   private
 
   # 📝 11/11: a equipe corrige/completa o resumo do cliente pela Central do cliente
