@@ -14,12 +14,12 @@ import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import DashKpi from 'dashboard/components-next/cevico/DashKpi.vue';
 import HBars from 'dashboard/components-next/cevico/HBars.vue';
 import ShareBar from 'dashboard/components-next/cevico/ShareBar.vue';
-import AreaChart from 'dashboard/components-next/cevico/AreaChart.vue';
 import TimelineChart from 'dashboard/components-next/cevico/TimelineChart.vue';
 import DonutChart from 'dashboard/components-next/cevico/DonutChart.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { useUISettings } from 'dashboard/composables/useUISettings';
 import CrmAPI from 'dashboard/api/crm';
+import { bucketCost, cumulativeCost } from 'dashboard/helper/cevicoLines';
 
 const route = useRoute();
 const isLoading = ref(true);
@@ -244,46 +244,76 @@ const campaignBars = computed(() =>
 // ── mês a mês ──
 const monthly = computed(() => data.value?.monthly || []);
 const monthLabels = computed(() => monthly.value.map(m => monthLabel(m.month)));
-const spendArea = computed(() => [
-  {
-    key: 'google',
-    label: 'Google',
-    color: CHANNEL_COLORS.google,
-    values: monthly.value.map(m => m.google),
-  },
-  {
-    key: 'meta',
-    label: 'Meta',
-    color: CHANNEL_COLORS.meta,
-    values: monthly.value.map(m => m.meta),
-  },
-  {
-    key: 'whatsapp',
-    label: 'WhatsApp',
-    color: '#25d366',
-    values: monthly.value.map(m => m.whatsapp),
-  },
-  {
-    key: 'ai',
-    label: 'IA',
-    color: '#ff9f0a',
-    values: monthly.value.map(m => m.ai),
-  },
-]);
-const cacArea = computed(() => [
+// 398 (19/11): linhas retas, um ponto por mês. Cores de linha validadas no
+// daltonismo (azul × rosa × verde × âmbar), as mesmas do custo por fonte.
+const MONTH_SPEND = [
+  { key: 'google', label: 'Google', color: '#0a84ff' },
+  { key: 'meta', label: 'Meta', color: '#db2777' },
+  { key: 'whatsapp', label: 'WhatsApp', color: '#25d366' },
+  { key: 'ai', label: 'IA', color: '#ff9f0a' },
+];
+const spendMonthLines = computed(() =>
+  MONTH_SPEND.map(line => {
+    const values = monthly.value.map(m => Number(m[line.key]) || 0);
+    const total = values.reduce((a, b) => a + b, 0);
+    return { ...line, values, total, dots: true, legendValue: money(total, 0) };
+  }).filter(line => line.total > 0)
+);
+const spendMonthTip = i => {
+  const m = monthly.value[i];
+  return {
+    title: `${monthLabels.value[i]} · ${money(m.total, 0)} no total`,
+    rows: spendMonthLines.value.map(line => ({
+      color: line.color,
+      label: line.label,
+      value: money(line.values[i], 0),
+    })),
+  };
+};
+// mês sem paciente operado NÃO tem CAC (não é zero): fica sem bolinha e um
+// pontilhado liga os meses vizinhos
+const MONTH_CAC = [
   {
     key: 'cac_ads',
     label: 'CAC de anúncios',
     color: '#bf5af2',
-    values: monthly.value.map(m => m.cac_ads || 0),
+    spend: 'ads',
+    count: 'paid_patients',
+    who: 'paciente(s) dos anúncios',
   },
   {
     key: 'cac_total',
     label: 'CAC total',
     color: '#ff9f0a',
-    values: monthly.value.map(m => m.cac_total || 0),
+    spend: 'total',
+    count: 'patients',
+    who: 'paciente(s) novos',
   },
-]);
+];
+const cacMonthLines = computed(() =>
+  MONTH_CAC.map(line => ({
+    ...line,
+    values: monthly.value.map(m => m[line.key] ?? null),
+    dots: true,
+    legendValue: `${orDash(s.value[line.key], moneyShort)} no período`,
+  }))
+);
+const cacMonthTip = i => {
+  const m = monthly.value[i];
+  return {
+    title: monthLabels.value[i],
+    rows: MONTH_CAC.map(line => ({
+      color: line.color,
+      label: line.label,
+      value: orDash(m[line.key], moneyShort),
+      sub: `${money(m[line.spend], 0)} ÷ ${fmtNum(m[line.count])} ${line.who}${
+        m[line.key] === null || m[line.key] === undefined
+          ? ' — sem paciente, sem CAC'
+          : ''
+      }`,
+    })),
+  };
+};
 
 // ══ 📈 LINHA DO TEMPO (19/10/2026): custo por fonte × tempo e faturamento × etapas ══
 const { uiSettings, updateUISettings } = useUISettings();
@@ -347,33 +377,102 @@ const unitWord = computed(
     ({ day: 'por dia', week: 'por semana', month: 'por mês' })[unitName.value]
 );
 const sourceData = key => timeline.value?.sources?.[key] || {};
-const costAt = (key, i) => {
-  const src = sourceData(key);
-  const spend = Number(src.spend?.[i] || 0);
-  const count = Number(src[costMetric.value]?.[i] || 0);
-  return spend > 0 && count > 0 ? spend / count : null;
-};
+// 398 (19/11, "linhas certinhas"): o custo de UM dia quebra a linha (dia sem
+// resultado = conta ÷ 0). Duas leituras, escolha salva por pessoa:
+//   acumulado = tudo que a fonte gastou do começo do período até o ponto ÷ tudo
+//               que ela trouxe até ali (linha inteira; fecha no custo do período)
+//   balde     = gasto ÷ resultado de cada dia/semana/mês (pontilhado sobre o
+//               balde sem resultado)
+// Sem escolha salva: por dia abre no acumulado; por semana ou mês, em cada balde.
+const UNIT_NOUN = { day: 'dia', week: 'semana', month: 'mês' };
+const unitNoun = computed(() => UNIT_NOUN[unitName.value]);
+// "o dia" / "a semana" / "o mês" e "do dia" / "da semana" / "do mês"
+const unitThe = computed(() =>
+  unitName.value === 'week' ? 'a semana' : `o ${unitNoun.value}`
+);
+const unitOf = computed(() => `d${unitThe.value}`);
+const costView = computed(() => {
+  const saved = tlPrefs.value.view;
+  if (saved === 'acumulado' || saved === 'balde') return saved;
+  return unitName.value === 'day' ? 'acumulado' : 'balde';
+});
+const COST_VIEWS = computed(() => [
+  { key: 'acumulado', label: 'Acumulado no período' },
+  {
+    key: 'balde',
+    label: `Cada ${unitNoun.value}`,
+  },
+]);
+// balde que ainda não chegou (período até o fim do mês) não entra na linha
+const todayIso = new Date().toLocaleDateString('en-CA', {
+  timeZone: 'America/Sao_Paulo',
+});
+const isFuture = i => (timeline.value?.buckets?.[i] || '') > todayIso;
+const costSeries = computed(() =>
+  SOURCE_LINES.map(line => {
+    const src = sourceData(line.key);
+    const spend = src.spend || [];
+    const count = src[costMetric.value] || [];
+    const each = bucketCost(spend, count);
+    const sum = cumulativeCost(spend, count);
+    return { ...line, each, sum, period: sum[sum.length - 1] || null };
+  })
+);
 const costLines = computed(() =>
-  SOURCE_LINES.map(line => ({
-    ...line,
-    values: tlLabels.value.map((_, i) => costAt(line.key, i)),
-  }))
+  costSeries.value.map(line => {
+    const points = costView.value === 'acumulado' ? line.sum : line.each;
+    return {
+      key: line.key,
+      label: line.label,
+      color: line.color,
+      dashed: line.dashed,
+      values: points.map((p, i) => (isFuture(i) ? null : p.cost)),
+      // bolinha = balde que teve resultado de verdade
+      dots: line.each.map(p =>
+        costView.value === 'acumulado' ? p.count > 0 : p.cost !== null
+      ),
+      legendValue:
+        line.period?.cost === null || !line.period
+          ? '—'
+          : `${money(line.period.cost, 0)} no período`,
+    };
+  })
+);
+const costLegendHint = computed(() =>
+  costSeries.value
+    .filter(line => line.period)
+    .map(
+      line =>
+        `${line.label}: ${money(line.period.spend, 0)} ÷ ${fmtNum(line.period.count)} ${costUnit.value}`
+    )
+    .join(' · ')
 );
 // dica: gasto ÷ quantidade = custo, fonte a fonte (revelar de onde veio)
 const costTip = i => ({
   title: bucketTitle(timeline.value.buckets[i]),
   rows: [
-    ...SOURCE_LINES.map(line => {
-      const src = sourceData(line.key);
-      const spend = Number(src.spend?.[i] || 0);
-      const count = Number(src[costMetric.value]?.[i] || 0);
-      const cost = costAt(line.key, i);
-      return {
+    ...costSeries.value.map(line => {
+      const each = line.each[i];
+      const sum = line.sum[i];
+      const eachTxt = `${money(each.spend, 0)} ÷ ${fmtNum(each.count)} ${costUnit.value}`;
+      const base = {
         color: line.color,
         dashed: line.dashed,
         label: line.label,
-        value: cost === null ? '—' : money(cost, 0),
-        sub: `${money(spend, 0)} ÷ ${fmtNum(count)} ${costUnit.value}`,
+      };
+      if (costView.value === 'acumulado')
+        return {
+          ...base,
+          value: sum.cost === null ? '—' : money(sum.cost, 0),
+          sub: `até aqui: ${money(sum.spend, 0)} ÷ ${fmtNum(sum.count)} ${costUnit.value} · só neste ${unitNoun.value}: ${eachTxt}`,
+        };
+      return {
+        ...base,
+        value: each.cost === null ? '—' : money(each.cost, 0),
+        sub:
+          each.cost === null && each.spend > 0
+            ? `${eachTxt} — gastou e não trouxe`
+            : eachTxt,
       };
     }),
     {
@@ -415,6 +514,8 @@ const METRIC_SHORT = {
   closed: 'cirurgias fechadas',
 };
 const costMetricShort = computed(() => METRIC_SHORT[costMetric.value]);
+const METRIC_ARTICLE = { leads: 'os', booked: 'os', closed: 'as' };
+const costMetricArticle = computed(() => METRIC_ARTICLE[costMetric.value]);
 
 // ── faturamento × etapas ──
 const pipelines = computed(() => timeline.value?.pipelines || []);
@@ -651,10 +752,10 @@ const partner = computed(() => data.value?.partner || {});
           </span>
         </div>
         <p class="text-[11px] text-n-slate-9 mb-3">
-          quanto cada fonte cobrou por resultado, {{ unitWord }} — a linha some
-          onde não houve resultado
+          quanto cada fonte cobrou por resultado — escolha o resultado e o jeito
+          de ler a linha
         </p>
-        <div class="flex flex-wrap gap-1.5 mb-4">
+        <div class="flex flex-wrap gap-1.5 mb-2">
           <button
             v-for="m in COST_METRICS"
             :key="m.key"
@@ -666,6 +767,36 @@ const partner = computed(() => data.value?.partner || {});
             {{ m.label }}
           </button>
         </div>
+        <div v-if="timeline" class="flex flex-wrap gap-1.5 mb-3">
+          <button
+            v-for="v in COST_VIEWS"
+            :key="v.key"
+            type="button"
+            class="cv-chip"
+            :class="costView === v.key ? 'cv-chip-on' : ''"
+            @click="savePrefs({ view: v.key })"
+          >
+            {{ v.label }}
+          </button>
+        </div>
+        <p
+          v-if="timeline"
+          class="text-[11px] text-n-slate-10 mb-4 leading-relaxed"
+        >
+          <template v-if="costView === 'acumulado'">
+            <b class="text-n-slate-11">Cada ponto da linha</b>
+            = tudo que a fonte gastou do começo do período até aquele
+            {{ unitNoun }} ÷ o total de {{ costMetricShort }} que ela trouxe até
+            ali. A bolinha marca {{ unitThe }} que teve resultado; o último
+            ponto é o custo do período inteiro.
+          </template>
+          <template v-else>
+            <b class="text-n-slate-11">Cada ponto da linha</b>
+            = gasto {{ unitOf }} ÷ {{ costMetricShort }} {{ unitOf }}. Onde não
+            houve resultado não existe custo: fica sem bolinha e um pontilhado
+            liga os pontos vizinhos.
+          </template>
+        </p>
         <TimelineChart
           v-if="timeline"
           :labels="tlLabels"
@@ -674,9 +805,16 @@ const partner = computed(() => data.value?.partner || {});
           :left-format="moneyShort"
           :left-width="60"
           :tip="costTip"
-          legend-note="em média"
+          straight
+          bridge-gaps
           empty-text="sem gasto ou sem resultado no período"
         />
+        <p
+          v-if="timeline && costLegendHint"
+          class="text-[10px] text-n-slate-9 mt-1.5 leading-relaxed"
+        >
+          no período: {{ costLegendHint }}
+        </p>
         <p v-else-if="timelineLoading" class="text-[11px] text-n-slate-9">
           calculando…
         </p>
@@ -698,7 +836,7 @@ const partner = computed(() => data.value?.partner || {});
           </div>
           <div>
             <p class="text-[12px] font-semibold text-n-slate-11 mb-2">
-              Quem trouxe os {{ costMetricShort }}
+              Quem trouxe {{ costMetricArticle }} {{ costMetricShort }}
             </p>
             <DonutChart
               :slices="donutCount"
@@ -748,6 +886,7 @@ const partner = computed(() => data.value?.partner || {});
           :left-width="66"
           :right-width="36"
           :tip="revenueTip"
+          straight
           empty-text="sem faturamento no período"
         />
         <p v-else-if="timelineLoading" class="text-[11px] text-n-slate-9">
@@ -1046,39 +1185,36 @@ const partner = computed(() => data.value?.partner || {});
         </div>
         <template v-if="monthly.length">
           <p class="text-[11px] text-n-slate-9 mb-3">como o gasto se formou</p>
-          <AreaChart
-            :series="spendArea"
+          <TimelineChart
             :labels="monthLabels"
-            :height="160"
-            :format="v => money(v, 0)"
-            :axis-format="axisShort"
-            :axis-width="46"
-            unit="gasto"
-            class="mb-5"
+            :lines="spendMonthLines"
+            :height="190"
+            :left-format="moneyAxis"
+            :left-width="66"
+            :tip="spendMonthTip"
+            straight
+            empty-text="sem gasto no período"
+            class="mb-6"
           />
           <p class="text-[11px] text-n-slate-9 mb-3">
-            e quanto custou cada paciente operado
+            e quanto custou cada paciente operado — mês sem paciente operado não
+            tem CAC: fica sem bolinha e um pontilhado liga os meses vizinhos
           </p>
-          <AreaChart
-            :series="cacArea"
+          <TimelineChart
             :labels="monthLabels"
-            :height="140"
-            :format="v => money(v, 0)"
-            :axis-format="axisShort"
-            :axis-width="46"
-            :legend="false"
-            unit="por paciente"
+            :lines="cacMonthLines"
+            :height="170"
+            :left-format="moneyAxis"
+            :left-width="66"
+            :tip="cacMonthTip"
+            straight
+            bridge-gaps
+            empty-text="nenhum paciente operado no período"
           />
-          <div class="flex items-center gap-4 mt-2 text-[11px] text-n-slate-10">
-            <span class="inline-flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-[#bf5af2]" /> CAC de anúncios
-              (anúncios ÷ pacientes dos anúncios)
-            </span>
-            <span class="inline-flex items-center gap-1.5">
-              <span class="w-2 h-2 rounded-full bg-[#ff9f0a]" /> CAC total (tudo
-              ÷ todos os pacientes novos)
-            </span>
-          </div>
+          <p class="text-[10px] text-n-slate-9 mt-1.5 leading-relaxed">
+            CAC de anúncios = anúncios ÷ pacientes dos anúncios · CAC total =
+            tudo (anúncios + WhatsApp + IA) ÷ todos os pacientes novos
+          </p>
         </template>
         <p v-else class="text-[11px] text-n-slate-9">
           escolha <b>90 dias</b>, <b>Este ano</b> ou um período maior que um mês

@@ -7,12 +7,14 @@
 // de R$ + colunas do CRM escolhidas em chips).
 //   labels = rótulo de cada balde (dia, semana ou mês)
 //   bars   = { key, label, color, values } | null
-//   lines  = [{ key, label, color, values: [n | null], dashed? }]
+//   lines  = [{ key, label, color, values: [n | null], dashed?,
+//              dots?: true | [bool por balde], legendValue? }]
 //   tip(i) = { title, rows: [{ color, label, value, sub? }] } — dica própria da
 //            tela (filosofia: mostrar de onde veio o número); sem ela, a dica
 //            lista as séries do ponto.
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
 import { smoothPath } from 'dashboard/helper/cevicoBuckets';
+import { lineSegments, straightPath } from 'dashboard/helper/cevicoLines';
 
 const props = defineProps({
   labels: { type: Array, default: () => [] },
@@ -38,6 +40,12 @@ const props = defineProps({
   // 358c: linhas de REFERÊNCIA horizontais (a nossa média), uma por eixo:
   // [{ axis: 'left' | 'right', value, label, color }]
   refs: { type: Array, default: () => [] },
+  // 398 (19/11): "linhas certinhas" — reta de ponto a ponto, sem curva que
+  // inventa pico entre dois valores
+  straight: { type: Boolean, default: false },
+  // 398: buraco no MEIO da linha (balde sem número) vira um pontilhado fino
+  // ligando os vizinhos, em vez de quebrar a linha em pedaços
+  bridgeGaps: { type: Boolean, default: false },
 });
 
 const wrap = ref(null);
@@ -164,23 +172,23 @@ const barShapes = computed(() =>
 );
 
 // ── linhas: um traço por trecho contínuo (buraco = sem quantidade) ──
+// bolinha de marcação: encolhe quando os baldes ficam apertados (celular)
+const markR = computed(() => Math.min(3.5, Math.max(1.8, slotW.value * 0.26)));
 const shapes = computed(() =>
   lineList.value.map(s => {
-    const segments = [];
-    let current = [];
-    s.values.forEach((v, i) => {
-      if (v === null) {
-        if (current.length) segments.push(current);
-        current = [];
-      } else {
-        current.push([xAt(i), yLine(v)]);
-      }
-    });
-    if (current.length) segments.push(current);
+    const points = s.values.map((v, i) =>
+      v === null ? null : [xAt(i), yLine(v)]
+    );
+    const { runs, bridges, singles } = lineSegments(points);
+    const marked = i => (Array.isArray(s.dots) ? !!s.dots[i] : !!s.dots);
+    const marks = points.filter((p, i) => p && marked(i));
     return {
       ...s,
-      paths: segments.filter(seg => seg.length > 1).map(smoothPath),
-      dots: segments.filter(seg => seg.length === 1).map(seg => seg[0]),
+      paths: runs.map(props.straight ? straightPath : smoothPath),
+      bridges: props.bridgeGaps ? bridges.map(straightPath) : [],
+      // ponto sozinho só ganha a bola grande se não estiver ligado nem marcado
+      dots: props.bridgeGaps || marks.length ? [] : singles,
+      marks: marks.length || !props.bridgeGaps ? marks : singles,
     };
   })
 );
@@ -265,6 +273,7 @@ const tipBox = computed(() => {
   return { i, x, left: x > W.value * 0.58, ...content };
 });
 const fmtLegend = s => {
+  if (s.legendValue !== undefined) return s.legendValue;
   if (s.count === 0) return '—';
   return hasBars.value
     ? lineFormat.value(s.total)
@@ -366,12 +375,31 @@ const empty = computed(
             stroke-linejoin="round"
             :stroke-dasharray="s.dashed ? '5 5' : null"
           />
+          <path
+            v-for="(d, k) in s.bridges"
+            :key="`g${s.key}${k}`"
+            :d="d"
+            fill="none"
+            :stroke="s.color"
+            stroke-width="1.5"
+            stroke-opacity="0.55"
+            stroke-linecap="round"
+            stroke-dasharray="1.5 4.5"
+          />
           <circle
             v-for="(pt, k) in s.dots"
             :key="`o${s.key}${k}`"
             :cx="pt[0]"
             :cy="pt[1]"
             r="4"
+            :fill="s.color"
+          />
+          <circle
+            v-for="(pt, k) in s.marks"
+            :key="`k${s.key}${k}`"
+            :cx="pt[0]"
+            :cy="pt[1]"
+            :r="markR"
             :fill="s.color"
           />
         </g>
@@ -514,7 +542,7 @@ const empty = computed(
           />
         </svg>
         <span>{{ s.label }}</span>
-        <b class="tabular-nums">{{ fmtLegend(s) }}</b>
+        <b class="tabular-nums whitespace-nowrap">{{ fmtLegend(s) }}</b>
       </span>
     </div>
   </div>
