@@ -47,7 +47,9 @@ class Crm::AgentSimulator
   # 🪞 08/11: photo = foto enviada pela tela (ótica): entra como anexo, é lida na hora
   # (formato do rosto) e as ferramentas da ótica rodam DE VERDADE na conversa de teste
   # (a imagem da prova virtual aparece no bate-papo); Agenda e tarefas continuam simuladas.
-  def say!(conversation, text, photo: nil)
+  # model (item 399): motor escolhido NA TELA DO TESTE para esta fala (Claude ou
+  # ChatGPT); vazio = o que o cartão do agente usa. Não grava nada no agente.
+  def say!(conversation, text, photo: nil, model: nil)
     message = conversation.messages.create!(
       account_id: @account.id, inbox_id: conversation.inbox_id, message_type: :incoming,
       content: text.to_s.strip, sender: conversation.contact
@@ -59,7 +61,7 @@ class Crm::AgentSimulator
     # simulador é sempre SOMBRA: as ferramentas (rodada 192) só simulam, nada escreve na Agenda
     result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: @agent_key, live: false, simulation: true,
                                             script_version: self.class.script_version(conversation),
-                                            otica_live: Otica::VirtualTryOn.otica?(@account)).call
+                                            otica_live: Otica::VirtualTryOn.otica?(@account), model_override: model).call
     return { error: result[:error] } if result[:error]
 
     Crm::ResponderAgentJob.write_shadow_note!(conversation, @agent_key, result, message.id)
@@ -69,7 +71,7 @@ class Crm::AgentSimulator
   # a conversa como balões: paciente (incoming) e agente (notas de sombra)
   # 🪞 08/11: as mensagens que as ferramentas da ótica mandam na conversa de teste (fotos da
   # prova virtual, imagens de lente, "me dá um instante") entram como balões 'media' do agente
-  def transcript(conversation)
+  def transcript(conversation) # rubocop:disable Metrics/AbcSize
     conversation.messages.where(message_type: %i[incoming activity outgoing]).includes(:attachments).reorder(:id).filter_map do |m|
       if m.incoming?
         { role: 'patient', text: m.content.to_s, at: m.created_at.iso8601, id: m.id, images: image_urls(m) }
@@ -77,7 +79,8 @@ class Crm::AgentSimulator
         { role: 'media', text: m.content.to_s, at: m.created_at.iso8601, id: m.id, images: image_urls(m) }
       elsif (shadow = m.additional_attributes&.[]('cevico_ia_shadow'))
         { role: 'agent', id: m.id, at: m.created_at.iso8601, messages: Array(shadow['mensagens']),
-          meta: shadow.slice('etapa', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura', 'acoes') }
+          meta: shadow.slice('etapa', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura', 'acoes',
+                             'modelo', 'reserva') }
       end
     end
   end

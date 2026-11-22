@@ -27,6 +27,7 @@ import GuidancesPanel from './GuidancesPanel.vue';
 import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
 import NpsSurveyCard from './NpsSurveyCard.vue';
 import FollowupSmartCard from './FollowupSmartCard.vue';
+import AgentEngineExperiment from './AgentEngineExperiment.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import {
   PERIOD_PRESETS,
@@ -2746,6 +2747,18 @@ const MODEL_SHORT = {
   'claude-sonnet-5': 'Sonnet 5',
   'claude-haiku-4-5': 'Haiku 4.5',
 };
+// 🧠 item 399: ChatGPT (OpenAI) como motor dos atendentes do WhatsApp. A lista
+// de modelos e quem pode usar vêm do servidor (Crm::LlmEngines); a chave fica
+// em CRM → Integrações → ChatGPT.
+const openaiModels = computed(() => settings.value?.ai?.openai_models || []);
+const openaiKeySet = computed(
+  () => settings.value?.ai?.openai_key_set === true
+);
+const openaiAllowed = key =>
+  (settings.value?.ai?.openai_agents || []).includes(key);
+const isOpenaiModel = m => openaiModels.value.some(o => o.value === m);
+const modelShort = m =>
+  MODEL_SHORT[m] || openaiModels.value.find(o => o.value === m)?.label || m;
 const EFFORT_SHORT = {
   low: 'baixo',
   medium: 'médio',
@@ -2778,7 +2791,7 @@ const resolvedModel = (key, agent) => {
     recommendedFor(key).recommended_model ||
     settings.value?.ai?.model ||
     'claude-opus-4-8';
-  return MODEL_SHORT[m] || m;
+  return modelShort(m);
 };
 const resolvedEffort = (key, agent) => {
   const m =
@@ -4825,7 +4838,40 @@ onUnmounted(() => {
                           >
                             {{ m.label }}
                           </option>
+                          <!-- 🧠 item 399: ChatGPT só nos atendentes do WhatsApp -->
+                          <optgroup
+                            v-if="openaiAllowed(key) && openaiModels.length"
+                            :label="
+                              openaiKeySet
+                                ? 'ChatGPT (OpenAI) — experimento'
+                                : 'ChatGPT (OpenAI) — falta a chave em Integrações'
+                            "
+                          >
+                            <option
+                              v-for="m in openaiModels"
+                              :key="m.value"
+                              :value="m.value"
+                              :disabled="
+                                !openaiKeySet && agent.model !== m.value
+                              "
+                            >
+                              {{ m.label }} — {{ m.hint }}
+                            </option>
+                          </optgroup>
                         </select>
+                        <p
+                          v-if="isOpenaiModel(agent.model)"
+                          class="text-[11px] mt-1.5"
+                          :class="
+                            openaiKeySet ? 'text-n-slate-10' : 'text-red-500'
+                          "
+                        >
+                          {{
+                            openaiKeySet
+                              ? 'Motor ChatGPT: mesmo Roteiro, ferramentas e travas. Se a OpenAI falhar numa conversa real, o Claude responde no lugar e fica anotado.'
+                              : 'Falta a chave da OpenAI: CRM → Integrações → ChatGPT.'
+                          }}
+                        </p>
                       </div>
                       <div>
                         <label
@@ -4876,6 +4922,20 @@ onUnmounted(() => {
                         {{ AGENT_META[key].suggestion }}
                       </span>
                     </div>
+
+                    <!-- 🧪 item 400: teste A/B de motor (variante A × B por caixa ou sorteio) -->
+                    <AgentEngineExperiment
+                      v-if="openaiAllowed(key)"
+                      :agent-key="key"
+                      :inboxes="
+                        whatsappInboxes.filter(ib =>
+                          (agent.inbox_ids || []).includes(ib.id)
+                        )
+                      "
+                      :claude-models="AGENT_MODELS"
+                      :openai-models="openaiModels"
+                      :openai-key-set="openaiKeySet"
+                    />
 
                     <!-- 🗣️ Config específica do Atendente de Agendamento (rodada 188): sombra × ao vivo, caixas, colunas -->
                     <div

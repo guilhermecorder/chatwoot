@@ -155,6 +155,10 @@ namespace :crm do
     # 📋 rodada 195: Agente de Ligação — "Ver quem ligaria hoje" (seleção em sombra, nada é discado)
     post :voice_shadow_run
     post :test_gemini
+    post :test_openai # 🧠 item 399: chave do ChatGPT (motor dos atendentes)
+    # 🧪 item 400: teste A/B de motor do atendente (config + placar)
+    get :ai_experiment
+    post :save_ai_experiment
     # Estúdio do Copywriter: conteúdo multi-formato (carrossel, reels...)
     post :copywriter_content
     post :update_google_ads

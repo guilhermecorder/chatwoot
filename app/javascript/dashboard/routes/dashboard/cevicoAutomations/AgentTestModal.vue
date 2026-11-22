@@ -8,6 +8,7 @@ import { ref, computed, nextTick, onMounted } from 'vue';
 import { useAlert } from 'dashboard/composables';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
+import { useMapGetter } from 'dashboard/composables/store';
 import CrmAPI from 'dashboard/api/crm';
 import GuidanceModal from './GuidanceModal.vue';
 
@@ -44,6 +45,31 @@ const SCRIPT_VERSIONS = [
   { key: 'v2', label: 'Roteiro 2 · Otimizado pela análise', hint: 'análise do banco de 22/09 + regras de 22/09; só existe aqui no teste' },
 ];
 const OBJECTIVE_PLACEHOLDER = 'orçamento enviado, sem resposta há 2 dias';
+
+// 🧠 item 399: MOTOR DESTE TESTE — Claude ou ChatGPT, só aqui. '' = o modelo
+// que o cartão do agente usa. Vale para a PRÓXIMA resposta: dá para trocar no
+// meio da mesma conversa e comparar. Nada é gravado no agente.
+const settings = useMapGetter('crm/getSettings');
+const CLAUDE_MODELS = [
+  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
+];
+const openaiModels = computed(() =>
+  (settings.value?.ai?.openai_agents || []).includes(props.agentKey)
+    ? settings.value?.ai?.openai_models || []
+    : []
+);
+const openaiKeySet = computed(
+  () => settings.value?.ai?.openai_key_set === true
+);
+const engineModel = ref('');
+const modelLabel = id =>
+  CLAUDE_MODELS.find(m => m.value === id)?.label ||
+  (settings.value?.ai?.openai_models || []).find(m => m.value === id)?.label ||
+  id;
+const isOpenaiModel = id =>
+  (settings.value?.ai?.openai_models || []).some(m => m.value === id);
 
 const pal = useCevicoPalette({
   scope: 'report:agentes',
@@ -196,6 +222,7 @@ const send = async text => {
       agent: props.agentKey,
       conversation_id: conversationId.value,
       script_version: scriptVersion.value,
+      model: engineModel.value || undefined,
       text: content,
     };
     if (photo) {
@@ -278,14 +305,17 @@ const guide = turn => {
       @click.self="emit('close')"
     >
       <div class="cv-modal w-full max-w-3xl max-h-[92vh] flex flex-col">
-        <div class="cv-modal-head flex items-center gap-3">
+        <!-- item 399: no celular o seletor de Roteiro e os botões descem para a linha de baixo (antes espremiam o título numa coluna de uma palavra) -->
+        <div
+          class="cv-modal-head flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2"
+        >
           <span class="cv-icon cv-icon-lg"><span
               :class="
                 isVoice ? 'i-lucide-phone-call' : 'i-lucide-flask-conical'
               "
               class="text-lg"
           /></span>
-          <div class="min-w-0 flex-1">
+          <div class="min-w-0 flex-1 basis-48 sm:basis-0">
             <p class="text-base sm:text-lg font-bold leading-tight">
               {{
                 isVoice
@@ -307,7 +337,7 @@ const guide = turn => {
           <!-- 🧪 22/09: Roteiro atual × v2 paralelo (trocar recomeça a conversa) -->
           <div
             v-if="!isVoice"
-            class="cv-seg cv-seg-sm flex-shrink-0"
+            class="cv-seg cv-seg-sm flex-shrink-0 max-w-full overflow-x-auto"
             title="Cada conversa de teste fica presa a uma versão do Roteiro. Trocar começa uma conversa nova."
           >
             <button
@@ -362,6 +392,52 @@ const guide = turn => {
             <span class="i-lucide-phone-outgoing text-xs" /> Ligar de novo com
             este motivo
           </button>
+        </div>
+
+        <!-- 🧠 item 399: motor deste teste (Claude × ChatGPT) -->
+        <div
+          class="px-4 sm:px-6 py-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b"
+          style="border-color: rgb(var(--cv-rgb) / 0.15)"
+        >
+          <label class="flex items-center gap-2 min-w-0">
+            <span class="cv-label flex-shrink-0">Motor deste teste</span>
+            <select
+              v-model="engineModel"
+              class="cv-input text-sm min-w-0"
+              :disabled="isSending"
+            >
+              <option value="">O do cartão do agente</option>
+              <optgroup label="Claude (Anthropic)">
+                <option
+                  v-for="m in CLAUDE_MODELS"
+                  :key="m.value"
+                  :value="m.value"
+                >
+                  {{ m.label }}
+                </option>
+              </optgroup>
+              <optgroup
+                v-if="openaiModels.length"
+                :label="
+                  openaiKeySet
+                    ? 'ChatGPT (OpenAI)'
+                    : 'ChatGPT (OpenAI) — falta a chave em Integrações'
+                "
+              >
+                <option
+                  v-for="m in openaiModels"
+                  :key="m.value"
+                  :value="m.value"
+                  :disabled="!openaiKeySet"
+                >
+                  {{ m.label }} — {{ m.hint }}
+                </option>
+              </optgroup>
+            </select>
+          </label>
+          <p class="text-[11px] text-n-slate-10 min-w-0 flex-1">
+            Vale só aqui, já na próxima resposta. O agente de verdade não muda.
+          </p>
         </div>
 
         <!-- corpo do bate-papo -->
@@ -425,6 +501,14 @@ const guide = turn => {
                 <span class="cv-chip">{{
                   STAGE_LABEL[t.meta?.etapa] || t.meta?.etapa || '—'
                 }}</span>
+                <span
+                  v-if="t.meta?.modelo"
+                  class="cv-chip"
+                  :class="isOpenaiModel(t.meta.modelo) ? 'cv-green' : ''"
+                  title="Modelo de IA que escreveu esta resposta"
+                >
+                  🧠 {{ modelLabel(t.meta.modelo) }}
+                </span>
                 <span
                   v-if="t.meta?.agendar"
                   class="cv-chip"

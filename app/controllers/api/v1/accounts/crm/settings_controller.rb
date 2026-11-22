@@ -23,7 +23,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # item 239: "quantos indicadores eu quiser" no Meu Painel (antes: 40 no total)
   KPI_LAYOUT_MAX = 200
   # Rodada 2 (achado #338): chaves que o rascunho de um agente nunca guarda
-  DRAFT_SECRET_KEYS = %w[page_access_token api_key gemini_api_key access_token api_secret].freeze
+  DRAFT_SECRET_KEYS = %w[page_access_token api_key gemini_api_key openai_api_key access_token api_secret].freeze
   # Rodada 2 (achados #295/#337): o que sai (ou fica) no GET settings da equipe sem a área "settings"
   TEAM_HIDDEN_KEYS = %i[agent_permissions price_table scheduler_log team_roles
                         appointment_reminders_state nps_survey_state
@@ -35,7 +35,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   TEAM_VOICE_KEYS = %i[enabled configured permission_template handoff_inbox_id whatsapp_number persona_name].freeze
 
   ADMIN_SETTINGS_ACTIONS = %i[
-    update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini
+    update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini test_openai
+    ai_experiment save_ai_experiment
     update_google_ads test_google_ads test_search_console update_sheets test_sheets
     prepare_google_ads test_google_ads_api
     update_oftalmofacil test_oftalmofacil sync_oftalmofacil
@@ -629,6 +630,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       live_error = responder_live_error(cfg['agents'] || {}, permitted)
       return render json: { error: live_error }, status: :unprocessable_entity if live_error
 
+      # 🧠 item 399: modelo do ChatGPT só nos atendentes do WhatsApp e só com a chave salva
+      openai_error = openai_model_error(cfg, permitted)
+      return render json: { error: openai_error }, status: :unprocessable_entity if openai_error
+
       # 🎙️ (195) Agente de Ligação ao vivo: exige colunas vigiadas + ElevenLabs configurada
       voice_error = voice_live_error(cfg, permitted)
       return render json: { error: voice_error }, status: :unprocessable_entity if voice_error
@@ -670,6 +675,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       fresh['api_key'] = params[:api_key] if params[:api_key].present?
       # Gemini (Google): reservada para geração de IMAGENS das Páginas
       fresh['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
+      # 🧠 item 399: ChatGPT (OpenAI) como motor dos atendentes do WhatsApp
+      fresh[Crm::LlmEngines::OPENAI_KEY] = params[:openai_api_key].to_s.strip if params[:openai_api_key].present?
       fresh['model']  = params[:model]  if params.key?(:model)
       fresh['effort'] = params[:effort] if params.key?(:effort)
       if permitted
@@ -744,7 +751,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     # 🪞 08/11: foto junto da fala (ótica: prova virtual no simulador)
     photo = params[:photo].respond_to?(:read) ? params[:photo] : nil
     if params[:text].present? || photo
-      outcome = sim.say!(conversation, params[:text], photo: photo)
+      # 🧠 item 399: `model` = motor escolhido na tela do teste para esta fala (não muda o agente)
+      outcome = sim.say!(conversation, params[:text], photo: photo, model: params[:model])
       error = outcome[:error]
     end
     render json: { agent: agent_key, conversation_id: conversation.id, display_id: conversation.display_id,
@@ -802,6 +810,72 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: { success: false, message: "Modelo #{cfg['model']} indisponível para esta chave." }
   rescue StandardError => e
     render json: { success: false, message: "Erro de conexão: #{e.message}" }
+  end
+
+  # 🧠 item 399: testa a chave da OpenAI de verdade — lista os modelos que ela
+  # enxerga e avisa se algum dos oferecidos na tela não está liberado para ela
+  def test_openai
+    key = (crm_settings.ai_config || {})[Crm::LlmEngines::OPENAI_KEY]
+    return render json: { success: false, message: 'Configure a chave da OpenAI primeiro.' } if key.blank?
+
+    available = Crm::LlmEngines::OpenaiResponses.model_ids(key)
+    catalog = Crm::LlmEngines::OPENAI_MODELS
+    missing = catalog.keys - available
+    if missing.empty?
+      render json: { success: true, message: 'ChatGPT conectado! Chave válida e todos os modelos liberados. ✓' }
+    elsif missing.size == catalog.size
+      render json: { success: false, message: 'Chave válida, mas nenhum dos modelos do sistema está liberado para ela.' }
+    else
+      names = missing.map { |id| catalog[id][:label] }.join(', ')
+      render json: { success: true, message: "ChatGPT conectado! Chave válida. Sem acesso a: #{names}." }
+    end
+  rescue Crm::LlmEngines::OpenaiResponses::Error => e
+    render json: { success: false, message: e.message }
+  rescue StandardError => e
+    render json: { success: false, message: "Erro de conexão: #{e.message}" }
+  end
+
+  # 🧪 item 400: TESTE A/B DE MOTOR do atendente (Crm::EngineExperiment) —
+  # devolve a config (variante B + modo de cada caixa) e o placar
+  def ai_experiment
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    key = experiment_agent_key
+    return render json: { error: 'O teste de motor só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+
+    render json: experiment_json(key)
+  end
+
+  # liga/desliga o teste, troca a variante B, o modo de cada caixa e zera o
+  # placar (reset). Trocar o modelo da variante B também começa um teste novo:
+  # o placar antigo comparava outra coisa.
+  def save_ai_experiment # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    key = experiment_agent_key
+    return render json: { error: 'O teste de motor só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+
+    agent = (crm_settings.ai_config || {}).dig('agents', key) || {}
+    current = agent[Crm::EngineExperiment::CONFIG_KEY] || {}
+    enabled = ActiveModel::Type::Boolean.new.cast(params[:enabled]) == true
+    model_b = params[:model_b].to_s.presence || current['model_b'].to_s
+    inboxes = experiment_inboxes(agent)
+    error = experiment_error(key, agent, enabled, model_b, inboxes)
+    return render json: { error: error }, status: :unprocessable_entity if error
+
+    restart = ActiveModel::Type::Boolean.new.cast(params[:reset]) == true || current['started_at'].blank? || current['model_b'] != model_b
+    Cevico::SettingMerge.merge!(crm_settings, :ai_config) do |fresh|
+      fresh['agents'] ||= {}
+      fresh['agents'][key] = (fresh['agents'][key] || {}).merge(
+        Crm::EngineExperiment::CONFIG_KEY => {
+          'enabled' => enabled, 'model_b' => model_b.presence, 'inboxes' => inboxes,
+          'started_at' => restart ? Time.current.iso8601 : current['started_at'],
+          'updated_by' => Current.user&.name
+        }.compact
+      )
+      fresh
+    end
+    render json: experiment_json(key)
   end
 
   # testa a chave do Gemini (Google) de verdade — lista os modelos da conta
@@ -2524,6 +2598,71 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     nil
   end
 
+  # ── 🧪 item 400: teste A/B de motor ──────────────────────────────────────
+  def experiment_agent_key
+    key = params[:agent].to_s
+    Crm::LlmEngines.openai_agent?(key) ? key : nil
+  end
+
+  # o modelo que a variante A usa de verdade (o do cartão; em branco = recomendado)
+  def experiment_model_a(key, agent)
+    agent['model'].presence || Crm::AiAgentConfig::RECOMMENDED.dig(key, 'model') || Crm::AiAgentConfig::DEFAULT_MODEL
+  end
+
+  # só as caixas em que o agente LÊ, e só os modos diferentes do padrão ('a')
+  def experiment_inboxes(agent)
+    raw = params[:inboxes].respond_to?(:to_unsafe_h) ? params[:inboxes].to_unsafe_h : {}
+    allowed = Array(agent['inbox_ids']).map(&:to_s)
+    raw.to_h { |id, mode| [id.to_s, mode.to_s] }.select { |id, mode| allowed.include?(id) && %w[b split].include?(mode) }
+  end
+
+  def experiment_error(key, agent, enabled, model_b, inboxes) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return nil if !enabled && model_b.blank?
+
+    allowed = Crm::AiAgentConfig::MODELS + Crm::LlmEngines::OPENAI_MODELS.keys
+    return 'Escolha o modelo da variante B.' unless allowed.include?(model_b)
+    return 'As duas variantes estão com o mesmo modelo: escolha outro para a B.' if model_b == experiment_model_a(key, agent)
+    if Crm::LlmEngines.openai?(model_b) && (crm_settings.ai_config || {})[Crm::LlmEngines::OPENAI_KEY].blank?
+      return 'Para usar um modelo do ChatGPT, salve antes a chave da OpenAI em CRM → Integrações → ChatGPT.'
+    end
+    return 'Escolha pelo menos uma caixa para a variante B ou para o sorteio.' if enabled && inboxes.empty?
+
+    nil
+  end
+
+  def experiment_json(key)
+    agent = (crm_settings.reload.ai_config || {}).dig('agents', key) || {}
+    config = agent[Crm::EngineExperiment::CONFIG_KEY] || {}
+    {
+      agent: key, model_a: experiment_model_a(key, agent),
+      config: { enabled: config['enabled'] == true, model_b: config['model_b'], inboxes: config['inboxes'] || {},
+                started_at: config['started_at'] },
+      report: Crm::EngineExperiment.report(Current.account, key),
+      usd_brl: experiment_usd_rate
+    }
+  end
+
+  # cotação do dólar para mostrar o custo em reais; sem cotação, a tela mostra só US$
+  def experiment_usd_rate
+    known = Crm::UsdRateService.last_known
+    known.is_a?(Hash) ? (known[:rate] || known['rate']).to_f.nonzero? : nil
+  rescue StandardError
+    nil
+  end
+
+  # 🧠 item 399: quem escolhe um modelo "gpt-…" precisa poder usar (atendente do
+  # WhatsApp) e ter a chave da OpenAI salva — senão o agente ficaria mudo
+  def openai_model_error(cfg, permitted)
+    permitted.each do |key, agent|
+      next unless agent.is_a?(Hash) && Crm::LlmEngines.openai?(agent['model'])
+      return 'O ChatGPT por enquanto só vale para os atendentes do WhatsApp.' unless Crm::LlmEngines.openai_agent?(key)
+
+      has_key = cfg[Crm::LlmEngines::OPENAI_KEY].present? || params[:openai_api_key].present?
+      return 'Para usar um modelo do ChatGPT, salve antes a chave da OpenAI em CRM → Integrações → ChatGPT.' unless has_key
+    end
+    nil
+  end
+
   def responder_stage_conflict(existing, permitted)
     keys = CrmListener::RESPONDER_KEYS
     merged = keys.index_with { |k| (existing[k] || {}).merge(permitted[k] || {}) }
@@ -2616,6 +2755,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     {
       api_key_set: cfg['api_key'].present?,
       gemini_key_set: cfg['gemini_api_key'].present?,
+      # 🧠 item 399: ChatGPT como motor dos atendentes (chave nunca volta; só o "tem/não tem")
+      openai_key_set: cfg[Crm::LlmEngines::OPENAI_KEY].present?,
+      openai_models: Crm::LlmEngines.openai_catalog,
+      openai_agents: Crm::LlmEngines::OPENAI_AGENT_KEYS,
       model: cfg['model'].presence || Crm::AiAgentConfig::DEFAULT_MODEL,
       effort: cfg['effort'].presence || 'high',
       configured: cfg['api_key'].present?,

@@ -106,6 +106,43 @@ const testGeminiConnection = async () => {
   }
 };
 
+// ── ChatGPT (OpenAI) — item 399: motor alternativo dos atendentes do WhatsApp ──
+const openai = ref({ api_key: '' });
+const isOpenaiSaving = ref(false);
+const isOpenaiTesting = ref(false);
+const openaiTestResult = ref(null);
+
+const saveOpenai = async () => {
+  if (!openai.value.api_key.trim()) {
+    useAlert('Cole a chave da OpenAI para salvar.');
+    return;
+  }
+  isOpenaiSaving.value = true;
+  try {
+    await CrmAPI.updateAi({ openai_api_key: openai.value.api_key.trim() });
+    openai.value.api_key = '';
+    await store.dispatch('crm/fetchSettings');
+    useAlert('Chave da OpenAI salva!');
+  } catch (error) {
+    useAlert(error?.response?.data?.error || 'Erro ao salvar a chave da OpenAI.');
+  } finally {
+    isOpenaiSaving.value = false;
+  }
+};
+
+const testOpenaiConnection = async () => {
+  isOpenaiTesting.value = true;
+  openaiTestResult.value = null;
+  try {
+    const { data } = await CrmAPI.testOpenai();
+    openaiTestResult.value = data;
+  } catch {
+    openaiTestResult.value = { success: false, message: 'Erro ao testar a conexão.' };
+  } finally {
+    isOpenaiTesting.value = false;
+  }
+};
+
 const saveAi = async () => {
   isAiSaving.value = true;
   try {
@@ -1262,6 +1299,70 @@ const fetchWorkflows = async () => {
             />
             {{ aiTestResult.message }}
           </div>
+        </div>
+
+        <!-- ══ ChatGPT (OpenAI) — item 399: motor alternativo dos atendentes ══ -->
+        <div v-if="showSection('openai')" :class="props.only ? '' : 'border-t border-n-weak pt-5'">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: #10A37F">
+              <span class="i-lucide-bot text-white text-sm" />
+            </span>
+            <p class="text-sm font-semibold text-n-slate-12">ChatGPT — OpenAI</p>
+            <span
+              class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+              :class="aiStatus.openai_key_set ? 'bg-green-500/15 text-green-600' : 'bg-n-alpha-2 text-n-slate-10'"
+            >
+              ● {{ aiStatus.openai_key_set ? 'Conectado' : 'Não configurado' }}
+            </span>
+          </div>
+          <p class="text-xs text-n-slate-10 mb-3">
+            Motor alternativo dos ATENDENTES do WhatsApp (os que conversam com o cliente),
+            para comparar com o Claude. Mesmo Roteiro, mesmas ferramentas e mesmas travas: só muda quem pensa.
+            A chave sai de
+            <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="text-n-brand hover:underline">platform.openai.com</a>
+            e é PRÉ-PAGA à parte (Billing → créditos): a assinatura do ChatGPT Plus não vale aqui.
+          </p>
+          <div>
+            <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
+              Chave da API (OpenAI)
+              <span v-if="aiStatus.openai_key_set" class="text-green-600 font-normal">(já configurada)</span>
+            </label>
+            <input
+              v-model="openai.api_key"
+              type="password"
+              autocomplete="off"
+              class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12 font-mono"
+              :placeholder="aiStatus.openai_key_set ? 'Digite para substituir' : 'sk-...'"
+            />
+          </div>
+          <div class="flex items-center gap-2 mt-3 flex-wrap">
+            <button
+              class="h-9 px-4 rounded-lg bg-n-brand text-white text-sm font-medium hover:bg-n-brand/90 disabled:opacity-50"
+              :disabled="isOpenaiSaving"
+              @click="saveOpenai"
+            >
+              {{ isOpenaiSaving ? 'Salvando…' : 'Salvar chave' }}
+            </button>
+            <button
+              class="h-9 px-4 rounded-lg border border-n-weak text-sm text-n-slate-11 hover:bg-n-alpha-1 disabled:opacity-50"
+              :disabled="isOpenaiTesting || !aiStatus.openai_key_set"
+              @click="testOpenaiConnection"
+            >
+              {{ isOpenaiTesting ? 'Testando…' : 'Testar conexão' }}
+            </button>
+            <span
+              v-if="openaiTestResult"
+              class="text-xs font-medium"
+              :class="openaiTestResult.success ? 'text-green-600' : 'text-red-500'"
+            >
+              {{ openaiTestResult.message }}
+            </span>
+          </div>
+          <p class="text-[11px] text-n-slate-9 mt-2">
+            Depois de salvar: Automações → Agentes de IA → cartão do atendente → "Modelo de IA" → grupo ChatGPT.
+            Para só experimentar sem mudar o agente, use o 🧪 Testar agente e troque o motor lá.
+            A conversa não fica guardada na OpenAI.
+          </p>
         </div>
 
         <!-- ══ Google Sheets (planilha de cirurgias) ══ -->

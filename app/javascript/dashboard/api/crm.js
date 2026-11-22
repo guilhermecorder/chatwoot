@@ -1266,6 +1266,22 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/test_gemini`);
   }
 
+  // 🧠 item 399: chave do ChatGPT (OpenAI), motor dos atendentes do WhatsApp
+  testOpenai() {
+    return axios.post(`${this.url}/settings/test_openai`);
+  }
+
+  // 🧪 item 400: teste A/B de motor do atendente (variante A × B por caixa ou sorteio)
+  getAiExperiment(agent) {
+    return axios.get(`${this.url}/settings/ai_experiment`, {
+      params: { agent },
+    });
+  }
+
+  saveAiExperiment(payload) {
+    return axios.post(`${this.url}/settings/save_ai_experiment`, payload);
+  }
+
   // popup de prioridade máxima do Radar + pausa manual (com registro)
   radarPing() {
     return axios.get(`${this.url}/home/radar_ping`);

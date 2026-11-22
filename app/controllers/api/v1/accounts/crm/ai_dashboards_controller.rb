@@ -147,7 +147,11 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
 
   # mesma resolução do runtime: escolha do agente > recomendado > global > padrão
   def resolved_model(key)
-    m = (ai_config['agents'] || {}).dig(key, 'model').presence ||
+    chosen = (ai_config['agents'] || {}).dig(key, 'model').presence
+    # 🧠 item 399: atendente do WhatsApp rodando no ChatGPT
+    return chosen if Crm::LlmEngines.openai_agent?(key) && Crm::LlmEngines.openai?(chosen)
+
+    m = chosen ||
         Crm::AiAgentConfig::RECOMMENDED.dig(key, 'model') ||
         ai_config['model'].presence
     Crm::AiAgentConfig::MODELS.include?(m) ? m : Crm::AiAgentConfig::DEFAULT_MODEL

@@ -90,8 +90,11 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   ANSWER_TOOL_NAME = 'responder'.freeze
   REPEATED_CALL_TEXT = 'Esta ferramenta JÁ foi chamada com os mesmos dados nesta resposta: nada foi feito de novo. ' \
                        'Use o resultado anterior e responda pela ferramenta responder.'.freeze
+  # item 399 (ótica): no ChatGPT a resposta final sai no formato, sem a ferramenta responder
+  OPENAI_ANSWER_HINT = /responda pela ferramenta responder/i
 
-  attr_reader :agent_key, :script_version
+  # spent_usd (item 400): quanto ESTA resposta custou, somando todas as chamadas
+  attr_reader :agent_key, :script_version, :spent_usd
 
   # live: false (sombra/simulador) = nenhuma ferramenta escreve na Agenda
   # simulation: true = 🧪 Testar agente (caixa interna, nada sai): roda MESMO com o
@@ -101,13 +104,18 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # 🪞 08/11: otica_live = no SIMULADOR (Testar agente) as ferramentas da ótica rodam de
   # verdade (foto → imagem no Gemini, lentes com imagem, conferência de desconto) dentro
   # da conversa de teste; a Agenda continua só simulando e nenhuma tarefa nasce
-  def initialize(conversation:, agent_key:, live: false, simulation: false, script_version: nil, otica_live: false)
+  # model_override (item 399): SÓ no 🧪 Testar agente — experimenta outro motor
+  # (Claude ou ChatGPT) na conversa de teste sem mexer no que o agente usa de verdade
+  def initialize(conversation:, agent_key:, live: false, simulation: false, script_version: nil, # rubocop:disable Metrics/ParameterLists
+                 otica_live: false, model_override: nil)
     @conversation = conversation
     @account = conversation.account
+    @spent_usd = 0.0
     @agent_key = agent_key.to_s
     @live = live == true
     @simulation = simulation == true
     @otica_live = otica_live == true
+    @model_override = model_override.to_s if @simulation && engine_models.include?(model_override.to_s)
     @script_version = Crm::CevicoScript.normalize_version(
       script_version.presence || conversation.additional_attributes&.[]('cevico_simulado_script')
     )
@@ -115,17 +123,18 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
   def call # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return { error: 'Agente desligado.' } if agent_paused? && !@simulation
-    return { error: 'Configure a chave da API em Integrações → Claude.' } if api_key.blank?
+    return { error: missing_key_error } if engine_api_key.blank?
 
     transcript = build_transcript
     return { error: 'Conversa vazia.' } if transcript.blank?
 
-    params = { model: model, max_tokens: 2048, system_: cached_system,
-               messages: [{ role: 'user', content: user_content(transcript) }] }
-    result = tools ? answer_with_tools(params) : answer_in_format(params)
+    # 🧠 item 399: o MODELO escolhido decide o motor (gpt-… = OpenAI; o resto = Claude)
+    result = openai_engine? ? openai_reply_or_fallback(transcript) : anthropic_reply(transcript)
     return result if result[:error]
 
     result[:acoes] = tools ? tools.acoes : []
+    result[:modelo] = model
+    result[:reserva] = @fallback_reason if @fallback_reason
     result
   rescue JSON::ParserError
     { error: 'Resposta da IA fora do formato.' }
@@ -159,6 +168,21 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     @otica
   end
 
+  # quais modelos este agente pode usar (Claude sempre; ChatGPT só os atendentes do WhatsApp)
+  def engine_models
+    MODELS + (Crm::LlmEngines.openai_agent?(@agent_key) ? Crm::LlmEngines::OPENAI_MODELS.keys : [])
+  end
+
+  # 🧪 item 400: variante do teste A/B de motor desta conversa ('a' | 'b' | nil).
+  # Só conversa REAL entra (o 🧪 Testar agente tem o seletor de motor dele). Se a
+  # variante B é do ChatGPT e a chave da OpenAI sumiu, a conversa fica FORA do
+  # teste (segue no modelo do cartão e não suja o placar).
+  def experiment_arm
+    return @experiment_arm if defined?(@experiment_arm)
+
+    @experiment_arm = resolve_experiment_arm
+  end
+
   # o prompt completo, visível na tela do agente ("o que ele lê")
   def system_prompt
     return voice_system_prompt if voice?
@@ -177,6 +201,153 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # Crm::ResponderAgentJob::LOCK_TTL (conta feita em cima desses números).
   def client
     @client ||= Anthropic::Client.new(api_key: api_key, timeout: 90, max_retries: 1)
+  end
+
+  # ── MOTOR CLAUDE (Anthropic) — o de sempre ───────────────────────────────
+  # 🧰 ótica (22/11): com ferramentas, a resposta chega pela ferramenta `responder`
+  # (answer_with_tools); sem ferramentas, direto no formato (answer_in_format)
+  def anthropic_reply(transcript)
+    params = { model: model, max_tokens: 2048, system_: cached_system,
+               messages: [{ role: 'user', content: user_content(transcript) }] }
+    tools ? answer_with_tools(params) : answer_in_format(params)
+  end
+
+  # ── MOTOR CHATGPT (OpenAI, item 399) ─────────────────────────────────────
+  # Mesmo prompt, mesmo contexto, mesmas ferramentas e mesmo formato de saída
+  # do Claude: só muda quem pensa. Ordem da entrada = prompt → conversa →
+  # contexto vivo (o que repete fica na frente e a OpenAI guarda em cache).
+  def openai_engine?
+    @fallback_model.nil? && Crm::LlmEngines.openai?(model)
+  end
+
+  def openai_api_key
+    ai_config[Crm::LlmEngines::OPENAI_KEY].presence
+  end
+
+  def engine_api_key
+    openai_engine? ? openai_api_key : api_key
+  end
+
+  def missing_key_error
+    return 'Configure a chave da OpenAI em Integrações → ChatGPT.' if openai_engine?
+
+    'Configure a chave da API em Integrações → Claude.'
+  end
+
+  # 🛟 REDE DE SEGURANÇA: paciente não fica sem resposta por causa do experimento.
+  # Se a OpenAI falhar (fora do ar, sem créditos, chave revogada) numa conversa
+  # REAL, o Claude recomendado do agente responde aquela mensagem e fica anotado
+  # (result[:reserva]). Só vale se nenhuma ferramenta rodou ainda (não repete
+  # remarcação/cancelamento) e nunca no 🧪 teste (lá o erro tem que aparecer).
+  def openai_reply_or_fallback(transcript) # rubocop:disable Metrics/CyclomaticComplexity
+    openai_reply(transcript)
+  rescue Crm::LlmEngines::OpenaiResponses::Error => e
+    raise if @simulation || api_key.blank? || tools&.acoes&.any?
+
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] ChatGPT falhou (#{e.message}) — o Claude responde no lugar"
+    @fallback_reason = "ChatGPT falhou (#{e.message.truncate(80)}); o Claude respondeu no lugar"
+    @fallback_model = recommended['model'] || DEFAULT_MODEL
+    anthropic_reply(transcript)
+  end
+
+  # devolve o Hash da resposta, como o motor Claude. Na ótica o esquema leva as
+  # unidades da conta (output_schema) e chamada repetida não roda de novo (22/11)
+  def openai_reply(transcript) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+    engine = Crm::LlmEngines::OpenaiResponses.new(api_key: openai_api_key, model: model, effort: effort)
+    definitions = tools ? Crm::LlmEngines::OpenaiResponses.tool_definitions(tools.definitions) : nil
+    input = [
+      { role: 'developer', content: system_prompt },
+      { role: 'user', content: user_content(transcript).map { |block| { type: 'input_text', text: block[:text] } } }
+    ]
+    seen = Set.new
+
+    reply = nil
+    (MAX_TOOL_ROUNDS + 1).times do |round|
+      reply = engine.create(input: input, schema: output_schema, schema_name: 'resposta_do_atendente',
+                            tools: definitions, allow_tools: round < MAX_TOOL_ROUNDS)
+      record_openai_usage(reply.usage)
+      break if tools.nil? || reply.tool_calls.empty?
+
+      # a resposta volta inteira (raciocínio cifrado + pedidos) e, em seguida, o resultado de cada ferramenta
+      input += reply.items
+      reply.tool_calls.each do |call|
+        input << { type: 'function_call_output', call_id: call['call_id'], output: openai_tool_output(call, seen) }
+      end
+    end
+    return { error: 'Resposta vazia da IA.' } if reply.text.blank?
+
+    JSON.parse(reply.text).symbolize_keys
+  end
+
+  # no ChatGPT não existe a ferramenta `responder` (a resposta final já sai no
+  # formato pedido): os avisos que mandam "responder pela ferramenta" são trocados
+  def openai_tool_output(call, seen)
+    args = openai_arguments(call)
+    outcome = if seen.add?("#{call['name']}:#{args.to_json}")
+                tools.call(call['name'], args)
+              else
+                { ok: false, repetida: true, motivo: REPEATED_CALL_TEXT }
+              end
+    outcome.to_json.gsub(OPENAI_ANSWER_HINT, 'responda no formato da resposta final')
+  end
+
+  # os argumentos chegam como TEXTO em JSON; texto quebrado = sem argumentos
+  # (a ferramenta responde ok=false e a IA corrige na volta seguinte)
+  def openai_arguments(call)
+    parsed = JSON.parse(call['arguments'].presence || '{}')
+    parsed.is_a?(Hash) ? parsed : {}
+  rescue JSON::ParserError
+    {}
+  end
+
+  # tokens + custo da chamada no "Gasto da IA" (tabela de preços em Crm::LlmEngines)
+  def record_openai_usage(usage)
+    cost = Crm::LlmEngines.openai_cost(model, usage)
+    @spent_usd += cost[:cost]
+    Rails.logger.info("[Crm::AiUsage] #{agent_key} #{model} entrada=#{cost[:input]} cache_lido=#{cost[:read]} " \
+                      "saida=#{cost[:output]} US$#{cost[:cost].round(4)}")
+    Crm::AiUsage.create!(account: @account, agent_key: agent_key, model: model, input_tokens: cost[:input], output_tokens: cost[:output],
+                         cache_read_tokens: cost[:read], cache_write_tokens: cost[:written], cost_usd: cost[:cost].round(6))
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::AiUsage] falhou ao registrar: #{e.message}"
+  end
+
+  # modelo do respondedor: o do teste (🧪) > ChatGPT escolhido no cartão > a
+  # regra de sempre do Crm::AiAgentConfig (escolha > recomendado > global)
+  def model
+    return @fallback_model if @fallback_model
+    return @model_override if @model_override
+    return experiment_model_b if experiment_arm == 'b'
+
+    chosen = agent_config['model'].presence
+    return super unless Crm::LlmEngines.openai?(chosen)
+    return chosen if Crm::LlmEngines.openai_agent?(@agent_key)
+
+    # modelo gpt gravado em agente que não pode usar a OpenAI: volta ao recomendado dele
+    recommended['model'] || DEFAULT_MODEL
+  end
+
+  # 🧪 item 400: o modelo da variante B, se este agente pode usá-lo agora
+  def experiment_model_b
+    candidate = Crm::EngineExperiment.active(agent_config)&.dig('model_b').to_s
+    return nil unless engine_models.include?(candidate)
+    return nil if Crm::LlmEngines.openai?(candidate) && openai_api_key.blank?
+
+    candidate
+  end
+
+  def resolve_experiment_arm
+    return nil if @simulation || !Crm::LlmEngines.openai_agent?(@agent_key)
+
+    arm = Crm::EngineExperiment.arm_for(@conversation, @agent_key, agent_config)
+    arm == 'b' && experiment_model_b.nil? ? nil : arm
+  end
+
+  # soma o custo da chamada do Claude no total desta resposta (item 400)
+  def record_usage(message)
+    row = super
+    @spent_usd += row.cost_usd.to_f if row.is_a?(Crm::AiUsage)
+    row
   end
 
   # 🎙️ rodada 195: simulador POR TEXTO do Agente de Ligação — mesmo Roteiro,
