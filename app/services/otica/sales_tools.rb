@@ -66,6 +66,8 @@ class Otica::SalesTools
       tone = attrs['selo_tom'].to_s
       current['selo_tom'] = Otica::TryOnCard::TONES.key?(tone) ? tone : Otica::TryOnCard::DEFAULT_TONE
     end
+    # 🖼️ 22/11: como a prova sai — moldura (padrão: rosto + modelos ideais + as 2 opções numa imagem) ou o cartão antigo
+    current['cartao'] = (attrs['cartao'].to_s == 'antes_depois' ? 'antes_depois' : 'moldura') if attrs.key?('cartao')
     cfg[CONFIG_KEY] = current
     setting.update!(ai_config: cfg)
     current

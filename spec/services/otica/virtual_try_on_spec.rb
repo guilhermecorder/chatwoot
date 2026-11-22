@@ -9,7 +9,7 @@ RSpec.describe Otica::VirtualTryOn do
   let(:contact) { create(:contact, account: account, name: 'Maria Silva', phone_number: '+5511999990000') }
   let(:conversation) { create(:conversation, account: account, inbox: inbox, contact: contact) }
   let(:png) { File.binread(Rails.root.join('spec/assets/sample.png')) }
-  let(:rosto) { { 'pessoas' => 1, 'frontal' => true, 'formato' => 'redondo', 'usa_oculos' => false, 'adulto' => true, 'qualidade' => 'ok', 'observacao' => '' } }
+  let(:rosto) { { 'pessoas' => 1, 'frontal' => true, 'formato' => 'redondo', 'usa_oculos' => false, 'adulto' => true, 'qualidade' => 'ok', 'observacao' => '', 'genero' => 'feminino' } }
 
   before do
     CrmSetting.create!(account: account, ai_config: { 'gemini_api_key' => 'AIza-teste' })
@@ -70,7 +70,7 @@ RSpec.describe Otica::VirtualTryOn do
     expect(out[:motivo]).to start_with('SEM MODELO PRO ROSTO').and include('retangular').and include('agendar_retorno {dias: 7')
   end
 
-  it 'ao vivo gera a foto de cada armação e envia como mensagem com imagem e legenda; registra o lote', :aggregate_failures do
+  it 'ao vivo gera a foto de cada armação e envia UMA imagem com moldura (rosto + modelos ideais + 1 e 2); registra o lote', :aggregate_failures do
     retangular = armacao('Retangular preta', 'retangular')
     gatinho = armacao('Gatinho', 'gatinho')
     selfie!
@@ -92,28 +92,29 @@ RSpec.describe Otica::VirtualTryOn do
     expect(aviso.attachments).to be_empty
     expect(aviso.additional_attributes).to include('cevico_visagismo_aviso' => true)
     expect(aviso.additional_attributes).not_to have_key('cevico_visagismo')
-    sent = all_out.drop(1).select { |m| m.attachments.any? } # as fotos (a pergunta de fechamento vem depois, sem anexo)
-    # legenda = opção + nome (formato) + o MOTIVO em palavras simples
-    expect(sent.map(&:content)).to eq(['Opção 1 de 2 · Retangular preta (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.',
-                                       'Opção 2 de 2 · Gatinho (gatinho): no seu rosto redondo, a gatinho levanta o olhar e valoriza as maçãs do rosto.'])
+    sent = all_out.drop(1).select { |m| m.attachments.any? } # a moldura (a pergunta de fechamento vem depois, sem anexo)
+    expect(sent.size).to eq(1) # 🖼️ 22/11: as 2 opções numa imagem só
+    # legenda = as 2 opções, cada uma com nome (formato) + o MOTIVO em palavras simples
+    expect(sent.first.content).to eq("Opção 1 de 2 · Retangular preta (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.\n\n" \
+                                     'Opção 2 de 2 · Gatinho (gatinho): no seu rosto redondo, a gatinho levanta o olhar e valoriza as maçãs do rosto.')
     expect(sent).to all(satisfy { |m| m.attachments.one? && m.attachments.first.file_type == 'image' && m.attachments.first.file.attached? })
     expect(out[:armacoes].first).to include(motivo: 'no seu rosto redondo, a retangular dá definição e alonga o olhar')
-    expect(out[:aviso]).to include('Qual dos dois você já se imagina usando?').and include('TAMBÉM JÁ FOI ENVIADA')
+    expect(out[:aviso]).to include('Qual você já se imagina usando: o 1 ou o 2?').and include('TAMBÉM JÁ FOI ENVIADA')
     # 08/11 (noite, teste real: o agente ficou mudo): o sistema manda a pergunta depois da última foto
     pergunta = conversation.messages.outgoing.where("additional_attributes ? 'cevico_prova_pergunta'").last
-    expect(pergunta.content).to eq('Qual dos dois você já se imagina usando?')
+    expect(pergunta.content).to eq('Qual você já se imagina usando: o 1 ou o 2?')
     expect(pergunta.id).to be > conversation.messages.outgoing.joins(:attachments).maximum(:id)
     expect(out[:foto_usada]).to eq('de frente')
-    # o cartão: ANTES e DEPOIS lado a lado = 1080×720 JPEG (sem marca: a loja ainda não subiu o logo)
+    # a moldura: 1080×1350 (4:5) JPEG (sem marca: a loja ainda não subiu o logo)
     card = MiniMagick::Image.read(sent.first.attachments.first.file.blob.open(&:read))
-    expect([card.width, card.height, card.type]).to eq([1080, 720, 'JPEG'])
+    expect([card.width, card.height, card.type]).to eq([1080, 1350, 'JPEG'])
     expect(sent.first.additional_attributes['cevico_ia_agent']).to eq('atendente_agendamento')
     expect(sent.first.additional_attributes.dig('cevico_visagismo', 'product_id')).to eq(retangular.id)
-    expect(sent.map { |m| m.additional_attributes.dig('cevico_visagismo', 'lote') }.uniq.size).to eq(1)
+    expect(sent.first.additional_attributes.dig('cevico_visagismo', 'product_ids')).to eq([retangular.id, gatinho.id])
     # 08/11: o anexo tem que existir no commit da mensagem — senão o Message dispara o SendReplyJob sem
     # espera e o WhatsApp recebe só a legenda (o Message só agenda com wait quando já há anexo)
     reply_jobs = enqueued_jobs.select { |j| j[:job] == SendReplyJob && sent.map(&:id).include?(j[:args].first) }
-    expect(reply_jobs.size).to eq(2)
+    expect(reply_jobs.size).to eq(1)
     expect(reply_jobs).to all(satisfy { |j| j['scheduled_at'].present? })
     # a pergunta sai DEPOIS da última foto (agendada com espera maior que a das imagens)
     ask_job = enqueued_jobs.find { |j| j[:job] == SendReplyJob && j[:args].first == pergunta.id }
@@ -170,7 +171,7 @@ RSpec.describe Otica::VirtualTryOn do
     expect(service.run(quantidade: 1)[:motivo]).to include('limite diário')
   end
 
-  it 'parecida_com: 3 do mesmo estilo em faixas (top de linha, custo-benefício, acessível) com o valor na legenda; "outra" não repete', :aggregate_failures do
+  it 'parecida_com: 2 do mesmo estilo (top de linha × mais acessível) com o valor na legenda; "outra" não repete', :aggregate_failures do
     ref = armacao('Retangular preta', 'retangular')
     cara = Otica::Product.create!(account: account, kind: 'armacao', name: 'Grife', frame_shape: 'retangular', list_price: 600, quantity: 1)
     media = Otica::Product.create!(account: account, kind: 'armacao', name: 'Meio', frame_shape: 'retangular', list_price: 450, quantity: 1)
@@ -184,21 +185,21 @@ RSpec.describe Otica::VirtualTryOn do
 
     ela_responde!
     first = service.run(quantidade: 2)
-    expect(first[:armacoes].pluck(:id)).to eq([ref.id, cara.id])
+    retas = [ref, cara, media, boa, barata]
+    # 🔀 22/11: a ordem entre as retangulares (mesma pontuação) varia por conversa; as 2 saem das retangulares
+    expect(first[:armacoes].pluck(:id)).to all(be_in(retas.map(&:id)))
 
     ela_responde!
-    out = service.run(quantidade: 3, parecida_com: ref.id)
-    expect(out).to include(ok: true, enviadas: 3, parecidas: true)
-    expect(out[:armacoes].map { |a| [a[:id], a[:faixa]] }).to eq([[media.id, 'Top de linha'], [boa.id, 'Melhor custo-benefício'], [barata.id, 'Mais acessível']])
-    expect(out[:aviso]).to include('Qual desses 3 você já se imagina usando?')
+    out = service.run(quantidade: 3, parecida_com: ref.id) # 22/11: no máximo 2 ("só duas opções")
+    expect(out).to include(ok: true, enviadas: 2, parecidas: true)
+    # "outra" não repete: só as retangulares que ainda não saíram (nem a de referência); a mais cara e a mais barata
+    resto = (retas - [ref]).reject { |p| first[:armacoes].pluck(:id).include?(p.id) }.sort_by(&:price)
+    expect(out[:armacoes].map { |a| [a[:id], a[:faixa]] }).to eq([[resto.last.id, 'Top de linha'], [resto.first.id, 'Mais acessível']])
     texts = conversation.messages.outgoing.order(:id).pluck(:content)
-    expect(texts.last).to eq('Qual desses 3 você já se imagina usando?') # 08/11 (noite): a pergunta sai do sistema
+    expect(texts.last).to eq('Qual você já se imagina usando: o 1 ou o 2?') # 08/11 (noite): a pergunta sai do sistema
     texts = texts[0...-1]
-    expect(texts).to include("Boa escolha!\n\nVou te mandar 3 opções nesse mesmo estilo pra você comparar: uma top de linha, uma de melhor " \
-                             "custo-benefício e uma mais acessível.\n\nSó um instante.")
-    expect(texts.last(3)).to eq(['Top de linha · R$ 450 · Meio (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.',
-                                 'Melhor custo-benefício · R$ 250,50 · Boa (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.',
-                                 'Mais acessível · R$ 199 · Básica (retangular): no seu rosto redondo, a retangular dá definição e alonga o olhar.'])
+    expect(texts).to include("Boa escolha!\n\nVou te mandar 2 opções nesse mesmo estilo pra você comparar.\n\nSó um instante.")
+    expect(texts.last).to start_with('Top de linha · R$ ').and include("\n\nMais acessível · R$ ")
 
     expect(service.run(quantidade: 3, parecida_com: 999_999)[:motivo]).to include('Não achei')
   end
@@ -211,6 +212,7 @@ RSpec.describe Otica::VirtualTryOn do
     fake = instance_double(Otica::TryOnImage, generate: { bytes: png, mime: 'image/png', model: 'm' })
     allow(Otica::TryOnImage).to receive(:new).and_return(fake)
     allow(Otica::TryOnCard).to receive(:compose).and_call_original
+    Otica::SalesTools.save_config!(account, 'cartao' => 'antes_depois') # o cartão antigo segue disponível
 
     out = service.run(quantidade: 1)
     expect(out).to include(ok: true, rosto: 'oval', foto_usada: 'de 3/4') # a última que ela mandou
@@ -270,6 +272,27 @@ RSpec.describe Otica::VirtualTryOn do
     expect(service.run(quantidade: 1)[:motivo]).to include('ACABARAM de ser enviadas')
     Redis::Alfred.delete("otica:prova_virtual:#{conversation.id}")
     expect(service.run(quantidade: 1)[:ok]).to be(true) # e a trava some no fim de cada prova
+  end
+
+  # 🕶️🚹 22/11: óculos de sol fora da prova de grau; foto antiga (sem gênero) é relida uma vez ao vivo
+  it 'tira óculos de sol (a não ser que peça sol) e relê homem/mulher de foto antiga, guardando na foto', :aggregate_failures do
+    sol = Otica::Product.create!(account: account, kind: 'solar', name: 'HB Switch polarizado', frame_shape: 'retangular', list_price: 300, quantity: 2)
+    sol.photo.attach(io: File.open(Rails.root.join('spec/assets/sample.png')), filename: 'a.png', content_type: 'image/png')
+    fem = armacao('Jean Marcell JM6105 roxa e rosa', 'retangular').tap { |p| p.update!(frame_fit: 'feminina', color: 'roxa e rosa') }
+    masc = armacao('Bulget BG8040M', 'retangular').tap { |p| p.update!(frame_fit: 'masculina') }
+
+    selfie!(rosto.merge('genero' => 'feminino'))
+    expect(service(live: false).run(quantidade: 2)[:armacoes].pluck(:id)).to eq([fem.id])
+    expect(service(live: false).run(quantidade: 2, preferencia: 'quero de sol')[:armacoes].pluck(:id)).to include(sol.id)
+
+    antiga = selfie!(rosto.except('genero')) # lida antes de 22/11
+    fake = instance_double(Otica::TryOnImage, generate: { bytes: png, mime: 'image/png', model: 'm' })
+    allow(Otica::TryOnImage).to receive(:new).and_return(fake)
+    allow_any_instance_of(described_class).to receive(:read_face).and_return(rosto.merge('genero' => 'masculino')) # rubocop:disable RSpec/AnyInstance
+    out = service.run(quantidade: 2)
+    expect(out).to include(ok: true, publico: 'masculino')
+    expect(out[:armacoes].pluck(:id)).to eq([masc.id])
+    expect(antiga.reload.meta.dig('cevico_media', 'rosto', 'genero')).to eq('masculino')
   end
 
   describe 'ferramenta do agente (Crm::ResponderTools)' do

@@ -32,4 +32,13 @@ RSpec.describe Otica::FaceReading do
   it 'pede o olhar no prompt da leitura da imagem' do
     expect(described_class::IMAGE_PROMPT).to include('"olhar"').and include('"baixo"')
   end
+
+  it '🚹🚺 22/11: lê homem/mulher; incerto ou vazio vira "incerto" (e a foto não é relida)', :aggregate_failures do
+    expect(described_class.normalize('formato' => 'oval', 'genero' => 'masculino')['genero']).to eq('masculino')
+    expect(described_class.normalize('formato' => 'oval', 'genero' => 'Feminino')['genero']).to eq('feminino')
+    expect(described_class.normalize('formato' => 'oval', 'genero' => 'incerto')['genero']).to eq('incerto')
+    expect(described_class.normalize('formato' => 'oval')['genero']).to eq('incerto')
+    expect(described_class.summary(described_class.normalize('formato' => 'oval', 'pessoas' => 1))).not_to include('homem')
+    expect(described_class.summary(described_class.normalize('formato' => 'oval', 'genero' => 'masculino', 'pessoas' => 1))).to include('homem')
+  end
 end

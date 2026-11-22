@@ -114,11 +114,11 @@ module Otica::Visagismo
   }.freeze
 
   # "No seu rosto oval, a retangular dá definição e alonga o olhar." (sem termo técnico)
-  def reason(face_shape, frame_shape)
+  def reason(face_shape, frame_shape, gender: nil)
     why = FRAME_WHY[frame_shape.to_s]
     return 'combina com o seu rosto' if why.nil?
 
-    r = rule(face_shape)
+    r = rule(face_shape, gender)
     if r['recomendadas'].include?(frame_shape.to_s)
       "no seu rosto #{face_label(face_shape)}, a #{frame_label(frame_shape)} #{why}"
     else
@@ -132,8 +132,8 @@ module Otica::Visagismo
   #   aproximada = não é das recomendadas, mas também não foge (ou formato não cadastrado)
   #   foge       = está em "evitar": nunca vai pra cliente como sugestão
   LEVELS = %w[exata aproximada foge].freeze
-  def match_level(face_shape, frame_shape)
-    r = rule(face_shape)
+  def match_level(face_shape, frame_shape, gender: nil)
+    r = rule(face_shape, gender)
     shape = frame_shape.to_s
     return 'exata' if r['recomendadas'].include?(shape)
     return 'foge' if r['evitar'].include?(shape)
@@ -143,19 +143,65 @@ module Otica::Visagismo
 
   # escolha HONESTA: tira as que fogem, prefere as exatas; devolve [escolhidas, nível geral, formatos ideais].
   # nível geral = 'exata' se a melhor é exata, 'aproximada' se só há aproximadas, 'nenhuma' se não sobrou nada.
-  def honest_pick(products, face_shape:, preference: nil, limit: 2)
-    r = rule(face_shape)
-    pool = products.reject { |p| match_level(face_shape, p.frame_shape) == 'foge' }
+  # 🚹🚺 22/11: gender filtra ANTES (feminina nunca vai pra homem, masculina nunca pra mulher)
+  def honest_pick(products, face_shape:, preference: nil, limit: 2, gender: nil, seed: nil) # rubocop:disable Metrics/ParameterLists
+    r = rule(face_shape, gender)
+    pool = filter_gender(products, gender).reject { |p| match_level(face_shape, p.frame_shape, gender: gender) == 'foge' }
     ideais = r['recomendadas'].map { |s| frame_label(s) }
     return [[], 'nenhuma', ideais] if pool.empty?
 
-    exact = pool.select { |p| match_level(face_shape, p.frame_shape) == 'exata' }
-    chosen = recommend(exact.presence || pool, face_shape: face_shape, preference: preference, limit: limit)
+    exact = pool.select { |p| match_level(face_shape, p.frame_shape, gender: gender) == 'exata' }
+    chosen = recommend(exact.presence || pool, face_shape: face_shape, preference: preference, limit: limit, gender: gender, seed: seed)
     # exatas de menos: completa com aproximadas (a cliente sempre compara 2)
     if exact.any? && chosen.size < limit
-      chosen += recommend(pool - chosen, face_shape: face_shape, preference: preference, limit: limit - chosen.size)
+      chosen += recommend(pool - chosen, face_shape: face_shape, preference: preference, limit: limit - chosen.size, gender: gender,
+                                         seed: seed)
     end
     [chosen, (exact.any? ? 'exata' : 'aproximada'), ideais]
+  end
+
+  # 🚹🚺 22/11/2026 (Guilherme, print da conversa #49: homem recebeu Jean Marcell feminina e depois a
+  # ROXA E ROSA — "achei meio feminino"): homem vê armação masculina, mulher vê feminina; unissex vale
+  # pros dois. Gosto masculino: principalmente QUADRADA/RETANGULAR; redonda às vezes; gatinho,
+  # borboleta e rosa/roxo/lilás NUNCA. Gênero vem da leitura da foto (FaceReading 'genero') ou do agente.
+  GENDERS = %w[masculino feminino].freeze
+  GENDER_FIT = { 'masculino' => 'masculina', 'feminino' => 'feminina' }.freeze
+  MALE_NEVER_SHAPES = %w[gatinho borboleta].freeze
+  MALE_NEVER_COLORS = %w[rosa rose rosé pink roxo roxa lilás lilas lavanda nude magenta fúcsia fucsia].freeze
+  MALE_TOP_SHAPES = %w[quadrada retangular].freeze
+  MALE_RARE_SHAPES = %w[redonda oval].freeze
+
+  def gender_of(value)
+    v = value.to_s.strip.downcase
+    return 'masculino' if v.start_with?('masc', 'homem', 'home')
+    return 'feminino' if v.start_with?('fem', 'mulher')
+
+    nil
+  end
+
+  # serve pra esse público? feminina nunca vai pra homem (e masculina nunca pra mulher); pro homem,
+  # além disso, gatinho/borboleta e cor rosa/roxa ficam de fora mesmo se o cadastro disser unissex
+  def fits_gender?(product, gender)
+    g = gender_of(gender)
+    return true if g.nil?
+
+    fit = product.frame_fit.to_s
+    return fit != 'masculina' if g == 'feminino'
+    return false if fit == 'feminina' || MALE_NEVER_SHAPES.include?(product.frame_shape.to_s)
+
+    color = [product.color, product.name].join(' ').downcase
+    MALE_NEVER_COLORS.none? { |c| color.match?(/(?<![[:alpha:]])#{Regexp.escape(c)}(?![[:alpha:]])/) }
+  end
+
+  def filter_gender(products, gender)
+    products.select { |p| fits_gender?(p, gender) }
+  end
+
+  # 🚻 22/11: a foto não deixou claro se é homem ou mulher → só unissex "neutra" (sem gatinho, borboleta
+  # nem rosa/roxo), que não erra pra nenhum dos dois. Sem nenhuma assim, volta tudo.
+  def filter_neutral(products)
+    safe = products.select { |p| p.frame_fit.to_s == 'unissex' && fits_gender?(p, 'masculino') }
+    safe.presence || products
   end
 
   def face_label(shape)
@@ -166,29 +212,51 @@ module Otica::Visagismo
     FRAME_SHAPES[shape.to_s] || shape.to_s
   end
 
-  def rule(face_shape)
-    RULES[face_shape.to_s] || RULES['oval']
+  # 🚹 22/11: pro HOMEM a regra do rosto ganha o gosto masculino: quadrada e retangular sempre na
+  # frente (mesmo no rosto quadrado, onde a regra clássica mandaria fugir delas), redonda/oval só no
+  # fim (às vezes), gatinho e borboleta nunca.
+  def rule(face_shape, gender = nil)
+    base = RULES[face_shape.to_s] || RULES['oval']
+    return base unless gender_of(gender) == 'masculino'
+
+    rec = base['recomendadas'] - MALE_NEVER_SHAPES - MALE_TOP_SHAPES
+    rare = rec & MALE_RARE_SHAPES
+    { 'recomendadas' => MALE_TOP_SHAPES + (rec - rare) + rare,
+      'evitar' => ((base['evitar'] - MALE_TOP_SHAPES) + MALE_NEVER_SHAPES).uniq,
+      'porque' => base['porque'] }
   end
 
   # frase curta para o agente / a equipe
-  def explain(face_shape)
-    r = rule(face_shape)
+  def explain(face_shape, gender = nil)
+    r = rule(face_shape, gender)
     "Rosto #{face_label(face_shape)}: #{r['porque']}. Combinam: #{r['recomendadas'].map { |s| frame_label(s) }.join(', ')}."
   end
 
   # ordena as armações do estoque para este rosto. products: Otica::Product
   # já filtrados (ativos, com foto, try_on, saldo). preference: texto livre da
   # cliente ("preta e fininha"). Devolve até `limit` produtos, os melhores primeiro.
-  def recommend(products, face_shape:, preference: nil, limit: 3)
-    r = rule(face_shape)
+  def recommend(products, face_shape:, preference: nil, limit: 3, gender: nil, seed: nil) # rubocop:disable Metrics/ParameterLists
+    r = rule(face_shape, gender)
     words = preference_words(preference)
-    scored = products.map { |p| [score(p, r, words), p] }
-    # desempate estável: pontuação, depois saldo maior, depois id (nunca aleatório: a cliente pode pedir "outra")
+    g = gender_of(gender)
+    scored = filter_gender(products, g).map { |p| [score(p, r, words, g) + shuffle_bonus(seed, p), p] }
+    # desempate: pontuação, depois saldo maior, depois id. 🔀 22/11: com `seed` (a conversa), cada cliente ganha
+    # uma ordem própria entre armações de pontuação parecida (antes todo rosto oval via a MESMA HB Switch);
+    # a ordem é fixa dentro da conversa, então "outra" continua trazendo novas.
     scored.sort_by { |score, p| [-score, -p.quantity.to_i, p.id.to_i] }.first(limit).map(&:last)
   end
 
-  def score(product, rule, words) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  # 0 a 0,29: menor que o degrau entre duas posições da regra (0,3), então nunca passa um formato melhor na frente
+  def shuffle_bonus(seed, product)
+    return 0.0 if seed.nil?
+
+    (Zlib.crc32("#{seed}-#{product.id}") % 30) / 100.0
+  end
+
+  def score(product, rule, words, gender = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     s = 0.0
+    # 🚹🚺 22/11: a armação do público dele/dela vem antes da unissex
+    s += 1.0 if gender && product.frame_fit.to_s == GENDER_FIT[gender]
     shape = product.frame_shape.to_s
     if (pos = rule['recomendadas'].index(shape))
       s += 3.0 - (pos * 0.3) # a 1ª recomendada vale mais que a 5ª
@@ -201,7 +269,6 @@ module Otica::Visagismo
                 product.lens_material].join(' ').downcase
     words.each { |w| s += 2.0 if haystack.include?(w) }
     s += 0.5 if product.promo_active?
-    s += 0.2 if product.quantity.to_i > 1
     s
   end
 

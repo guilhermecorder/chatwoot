@@ -67,4 +67,64 @@ RSpec.describe Otica::Visagismo do
     expect(described_class.preference_words('Preta e fininha, de acetato')).to include('preto', 'fina', 'acetato')
     expect(described_class.preference_words('')).to eq([])
   end
+
+  # 🚹🚺 22/11 (conversa #49: homem recebeu Jean Marcell feminina e depois a roxa e rosa)
+  describe 'público (homem × mulher)' do
+    def com_publico(name, shape, fit, color: '')
+      armacao(name, shape, color: color).tap { |p| p.update!(frame_fit: fit) }
+    end
+
+    it 'homem nunca vê feminina, gatinho nem rosa/roxa; quadrada e retangular vêm primeiro', :aggregate_failures do
+      fem = com_publico('Jean Marcell JM6105 cinza e verde', 'retangular', 'feminina', color: 'cinza e verde')
+      roxa = com_publico('Unissex roxa e rosa', 'retangular', 'unissex', color: 'roxa e rosa')
+      gatinho = com_publico('Gatinho preta', 'gatinho', 'unissex', color: 'preto')
+      redonda = com_publico('Redonda masculina', 'redonda', 'masculina', color: 'preto')
+      quadrada = com_publico('Bulget quadrada', 'quadrada', 'masculina', color: 'azul')
+      retangular = com_publico('HB retangular', 'retangular', 'unissex', color: 'cinza')
+
+      todas = [fem, roxa, gatinho, redonda, quadrada, retangular]
+      expect(described_class.filter_gender(todas, 'masculino')).to contain_exactly(redonda, quadrada, retangular)
+
+      chosen, nivel, = described_class.honest_pick(todas, face_shape: 'oval', gender: 'masculino', limit: 2)
+      expect(chosen).to eq([quadrada, retangular])
+      expect(nivel).to eq('exata')
+
+      # rosto quadrado: a regra clássica foge da quadrada, mas pro homem ela continua valendo
+      expect(described_class.match_level('quadrado', 'quadrada', gender: 'masculino')).to eq('exata')
+      expect(described_class.match_level('quadrado', 'gatinho', gender: 'masculino')).to eq('foge')
+      expect(described_class.match_level('quadrado', 'quadrada')).to eq('foge')
+      expect(described_class.rule('oval', 'masculino')['recomendadas'].last(1)).to eq(['redonda'])
+    end
+
+    it 'mulher não vê masculina; unissex vale pros dois; sem gênero nada muda', :aggregate_failures do
+      fem = com_publico('Gatinho vinho', 'gatinho', 'feminina', color: 'vinho')
+      masc = com_publico('Bulget BG8040M', 'retangular', 'masculina', color: 'azul')
+      uni = com_publico('Unissex preta', 'retangular', 'unissex', color: 'preto')
+
+      expect(described_class.filter_gender([fem, masc, uni], 'feminino')).to contain_exactly(fem, uni)
+      expect(described_class.filter_gender([fem, masc, uni], nil)).to contain_exactly(fem, masc, uni)
+      expect(described_class.gender_of('Masculino')).to eq('masculino')
+      expect(described_class.gender_of('incerto')).to be_nil
+    end
+
+    it 'foto sem homem/mulher claro: só unissex neutra (sem gatinho nem rosa); sem nenhuma, volta tudo', :aggregate_failures do
+      fem = com_publico('Gatinho vinho', 'gatinho', 'feminina', color: 'vinho')
+      rosa = com_publico('Unissex rosa', 'retangular', 'unissex', color: 'rosa')
+      uni = com_publico('Unissex preta', 'retangular', 'unissex', color: 'preto')
+      expect(described_class.filter_neutral([fem, rosa, uni])).to eq([uni])
+      expect(described_class.filter_neutral([fem, rosa])).to eq([fem, rosa])
+    end
+  end
+
+  # 🔀 22/11: todo rosto oval recebia a MESMA sequência (desempate por saldo e id)
+  it 'com a conversa como semente, a ordem entre armações empatadas varia de cliente pra cliente e é fixa na conversa', :aggregate_failures do
+    pool = Array.new(8) { |i| armacao("Retangular #{i}", 'retangular') }
+    firsts = (1..20).map { |conv| described_class.recommend(pool, face_shape: 'oval', limit: 1, seed: conv).first }
+    expect(firsts.uniq.size).to be > 2
+    primeira = described_class.recommend(pool, face_shape: 'oval', limit: 2, seed: 7)
+    expect(described_class.recommend(pool.reverse, face_shape: 'oval', limit: 2, seed: 7)).to eq(primeira) # fixa na conversa
+    # nunca passa um formato melhor na frente: a 1ª recomendada continua ganhando da última
+    browline = armacao('Browline', 'browline')
+    expect(described_class.recommend(pool + [browline], face_shape: 'oval', limit: 8, seed: 3)).not_to include(browline)
+  end
 end

@@ -129,8 +129,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
                    'chamar depois (agendar_retorno), ou convide para a loja. Só mostra o que a loja TEM (foto + saldo) e que combina; ' \
                    'quando só há aproximadas, o resultado avisa (combinacao=aproximada): diga que são as mais próximas de hoje. ' \
                    'O sistema avisa a cliente sozinho ("recebi sua foto, já estou montando") antes das imagens, e cada legenda ' \
-                   'já traz o motivo da escolha. Com parecida_com (id da armação que ela gostou) manda 3 do mesmo estilo em ' \
-                   'faixas de valor (top de linha, custo-benefício, mais acessível), com o valor da armação na legenda. ' \
+                   'já traz o motivo da escolha. Com parecida_com (id da armação que ela gostou) manda 2 do mesmo estilo em ' \
+                   'faixas de valor (top de linha e mais acessível), com o valor da armação na legenda. ' \
                    "Limite: até #{Otica::VirtualTryOn::MAX_PER_CALL} por vez e #{Otica::VirtualTryOn::MAX_IMAGES_PER_DAY} imagens por dia por cliente.",
       input_schema: {
         type: 'object',
@@ -140,7 +140,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
           preferencia: { type: 'string', description: 'O que a cliente disse que gosta, em poucas palavras: cor, material, ' \
                                                       'estilo ("preta e fininha", "dourada", "grande"). Vazio se não disse.' },
           parecida_com: { type: 'integer', description: 'id da armação que a cliente gostou (do resultado anterior) para ver ' \
-                                                        '3 parecidas em faixas de valor. Só depois de ela escolher uma.' }
+                                                        '2 parecidas (top de linha e mais acessível). Só depois de ela escolher uma.' },
+          publico: { type: 'string', enum: %w[masculino feminino],
+                     description: 'Pra quem é o óculos, SÓ se a conversa disser diferente da foto ou a pessoa reclamar ' \
+                                  '("achei feminino" → masculino; "é pro meu marido" → masculino). Vazio = o sistema usa a foto.' }
         },
         additionalProperties: false
       }
@@ -506,8 +509,9 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     return refuse(OTICA_TOOL_NAME, 'A prova virtual não está disponível neste atendimento.') unless otica_tool?
 
     outcome = Otica::VirtualTryOn.new(account: @account, conversation: @conversation, live: @live || @otica_live, agent_key: @agent_key)
-                                 .run(quantidade: args['quantidade'].presence || (args['parecida_com'].present? ? 3 : 2),
-                                      preferencia: args['preferencia'], parecida_com: args['parecida_com'].presence)
+                                 .run(quantidade: args['quantidade'].presence || 2,
+                                      preferencia: args['preferencia'], parecida_com: args['parecida_com'].presence,
+                                      publico: args['publico'].presence)
     resumo = if outcome[:ok]
                names = Array(outcome[:armacoes]).map { |a| a[:armacao] }.join(', ')
                outcome[:simulado] ? "simulado (rosto #{outcome[:rosto_label]}): #{names}" : "#{outcome[:enviadas]} foto(s) enviada(s): #{names}"

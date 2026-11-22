@@ -31,6 +31,7 @@ module Otica::FaceReading
         "formato": formato do rosto principal, UMA palavra: oval | redondo | quadrado | coracao | alongado | diamante | triangular,
         "usa_oculos": true se a pessoa já está de óculos na foto,
         "adulto": true se a pessoa principal aparenta ser adulta,
+        "genero": "masculino" se a pessoa principal é um homem | "feminino" se é uma mulher | "incerto" se não dá pra saber (serve só pra mostrar armação masculina ou feminina),
         "qualidade": "ok" ou "ruim" (ruim = escura, borrada, rosto muito pequeno ou cortado),
         "observacao": 1 frase simples sobre o rosto útil para escolher armação (ex.: "testa larga e queixo fino")}
     Responda SOMENTE com um JSON válido, sem comentários:
@@ -51,6 +52,7 @@ module Otica::FaceReading
       'formato' => (Otica::Visagismo::FACE_SHAPES.key?(formato) ? formato : 'oval'),
       'usa_oculos' => raw['usa_oculos'] == true,
       'adulto' => raw['adulto'] != false,
+      'genero' => Otica::Visagismo.gender_of(raw['genero']) || 'incerto',
       'qualidade' => (QUALIDADES.include?(raw['qualidade'].to_s) ? raw['qualidade'].to_s : 'ok'),
       'observacao' => raw['observacao'].to_s.strip.truncate(160)
     }
@@ -95,6 +97,8 @@ module Otica::FaceReading
     return '' if rosto.blank?
 
     parts = ["rosto #{Otica::Visagismo.face_label(rosto['formato'])}"]
+    who = { 'masculino' => 'homem', 'feminino' => 'mulher' }[rosto['genero'].to_s]
+    parts << who if who
     parts << "#{rosto['pessoas']} pessoa(s)" if rosto['pessoas'].to_i != 1
     parts << { 'frente' => 'de frente', 'tres_quartos' => 'de 3/4' }.fetch(rosto['angulo'].to_s, rosto['frontal'] ? 'de frente' : 'de lado')
     parts << 'olhando pra baixo' if rosto['olhar'] == 'baixo'
