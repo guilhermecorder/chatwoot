@@ -41,7 +41,8 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
       first_response_at: responses.map(&:created_at).min,
       last_response_at: responses.map(&:created_at).max,
       questions: aggregate_questions(responses),
-      ai_insight: @form.ai_insight.presence
+      # 🪝 item 397: a leitura para a copy ('copy') mora junto, mas não é o resumo de marketing
+      ai_insight: @form.ai_insight.except('copy').presence
     }
   end
 
@@ -52,7 +53,7 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
     if result[:error]
       render json: { error: result[:error] }, status: :unprocessable_entity
     else
-      @form.update!(ai_insight: result.stringify_keys)
+      @form.update!(ai_insight: result.stringify_keys.merge(@form.ai_insight.slice('copy')))
       render json: { ai_insight: result }
     end
   end
@@ -129,7 +130,7 @@ class Api::V1::Accounts::Crm::FormsController < Api::V1::Accounts::BaseControlle
       responses_count: responses_count,
       sent_count: f.sent_count,
       funnel_stats: f.funnel_stats || {},
-      has_insight: f.ai_insight.present?,
+      has_insight: f.ai_insight.except('copy').present?,
       created_at: f.created_at
     }
   end

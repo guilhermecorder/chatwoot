@@ -201,6 +201,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     # quem só VÊ páginas lê e COMENTA (delete_comment confere autor/admin sozinho)
     'crm/pages' => { node: 'marketing.paginas', view: %w[index generate_status add_comment delete_comment] },
     'crm/content_items' => { node: 'marketing.paginas', view: %w[index] },
+    'crm/copy_bank' => { node: 'marketing.criativos', view: %w[index drafts forms] }, # 🪝 item 397
     'crm/pages_dashboards' => { node: 'marketing.resultados', view: %w[show] },
     'crm/pages_reports' => { node: 'marketing.resultados', view: %w[show] },
     'crm/campaign_agent' => { node: 'marketing.campanhas', view: %w[show] }, # 🎯 item 352

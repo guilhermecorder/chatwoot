@@ -3,6 +3,7 @@
 // perguntas, dashboard de respostas e insights de marketing com IA.
 // 20/09: visual no kit CEVICO (cv-*) — hero, 3 blocos, paleta por bloco.
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
@@ -366,6 +367,11 @@ const copyShortLink = async form => {
 };
 
 // ── Insights de IA ─────────────────────────────────────────
+// 🪝 item 397: levar o formulário para o Banco de Ganchos ("Puxar o que importa" para a copy)
+const router = useRouter();
+const usarNaCopy = () =>
+  router.push({ name: 'cevico_copy_bank', query: { form: selectedFormId.value } });
+
 const generateInsights = async () => {
   if (isGeneratingInsights.value) return;
   isGeneratingInsights.value = true;
@@ -745,6 +751,16 @@ const retentionTone = p => {
                         ? 'Atualizar'
                         : 'Gerar com IA'
                   }}
+                </button>
+                <!-- 🪝 item 397: daqui direto para escrever a copy -->
+                <button
+                  class="cv-btn cv-btn-ghost self-start"
+                  :disabled="!summary.total"
+                  title="Abre o Banco de Ganchos com este formulário: puxa o que importa e leva para a copy"
+                  @click="usarNaCopy"
+                >
+                  <span class="i-lucide-anchor text-sm" />
+                  Usar na copy
                 </button>
               </div>
             </div>

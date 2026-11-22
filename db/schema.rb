@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_11_12_180000) do
+ActiveRecord::Schema[7.2].define(version: 2026_11_18_120000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -757,6 +757,44 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_12_180000) do
     t.datetime "archived_at"
     t.index ["account_id", "stage"], name: "index_cevico_content_items_on_account_id_and_stage"
     t.index ["account_id"], name: "index_cevico_content_items_on_account_id"
+  end
+
+  create_table "cevico_copy_blocks", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.string "kind", default: "gancho", null: false
+    t.string "categoria"
+    t.text "texto", null: false
+    t.text "original"
+    t.text "exemplo"
+    t.string "referencia"
+    t.string "saude", default: "pronto", null: false
+    t.jsonb "lacunas", default: [], null: false
+    t.string "fonte", default: "manual", null: false
+    t.boolean "favorito", default: false, null: false
+    t.integer "usos", default: 0, null: false
+    t.integer "position", default: 0, null: false
+    t.bigint "creator_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "kind", "categoria"], name: "index_cevico_copy_blocks_on_account_id_and_kind_and_categoria"
+    t.index ["account_id"], name: "index_cevico_copy_blocks_on_account_id"
+    t.index ["creator_id"], name: "index_cevico_copy_blocks_on_creator_id"
+  end
+
+  create_table "cevico_copy_drafts", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "creator_id"
+    t.string "titulo", null: false
+    t.string "tema"
+    t.string "formato"
+    t.string "status", default: "rascunho", null: false
+    t.jsonb "partes", default: {}, null: false
+    t.text "texto_final"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "created_at"], name: "index_cevico_copy_drafts_on_account_id_and_created_at"
+    t.index ["account_id"], name: "index_cevico_copy_drafts_on_account_id"
+    t.index ["creator_id"], name: "index_cevico_copy_drafts_on_creator_id"
   end
 
   create_table "cevico_finance_entries", force: :cascade do |t|
@@ -2565,6 +2603,10 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_12_180000) do
   add_foreign_key "cevico_campaign_actions", "accounts", on_delete: :cascade
   add_foreign_key "cevico_campaign_days", "accounts", on_delete: :cascade
   add_foreign_key "cevico_content_items", "accounts"
+  add_foreign_key "cevico_copy_blocks", "accounts"
+  add_foreign_key "cevico_copy_blocks", "users", column: "creator_id"
+  add_foreign_key "cevico_copy_drafts", "accounts"
+  add_foreign_key "cevico_copy_drafts", "users", column: "creator_id"
   add_foreign_key "cevico_finance_entries", "accounts"
   add_foreign_key "cevico_goal_plans", "accounts"
   add_foreign_key "cevico_journey_messages", "accounts", on_delete: :cascade

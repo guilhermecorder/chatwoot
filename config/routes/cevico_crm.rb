@@ -329,6 +329,25 @@ namespace :crm do
     # renovar o ambiente: publicados → coluna oculta (item 95)
     collection { post :archive_published }
   end
+  # 🪝 item 397: Banco de Ganchos (gancho → história → oferta)
+  scope 'copy_bank', controller: 'copy_bank', as: 'copy_bank' do
+    get '/', action: :index
+    post :blocks, action: :create_block
+    patch 'blocks/:id', action: :update_block
+    delete 'blocks/:id', action: :destroy_block
+    post 'blocks/:id/use', action: :use_block
+    get :drafts, action: :drafts
+    post :drafts, action: :create_draft, as: :create_draft
+    patch 'drafts/:id', action: :update_draft
+    delete 'drafts/:id', action: :destroy_draft
+    patch 'drafts/:id/ads', action: :link_ads
+    get :ranking, action: :ranking
+    get :ads, action: :ads
+    post :generate_hooks, action: :generate_hooks
+    post :generate_copy, action: :generate_copy
+    get :forms, action: :forms
+    post 'forms/:id/brief', action: :form_brief
+  end
   # Ambiente Pessoas: DISC + desenvolvimento pessoal + feedbacks
   resource :people, only: [:show], controller: 'people' do
     post :save_disc

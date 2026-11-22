@@ -52,6 +52,7 @@ export const ROUTE_NODES = {
   cevico_pages_analytics: 'marketing.resultados',
   cevico_funnel_builder: 'marketing.funis',
   cevico_ab_center: 'marketing.funis',
+  cevico_copy_bank: 'marketing.criativos', // 🪝 item 397
   cevico_people: 'pessoas',
   tasks_board: 'tarefas',
   academy_home: 'academia',
@@ -110,6 +111,7 @@ export const MENU_NODES = {
   'Pages Analytics': 'marketing.resultados',
   'Funnel Builder': 'marketing.funis',
   'AB Center': 'marketing.funis',
+  'Copy Bank': 'marketing.criativos', // 🪝 item 397
   // Relatórios (filhos) — o pai "Reports" aparece se algum filho aparecer
   'CRM Dashboard': 'relatorios.crm',
   'Campaigns Dashboard': 'relatorios.campanhas',
