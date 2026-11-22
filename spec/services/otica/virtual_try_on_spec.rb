@@ -14,6 +14,8 @@ RSpec.describe Otica::VirtualTryOn do
   before do
     CrmSetting.create!(account: account, ai_config: { 'gemini_api_key' => 'AIza-teste' })
     Cevico::Company.save!(account, 'segment' => 'otica')
+    # os testes antigos fazem várias provas seguidas; o catálogo (22/11) tem teste próprio
+    stub_const('Otica::VirtualTryOn::ROUNDS_BEFORE_CATALOG', 99)
   end
 
   def armacao(name, shape, quantity: 2, photo: true)
@@ -293,6 +295,60 @@ RSpec.describe Otica::VirtualTryOn do
     expect(out).to include(ok: true, publico: 'masculino')
     expect(out[:armacoes].pluck(:id)).to eq([masc.id])
     expect(antiga.reload.meta.dig('cevico_media', 'rosto', 'genero')).to eq('masculino')
+  end
+
+  # 📖 22/11 (Guilherme): homem ou mulher primeiro; 2 provas sem acerto → catálogo de estilos com código
+  describe 'catálogo de estilos e público' do
+    before { stub_const('Otica::VirtualTryOn::ROUNDS_BEFORE_CATALOG', 2) }
+
+    def prova_enviada!(lote)
+      conversation.messages.create!(account_id: account.id, inbox_id: inbox.id, message_type: :outgoing, content: 'prova',
+                                    additional_attributes: { 'cevico_visagismo' => { 'lote' => lote, 'product_ids' => [] } })
+    end
+
+    it 'foto sem gênero claro: pergunta antes de mostrar', :aggregate_failures do
+      armacao('Retangular', 'retangular')
+      selfie!(rosto.merge('genero' => 'incerto'))
+      out = service(live: false).run(quantidade: 2)
+      expect(out[:ok]).to be(false)
+      expect(out[:motivo]).to include('homem ou pra mulher')
+      expect(service(live: false).run(quantidade: 2, publico: 'feminino')[:ok]).to be(true)
+    end
+
+    it 'depois de 2 provas manda o catálogo; o código escolhido traz só aquele estilo, escura e clara', :aggregate_failures do
+      gat_preta = armacao('Gatinho preta', 'gatinho').tap { |p| p.update!(color: 'preto', frame_fit: 'feminina') }
+      gat_nude = armacao('Gatinho nude', 'gatinho').tap { |p| p.update!(color: 'nude', frame_fit: 'feminina') }
+      armacao('Retangular', 'retangular')
+      selfie!
+      prova_enviada!('a1')
+      prova_enviada!('b2')
+      ela_responde!
+
+      out = service.run(quantidade: 2)
+      expect(out).to include(ok: true, catalogo: true, publico: 'feminino')
+      catalogo = conversation.messages.outgoing.where("additional_attributes ? 'cevico_catalogo_estilos'").last
+      expect(catalogo.attachments.size).to eq(1)
+      expect(catalogo.content).to include('F1 Gatinho')
+      expect(conversation.messages.outgoing.last.content).to include('código')
+
+      ela_responde!
+      expect(service.run(quantidade: 2)[:motivo]).to include('JÁ foi enviado')
+      expect(service(live: false).run(quantidade: 2, estilo: 'x9')[:motivo]).to include('não reconhecido')
+
+      out = service(live: false).run(quantidade: 2, estilo: 'f1')
+      expect(out).to include(ok: true, estilo: 'F1 Gatinho')
+      expect(out[:armacoes].pluck(:id)).to contain_exactly(gat_preta.id, gat_nude.id)
+      expect(out[:armacoes].pluck(:tom)).to contain_exactly('escura', 'clara')
+      expect(out[:aviso]).to include('NADA substitui')
+    end
+
+    it 'o código aceita "o 1" e o público do código vale quando a foto não diz' do
+      expect(Otica::CatalogoEstilos.normalize('o 3', 'masculino')).to eq('M3')
+      expect(Otica::CatalogoEstilos.normalize('f2')).to eq('F2')
+      expect(Otica::CatalogoEstilos.normalize('M9')).to be_nil
+      expect(File).to exist(Otica::CatalogoEstilos.image_path('masculino'))
+      expect(File).to exist(Otica::CatalogoEstilos.image_path('feminino'))
+    end
   end
 
   describe 'ferramenta do agente (Crm::ResponderTools)' do

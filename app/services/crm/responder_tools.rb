@@ -118,7 +118,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     Crm::AgendaSlots.unit_labels(@account).keys
   end
 
-  def otica_definition
+  def otica_definition # rubocop:disable Metrics/MethodLength
     {
       name: OTICA_TOOL_NAME,
       description: 'PROVA VIRTUAL: gera e ENVIA à cliente, nesta conversa, fotos dela usando armações do estoque da loja ' \
@@ -131,6 +131,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
                    'O sistema avisa a cliente sozinho ("recebi sua foto, já estou montando") antes das imagens, e cada legenda ' \
                    'já traz o motivo da escolha. Com parecida_com (id da armação que ela gostou) manda 2 do mesmo estilo em ' \
                    'faixas de valor (top de linha e mais acessível), com o valor da armação na legenda. ' \
+                   'Sem parecida_com, as 2 opções saem uma de cor ESCURA e uma CLARA (pra saber do que ela gosta). Se ela não ' \
+                   'gostou de nenhuma, chame de novo: depois de 2 provas sem acerto o sistema manda o CATÁLOGO DE ESTILOS ' \
+                   '(imagem com códigos) e aí você chama com estilo = o código que ela escolher. Se a foto não deixar claro se ' \
+                   'é homem ou mulher, o resultado pede para você perguntar antes. ' \
                    "Limite: até #{Otica::VirtualTryOn::MAX_PER_CALL} por vez e #{Otica::VirtualTryOn::MAX_IMAGES_PER_DAY} imagens por dia por cliente.",
       input_schema: {
         type: 'object',
@@ -142,8 +146,12 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
           parecida_com: { type: 'integer', description: 'id da armação que a cliente gostou (do resultado anterior) para ver ' \
                                                         '2 parecidas (top de linha e mais acessível). Só depois de ela escolher uma.' },
           publico: { type: 'string', enum: %w[masculino feminino],
-                     description: 'Pra quem é o óculos, SÓ se a conversa disser diferente da foto ou a pessoa reclamar ' \
-                                  '("achei feminino" → masculino; "é pro meu marido" → masculino). Vazio = o sistema usa a foto.' }
+                     description: 'Pra quem é o óculos, SÓ se a conversa disser diferente da foto, a pessoa reclamar ' \
+                                  '("achei feminino" → masculino; "é pro meu marido" → masculino) ou você perguntou porque a ' \
+                                  'foto não deixou claro. Vazio = o sistema usa a foto.' },
+          estilo: { type: 'string',
+                    description: 'Código do CATÁLOGO DE ESTILOS que ela escolheu (M1…M8 homem, F1…F8 mulher; aceita "o 3" ' \
+                                 'se o catálogo enviado foi um só). Só depois que o catálogo foi enviado. Vazio nas outras vezes.' }
         },
         additionalProperties: false
       }
@@ -505,14 +513,16 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   # ── vagas de um dia específico (item 200: agendamento futuro liberado) ──
   # Só lê a Agenda: vale igual em sombra e ao vivo.
   # ── 🪞 prova virtual (ótica) ────────────────────────────────────────────
-  def experimentar(args)
+  def experimentar(args) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return refuse(OTICA_TOOL_NAME, 'A prova virtual não está disponível neste atendimento.') unless otica_tool?
 
     outcome = Otica::VirtualTryOn.new(account: @account, conversation: @conversation, live: @live || @otica_live, agent_key: @agent_key)
                                  .run(quantidade: args['quantidade'].presence || 2,
                                       preferencia: args['preferencia'], parecida_com: args['parecida_com'].presence,
-                                      publico: args['publico'].presence)
-    resumo = if outcome[:ok]
+                                      publico: args['publico'].presence, estilo: args['estilo'].presence)
+    resumo = if outcome[:catalogo]
+               "catálogo de estilos #{outcome[:publico]} #{outcome[:simulado] ? 'simulado' : 'enviado'}"
+             elsif outcome[:ok]
                names = Array(outcome[:armacoes]).map { |a| a[:armacao] }.join(', ')
                outcome[:simulado] ? "simulado (rosto #{outcome[:rosto_label]}): #{names}" : "#{outcome[:enviadas]} foto(s) enviada(s): #{names}"
              else

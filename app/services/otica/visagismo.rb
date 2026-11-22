@@ -151,13 +151,52 @@ module Otica::Visagismo
     return [[], 'nenhuma', ideais] if pool.empty?
 
     exact = pool.select { |p| match_level(face_shape, p.frame_shape, gender: gender) == 'exata' }
-    chosen = recommend(exact.presence || pool, face_shape: face_shape, preference: preference, limit: limit, gender: gender, seed: seed)
-    # exatas de menos: completa com aproximadas (a cliente sempre compara 2)
-    if exact.any? && chosen.size < limit
-      chosen += recommend(pool - chosen, face_shape: face_shape, preference: preference, limit: limit - chosen.size, gender: gender,
-                                         seed: seed)
-    end
+    opts = { face_shape: face_shape, preference: preference, limit: pool.size, gender: gender, seed: seed }
+    ranked_exact = recommend(exact, **opts)
+    ranked_pool = recommend(pool, **opts)
+    # 🌓 22/11: uma de cor ESCURA e uma de cor CLARA (a pessoa mostra do que gosta mais)
+    chosen = contrast_pick(ranked_exact.presence || ranked_pool, ranked_pool, limit)
     [chosen, (exact.any? ? 'exata' : 'aproximada'), ideais]
+  end
+
+  # 🌓 22/11 (Guilherme: "oferecer tanto uma cor clara quanto uma cor escura, pra saber o que a pessoa gosta
+  # mais"): a 1ª é a melhor da lista; a 2ª é a melhor de TOM OPOSTO (primeiro entre as do formato ideal,
+  # depois entre as que também servem); sem nenhuma de tom oposto, a 2ª melhor. Completa até `limit`.
+  def contrast_pick(ranked, fallback, limit) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return [] if ranked.empty?
+
+    first = ranked.first
+    chosen = [first]
+    if limit >= 2
+      opposite = ->(p) { p != first && contrast?(tone_of(first), tone_of(p)) }
+      second = ranked.find(&opposite) || fallback.find(&opposite)
+      chosen << second if second
+    end
+    (ranked + fallback).each do |p|
+      break if chosen.size >= limit
+
+      chosen << p unless chosen.include?(p)
+    end
+    chosen.first(limit)
+  end
+
+  # a 1ª sem tom conhecido: não força contraste (segue a ordem do visagismo)
+  def contrast?(tone_a, tone_b)
+    tone_a.present? && tone_b.present? && tone_b != tone_a
+  end
+
+  # 🌓 tom da armação pela cor do cadastro: 'escura', 'clara' ou nil (não dá pra saber)
+  DARK_WORDS = %w[preto preta black grafite chumbo gunmetal escuro escura marinho navy tartaruga havana marrom brown
+                  vinho bordo bordô café cafe chocolate onix ônix].freeze
+  LIGHT_WORDS = %w[transparente cristal clear nude bege dourado dourada gold ouro prata prateado prateada silver rose rosé
+                   champagne mel branco branca claro clara rosa lilás lilas acqua translucido translúcido areia].freeze
+  def tone_of(product)
+    text = [product.color, product.name].join(' ').downcase
+    words = text.scan(/[[:alpha:]]+/)
+    return 'clara' if words.intersect?(LIGHT_WORDS)
+    return 'escura' if words.intersect?(DARK_WORDS)
+
+    nil
   end
 
   # 🚹🚺 22/11/2026 (Guilherme, print da conversa #49: homem recebeu Jean Marcell feminina e depois a
@@ -169,6 +208,8 @@ module Otica::Visagismo
   MALE_NEVER_SHAPES = %w[gatinho borboleta].freeze
   MALE_NEVER_COLORS = %w[rosa rose rosé pink roxo roxa lilás lilas lavanda nude magenta fúcsia fucsia].freeze
   MALE_TOP_SHAPES = %w[quadrada retangular].freeze
+  # 22/11 (tarde): os "modernos" que o homem prefere, na ordem
+  MALE_MODERN_SHAPES = %w[quadrada retangular geometrica browline].freeze
   MALE_RARE_SHAPES = %w[redonda oval].freeze
 
   def gender_of(value)
@@ -212,17 +253,19 @@ module Otica::Visagismo
     FRAME_SHAPES[shape.to_s] || shape.to_s
   end
 
-  # 🚹 22/11: pro HOMEM a regra do rosto ganha o gosto masculino: quadrada e retangular sempre na
-  # frente (mesmo no rosto quadrado, onde a regra clássica mandaria fugir delas), redonda/oval só no
-  # fim (às vezes), gatinho e borboleta nunca.
+  # 🚹 22/11: pro HOMEM a regra do rosto ganha o gosto masculino: os MODERNOS (quadrada, retangular,
+  # geométrica, browline) na frente, redonda/oval só no fim (às vezes), gatinho e borboleta nunca.
+  # 22/11 (tarde, Guilherme: "priorizar quadrados e modernos, mas que combine com o formato do
+  # rosto"): moderno que FOGE do rosto (ex.: quadrada no rosto quadrado) não entra na frente.
   def rule(face_shape, gender = nil)
     base = RULES[face_shape.to_s] || RULES['oval']
     return base unless gender_of(gender) == 'masculino'
 
-    rec = base['recomendadas'] - MALE_NEVER_SHAPES - MALE_TOP_SHAPES
-    rare = rec & MALE_RARE_SHAPES
-    { 'recomendadas' => MALE_TOP_SHAPES + (rec - rare) + rare,
-      'evitar' => ((base['evitar'] - MALE_TOP_SHAPES) + MALE_NEVER_SHAPES).uniq,
+    modern = MALE_MODERN_SHAPES - base['evitar']
+    rest = base['recomendadas'] - MALE_NEVER_SHAPES - MALE_MODERN_SHAPES
+    rare = rest & MALE_RARE_SHAPES
+    { 'recomendadas' => modern + (rest - rare) + rare,
+      'evitar' => (base['evitar'] + MALE_NEVER_SHAPES).uniq,
       'porque' => base['porque'] }
   end
 

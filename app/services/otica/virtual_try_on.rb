@@ -45,6 +45,14 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   DEFAULT_DAILY_CAP = 150
   CAP_KEY = 'visagismo_daily_cap'.freeze
   STAMP_KEY = 'cevico_visagismo'.freeze
+  # 📖 22/11 (Guilherme): depois de 2 provas sem acerto, o catálogo de estilos (Otica::CatalogoEstilos)
+  CATALOGO_KEY = 'cevico_catalogo_estilos'.freeze
+  ROUNDS_BEFORE_CATALOG = 2
+  # 🏬 22/11: a prova é só uma prévia: depois da escolha, a conversa vai pra loja e pro exame
+  FECHAMENTO = 'Quando ela escolher (ou gostar de uma), diga com naturalidade que a foto é uma prévia e que NADA substitui ' \
+               'ver e experimentar o óculos pessoalmente na loja, com o exame de vista pra fazer as lentes certinhas; ' \
+               'e conduza para MARCAR o exame (ofereça 2 horários). Não precisa acertar a armação perfeita agora: ' \
+               'o importante é entender o estilo dela.'.freeze
   LOOKBACK_MESSAGES = 30
 
   attr_reader :account
@@ -117,7 +125,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   # devolve o Hash que vai ao modelo como tool_result.
   # parecida_com: id da armação que a cliente gostou → 2 do mesmo estilo (top de linha × mais acessível)
   # publico: 'masculino'/'feminino' quando o agente sabe (ex.: "é pro meu marido"); senão vale o que a foto mostra
-  def run(quantidade: 2, preferencia: nil, parecida_com: nil, publico: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  def run(quantidade: 2, preferencia: nil, parecida_com: nil, publico: nil, estilo: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     return refuse('A prova virtual só existe no ramo ótica.') unless self.class.otica?(account)
 
     attachment, rosto, = pick_selfie
@@ -129,10 +137,25 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     # 🚹🚺 22/11: homem só vê armação masculina/unissex (nada de gatinho, rosa, roxo); mulher, feminina/unissex.
     # Foto lida antes de 22/11 não tem 'genero': ao vivo, relê só isso uma vez (e guarda na foto).
     rosto = rosto.merge('genero' => read_gender!(attachment)) if @live && !rosto.key?('genero')
+    estilo_code = Otica::CatalogoEstilos.normalize(estilo, publico || rosto['genero']) if estilo.present?
+    return estilo_desconhecido(publico || rosto['genero']) if estilo.present? && estilo_code.nil?
+
     genero = Otica::Visagismo.gender_of(publico) || Otica::Visagismo.gender_of(rosto['genero'])
+    genero ||= Otica::CatalogoEstilos.style(estilo_code)&.dig(:publico)
+    # 🚹🚺 22/11 (tarde, Guilherme: "primeiro descobrir se a pessoa é homem ou mulher"): a foto não deixou
+    # claro → a IA pergunta antes de chutar (antes saía só unissex neutra)
+    return refuse(GENERO_INCERTO) if genero.nil?
+
     rosto = rosto.merge('genero' => genero.to_s)
-    products = self.class.candidates(account)
-    products = genero ? Otica::Visagismo.filter_gender(products, genero) : Otica::Visagismo.filter_neutral(products)
+    # 📖 22/11: 2 provas e nada agradou → catálogo de estilos (a pessoa escolhe pelo código)
+    if estilo_code.nil? && parecida_com.blank? && rounds_sent >= ROUNDS_BEFORE_CATALOG
+      return catalogo_ja_enviado(genero) if catalog_sent?
+      return refuse(JA_ENVIADAS) if @live && just_sent?
+
+      return send_catalog!(genero)
+    end
+
+    products = Otica::Visagismo.filter_gender(self.class.candidates(account), genero)
     # 🕶️ 22/11: óculos de sol só entra na prova quando ela pede sol (antes 22 solares iam pra quem quer grau)
     products = products.reject { |p| p.kind.to_s == 'solar' } unless preferencia.to_s.match?(/\bsol\b|solar/i) || parecida_com.present?
     return refuse('Nenhuma armação do estoque está pronta para a prova virtual (precisa de foto e saldo). Convide para a loja.') if products.empty?
@@ -153,6 +176,22 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
 
       chosen, tiers = pick_tiers(pool, quantidade)
       tiers = {} if chosen.size < 2 # faixa só faz sentido comparando (1 parecida sai sem "top de linha")
+    elsif estilo_code
+      # 📖 22/11: o estilo que ela escolheu no catálogo, com a cor escura e a clara
+      quantidade = (quantidade.presence || 2).to_i.clamp(1, MAX_PER_CALL)
+      s = Otica::CatalogoEstilos.style(estilo_code)
+      in_style = Otica::CatalogoEstilos.products_for(estilo_code, products)
+      fresh = in_style.reject { |p| already.include?(p.id) }
+      in_style = fresh if fresh.any?
+      if in_style.empty?
+        return refuse("Hoje a loja não tem armação do estilo #{estilo_code} (#{s[:nome]}) com foto e saldo pra prova. Fale a verdade, " \
+                      'ofereça outro código do catálogo ou convide pra ver as novidades na loja (e marcar o exame).')
+      end
+
+      ranked = Otica::Visagismo.recommend(in_style, face_shape: rosto['formato'], preference: [s[:preferencia], preferencia].compact.join(' '),
+                                                    limit: in_style.size, gender: genero, seed: @conversation&.id)
+      chosen = Otica::Visagismo.contrast_pick(ranked, ranked, quantidade)
+      nivel = 'estilo'
     else
       quantidade = (quantidade.presence || 2).to_i.clamp(1, MAX_PER_CALL)
       pool = products.reject { |p| already.include?(p.id) }
@@ -165,7 +204,9 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
 
     base = { rosto: rosto['formato'], rosto_label: Otica::Visagismo.face_label(rosto['formato']), publico: genero,
              foto_usada: (media(attachment).dig('rosto', 'angulo') == 'tres_quartos' ? 'de 3/4' : 'de frente'),
-             visagismo: Otica::Visagismo.explain(rosto['formato'], genero), parecidas: parecida_com.present? }.compact
+             visagismo: Otica::Visagismo.explain(rosto['formato'], genero), parecidas: parecida_com.present?,
+             estilo: (estilo_code ? "#{estilo_code} #{Otica::CatalogoEstilos.style(estilo_code)[:nome]}" : nil),
+             tentativa: rounds_sent + 1 }.compact
     if nivel == 'aproximada'
       base[:combinacao] = 'aproximada'
       base[:aviso_honesto] = 'ATENÇÃO: nenhuma armação com foto e saldo é do formato IDEAL pro rosto dela (' \
@@ -179,7 +220,8 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     unless @live
       return base.merge(ok: true, simulado: true,
                         aviso: 'SIMULAÇÃO (sombra/teste): nenhuma imagem foi gerada nem enviada. Ao vivo, estas armações ' \
-                               'seriam enviadas como fotos da cliente usando cada uma. Comente como se as fotos tivessem chegado.',
+                               'seriam enviadas como fotos da cliente usando cada uma (a 1 escura e a 2 clara, quando der). ' \
+                               "Comente como se as fotos tivessem chegado. #{FECHAMENTO}",
                         armacoes: chosen.map { |p| describe(p, rosto, tiers[p.id]) })
     end
 
@@ -238,13 +280,15 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
 
     # 08/11 (Guilherme): a pergunta que faz ela se ver com o óculos. 08/11 à noite (teste real: as fotos
     # chegaram e o agente ficou mudo): o SISTEMA manda a pergunta logo depois da última foto, garantido.
-    pergunta = closing_question(sent.size)
+    pergunta = closing_question(sent.size, sent)
     send_text!(pergunta, PERGUNTA_KEY)
     base.merge(ok: true, enviadas: sent.size, armacoes: sent, falhas: failures, imagens_hoje: today + sent.size,
                aviso: 'As fotos JÁ FORAM ENVIADAS à cliente nesta conversa (numa imagem com moldura: formato do rosto, modelos ideais e ' \
                       'as opções numeradas 1 e 2, com legenda e o motivo) e a pergunta ' \
                       "\"#{pergunta}\" TAMBÉM JÁ FOI ENVIADA. Não repita nomes, motivos nem a pergunta: responda com NADA (texto vazio) " \
-                      'ou no máximo 1 linha curta, e espere a escolha dela. NÃO chame experimentar_armacoes de novo nesta resposta.')
+                      'ou no máximo 1 linha curta, e espere a escolha dela. NÃO chame experimentar_armacoes de novo nesta resposta. ' \
+                      "Se ela não gostar de nenhuma, chame de novo (na #{ROUNDS_BEFORE_CATALOG + 1}ª vez o sistema manda o catálogo de " \
+                      "estilos). #{FECHAMENTO}")
   ensure
     Redis::Alfred.delete(@lock_key) if @lock_key
   end
@@ -304,7 +348,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
 
   def describe(product, rosto = nil, tier = nil)
     { id: product.id, armacao: product.name, formato: Otica::Visagismo.frame_label(product.frame_shape),
-      cor: product.color, valor: product.price, faixa: (tier ? TIERS[tier] : nil),
+      cor: product.color, tom: Otica::Visagismo.tone_of(product), valor: product.price, faixa: (tier ? TIERS[tier] : nil),
       motivo: (rosto ? Otica::Visagismo.reason(rosto['formato'], product.frame_shape, gender: rosto['genero']) : nil),
       combinacao: (rosto ? Otica::Visagismo.match_level(rosto['formato'], product.frame_shape, gender: rosto['genero']) : nil),
       observacao: product.visagismo_notes.presence }.compact
@@ -433,12 +477,85 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   end
 
   PERGUNTA_KEY = 'cevico_prova_pergunta'.freeze
-  def closing_question(count)
+  # 🌓 22/11: com uma escura e uma clara, a pergunta já diz qual é qual
+  def closing_question(count, sent = [])
     case count
     when 1 then 'Você já se imagina usando esse?'
-    when 2 then 'Qual você já se imagina usando: o 1 ou o 2?'
+    when 2
+      tones = Array(sent).pluck(:tom)
+      if tones.compact.size == 2 && tones.uniq.size == 2
+        "Qual você já se imagina usando: o 1, de cor mais #{tones[0]}, ou o 2, mais #{tones[1]}?"
+      else
+        'Qual você já se imagina usando: o 1 ou o 2?'
+      end
     else "Qual desses #{count} você já se imagina usando?"
     end
+  end
+
+  GENERO_INCERTO = 'Pela foto não deu pra ter certeza se o óculos é pra homem ou pra mulher. Antes de mostrar armações, ' \
+                   'pergunte de um jeito leve (ex.: "É pra você mesmo que vamos escolher?" ou, se precisar, "Prefere ver modelos ' \
+                   'masculinos ou femininos?") e chame de novo com publico.'.freeze
+
+  # 📖 provas já mandadas nesta conversa (cada moldura/lote = 1); no simulador sem imagens, as provas simuladas
+  def rounds_sent
+    @rounds_sent ||= begin
+      lots = @conversation.messages.where(message_type: :outgoing).where("additional_attributes ? '#{STAMP_KEY}'")
+                          .pluck(Arel.sql("additional_attributes -> '#{STAMP_KEY}' ->> 'lote'")).compact.uniq.size
+      lots + simulated_actions.count { |a| a['ok'] && a['resumo'].to_s.start_with?('simulado (rosto') }
+    end
+  end
+
+  def catalog_sent?
+    @conversation.messages.where(message_type: :outgoing).exists?(["additional_attributes ? '#{CATALOGO_KEY}'"]) ||
+      simulated_actions.any? { |a| a['ok'] && a['resumo'].to_s.start_with?('catálogo') }
+  end
+
+  # ações da prova nas notas de sombra (simulador/sombra: nada sai, mas a conversa lembra o que "teria" saído)
+  def simulated_actions
+    @simulated_actions ||= @conversation.messages.where(message_type: :activity)
+                                        .where("additional_attributes ? 'cevico_ia_shadow'")
+                                        .pluck(Arel.sql("additional_attributes -> 'cevico_ia_shadow' -> 'acoes'"))
+                                        .flat_map { |list| list.is_a?(String) ? (JSON.parse(list) rescue []) : Array(list) } # rubocop:disable Style/RescueModifier
+                                        .select { |a| a.is_a?(Hash) && a['ferramenta'] == Crm::ResponderTools::OTICA_TOOL_NAME }
+  end
+
+  CATALOGO_TEXTO = 'Pra eu acertar o seu estilo, separei aqui os principais tipos de óculos. Me diz o código do que mais ' \
+                   'te agrada (por exemplo, {exemplo}) que eu já te mostro no seu rosto.'.freeze
+
+  # 📖 manda a imagem do catálogo (homem ou mulher) + a pergunta do código
+  def send_catalog!(genero) # rubocop:disable Metrics/MethodLength
+    styles = Otica::CatalogoEstilos.for_gender(genero)
+    exemplo = genero == 'masculino' ? 'M3' : 'F1'
+    base = { ok: true, catalogo: true, publico: genero, estilos: styles.map { |code, s| "#{code} #{s[:nome]} (#{s[:descricao]})" } }
+    instrucao = 'Duas provas e nada agradou: o CATÁLOGO DE ESTILOS (imagem com os principais tipos, cada um com um código) ' \
+                'e a pergunta do código JÁ FORAM ENVIADOS. Não repita a lista: responda com NADA ou no máximo 1 linha leve. ' \
+                'Quando ela disser o código (ou descrever um deles), chame experimentar_armacoes com estilo = o código.'
+    return base.merge(simulado: true, aviso: "SIMULAÇÃO: o catálogo #{genero} seria enviado agora. #{instrucao}") unless @live
+
+    path = Otica::CatalogoEstilos.image_path(genero)
+    return refuse('O catálogo de estilos não está instalado. Pergunte que estilo ela prefere em palavras.') unless File.exist?(path)
+
+    message = @conversation.messages.new(
+      account_id: account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing,
+      content: Otica::CatalogoEstilos.legend(genero),
+      additional_attributes: { 'cevico_ia_agent' => @agent_key.presence || Otica::TryOnImage::AGENT_KEY,
+                               CATALOGO_KEY => { 'publico' => genero } }
+    )
+    message.attachments.build(account_id: account.id, file_type: :image,
+                              file: { io: File.open(path, 'rb'), filename: "catalogo-#{genero}.jpg", content_type: 'image/jpeg' })
+    message.save!
+    send_text!(CATALOGO_TEXTO.gsub('{exemplo}', exemplo), PERGUNTA_KEY)
+    base.merge(aviso: instrucao)
+  end
+
+  def catalogo_ja_enviado(genero)
+    refuse("O catálogo de estilos #{genero} JÁ foi enviado nesta conversa. Peça o código do estilo que ela mais gostou " \
+           "(#{Otica::CatalogoEstilos.legend(genero)}) e chame com estilo. Se nada agradar, não insista: diga que " \
+           'na loja ela experimenta vários pessoalmente e conduza para marcar o exame de vista.')
+  end
+
+  def estilo_desconhecido(genero)
+    refuse("Código de estilo não reconhecido. Os códigos são: #{Otica::CatalogoEstilos.legend(genero)}.")
   end
 
   # balão de texto da loja na conversa (sai pelo WhatsApp), carimbado; `wait` = sai depois das fotos
@@ -495,7 +612,9 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
   def frame_subtitle(product, tier)
     return "#{TIERS[tier]} · #{money(product.price)}" if tier
 
-    Otica::Visagismo.frame_label(product.frame_shape).to_s.capitalize
+    label = Otica::Visagismo.frame_label(product.frame_shape).to_s.capitalize
+    tone = Otica::Visagismo.tone_of(product)
+    tone ? "#{label} · cor #{tone}" : label
   end
 
   # "Modelos ideais": os formatos das opções que combinam de verdade, completados pela regra do rosto (máx. 2)

@@ -89,11 +89,26 @@ RSpec.describe Otica::Visagismo do
       expect(chosen).to eq([quadrada, retangular])
       expect(nivel).to eq('exata')
 
-      # rosto quadrado: a regra clássica foge da quadrada, mas pro homem ela continua valendo
-      expect(described_class.match_level('quadrado', 'quadrada', gender: 'masculino')).to eq('exata')
+      # 22/11 (tarde): moderno na frente, MAS combinando com o rosto: no rosto quadrado a quadrada foge
+      expect(described_class.match_level('quadrado', 'quadrada', gender: 'masculino')).to eq('foge')
+      expect(described_class.rule('quadrado', 'masculino')['recomendadas'].first).to eq('browline')
+      expect(described_class.rule('oval', 'masculino')['recomendadas'].first(4)).to eq(%w[quadrada retangular geometrica browline])
       expect(described_class.match_level('quadrado', 'gatinho', gender: 'masculino')).to eq('foge')
       expect(described_class.match_level('quadrado', 'quadrada')).to eq('foge')
       expect(described_class.rule('oval', 'masculino')['recomendadas'].last(1)).to eq(['redonda'])
+    end
+
+    # 🌓 22/11: uma de cor escura e uma clara, pra saber do que a pessoa gosta mais
+    it 'as 2 opções saem uma escura e uma clara quando o estoque deixa', :aggregate_failures do
+      preta = com_publico('Quadrada preta', 'quadrada', 'masculina', color: 'preto')
+      preta2 = com_publico('Quadrada grafite', 'quadrada', 'masculina', color: 'grafite')
+      cristal = com_publico('Retangular cristal', 'retangular', 'unissex', color: 'transparente')
+
+      chosen, = described_class.honest_pick([preta, preta2, cristal], face_shape: 'oval', gender: 'masculino', limit: 2)
+      expect(chosen.map { |p| described_class.tone_of(p) }).to contain_exactly('escura', 'clara')
+      expect(chosen.first.frame_shape).to eq('quadrada')
+      expect(described_class.tone_of(com_publico('Havana', 'redonda', 'unissex', color: 'tartaruga clara'))).to eq('clara')
+      expect(described_class.tone_of(com_publico('Sem cor', 'redonda', 'unissex', color: 'azul'))).to be_nil
     end
 
     it 'mulher não vê masculina; unissex vale pros dois; sem gênero nada muda', :aggregate_failures do
