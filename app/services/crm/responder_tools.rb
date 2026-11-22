@@ -67,6 +67,16 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
   OTICA_TOOL_NAME = 'experimentar_armacoes'.freeze
   OTICA_TOOL_KEYS = %w[atendente_agendamento atendente_pos atendente_visagista].freeze
   WEEKDAYS_SHORT = %w[dom seg ter qua qui sex sáb].freeze
+  # 🧰 22/11: tarefa-lixo que a IA abria para "desfazer" uma chamada à toa (24 de 48 tarefas
+  # da IA na VPS da ótica em 30 dias: "placeholder", "chamada indevida - ignorar", "dummy",
+  # "nenhuma ação necessária"). Motivo assim é recusado: nenhuma tarefa nasce.
+  JUNK_TASK = /
+    placeholder|dummy|\bignor(ar|e)\b|desconsider|indevid|por\s+engano|erro\s+meu|chamada\s+(errada|incorreta)|
+    nenhuma\s+a[çc][ãa]o|sem\s+a[çc][ãa]o|nada\s+a\s+fazer|apenas\s+teste|só\s+teste|
+    \Ateste\b|\btest\b|\bteste\s+(de\s+|da\s+)?ferramenta
+  /xi
+  JUNK_TASK_TEXT = 'Tarefa NÃO aberta: tarefa é só para algo que a equipe precisa fazer por esta pessoa. Nunca abra tarefa ' \
+                   'para teste, correção ou "ignorar" uma chamada anterior: só responda pela ferramenta responder.'.freeze
 
   attr_reader :acoes
 
@@ -273,6 +283,11 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
             .where('due_at >= ?', TZ.now.beginning_of_day)
   end
 
+  # 🧰 22/11: motivo/detalhes de tarefa-lixo (teste, placeholder, "ignorar")
+  def self.junk_task?(motivo, detalhes = nil)
+    [motivo, detalhes].any? { |text| text.to_s.match?(JUNK_TASK) }
+  end
+
   # o Postgres tem a extensão unaccent? (uma vez por processo)
   def self.unaccent?
     return @unaccent unless @unaccent.nil?
@@ -468,6 +483,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
     motivo = args['motivo'].to_s.strip.first(120)
     return refuse('abrir_tarefa', 'Informe o motivo em uma frase.') if motivo.blank?
+    return refuse('abrir_tarefa', JUNK_TASK_TEXT) if self.class.junk_task?(motivo, args['detalhes'])
 
     urgencia = args['urgencia'].to_s == 'alta' ? 'alta' : 'normal'
     unless @live

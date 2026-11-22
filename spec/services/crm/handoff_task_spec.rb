@@ -79,6 +79,38 @@ RSpec.describe Crm::HandoffTask do
     end
   end
 
+  # 🧰 22/11: tarefa-lixo (24 de 48 tarefas da IA na VPS da ótica eram "placeholder", "ignorar", "dummy"…)
+  describe 'abrir_tarefa recusa tarefa-lixo' do
+    let(:live) { Crm::ResponderTools.new(conversation: conversation, agent_key: 'atendente_agendamento', live: true) }
+
+    it 'motivos de teste/correção/"ignorar" não criam tarefa (ao vivo nem em sombra)', :aggregate_failures do
+      [
+        { 'motivo' => 'placeholder' },
+        { 'motivo' => 'chamada indevida de ferramenta - ignorar' },
+        { 'motivo' => 'Atendimento · Rosana — placeholder' },
+        { 'motivo' => 'dummy' },
+        { 'motivo' => 'nenhuma ação necessária' },
+        { 'motivo' => 'teste', 'detalhes' => 'ignorar' },
+        { 'motivo' => 'Correção: chamadas de teste indevidas, ignorar' },
+        { 'motivo' => 'Atendimento', 'detalhes' => 'Erro meu de ferramenta, sem ação necessária' }
+      ].each do |args|
+        result = live.call('abrir_tarefa', args.merge('urgencia' => 'normal'))
+        expect(result).to eq(ok: false, motivo: Crm::ResponderTools::JUNK_TASK_TEXT), args['motivo']
+      end
+      shadow = Crm::ResponderTools.new(conversation: conversation, agent_key: 'atendente_agendamento', live: false)
+      expect(shadow.call('abrir_tarefa', 'motivo' => 'placeholder', 'urgencia' => 'normal')[:ok]).to be(false)
+      expect(account.tasks.where(task_type: 'pos_op')).to be_empty
+      expect(live.acoes).to all(include('ferramenta' => 'abrir_tarefa', 'ok' => false))
+    end
+
+    it 'motivo de verdade continua abrindo (inclusive com "teste" no meio, como teste de adaptação)', :aggregate_failures do
+      motivos = ['Orçamento: armação HB + lente filtro de tela', 'cliente quer fazer teste de adaptação da lente', 'mandou o comprovante do Pix']
+      motivos.each do |motivo|
+        expect(live.call('abrir_tarefa', 'motivo' => motivo, 'urgencia' => 'normal')[:ok]).to be(true), motivo
+      end
+    end
+  end
+
   # 🔴 auditoria 10/10 (#443): tarefa urgente nunca fica "sem responsável definido"
   it 'sem pessoa no card nem dono de coluna, a tarefa vai para o primeiro administrador e diz de qual atendente veio', :aggregate_failures do
     settings.update!(ai_config: { 'api_key' => 'sk-teste', 'agents' => { 'atendente_agendamento' => { 'enabled' => true } } })

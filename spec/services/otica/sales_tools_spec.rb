@@ -25,7 +25,13 @@ RSpec.describe Otica::SalesTools do
     described_class.new(conversation: conversation, agent_key: 'atendente_agendamento', live: live)
   end
 
+  def fala(conv, text, type: :incoming)
+    create(:message, account: account, inbox: inbox, conversation: conv, message_type: type, content: text)
+  end
+
   describe 'pedir_fotos' do
+    before { fala(conversation, 'Vi o vídeo e quero ver as armações no meu rosto') }
+
     it 'em sombra só simula; ao vivo manda a orientação (texto padrão ou da loja) com o cartão-exemplo quando ele existe', :aggregate_failures do
       out, = tools(live: false).call('pedir_fotos', {})
       expect(out).to include(ok: true, simulado: true, com_exemplo: false)
@@ -47,6 +53,7 @@ RSpec.describe Otica::SalesTools do
       described_class.save_config!(account, 'orientacao_foto' => 'Manda duas fotos, assim como no exemplo!')
       CrmSetting.find_by(account: account).otica_photo_example.attach(io: File.open(Rails.root.join('spec/assets/sample.png')), filename: 'exemplo.png', content_type: 'image/png')
       outra = create(:conversation, account: account, inbox: inbox, contact: contact)
+      fala(outra, 'pode mandar como tira a foto')
       out, resumo = described_class.new(conversation: outra, agent_key: 'atendente_visagista', live: true).call('pedir_fotos', {})
       expect(out).to include(ok: true, com_exemplo: true)
       expect(resumo).to include('cartão-exemplo')
@@ -54,6 +61,56 @@ RSpec.describe Otica::SalesTools do
       expect(last.content).to eq('Manda duas fotos, assim como no exemplo!')
       expect(last.attachments.one? && last.attachments.first.file_type == 'image').to be(true)
       expect(last.additional_attributes).to include('cevico_pedir_fotos' => true)
+    end
+  end
+
+  # 🧰 22/11: o cartão de como tirar a foto só sai depois do convite (bug das ferramentas à toa)
+  describe 'pedir_fotos fora de hora' do
+    let(:conv) { create(:conversation, account: account, inbox: inbox, contact: contact) }
+
+    def pedir(live: true)
+      described_class.new(conversation: conv, agent_key: 'atendente_agendamento', live: live).call('pedir_fotos', {})
+    end
+
+    it 'recusa antes do convite e não envia nada (sombra e ao vivo)', :aggregate_failures do
+      fala(conv, 'Boa noite, faz tempo que não troco meu óculos')
+      fala(conv, 'É pra você ou pra alguém da família?', type: :outgoing)
+      fala(conv, 'É pra mim')
+      [false, true].each do |live|
+        out, resumo = pedir(live: live)
+        expect(out).to eq(ok: false, motivo: described_class::PHOTO_NOT_YET)
+        expect(resumo).to eq('recusado: fora de hora')
+      end
+      expect(conv.messages.outgoing.where("additional_attributes ? 'cevico_pedir_fotos'")).to be_empty
+    end
+
+    it 'depois do convite da loja ("posso te explicar como mandar a foto?") envia', :aggregate_failures do
+      fala(conv, 'Posso te explicar como mandar a foto?', type: :outgoing)
+      fala(conv, 'Pode explicar')
+      out, = pedir
+      expect(out).to include(ok: true)
+      expect(conv.messages.outgoing.last.additional_attributes).to include('cevico_pedir_fotos' => true)
+    end
+
+    it 'no simulador o convite vem da nota de sombra da loja' do
+      conv.messages.create!(account_id: account.id, inbox_id: conv.inbox_id, message_type: :activity, private: true, content: 'sombra',
+                            additional_attributes: { 'cevico_ia_shadow' => { 'mensagens' => ['Posso te explicar como mandar a foto?'] } })
+      fala(conv, 'Pode')
+      out, = pedir(live: false)
+      expect(out).to include(ok: true, simulado: true)
+    end
+
+    it 'recusa quando ela disse que não quer foto ou quando a foto acabou de chegar', :aggregate_failures do
+      fala(conv, 'Posso te explicar como mandar a foto?', type: :outgoing)
+      fala(conv, 'Ah, não precisa de foto não, prefiro ver aí')
+      expect(pedir.first).to eq(ok: false, motivo: described_class::PHOTO_NOT_YET)
+
+      foto = fala(conv, 'Segue')
+      foto.attachments.create!(account_id: account.id, file_type: :image,
+                               file: Rack::Test::UploadedFile.new(Rails.root.join('spec/assets/sample.png'), 'image/png'))
+      out, resumo = pedir
+      expect(out).to eq(ok: false, motivo: described_class::PHOTO_ALREADY)
+      expect(resumo).to eq('recusado: a foto já chegou')
     end
   end
 

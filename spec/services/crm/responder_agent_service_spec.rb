@@ -23,6 +23,11 @@ RSpec.describe Crm::ResponderAgentService do
     instance_double(Anthropic::Message, stop_reason: :end_turn, content: [instance_double(Anthropic::TextBlock, type: :text, text: final_json)],
                                         usage: usage)
   end
+  # 🧰 22/11: a resposta chega pela ferramenta `responder` (strict), não por texto em JSON
+  let(:answer_use) do
+    instance_double(Anthropic::ToolUseBlock, type: :tool_use, id: 'toolu_9', name: 'responder', input: JSON.parse(final_json, symbolize_names: true))
+  end
+  let(:answer) { instance_double(Anthropic::Message, stop_reason: :tool_use, content: [answer_use], usage: usage) }
   let(:messages_api) { instance_double(Anthropic::Resources::Messages) }
 
   before do
@@ -41,7 +46,7 @@ RSpec.describe Crm::ResponderAgentService do
     calls = []
     allow(messages_api).to receive(:create) do |**params|
       calls << params
-      calls.size == 1 ? round1 : round2
+      calls.size == 1 ? round1 : answer
     end
 
     result = service.call
@@ -51,8 +56,11 @@ RSpec.describe Crm::ResponderAgentService do
     expect(result[:acoes].first['resumo']).to include('1 de outra pessoa oculta')
 
     expect(calls.size).to eq(2)
-    expect(calls.first[:tools].pluck(:name)).to eq(Crm::ResponderTools::ALL_NAMES) # #458: abrir_tarefa nos três atendentes
-    expect(calls.first[:output_config][:format][:type]).to eq('json_schema')
+    # #458: abrir_tarefa nos três atendentes · 🧰 22/11: + responder (strict), sem JSON obrigatório nas voltas, 1 por vez
+    expect(calls.first[:tools].pluck(:name)).to eq(Crm::ResponderTools::ALL_NAMES + ['responder'])
+    expect(calls.first[:tools].last).to include(strict: true, input_schema: service.output_schema)
+    expect(calls.map { |c| c.dig(:output_config, :format) }).to all(be_nil)
+    expect(calls.map { |c| c[:tool_choice] }).to all(eq(type: 'auto', disable_parallel_tool_use: true))
     history = calls.last[:messages]
     expect(history.size).to eq(3)
     expect(history[1]).to eq(role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'buscar_consulta', input: { nome: 'Maísa' } }])
@@ -78,7 +86,7 @@ RSpec.describe Crm::ResponderAgentService do
     calls = []
     allow(messages_api).to receive(:create) do |**params|
       calls << params
-      round2
+      answer
     end
     service.call
     # item 232: o turno do usuário virou 2 blocos (conversa marcada para cache + contexto vivo)
@@ -87,17 +95,67 @@ RSpec.describe Crm::ResponderAgentService do
     expect(transcript).to include('PACIENTE: olha aqui [imagem: não foi possível ler; pergunte ao paciente o que ele enviou]')
   end
 
-  it 'passa do teto de voltas → última chamada sem ferramentas (tool_choice none)' do
+  it 'passa do teto de voltas → última chamada sem ferramentas (tool_choice none) e com o JSON obrigatório', :aggregate_failures do
     calls = []
+    rounds = (1..described_class::MAX_TOOL_ROUNDS).map do |i|
+      use = instance_double(Anthropic::ToolUseBlock, type: :tool_use, id: "toolu_#{i}", name: 'buscar_consulta', input: { dia: "2026-12-0#{i}" })
+      instance_double(Anthropic::Message, stop_reason: :tool_use, content: [use], usage: usage)
+    end
     allow(messages_api).to receive(:create) do |**params|
       calls << params
-      calls.size <= described_class::MAX_TOOL_ROUNDS ? round1 : round2
+      rounds[calls.size - 1] || round2
     end
     result = service.call
     expect(result[:error]).to be_nil
+    expect(result[:mensagens]).to eq(['Achei a consulta da Maísa: hoje às 14:00, na Av. Paulista.'])
     expect(calls.size).to eq(described_class::MAX_TOOL_ROUNDS + 1)
     expect(calls.last[:tool_choice]).to eq(type: 'none')
-    expect(calls[0..-2].map { |c| c[:tool_choice] }).to all(be_nil)
+    expect(calls.last[:output_config][:format][:type]).to eq('json_schema')
+    expect(calls[0..-2].map { |c| c[:tool_choice] }).to all(eq(type: 'auto', disable_parallel_tool_use: true))
+  end
+
+  # 🧰 22/11: a IA terminou em texto solto (sem chamar responder) → uma volta final escreve no formato
+  it 'resposta em texto solto ganha uma última chamada com o formato e sem ferramentas', :aggregate_failures do
+    loose = instance_double(Anthropic::Message, stop_reason: :end_turn, usage: usage,
+                                                content: [instance_double(Anthropic::TextBlock, type: :text, text: 'Oi! Achei a consulta.')])
+    calls = []
+    allow(messages_api).to receive(:create) do |**params|
+      calls << params
+      calls.size == 1 ? loose : round2
+    end
+    result = service.call
+    expect(result[:mensagens]).to eq(['Achei a consulta da Maísa: hoje às 14:00, na Av. Paulista.'])
+    expect(calls.size).to eq(2)
+    expect(calls.last).to include(tool_choice: { type: 'none' })
+    expect(calls.last[:output_config][:format][:type]).to eq('json_schema')
+    expect(calls.last[:messages].size).to eq(1) # o texto solto não entra na conversa
+  end
+
+  # 🧰 22/11: a mesma ferramenta com os mesmos dados na mesma resposta não roda de novo
+  it 'chamada repetida não executa de novo: devolve aviso e a ação fica registrada uma vez só', :aggregate_failures do
+    again = instance_double(Anthropic::ToolUseBlock, type: :tool_use, id: 'toolu_2', name: 'buscar_consulta', input: { nome: 'Maísa' })
+    round_again = instance_double(Anthropic::Message, stop_reason: :tool_use, content: [again], usage: usage)
+    calls = []
+    allow(messages_api).to receive(:create) do |**params|
+      calls << params
+      [round1, round_again, answer][calls.size - 1]
+    end
+    result = service.call
+    expect(result[:acoes].size).to eq(1)
+    repeated = JSON.parse(calls.last[:messages].last[:content].first[:content])
+    expect(repeated).to include('ok' => false, 'repetida' => true)
+  end
+
+  it 'com esforço escolhido, as voltas levam só o esforço (sem formato)' do
+    settings = CrmSetting.find_by(account: account)
+    settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_pos' => { 'effort' => 'low', 'model' => 'claude-sonnet-5' } }))
+    calls = []
+    allow(messages_api).to receive(:create) do |**params|
+      calls << params
+      answer
+    end
+    service.call
+    expect(calls.first[:output_config]).to eq(effort: 'low')
   end
 
   it 'agente sem ferramentas (instagram) chama sem tools e devolve acoes vazio', :aggregate_failures do
@@ -106,7 +164,8 @@ RSpec.describe Crm::ResponderAgentService do
     allow(messages_api).to receive(:create).and_return(round2)
     result = service(agent_key: 'instagram').call
     expect(result[:acoes]).to eq([])
-    expect(messages_api).to have_received(:create).with(hash_excluding(:tools))
+    expect(messages_api).to have_received(:create).with(hash_excluding(:tools, :tool_choice))
+    expect(messages_api).to have_received(:create).with(hash_including(output_config: hash_including(format: hash_including(type: 'json_schema'))))
   end
 
   it 'o contexto traz o id da consulta futura do próprio paciente' do

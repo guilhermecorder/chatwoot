@@ -38,6 +38,14 @@ class Otica::SalesTools
   CHECK_TEXT = 'Me dá um instante que eu vou conferir aqui no sistema a possibilidade pra você. Me dá uns 30 segundos.'.freeze
   STAMP_KEY = 'cevico_venda'.freeze
   PAYMENT_METHODS = %w[pix link na_loja].freeze
+  # 🧰 22/11: o pedido da foto só sai na hora certa — a pessoa falou em foto/armações no rosto,
+  # ou a loja acabou de convidar ("posso te explicar como mandar a foto?") e ela respondeu.
+  # Antes disso (ou quando ela disse que não quer foto) o cartão NÃO é enviado.
+  PHOTO_TALK = /foto|selfie|arma[çc]|rosto|visagism|prova\s+virtual|v[íi]deo/i
+  NO_PHOTO = /(n[ãa]o|sem)\b[^.!?]{0,30}\bfoto|prefiro\s+(ver|ir|provar)[^.!?]{0,20}(a[íi]|na\s+loja|pessoalmente|l[áa])\b/i
+  PHOTO_NOT_YET = 'NÃO enviei a orientação da foto: a conversa ainda não chegou no convite da foto (ou a pessoa disse ' \
+                  'que não quer mandar foto). Siga o roteiro e responda; o pedido da foto vem depois do convite.'.freeze
+  PHOTO_ALREADY = 'NÃO enviei a orientação da foto: a pessoa ACABOU de mandar uma foto. Use a foto (prova virtual) ou responda.'.freeze
 
   def self.config(account)
     (CrmSetting.find_by(account: account)&.ai_config&.dig(CONFIG_KEY) || {}).to_h
@@ -86,8 +94,9 @@ class Otica::SalesTools
       {
         name: 'pedir_fotos',
         description: 'PEDIDO DA FOTO PARA A PROVA VIRTUAL: envia à cliente, nesta conversa, a sugestão de como tirar a foto ' \
-                     '(com o cartão-exemplo da loja, se houver). Use UMA vez, no momento em que ela aceita ver armações no rosto ' \
-                     'dela (ou logo ao convidar). Depois do ok=true você não repete a orientação: só espera a foto. Qualquer ' \
+                     '(com o cartão-exemplo da loja, se houver). Use UMA vez, quando ela aceitou o convite da foto ou ela mesma ' \
+                     'pediu para ver armações no rosto dela; antes disso o sistema recusa. ' \
+                     'Depois do ok=true você não repete a orientação: só espera a foto. Qualquer ' \
                      'foto boa serve; vale sempre a última que ela mandar.',
         input_schema: { type: 'object', properties: {}, additionalProperties: false }
       },
@@ -191,6 +200,9 @@ class Otica::SalesTools
 
   # ── pedido da foto (cartão-exemplo + orientação) ──────────────────────────
   def pedir_fotos # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+    not_now = photo_request_block
+    return [{ ok: false, motivo: not_now }, not_now == PHOTO_ALREADY ? 'recusado: a foto já chegou' : 'recusado: fora de hora'] if not_now
+
     cfg = self.class.config(@account)
     text = Otica::TextSpacing.space(cfg['orientacao_foto'].presence || DEFAULT_PHOTO_GUIDE)
     example = CrmSetting.find_by(account: @account)&.otica_photo_example
@@ -221,6 +233,31 @@ class Otica::SalesTools
        aviso: 'A orientação JÁ FOI ENVIADA à cliente (com o cartão-exemplo, se a loja tem um). Não repita a orientação: escreva no ' \
               'máximo 1 linha ou nada, e espere a foto.' },
      "orientação enviada#{' + cartão-exemplo' if example&.attached?}"]
+  end
+
+  # 🧰 22/11: nil = pode pedir a foto agora; senão, o motivo da recusa
+  def photo_request_block
+    last_in = @conversation.messages.where(message_type: :incoming).includes(:attachments).reorder(created_at: :desc).first
+    return PHOTO_NOT_YET if last_in.blank?
+    return PHOTO_ALREADY if last_in.attachments.any? { |a| a.file_type.to_s == 'image' }
+
+    said = last_in.content.to_s
+    return PHOTO_NOT_YET if said.match?(NO_PHOTO)
+    return nil if said.match?(PHOTO_TALK) || last_clinic_text.match?(/foto/i)
+
+    PHOTO_NOT_YET
+  end
+
+  # a última fala da loja: mensagem enviada (ao vivo) ou nota de sombra (simulador)
+  def last_clinic_text
+    @conversation.messages.where(message_type: %i[outgoing activity]).reorder(created_at: :desc).limit(15).each do |m|
+      if m.outgoing?
+        return m.content.to_s if !m.private? && m.content.present?
+      elsif (shadow = m.additional_attributes&.[]('cevico_ia_shadow'))
+        return Array(shadow['mensagens']).join(' ')
+      end
+    end
+    ''
   end
 
   # ── consultoria de lentes ─────────────────────────────────────────────────

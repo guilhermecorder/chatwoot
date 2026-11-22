@@ -77,6 +77,19 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # voltas de tool use por resposta: a IA pede → o sistema executa → a IA lê.
   # Passou do teto, a última chamada vai com tool_choice none (tem que responder).
   MAX_TOOL_ROUNDS = 5
+  # 🧰 22/11 (bug das ferramentas à toa): com o JSON obrigatório (output_config
+  # json_schema) valendo também nas voltas de ferramenta, a IA que só queria FALAR
+  # não conseguia: o texto tinha de abrir em JSON, e a saída que sobrava era chamar
+  # ferramenta (horarios_do_dia, buscar_consulta, abrir_tarefa "placeholder/ignorar",
+  # pedir_fotos fora de hora). Medido na bancada 6517: com o formato, chamada à toa já
+  # na 2ª resposta; sem ele, 8 respostas sem nenhuma. Agora a resposta à pessoa é
+  # uma ferramenta própria (`responder`, strict: o JSON sai igual, conferido pela API)
+  # e as voltas não têm formato obrigatório; uma ferramenta por vez. Se a IA terminar
+  # em texto solto (ou passar do teto), uma última chamada SEM ferramentas e COM o
+  # formato escreve a resposta.
+  ANSWER_TOOL_NAME = 'responder'.freeze
+  REPEATED_CALL_TEXT = 'Esta ferramenta JÁ foi chamada com os mesmos dados nesta resposta: nada foi feito de novo. ' \
+                       'Use o resultado anterior e responda pela ferramenta responder.'.freeze
 
   attr_reader :agent_key, :script_version
 
@@ -100,40 +113,18 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     )
   end
 
-  def call # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  def call # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return { error: 'Agente desligado.' } if agent_paused? && !@simulation
     return { error: 'Configure a chave da API em Integrações → Claude.' } if api_key.blank?
 
     transcript = build_transcript
     return { error: 'Conversa vazia.' } if transcript.blank?
 
-    # tools + output_config (json_schema) convivem na mesma chamada (conferido
-    # no gem anthropic 1.55, 21/09): o JSON vale para a resposta final em texto
-    params = {
-      model: model, max_tokens: 2048, system_: cached_system,
-      output_config: output_config_for({ type: 'json_schema', schema: output_schema }),
-      messages: [{ role: 'user', content: user_content(transcript) }]
-    }
-    params[:tools] = tools.definitions if tools
+    params = { model: model, max_tokens: 2048, system_: cached_system,
+               messages: [{ role: 'user', content: user_content(transcript) }] }
+    result = tools ? answer_with_tools(params) : answer_in_format(params)
+    return result if result[:error]
 
-    message = nil
-    (MAX_TOOL_ROUNDS + 1).times do |round|
-      params[:tool_choice] = { type: 'none' } if tools && round == MAX_TOOL_ROUNDS
-      message = client.messages.create(**params)
-      record_usage(message)
-      break unless tools && message.stop_reason == :tool_use
-
-      uses = message.content.select { |block| block.type == :tool_use }
-      break if uses.empty?
-
-      params[:messages] << { role: 'assistant', content: assistant_content(message) }
-      params[:messages] << { role: 'user', content: uses.map { |use| tool_result_block(use) } }
-    end
-
-    text = message.content.find { |block| block.type == :text }&.text
-    return { error: 'Resposta vazia da IA.' } if text.blank?
-
-    result = JSON.parse(text).symbolize_keys
     result[:acoes] = tools ? tools.acoes : []
     result
   rescue JSON::ParserError
@@ -141,6 +132,18 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   rescue StandardError => e
     Rails.logger.error "[Crm::ResponderAgent##{@agent_key}] #{e.class}: #{e.message}"
     { error: e.message }
+  end
+
+  # 🧰 22/11: a resposta à pessoa como ferramenta (strict = a API confere o esquema)
+  def answer_tool_definition
+    {
+      name: ANSWER_TOOL_NAME,
+      description: 'RESPOSTA FINAL: é por aqui que você responde à pessoa desta conversa, com todos os campos do formato. ' \
+                   'Chame UMA vez, no fim. Use outra ferramenta antes SÓ quando a última mensagem da pessoa pede um dado ' \
+                   'ou uma ação dela agora; sem isso, chame direto esta.',
+      input_schema: output_schema,
+      strict: true
+    }
   end
 
   # 👓 08/11: o esquema da resposta com as UNIDADES DESTA CONTA (a ótica tem a
@@ -202,6 +205,59 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
                                        otica_live: @otica_live, simulation: @simulation)
   end
 
+  # sem ferramentas (instagram, comentários): uma chamada, JSON obrigatório
+  def answer_in_format(params)
+    message = create_message(params.merge(output_config: output_config_for(json_format)))
+    parse_answer_text(message)
+  end
+
+  # 🧰 22/11: voltas de ferramenta SEM formato obrigatório, uma ferramenta por vez;
+  # a resposta chega pela ferramenta `responder`. Chamada repetida (mesma ferramenta,
+  # mesmos dados) na mesma resposta não roda de novo.
+  def answer_with_tools(params) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    params = params.merge(tools: tools.definitions + [answer_tool_definition],
+                          tool_choice: { type: 'auto', disable_parallel_tool_use: true })
+    effort_only = output_config_for(nil).except(:format)
+    params[:output_config] = effort_only if effort_only.any?
+    seen = Set.new
+
+    MAX_TOOL_ROUNDS.times do
+      message = create_message(params)
+      uses = message.content.select { |block| block.type == :tool_use }
+      answer = uses.find { |use| use.name == ANSWER_TOOL_NAME }
+      return answer_from_tool(answer) if answer
+      break if message.stop_reason != :tool_use || uses.empty?
+
+      params[:messages] << { role: 'assistant', content: assistant_content(message) }
+      params[:messages] << { role: 'user', content: uses.map { |use| tool_result_block(use, seen) } }
+    end
+
+    # terminou em texto solto ou passou do teto: a última volta escreve no formato, sem ferramentas
+    final = create_message(params.merge(tool_choice: { type: 'none' }, output_config: output_config_for(json_format)))
+    parse_answer_text(final)
+  end
+
+  def json_format
+    { type: 'json_schema', schema: output_schema }
+  end
+
+  def create_message(params)
+    message = client.messages.create(**params)
+    record_usage(message)
+    message
+  end
+
+  def answer_from_tool(block)
+    JSON.parse((block.input || {}).to_h.to_json).symbolize_keys
+  end
+
+  def parse_answer_text(message)
+    text = message.content.find { |block| block.type == :text }&.text
+    return { error: 'Resposta vazia da IA.' } if text.blank?
+
+    JSON.parse(text).symbolize_keys
+  end
+
   # a resposta da IA volta como turno do assistente: texto e tool_use viram
   # blocos simples; thinking (quando vier) vai de volta inteiro, com assinatura
   def assistant_content(message)
@@ -214,8 +270,13 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     end
   end
 
-  def tool_result_block(use)
-    outcome = tools.call(use.name, use.input)
+  def tool_result_block(use, seen = Set.new)
+    signature = "#{use.name}:#{(use.input || {}).to_h.to_json}"
+    outcome = if seen.add?(signature)
+                tools.call(use.name, use.input)
+              else
+                { ok: false, repetida: true, motivo: REPEATED_CALL_TEXT }
+              end
     { type: 'tool_result', tool_use_id: use.id, content: outcome.to_json }
   end
 
