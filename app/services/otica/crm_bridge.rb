@@ -12,7 +12,10 @@ class Otica::CrmBridge
     'aberta' => 'Pedido fechado',
     'em_producao' => 'Pedido em produção',
     'pronta' => 'Pronto para retirar',
-    'entregue' => 'Retirou o óculos'
+    'entregue' => 'Retirou o óculos',
+    # 💳 22/11: exame pago no PIX (Otica::ExamPix)
+    'pix_exame' => 'PIX do exame',
+    'exame_pago' => 'Exame pago'
   }.freeze
 
   def self.stage_names(account)

@@ -25,6 +25,7 @@ class Crm::MediaReadingJob < ApplicationJob
       # nas voltas (round > 0) não precisa esperar os 20 s entre tentativas
       Crm::MediaReadingService.new(attachment).perform(retry_now: round.positive?)
       again ||= Crm::MediaReadingService.retriable?(attachment.reload, retry_now: true)
+      Otica::ExamPix.receipt!(message, attachment) # 💳 22/11: comprovante do PIX do exame (só ótica, só com PIX aguardando)
     end
     return unless again && round < RETRY_WAITS.size
 
