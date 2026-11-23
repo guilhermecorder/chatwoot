@@ -101,7 +101,7 @@ class Crm::FollowupConversationReader
 
   # leitura curta: 20 s bastam (não segura a rodada do robô)
   def client
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 20)
+    @client ||= llm_client(timeout: 20)
   end
 
   private

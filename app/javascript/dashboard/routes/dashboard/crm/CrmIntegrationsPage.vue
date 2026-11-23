@@ -59,6 +59,16 @@ const cevicoCards = computed(() => [
     description: 'Análise de conversas (interesse do paciente) e insights de marketing dos formulários.',
     enabled: !!settings.value?.ai?.configured,
   },
+  // 🧠 item 399: ChatGPT como motor dos atendentes do WhatsApp (experimento)
+  {
+    key: 'openai',
+    name: 'ChatGPT — OpenAI',
+    icon: 'i-lucide-bot',
+    color: '#10A37F',
+    description:
+      'Motor alternativo dos atendentes do WhatsApp: escolha um modelo GPT no cartão do agente e compare com o Claude.',
+    enabled: !!settings.value?.ai?.openai_key_set,
+  },
   {
     key: 'gemini',
     name: 'Gemini — imagens (Google)',

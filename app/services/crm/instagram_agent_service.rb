@@ -198,7 +198,7 @@ class Crm::InstagramAgentService # rubocop:disable Metrics/ClassLength
   # (#100) mesmo cliente dos respondedores do WhatsApp: 90 s por chamada e só
   # 1 nova tentativa — quem responde paciente não segura a conversa por meia hora
   def client
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 90, max_retries: 1)
+    @client ||= llm_client(timeout: 90, max_retries: 1)
   end
 
   # contexto vivo: data/hora de agora + vagas REAIS da agenda interna

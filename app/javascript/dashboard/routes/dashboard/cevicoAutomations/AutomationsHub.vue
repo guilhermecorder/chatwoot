@@ -28,6 +28,7 @@ import EducationEnginePanel from './EducationEnginePanel.vue';
 import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
 import NpsSurveyCard from './NpsSurveyCard.vue';
 import FollowupSmartCard from './FollowupSmartCard.vue';
+import AgentEngineExperiment from './AgentEngineExperiment.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import {
   PERIOD_PRESETS,
@@ -37,6 +38,7 @@ import {
 } from 'dashboard/helper/cevicoPeriod';
 import CrmAPI from 'dashboard/api/crm';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import LlmModelPicker from 'dashboard/components-next/cevico/LlmModelPicker.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { hexToRgb } from 'dashboard/helper/cevicoPalettes';
 
@@ -2700,6 +2702,20 @@ const MODEL_SHORT = {
   'claude-sonnet-5': 'Sonnet 5',
   'claude-haiku-4-5': 'Haiku 4.5',
 };
+// 🧠 item 399: ChatGPT (OpenAI) como motor dos atendentes do WhatsApp. A lista
+// de modelos e quem pode usar vêm do servidor (Crm::LlmEngines); a chave fica
+// em CRM → Integrações → ChatGPT.
+const openaiModels = computed(() => settings.value?.ai?.openai_models || []);
+const openaiAllowed = key =>
+  (settings.value?.ai?.openai_agents || []).includes(key);
+// 🧠 22/11: os 3 fornecedores (Claude, ChatGPT, Gemini) para o seletor de todo agente
+const llmCatalog = computed(() => settings.value?.ai?.llm_catalog || []);
+const modelShort = m =>
+  MODEL_SHORT[m] ||
+  llmCatalog.value.flatMap(p => p.models || []).find(o => o.value === m)
+    ?.label ||
+  openaiModels.value.find(o => o.value === m)?.label ||
+  m;
 const EFFORT_SHORT = {
   low: 'baixo',
   medium: 'médio',
@@ -2732,7 +2748,7 @@ const resolvedModel = (key, agent) => {
     recommendedFor(key).recommended_model ||
     settings.value?.ai?.model ||
     'claude-opus-4-8';
-  return MODEL_SHORT[m] || m;
+  return modelShort(m);
 };
 const resolvedEffort = (key, agent) => {
   const m =
@@ -4766,22 +4782,13 @@ onUnmounted(() => {
                           class="text-xs font-medium text-n-slate-11 block mb-1.5"
                           >Modelo de IA</label
                         >
-                        <select
+                        <!-- 🧠 22/11: Claude, ChatGPT ou Gemini — qualquer modelo, em todo agente -->
+                        <LlmModelPicker
                           v-model="agent.model"
+                          :catalog="llmCatalog"
                           :disabled="!editingAgent[key]"
-                          class="cv-input w-full text-sm disabled:cursor-not-allowed"
-                        >
-                          <option value="">
-                            ⭐ {{ recommendedModelLabel(key) }}
-                          </option>
-                          <option
-                            v-for="m in AGENT_MODELS"
-                            :key="m.value"
-                            :value="m.value"
-                          >
-                            {{ m.label }}
-                          </option>
-                        </select>
+                          :empty-label="`⭐ ${recommendedModelLabel(key)}`"
+                        />
                       </div>
                       <div>
                         <label
@@ -4832,6 +4839,20 @@ onUnmounted(() => {
                         {{ AGENT_META[key].suggestion }}
                       </span>
                     </div>
+
+                    <!-- 🧪 item 400: teste A/B de motor (variante A × B por caixa ou sorteio) -->
+                    <AgentEngineExperiment
+                      v-if="openaiAllowed(key)"
+                      :agent-key="key"
+                      :inboxes="
+                        whatsappInboxes.filter(ib =>
+                          (agent.inbox_ids || []).includes(ib.id)
+                        )
+                      "
+                      :claude-models="AGENT_MODELS"
+                      :openai-models="openaiModels"
+                      :llm-catalog="llmCatalog"
+                    />
 
                     <!-- 🗣️ Config específica do Atendente de Agendamento (rodada 188): sombra × ao vivo, caixas, colunas -->
                     <div

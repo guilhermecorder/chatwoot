@@ -44,14 +44,16 @@ class Crm::AgentSimulator
   end
 
   # uma fala do "paciente" → resposta do agente (IA de verdade) como nota de sombra
-  def say!(conversation, text)
+  # model (item 399): motor escolhido NA TELA DO TESTE para esta fala (Claude ou
+  # ChatGPT); vazio = o que o cartão do agente usa. Não grava nada no agente.
+  def say!(conversation, text, model: nil)
     message = conversation.messages.create!(
       account_id: @account.id, inbox_id: conversation.inbox_id, message_type: :incoming,
       content: text.to_s.strip, sender: conversation.contact
     )
     # simulador é sempre SOMBRA: as ferramentas (rodada 192) só simulam, nada escreve na Agenda
     result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: @agent_key, live: false, simulation: true,
-                                            script_version: self.class.script_version(conversation)).call
+                                            script_version: self.class.script_version(conversation), model_override: model).call
     return { error: result[:error] } if result[:error]
 
     Crm::ResponderAgentJob.write_shadow_note!(conversation, @agent_key, result, message.id)
@@ -65,7 +67,8 @@ class Crm::AgentSimulator
         { role: 'patient', text: m.content.to_s, at: m.created_at.iso8601, id: m.id }
       elsif (shadow = m.additional_attributes&.[]('cevico_ia_shadow'))
         { role: 'agent', id: m.id, at: m.created_at.iso8601, messages: Array(shadow['mensagens']),
-          meta: shadow.slice('etapa', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura', 'acoes') }
+          meta: shadow.slice('etapa', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura', 'acoes',
+                             'modelo', 'reserva') }
       end
     end
   end

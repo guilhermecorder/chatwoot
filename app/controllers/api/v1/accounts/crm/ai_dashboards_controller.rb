@@ -144,10 +144,13 @@ class Api::V1::Accounts::Crm::AiDashboardsController < Api::V1::Accounts::BaseCo
 
   # mesma resolução do runtime: escolha do agente > recomendado > global > padrão
   def resolved_model(key)
-    m = (ai_config['agents'] || {}).dig(key, 'model').presence ||
-        Crm::AiAgentConfig::RECOMMENDED.dig(key, 'model') ||
-        ai_config['model'].presence
-    Crm::AiAgentConfig::MODELS.include?(m) ? m : Crm::AiAgentConfig::DEFAULT_MODEL
+    # 🧠 22/11: qualquer modelo dos 3 fornecedores, com a chave daquele fornecedor salva
+    candidates = [(ai_config['agents'] || {}).dig(key, 'model').presence,
+                  Crm::AiAgentConfig::RECOMMENDED.dig(key, 'model'), ai_config['model'].presence].compact
+    candidates.find do |m|
+      Crm::AiAgentConfig::MODELS.include?(m) ||
+        (Crm::LlmCatalog.anthropic?(m) ? Crm::LlmCatalog.valid_id?(m) : Crm::LlmCatalog.usable?(ai_config, m))
+    end || Crm::AiAgentConfig::DEFAULT_MODEL
   end
 
   # chamadas por dia (14 dias) por agente — vira o mini-gráfico do card.
