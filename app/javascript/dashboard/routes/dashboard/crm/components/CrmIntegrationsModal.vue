@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import LlmModelPicker from 'dashboard/components-next/cevico/LlmModelPicker.vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
@@ -53,12 +54,6 @@ const testAi = async () => {
     isAiTesting.value = false;
   }
 };
-
-const AI_MODELS = [
-  { value: 'claude-opus-4-8', label: 'Claude Opus 4.8 — melhor análise (padrão)' },
-  { value: 'claude-sonnet-5', label: 'Claude Sonnet 5 — equilíbrio' },
-  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 — mais barato e rápido' },
-];
 
 // Esforço = quanto a IA "pensa" antes de responder (mais esforço =
 // análise melhor e um pouco mais cara/lenta). O Haiku ignora este campo.
@@ -1241,12 +1236,13 @@ const fetchWorkflows = async () => {
             </div>
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1.5">Modelo padrão</label>
-              <select
+              <!-- 🧠 22/11: Claude, ChatGPT ou Gemini (a chave do fornecedor tem que estar salva) -->
+              <LlmModelPicker
                 v-model="ai.model"
-                class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
-              >
-                <option v-for="m in AI_MODELS" :key="m.value" :value="m.value">{{ m.label }}</option>
-              </select>
+                :catalog="settings?.ai?.llm_catalog || []"
+                :engine-note="false"
+                select-class="w-full border border-n-weak rounded-lg px-3 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              />
             </div>
             <div class="col-span-2">
               <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
@@ -1316,8 +1312,8 @@ const fetchWorkflows = async () => {
             </span>
           </div>
           <p class="text-xs text-n-slate-10 mb-3">
-            Motor alternativo dos ATENDENTES do WhatsApp (os que conversam com o cliente),
-            para comparar com o Claude. Mesmo Roteiro, mesmas ferramentas e mesmas travas: só muda quem pensa.
+            Com a chave salva, QUALQUER agente de IA pode rodar no ChatGPT (atendentes, analistas, copywriter, gestor…):
+            mesmo prompt, mesmas ferramentas e mesmas travas, só muda quem pensa.
             A chave sai de
             <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="text-n-brand hover:underline">platform.openai.com</a>
             e é PRÉ-PAGA à parte (Billing → créditos): a assinatura do ChatGPT Plus não vale aqui.
@@ -1359,7 +1355,7 @@ const fetchWorkflows = async () => {
             </span>
           </div>
           <p class="text-[11px] text-n-slate-9 mt-2">
-            Depois de salvar: Automações → Agentes de IA → cartão do atendente → "Modelo de IA" → grupo ChatGPT.
+            Depois de salvar: Automações → Agentes de IA → cartão do agente → "Modelo de IA" → grupo OpenAI · ChatGPT.
             Para só experimentar sem mudar o agente, use o 🧪 Testar agente e troque o motor lá.
             A conversa não fica guardada na OpenAI.
           </p>
@@ -1381,7 +1377,8 @@ const fetchWorkflows = async () => {
             </span>
           </div>
           <p class="text-xs text-n-slate-10 mb-3">
-            Reservado para GERAR IMAGENS nas Páginas (heros, ilustrações de procedimentos).
+            Lê áudio e imagem dos clientes, gera imagens nas Páginas e, com a mesma chave, QUALQUER agente de IA pode
+            rodar no Gemini (cartão do agente → "Modelo de IA" → grupo Google · Gemini).
             A chave sai do <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" class="text-n-brand hover:underline">Google AI Studio</a> — gratuita para começar.
           </p>
           <div>

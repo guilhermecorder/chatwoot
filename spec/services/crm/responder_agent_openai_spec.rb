@@ -97,10 +97,13 @@ RSpec.describe Crm::ResponderAgentService do
     expect(bodies.last['tool_choice']).to eq('none')
   end
 
-  it 'sem a chave da OpenAI avisa onde configurar e não chama ninguém', :aggregate_failures do
+  # 🧠 22/11: sem a chave do fornecedor escolhido, o atendente NÃO fica mudo —
+  # cai no Claude recomendado (a tela já não deixa salvar gpt sem a chave)
+  it 'sem a chave da OpenAI volta ao Claude recomendado e não chama a OpenAI', :aggregate_failures do
     CrmSetting.find_by(account: account).update!(ai_config: ai_config.except('openai_api_key'))
 
-    expect(service.call).to eq(error: 'Configure a chave da OpenAI em Integrações → ChatGPT.')
+    expect(service.send(:model)).to eq('claude-haiku-4-5')
+    expect(service.send(:openai_engine?)).to be(false)
     expect(WebMock).not_to have_requested(:post, url)
   end
 
@@ -167,14 +170,15 @@ RSpec.describe Crm::ResponderAgentService do
       expect(service.send(:openai_engine?)).to be(false)
     end
 
-    it 'agente que não é atendente do WhatsApp ignora modelo gpt e segue no Claude' do
+    # 🧠 22/11: liberdade de modelo — todo agente pode rodar no ChatGPT (e no Gemini)
+    it 'agente que não é atendente do WhatsApp também pode usar o ChatGPT' do
       CrmSetting.find_by(account: account).update!(
         ai_config: ai_config.merge('agents' => { 'voice' => { 'enabled' => true, 'model' => 'gpt-6.2-sol' } })
       )
       voice = described_class.new(conversation: conversation, agent_key: 'voice')
 
-      expect(voice.send(:model)).to eq('claude-sonnet-5')
-      expect(voice.engine_models).to eq(Crm::AiAgentConfig::MODELS)
+      expect(voice.send(:model)).to eq('gpt-6.2-sol')
+      expect(voice.engine_model?('gemini-4-neon')).to be(true)
     end
 
     it 'o motor do teste (🧪) vale só em simulação', :aggregate_failures do

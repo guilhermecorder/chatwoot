@@ -5,6 +5,7 @@
 // meio por conversa. O placar compara conversão e custo por atendimento.
 // Salva na hora (não passa pelo rascunho/publicar do cartão).
 import { ref, computed, watch, onMounted } from 'vue';
+import LlmModelPicker from 'dashboard/components-next/cevico/LlmModelPicker.vue';
 import { useAlert } from 'dashboard/composables';
 import CrmAPI from 'dashboard/api/crm';
 
@@ -14,7 +15,8 @@ const props = defineProps({
   inboxes: { type: Array, default: () => [] },
   claudeModels: { type: Array, default: () => [] },
   openaiModels: { type: Array, default: () => [] },
-  openaiKeySet: { type: Boolean, default: false },
+  // 🧠 22/11: settings.ai.llm_catalog (Claude, ChatGPT, Gemini)
+  llmCatalog: { type: Array, default: () => [] },
 });
 
 const MODES = [
@@ -36,7 +38,8 @@ const shortLabel = label => String(label || '').split(' — ')[0];
 const modelLabel = id => {
   const found =
     props.claudeModels.find(m => m.value === id) ||
-    props.openaiModels.find(m => m.value === id);
+    props.openaiModels.find(m => m.value === id) ||
+    props.llmCatalog.flatMap(p => p.models || []).find(m => m.value === id);
   return found ? shortLabel(found.label) : id || 'não escolhido';
 };
 
@@ -236,38 +239,14 @@ watch(() => props.agentKey, load);
         </div>
         <div class="cv-stat px-3 py-2">
           <p class="text-[10px] text-n-slate-10 mb-1">Variante B</p>
-          <select
+          <!-- 🧠 22/11: variante B pode ser Claude, ChatGPT ou Gemini -->
+          <LlmModelPicker
             v-model="modelB"
-            class="cv-input w-full text-sm"
+            :catalog="llmCatalog"
             :disabled="saving"
-          >
-            <option value="">Escolha o modelo…</option>
-            <option
-              v-for="m in claudeModels"
-              :key="m.value"
-              :value="m.value"
-              :disabled="m.value === data.model_a"
-            >
-              {{ m.label }}
-            </option>
-            <optgroup
-              v-if="openaiModels.length"
-              :label="
-                openaiKeySet
-                  ? 'ChatGPT (OpenAI)'
-                  : 'ChatGPT (OpenAI) — falta a chave em Integrações'
-              "
-            >
-              <option
-                v-for="m in openaiModels"
-                :key="m.value"
-                :value="m.value"
-                :disabled="!openaiKeySet || m.value === data.model_a"
-              >
-                {{ m.label }} — {{ m.hint }}
-              </option>
-            </optgroup>
-          </select>
+            :engine-note="false"
+            empty-label="Escolha o modelo…"
+          />
         </div>
       </div>
 

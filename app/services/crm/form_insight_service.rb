@@ -78,7 +78,7 @@ class Crm::FormInsightService
 
   # formulários podem ter centenas de respostas — timeout maior
   def client
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 120)
+    @client ||= llm_client(timeout: 120)
   end
 
   def build_corpus

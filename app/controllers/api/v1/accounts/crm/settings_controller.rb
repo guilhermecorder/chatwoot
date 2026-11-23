@@ -35,7 +35,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   TEAM_VOICE_KEYS = %i[enabled configured permission_template handoff_inbox_id whatsapp_number persona_name].freeze
 
   ADMIN_SETTINGS_ACTIONS = %i[
-    update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini test_openai
+    update test_n8n fetch_workflows update_meta_ads test_meta_ads update_ai test_ai test_gemini test_openai llm_models test_llm
     ai_experiment save_ai_experiment
     update_google_ads test_google_ads test_search_console update_sheets test_sheets
     prepare_google_ads test_google_ads_api
@@ -630,8 +630,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       live_error = responder_live_error(cfg['agents'] || {}, permitted)
       return render json: { error: live_error }, status: :unprocessable_entity if live_error
 
-      # 🧠 item 399: modelo do ChatGPT só nos atendentes do WhatsApp e só com a chave salva
-      openai_error = openai_model_error(cfg, permitted)
+      # 🧠 22/11: qualquer modelo (Claude, ChatGPT, Gemini) — só exige a chave daquele fornecedor
+      openai_error = llm_model_error(cfg, permitted)
       return render json: { error: openai_error }, status: :unprocessable_entity if openai_error
 
       # 🎙️ (195) Agente de Ligação ao vivo: exige colunas vigiadas + ElevenLabs configurada
@@ -677,7 +677,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       fresh['gemini_api_key'] = params[:gemini_api_key] if params[:gemini_api_key].present?
       # 🧠 item 399: ChatGPT (OpenAI) como motor dos atendentes do WhatsApp
       fresh[Crm::LlmEngines::OPENAI_KEY] = params[:openai_api_key].to_s.strip if params[:openai_api_key].present?
-      fresh['model']  = params[:model]  if params.key?(:model)
+      fresh['model']  = params[:model]  if params.key?(:model) && (params[:model].blank? || Crm::LlmCatalog.valid_id?(params[:model]))
       fresh['effort'] = params[:effort] if params.key?(:effort)
       if permitted
         fresh['agents'] = (fresh['agents'] || {}).merge(permitted) do |_key, old_agent, new_agent|
@@ -796,7 +796,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     cfg = crm_settings.ai_config || {}
     return render json: { success: false, message: 'Configure a chave da API primeiro.' } if cfg['api_key'].blank?
 
-    model = cfg['model'].presence || Crm::ConversationInsightService::DEFAULT_MODEL
+    model = cfg['model'].presence
+    model = Crm::ConversationInsightService::DEFAULT_MODEL unless Crm::LlmCatalog.anthropic?(model)
     client = Anthropic::Client.new(api_key: cfg['api_key'], timeout: 30)
     client.messages.create(
       model: model,
@@ -810,6 +811,38 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: { success: false, message: "Modelo #{cfg['model']} indisponível para esta chave." }
   rescue StandardError => e
     render json: { success: false, message: "Erro de conexão: #{e.message}" }
+  end
+
+  # 🧠 22/11: lista de modelos dos 3 fornecedores (recomendados + o que cada chave enxerga)
+  def llm_models
+    render json: { providers: Crm::LlmCatalog.catalog(Current.account, ai_config: crm_settings.ai_config || {}, fetch: true,
+                                                                       refresh: params[:refresh].present?),
+                   pricing_date: Crm::LlmCatalog::PRICING_TABLE_DATE }
+  end
+
+  # 🧠 22/11: testa UM modelo de verdade (mini-chamada pela tomada universal)
+  def test_llm
+    cfg = crm_settings.ai_config || {}
+    chosen = params[:model].to_s.strip
+    error = llm_choice_error(cfg, chosen)
+    return render json: { success: false, message: error } if error
+    if Crm::LlmCatalog.key_for(cfg, chosen).blank?
+      return render json: { success: false, message: 'Configure a chave da API em CRM → Integrações → Claude.' }
+    end
+
+    started = Time.current
+    reply = Crm::LlmGateway.client(model: chosen, ai_config: cfg, timeout: 45, max_retries: 0)
+                           .messages.create(model: Crm::LlmCatalog.api_id(chosen), max_tokens: 64,
+                                            messages: [{ role: 'user', content: 'Responda apenas com a palavra: ok' }])
+    text = reply.content.find { |block| block.type == :text }&.text.to_s.strip
+    seconds = (Time.current - started).round(1)
+    render json: { success: true, message: "#{Crm::LlmCatalog.label(chosen)} respondeu em #{seconds}s: \"#{text.truncate(40)}\" ✓" }
+  rescue Anthropic::Errors::AuthenticationError
+    render json: { success: false, message: 'Chave da Anthropic inválida.' }
+  rescue Anthropic::Errors::NotFoundError
+    render json: { success: false, message: "Modelo #{chosen} indisponível para esta chave." }
+  rescue StandardError => e
+    render json: { success: false, message: e.message.to_s.truncate(220) }
   end
 
   # 🧠 item 399: testa a chave da OpenAI de verdade — lista os modelos que ela
@@ -2619,12 +2652,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   def experiment_error(key, agent, enabled, model_b, inboxes) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return nil if !enabled && model_b.blank?
 
-    allowed = Crm::AiAgentConfig::MODELS + Crm::LlmEngines::OPENAI_MODELS.keys
-    return 'Escolha o modelo da variante B.' unless allowed.include?(model_b)
+    return 'Escolha o modelo da variante B.' unless Crm::LlmCatalog.valid_id?(model_b)
     return 'As duas variantes estão com o mesmo modelo: escolha outro para a B.' if model_b == experiment_model_a(key, agent)
-    if Crm::LlmEngines.openai?(model_b) && (crm_settings.ai_config || {})[Crm::LlmEngines::OPENAI_KEY].blank?
-      return 'Para usar um modelo do ChatGPT, salve antes a chave da OpenAI em CRM → Integrações → ChatGPT.'
-    end
+
+    choice_error = llm_choice_error(crm_settings.ai_config || {}, model_b)
+    return choice_error if choice_error
     return 'Escolha pelo menos uma caixa para a variante B ou para o sorteio.' if enabled && inboxes.empty?
 
     nil
@@ -2650,17 +2682,31 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     nil
   end
 
-  # 🧠 item 399: quem escolhe um modelo "gpt-…" precisa poder usar (atendente do
-  # WhatsApp) e ter a chave da OpenAI salva — senão o agente ficaria mudo
-  def openai_model_error(cfg, permitted)
-    permitted.each do |key, agent|
-      next unless agent.is_a?(Hash) && Crm::LlmEngines.openai?(agent['model'])
-      return 'O ChatGPT por enquanto só vale para os atendentes do WhatsApp.' unless Crm::LlmEngines.openai_agent?(key)
+  # 🧠 22/11: todo agente pode usar qualquer modelo dos 3 fornecedores; quem
+  # escolhe um modelo de fora do Claude precisa ter a chave daquele fornecedor
+  # salva — senão o agente cairia no Claude sem a pessoa perceber
+  def llm_model_error(cfg, permitted)
+    permitted.each_value do |agent|
+      next unless agent.is_a?(Hash)
 
-      has_key = cfg[Crm::LlmEngines::OPENAI_KEY].present? || params[:openai_api_key].present?
-      return 'Para usar um modelo do ChatGPT, salve antes a chave da OpenAI em CRM → Integrações → ChatGPT.' unless has_key
+      [agent['model'], agent.dig('draft', 'model')].compact_blank.each do |chosen|
+        error = llm_choice_error(cfg, chosen)
+        return error if error
+      end
     end
     nil
+  end
+
+  def llm_choice_error(cfg, chosen)
+    return "Modelo \"#{chosen}\" não reconhecido. Use o id oficial (ex.: claude-…, gpt-…, gemini-…)." unless Crm::LlmCatalog.valid_id?(chosen)
+
+    provider = Crm::LlmCatalog.provider(chosen)
+    return nil if provider == 'anthropic'
+
+    key_name = Crm::LlmCatalog.key_name(provider)
+    return nil if cfg[key_name].present? || params[key_name].present?
+
+    "Para usar #{Crm::LlmCatalog.label(chosen)}, salve antes a chave do #{Crm::LlmCatalog::PROVIDERS.dig(provider, :label)} em CRM → Integrações."
   end
 
   def responder_stage_conflict(existing, permitted)
@@ -2759,6 +2805,9 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       openai_key_set: cfg[Crm::LlmEngines::OPENAI_KEY].present?,
       openai_models: Crm::LlmEngines.openai_catalog,
       openai_agents: Crm::LlmEngines::OPENAI_AGENT_KEYS,
+      # 🧠 22/11: os 3 fornecedores para o seletor de modelo de TODO agente
+      # (só o que já está guardado; a lista ao vivo vem por llm_models)
+      llm_catalog: Crm::LlmCatalog.catalog(s.account, ai_config: cfg),
       model: cfg['model'].presence || Crm::AiAgentConfig::DEFAULT_MODEL,
       effort: cfg['effort'].presence || 'high',
       configured: cfg['api_key'].present?,

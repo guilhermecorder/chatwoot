@@ -37,6 +37,7 @@ import {
 } from 'dashboard/helper/cevicoPeriod';
 import CrmAPI from 'dashboard/api/crm';
 import CevicoHero from 'dashboard/components-next/cevico/CevicoHero.vue';
+import LlmModelPicker from 'dashboard/components-next/cevico/LlmModelPicker.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { hexToRgb } from 'dashboard/helper/cevicoPalettes';
 
@@ -2751,14 +2752,16 @@ const MODEL_SHORT = {
 // de modelos e quem pode usar vêm do servidor (Crm::LlmEngines); a chave fica
 // em CRM → Integrações → ChatGPT.
 const openaiModels = computed(() => settings.value?.ai?.openai_models || []);
-const openaiKeySet = computed(
-  () => settings.value?.ai?.openai_key_set === true
-);
 const openaiAllowed = key =>
   (settings.value?.ai?.openai_agents || []).includes(key);
-const isOpenaiModel = m => openaiModels.value.some(o => o.value === m);
+// 🧠 22/11: os 3 fornecedores (Claude, ChatGPT, Gemini) para o seletor de todo agente
+const llmCatalog = computed(() => settings.value?.ai?.llm_catalog || []);
 const modelShort = m =>
-  MODEL_SHORT[m] || openaiModels.value.find(o => o.value === m)?.label || m;
+  MODEL_SHORT[m] ||
+  llmCatalog.value.flatMap(p => p.models || []).find(o => o.value === m)
+    ?.label ||
+  openaiModels.value.find(o => o.value === m)?.label ||
+  m;
 const EFFORT_SHORT = {
   low: 'baixo',
   medium: 'médio',
@@ -4823,55 +4826,13 @@ onUnmounted(() => {
                           class="text-xs font-medium text-n-slate-11 block mb-1.5"
                           >Modelo de IA</label
                         >
-                        <select
+                        <!-- 🧠 22/11: Claude, ChatGPT ou Gemini — qualquer modelo, em todo agente -->
+                        <LlmModelPicker
                           v-model="agent.model"
+                          :catalog="llmCatalog"
                           :disabled="!editingAgent[key]"
-                          class="cv-input w-full text-sm disabled:cursor-not-allowed"
-                        >
-                          <option value="">
-                            ⭐ {{ recommendedModelLabel(key) }}
-                          </option>
-                          <option
-                            v-for="m in AGENT_MODELS"
-                            :key="m.value"
-                            :value="m.value"
-                          >
-                            {{ m.label }}
-                          </option>
-                          <!-- 🧠 item 399: ChatGPT só nos atendentes do WhatsApp -->
-                          <optgroup
-                            v-if="openaiAllowed(key) && openaiModels.length"
-                            :label="
-                              openaiKeySet
-                                ? 'ChatGPT (OpenAI) — experimento'
-                                : 'ChatGPT (OpenAI) — falta a chave em Integrações'
-                            "
-                          >
-                            <option
-                              v-for="m in openaiModels"
-                              :key="m.value"
-                              :value="m.value"
-                              :disabled="
-                                !openaiKeySet && agent.model !== m.value
-                              "
-                            >
-                              {{ m.label }} — {{ m.hint }}
-                            </option>
-                          </optgroup>
-                        </select>
-                        <p
-                          v-if="isOpenaiModel(agent.model)"
-                          class="text-[11px] mt-1.5"
-                          :class="
-                            openaiKeySet ? 'text-n-slate-10' : 'text-red-500'
-                          "
-                        >
-                          {{
-                            openaiKeySet
-                              ? 'Motor ChatGPT: mesmo Roteiro, ferramentas e travas. Se a OpenAI falhar numa conversa real, o Claude responde no lugar e fica anotado.'
-                              : 'Falta a chave da OpenAI: CRM → Integrações → ChatGPT.'
-                          }}
-                        </p>
+                          :empty-label="`⭐ ${recommendedModelLabel(key)}`"
+                        />
                       </div>
                       <div>
                         <label
@@ -4934,7 +4895,7 @@ onUnmounted(() => {
                       "
                       :claude-models="AGENT_MODELS"
                       :openai-models="openaiModels"
-                      :openai-key-set="openaiKeySet"
+                      :llm-catalog="llmCatalog"
                     />
 
                     <!-- 🗣️ Config específica do Atendente de Agendamento (rodada 188): sombra × ao vivo, caixas, colunas -->

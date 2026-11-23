@@ -1266,6 +1266,17 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/test_gemini`);
   }
 
+  // 🧠 22/11: modelos dos 3 fornecedores (Claude, ChatGPT, Gemini) e teste de um modelo
+  llmModels(refresh = false) {
+    return axios.get(`${this.url}/settings/llm_models`, {
+      params: refresh ? { refresh: 1 } : {},
+    });
+  }
+
+  testLlm(model) {
+    return axios.post(`${this.url}/settings/test_llm`, { model });
+  }
+
   // 🧠 item 399: chave do ChatGPT (OpenAI), motor dos atendentes do WhatsApp
   testOpenai() {
     return axios.post(`${this.url}/settings/test_openai`);

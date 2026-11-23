@@ -5,6 +5,7 @@
 // dedicado a testar agentes, local ou em produção. As respostas ficam como
 // notas de sombra (mesmo formato da tela Sombra).
 import { ref, computed, nextTick, onMounted } from 'vue';
+import LlmModelPicker from 'dashboard/components-next/cevico/LlmModelPicker.vue';
 import { useAlert } from 'dashboard/composables';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
@@ -55,21 +56,17 @@ const CLAUDE_MODELS = [
   { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
   { value: 'claude-opus-4-8', label: 'Opus 4.8' },
 ];
-const openaiModels = computed(() =>
-  (settings.value?.ai?.openai_agents || []).includes(props.agentKey)
-    ? settings.value?.ai?.openai_models || []
-    : []
-);
-const openaiKeySet = computed(
-  () => settings.value?.ai?.openai_key_set === true
-);
 const engineModel = ref('');
+// 🧠 22/11: os 3 fornecedores (Claude, ChatGPT, Gemini)
+const llmCatalog = computed(() => settings.value?.ai?.llm_catalog || []);
 const modelLabel = id =>
   CLAUDE_MODELS.find(m => m.value === id)?.label ||
+  llmCatalog.value.flatMap(p => p.models || []).find(m => m.value === id)
+    ?.label ||
   (settings.value?.ai?.openai_models || []).find(m => m.value === id)?.label ||
   id;
-const isOpenaiModel = id =>
-  (settings.value?.ai?.openai_models || []).some(m => m.value === id);
+// etiqueta verde quando a resposta NÃO veio do Claude
+const isOpenaiModel = id => !!id && !/^claude/i.test(String(id));
 
 const pal = useCevicoPalette({
   scope: 'report:agentes',
@@ -401,39 +398,16 @@ const guide = turn => {
         >
           <label class="flex items-center gap-2 min-w-0">
             <span class="cv-label flex-shrink-0">Motor deste teste</span>
-            <select
+            <!-- 🧠 22/11: Claude, ChatGPT ou Gemini, qualquer modelo -->
+            <LlmModelPicker
               v-model="engineModel"
-              class="cv-input text-sm min-w-0"
+              class="min-w-0 flex-1"
+              :catalog="llmCatalog"
               :disabled="isSending"
-            >
-              <option value="">O do cartão do agente</option>
-              <optgroup label="Claude (Anthropic)">
-                <option
-                  v-for="m in CLAUDE_MODELS"
-                  :key="m.value"
-                  :value="m.value"
-                >
-                  {{ m.label }}
-                </option>
-              </optgroup>
-              <optgroup
-                v-if="openaiModels.length"
-                :label="
-                  openaiKeySet
-                    ? 'ChatGPT (OpenAI)'
-                    : 'ChatGPT (OpenAI) — falta a chave em Integrações'
-                "
-              >
-                <option
-                  v-for="m in openaiModels"
-                  :key="m.value"
-                  :value="m.value"
-                  :disabled="!openaiKeySet"
-                >
-                  {{ m.label }} — {{ m.hint }}
-                </option>
-              </optgroup>
-            </select>
+              :engine-note="false"
+              select-class="cv-input text-sm min-w-0 w-full"
+              empty-label="O do cartão do agente"
+            />
           </label>
           <p class="text-[11px] text-n-slate-10 min-w-0 flex-1">
             Vale só aqui, já na próxima resposta. O agente de verdade não muda.

@@ -115,7 +115,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     @live = live == true
     @simulation = simulation == true
     @otica_live = otica_live == true
-    @model_override = model_override.to_s if @simulation && engine_models.include?(model_override.to_s)
+    @model_override = model_override.to_s if @simulation && engine_model?(model_override.to_s)
     @script_version = Crm::CevicoScript.normalize_version(
       script_version.presence || conversation.additional_attributes&.[]('cevico_simulado_script')
     )
@@ -129,7 +129,11 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     return { error: 'Conversa vazia.' } if transcript.blank?
 
     # 🧠 item 399: o MODELO escolhido decide o motor (gpt-… = OpenAI; o resto = Claude)
-    result = openai_engine? ? openai_reply_or_fallback(transcript) : anthropic_reply(transcript)
+    # 🧠 22/11: Gemini (ou qualquer outro modelo fora do Claude) pela tomada universal
+    result = if openai_engine? then openai_reply_or_fallback(transcript)
+             elsif gateway_engine? then gateway_reply_or_fallback(transcript)
+             else anthropic_reply(transcript)
+             end
     return result if result[:error]
 
     result[:acoes] = tools ? tools.acoes : []
@@ -168,9 +172,9 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     @otica
   end
 
-  # quais modelos este agente pode usar (Claude sempre; ChatGPT só os atendentes do WhatsApp)
-  def engine_models
-    MODELS + (Crm::LlmEngines.openai_agent?(@agent_key) ? Crm::LlmEngines::OPENAI_MODELS.keys : [])
+  # 🧠 22/11: qualquer modelo dos 3 fornecedores (Claude, ChatGPT, Gemini)
+  def engine_model?(candidate)
+    MODELS.include?(candidate) || Crm::LlmCatalog.valid_id?(candidate)
   end
 
   # 🧪 item 400: variante do teste A/B de motor desta conversa ('a' | 'b' | nil).
@@ -200,7 +204,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # (item 291) já cobre o erro passageiro, e a trava por conversa expira em
   # Crm::ResponderAgentJob::LOCK_TTL (conta feita em cima desses números).
   def client
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 90, max_retries: 1)
+    @client ||= llm_client(timeout: 90, max_retries: 1)
   end
 
   # ── MOTOR CLAUDE (Anthropic) — o de sempre ───────────────────────────────
@@ -229,9 +233,35 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   end
 
   def missing_key_error
-    return 'Configure a chave da OpenAI em Integrações → ChatGPT.' if openai_engine?
+    return 'Configure a chave da OpenAI em Integrações → ChatGPT.' if Crm::LlmCatalog.provider(model) == 'openai'
+    return 'Configure a chave do Google em Integrações → Gemini.' if Crm::LlmCatalog.provider(model) == 'google'
 
     'Configure a chave da API em Integrações → Claude.'
+  end
+
+  # 🧠 22/11: modelo de fora do Claude que não é um dos 4 do motor ChatGPT
+  # dedicado (Gemini, ou outro gpt digitado à mão) — vai pelo Crm::LlmGateway
+  # com as mesmas ferramentas (inclusive a `responder`) e o mesmo formato do Claude
+  def gateway_engine?
+    @fallback_model.nil? && !Crm::LlmCatalog.anthropic?(model) && !Crm::LlmEngines.openai?(model)
+  end
+
+  def gateway_reply_or_fallback(transcript)
+    anthropic_reply(transcript)
+  rescue Crm::LlmGateway::Error => e
+    claude_fallback!(e) { anthropic_reply(transcript) }
+  end
+
+  # 🛟 rede de segurança comum (ChatGPT e Gemini): ver openai_reply_or_fallback
+  def claude_fallback!(error) # rubocop:disable Metrics/CyclomaticComplexity
+    raise error if @simulation || ai_config['api_key'].blank? || tools&.acoes&.any?
+
+    engine = Crm::LlmCatalog::PROVIDERS.dig(Crm::LlmCatalog.provider(model), :label) || model
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] #{engine} falhou (#{error.message}) — o Claude responde no lugar"
+    @fallback_reason = "#{engine} falhou (#{error.message.truncate(80)}); o Claude respondeu no lugar"
+    @fallback_model = Crm::LlmCatalog.anthropic?(recommended['model']) ? recommended['model'] : DEFAULT_MODEL
+    @client = nil
+    yield
   end
 
   # 🛟 REDE DE SEGURANÇA: paciente não fica sem resposta por causa do experimento.
@@ -239,15 +269,10 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # REAL, o Claude recomendado do agente responde aquela mensagem e fica anotado
   # (result[:reserva]). Só vale se nenhuma ferramenta rodou ainda (não repete
   # remarcação/cancelamento) e nunca no 🧪 teste (lá o erro tem que aparecer).
-  def openai_reply_or_fallback(transcript) # rubocop:disable Metrics/CyclomaticComplexity
+  def openai_reply_or_fallback(transcript)
     openai_reply(transcript)
   rescue Crm::LlmEngines::OpenaiResponses::Error => e
-    raise if @simulation || api_key.blank? || tools&.acoes&.any?
-
-    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] ChatGPT falhou (#{e.message}) — o Claude responde no lugar"
-    @fallback_reason = "ChatGPT falhou (#{e.message.truncate(80)}); o Claude respondeu no lugar"
-    @fallback_model = recommended['model'] || DEFAULT_MODEL
-    anthropic_reply(transcript)
+    claude_fallback!(e) { anthropic_reply(transcript) }
   end
 
   # devolve o Hash da resposta, como o motor Claude. Na ótica o esquema leva as
@@ -319,19 +344,14 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     return @model_override if @model_override
     return experiment_model_b if experiment_arm == 'b'
 
-    chosen = agent_config['model'].presence
-    return super unless Crm::LlmEngines.openai?(chosen)
-    return chosen if Crm::LlmEngines.openai_agent?(@agent_key)
-
-    # modelo gpt gravado em agente que não pode usar a OpenAI: volta ao recomendado dele
-    recommended['model'] || DEFAULT_MODEL
+    # 🧠 22/11: qualquer modelo dos 3 fornecedores, com a chave salva (Crm::AiAgentConfig#model)
+    super
   end
 
   # 🧪 item 400: o modelo da variante B, se este agente pode usá-lo agora
   def experiment_model_b
     candidate = Crm::EngineExperiment.active(agent_config)&.dig('model_b').to_s
-    return nil unless engine_models.include?(candidate)
-    return nil if Crm::LlmEngines.openai?(candidate) && openai_api_key.blank?
+    return nil unless engine_model?(candidate) && model_runnable?(candidate)
 
     candidate
   end
