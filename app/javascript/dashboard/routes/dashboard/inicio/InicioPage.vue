@@ -32,6 +32,8 @@ import { IMAC_PALETTES, FRUIT_PALETTES } from 'dashboard/helper/cevicoPalettes';
 // 🧭 item 336: vitrine giratória do guia arejado (frase do dia + equipe)
 import CvVitrine from 'dashboard/components-next/cevico/guia/CvVitrine.vue';
 import VisaoGeral from 'dashboard/components-next/cevico/guia/VisaoGeral.vue';
+import OticaJourneyStrip from 'dashboard/components-next/cevico/OticaJourneyStrip.vue';
+import FollowupStrip from 'dashboard/components-next/cevico/FollowupStrip.vue';
 import { fraseDoDia } from 'dashboard/helper/cevicoFrases';
 import {
   PANEL_PRESETS,
@@ -5426,6 +5428,14 @@ onUnmounted(() => {
       <!-- 🧭 item 336: VITRINE GIRATÓRIA (frase do dia + equipe), some no modo edição -->
       <div v-if="!organizeMode && !estiloClassico" class="cvg-arejado-vitrine">
         <CvVitrine :paineis="vitrinePaineis" lembrar="cevico:vitrine:inicio" />
+      </div>
+
+      <!-- 👓 22/11 (Guilherme: "aquela mesma ideia da LIFE, a jornada inteira da pessoa"):
+           a JORNADA DA ÓTICA (conversa → loja) e o follow-up dos robôs, no alto do
+           Meu Painel — Novo e Clássico, só na conta da ótica -->
+      <div v-if="!organizeMode && isOticaAccount" class="cvg-arejado-jornada">
+        <OticaJourneyStrip />
+        <FollowupStrip />
       </div>
 
       <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin).

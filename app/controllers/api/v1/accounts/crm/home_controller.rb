@@ -17,8 +17,13 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   include Crm::AgentPerformance
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
+  ONLY_STRIPS = %w[otica_journey followup_panel].freeze
 
   def show
+    # 👓 22/11: só uma faixa, com o período dela — "Jornada da ótica" (Otica::Journey) ou
+    # "Follow-up da venda" (Crm::FollowupPanel, o mesmo da LIFE)
+    return render json: { params[:only] => send("#{params[:only]}_json") } if ONLY_STRIPS.include?(params[:only])
+
     since, until_at = resolve_range
     # ⚡ item 237 (25/09): o MIOLO pesado (painel do período + desempenho +
     # meta de resposta) fica guardado por pessoa+painel+período: 1 min nos
@@ -1374,5 +1379,23 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def quote_stage_for(account)
     pipeline = account.crm_pipelines.order(:position).first
     pipeline&.stages&.order(:position)&.detect { |st| st.name.match?(/or[cç]amento/i) }
+  end
+
+  # 👓 jornada da ótica (Otica::Journey): quem chegou no período e até onde andou; 5 min de cache.
+  def otica_journey_json
+    now = Crm::ResolvesPeriod::PERIOD_TZ.now
+    since, until_at = standard_period_range || [(now - 6.days).beginning_of_day, now.end_of_day] # padrão: últimos 7 dias
+    Rails.cache.fetch(['cevico:otica_journey:v1', account.id, since.to_i, until_at.to_i], expires_in: 5.minutes) do
+      JSON.parse(Otica::Journey.new(account, since: since, until_at: until_at).call.to_json)
+    end
+  end
+
+  # 📬 follow-up da venda (Crm::FollowupPanel): envios dos robôs por momento e por mensagem; 2 min de cache.
+  def followup_panel_json
+    now = Crm::ResolvesPeriod::PERIOD_TZ.now
+    since, until_at = standard_period_range || [(now - 6.days).beginning_of_day, now.end_of_day]
+    Rails.cache.fetch(['cevico:followup_panel:v1', account.id, since.to_i, until_at.to_i], expires_in: 2.minutes) do
+      JSON.parse(Crm::FollowupPanel.new(account, since: since, until_at: until_at).call.to_json)
+    end
   end
 end
