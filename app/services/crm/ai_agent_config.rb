@@ -132,15 +132,23 @@ module Crm::AiAgentConfig
 
   def client
     # 300s: Copywriter/Construtor geram páginas inteiras (minutos) — 60s estourava no meio (bug 17/07)
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 300)
+    @client ||= llm_client(timeout: 300)
+  end
+
+  # 🧠 22/11: o cliente da IA conforme o MODELO do agente — Claude (Anthropic),
+  # ChatGPT (OpenAI) ou Gemini (Google). Mesma conversa para os 3 (Crm::LlmGateway).
+  def llm_client(timeout:, max_retries: 2)
+    Crm::LlmGateway.client(model: model, ai_config: ai_config, timeout: timeout, max_retries: max_retries)
   end
 
   def ai_config
     @ai_config ||= CrmSetting.find_by(account: @account)&.ai_config || {}
   end
 
+  # a chave do fornecedor do modelo que o agente vai usar (Anthropic, OpenAI
+  # ou Google) — quem checa "api_key.blank?" continua certo para os 3
   def api_key
-    ai_config['api_key']
+    Crm::LlmCatalog.key_for(ai_config, model) || (Crm::LlmCatalog.anthropic?(model) ? ai_config['api_key'] : nil)
   end
 
   def agent_config
@@ -197,11 +205,20 @@ module Crm::AiAgentConfig
     RECOMMENDED[agent_key] || {}
   end
 
-  # modelo: escolha do agente > recomendado para o agente > global > padrão
+  # modelo: escolha do agente > recomendado para o agente > global > padrão.
+  # 🧠 22/11: vale QUALQUER modelo dos 3 fornecedores (Crm::LlmCatalog), desde
+  # que a chave daquele fornecedor esteja salva — sem a chave, cai no próximo
+  # da fila (o agente nunca fica mudo por falta de chave de outro fornecedor).
   def model
-    m = agent_config['model'].presence || recommended['model'] ||
-        ai_config['model'].presence
-    MODELS.include?(m) ? m : DEFAULT_MODEL
+    candidates = [agent_config['model'].presence, recommended['model'], ai_config['model'].presence].compact
+    candidates.find { |m| model_runnable?(m) } || DEFAULT_MODEL
+  end
+
+  def model_runnable?(candidate)
+    return true if MODELS.include?(candidate)
+    return Crm::LlmCatalog.valid_id?(candidate) if Crm::LlmCatalog.anthropic?(candidate)
+
+    Crm::LlmCatalog.usable?(ai_config, candidate)
   end
 
   # esforço: escolha do agente > recomendado > global > (omitido = high)
@@ -235,7 +252,7 @@ module Crm::AiAgentConfig
   # monta o output_config com o formato pedido + esforço quando o modelo aceita
   def output_config_for(format)
     cfg = { format: format }
-    cfg[:effort] = effort if effort && model.exclude?('haiku')
+    cfg[:effort] = effort if effort && Crm::LlmCatalog.effort_supported?(model) && !model.match?(/haiku-[34]/)
     cfg
   end
 
@@ -255,10 +272,15 @@ module Crm::AiAgentConfig
     read = usage.cache_read_input_tokens.to_i
     input = fresh + written + read
     output = usage.output_tokens.to_i
-    price_in, price_out = PRICING[model] || PRICING[DEFAULT_MODEL]
-    # item 213: entrada lida do cache custa 10%; gravação no cache custa 2x (ttl 1h)
-    cost = ((fresh * price_in) + (written * price_in * CACHE_WRITE_FACTOR) +
-            (read * price_in * CACHE_READ_FACTOR) + (output * price_out)) / 1_000_000.0
+    # item 213: entrada lida do cache custa 10%; gravação no cache custa 2x (ttl 1h).
+    # 🧠 22/11: preço por modelo dos 3 fornecedores (Crm::LlmCatalog); modelo
+    # sem preço conhecido grava US$ 0 e avisa no log
+    cost = if Crm::LlmCatalog.price(model)
+             Crm::LlmCatalog.cost(model, fresh: fresh, written: written, read: read, output: output)
+           else
+             Rails.logger.warn("[Crm::AiUsage] #{model} sem preço na tabela (Crm::LlmCatalog) — gasto gravado como US$ 0")
+             0.0
+           end
     Rails.logger.info("[Crm::AiUsage] #{agent_key} #{model} entrada=#{fresh} cache_gravado=#{written} cache_lido=#{read} saida=#{output} US$#{cost.round(4)}")
 
     Crm::AiUsage.create!(

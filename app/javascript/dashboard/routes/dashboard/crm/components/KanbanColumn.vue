@@ -12,6 +12,7 @@ import StageEditModal from './StageEditModal.vue';
 import ColumnAutomationsModal from './ColumnAutomationsModal.vue';
 import FollowupBotModal from './FollowupBotModal.vue';
 import CrmAPI from 'dashboard/api/crm';
+import LlmModelPicker from 'dashboard/components-next/cevico/LlmModelPicker.vue';
 
 const props = defineProps({
   stage:           { type: Object, required: true },
@@ -37,6 +38,8 @@ const props = defineProps({
 const emit = defineEmits(['cardClick', 'stageDrop', 'addContact', 'openChat', 'loadMore']);
 
 const store = useStore();
+// 🧠 22/11: catálogo dos 3 fornecedores de IA (seletor de modelo do agente)
+const crmSettingsForLlm = computed(() => store.getters['crm/getSettings']);
 const { t } = useI18n();
 const { isAdmin } = useAdmin();
 // 🔐 revisão 12/10: a estrutura da coluna segue a MESMA concessão que o
@@ -823,12 +826,14 @@ const delayLabel = (minutes) => {
             </button>
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1">Modelo</label>
-              <select v-model="agentForm.model" class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12">
-                <option value="">⭐ Recomendado do agente</option>
-                <option value="claude-opus-4-8">Opus 4.8 — melhor análise</option>
-                <option value="claude-sonnet-5">Sonnet 5 — equilíbrio</option>
-                <option value="claude-haiku-4-5">Haiku 4.5 — mais barato e rápido</option>
-              </select>
+              <!-- 🧠 22/11: Claude, ChatGPT ou Gemini -->
+              <LlmModelPicker
+                v-model="agentForm.model"
+                :catalog="crmSettingsForLlm?.ai?.llm_catalog || []"
+                :engine-note="false"
+                empty-label="⭐ Recomendado do agente"
+                select-class="w-full border border-n-weak rounded-lg px-2 py-2 text-sm bg-n-solid-2 text-n-slate-12"
+              />
             </div>
             <div>
               <label class="text-xs font-medium text-n-slate-11 block mb-1">

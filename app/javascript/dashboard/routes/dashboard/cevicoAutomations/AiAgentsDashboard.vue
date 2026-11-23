@@ -64,6 +64,11 @@ const MODEL_LABEL = {
   'claude-opus-4-8': 'Opus',
   'claude-sonnet-5': 'Sonnet',
   'claude-haiku-4-5': 'Haiku',
+  // 🧠 item 399: atendentes rodando no ChatGPT
+  'gpt-6.2-sol': 'GPT Sol',
+  'gpt-6.1-terra': 'GPT Terra',
+  'gpt-6-luna': 'GPT Luna',
+  'gpt-6.2-astra': 'GPT Astra',
 };
 
 const fmtNum = v => Number(v || 0).toLocaleString('pt-BR');

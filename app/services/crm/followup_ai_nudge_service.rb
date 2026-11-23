@@ -116,7 +116,7 @@ class Crm::FollowupAiNudgeService
   # cutucada curta: 30 s bastam — o cliente padrão espera até 300 s (páginas
   # inteiras) e seguraria a rodada do robô
   def client
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 30)
+    @client ||= llm_client(timeout: 30)
   end
 
   private

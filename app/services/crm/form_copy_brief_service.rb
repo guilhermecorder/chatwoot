@@ -100,7 +100,7 @@ class Crm::FormCopyBriefService
   private
 
   def client
-    @client ||= Anthropic::Client.new(api_key: api_key, timeout: 180)
+    @client ||= llm_client(timeout: 180)
   end
 
   def resposta(resp, question_id)

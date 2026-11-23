@@ -130,7 +130,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   # NOTA DE SOMBRA (usada pelo job e pelo Simulador): o que o agente teria
   # respondido, com os dados estruturados para a tela Sombra. Devolve se a
   # vaga que ele agendaria é válida (nil quando não agendaria).
-  def self.write_shadow_note!(conversation, agent_key, result, trigger_message_id) # rubocop:disable Metrics/AbcSize
+  def self.write_shadow_note!(conversation, agent_key, result, trigger_message_id) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     account = conversation.account
     slot_valid = result[:agendar] ? new.send(:slot_valid?, account, result[:agendamento]) : nil
     conversation.messages.create!(
@@ -145,6 +145,9 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
           'pausar' => result[:pausar] == true, 'leitura' => result[:leitura].to_s.truncate(300),
           # 🔧 rodada 192: o que as ferramentas fizeram/simulariam [{ferramenta, ok, resumo}]
           'acoes' => Array(result[:acoes]).first(10),
+          # 🧠 item 399: qual modelo respondeu (Claude × ChatGPT), para comparar
+          'modelo' => result[:modelo],
+          'reserva' => result[:reserva], # ChatGPT falhou e o Claude respondeu no lugar
           'trigger_message_id' => trigger_message_id
         }
       }
@@ -217,7 +220,9 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     # a mesma mensagem já ganhou nota (ex.: simulador rodou na hora e o job da fila chegou depois)
     return if shadow_note_exists?(conversation, trigger_message_id)
 
-    result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: agent_key, live: false).call
+    service = Crm::ResponderAgentService.new(conversation: conversation, agent_key: agent_key, live: false)
+    result = service.call
+    track_experiment_call(conversation, agent_key, cfg, service, result)
     if result[:error]
       log_event(account, agent_key, conversation, 'erro', result[:error].to_s.truncate(120))
       return
@@ -228,6 +233,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
     slot_valid = self.class.write_shadow_note!(conversation, agent_key, result, trigger_message_id)
     count_shadow!(account, agent_key, conversation)
+    track_experiment(conversation, agent_key, cfg, service, 'shadow' => true, 'would_book' => result[:agendar] && slot_valid,
+                                                            'handoff' => result[:chamar_humano])
     detail = "etapa #{result[:etapa]} · #{Array(result[:mensagens]).size} msg(s)"
     detail += if result[:agendar]
                 slot_valid ? ' · agendaria (vaga ✓)' : ' · agendaria (vaga ✗)'
@@ -236,6 +243,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
               end
     detail += ' · chamaria humano' if result[:chamar_humano]
     detail += " · 🔧 #{acoes_text(result)}" if Array(result[:acoes]).any?
+    detail += " · 🛟 #{result[:reserva]}" if result[:reserva].present? # item 399
     log_event(account, agent_key, conversation, 'sombra', detail.truncate(220))
     urgent_outside_window!(account, conversation, cfg, agent_key, result)
   end
@@ -316,7 +324,9 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       return
     end
 
-    result = Crm::ResponderAgentService.new(conversation: conversation, agent_key: agent_key, live: true).call
+    service = Crm::ResponderAgentService.new(conversation: conversation, agent_key: agent_key, live: true)
+    result = service.call
+    track_experiment_call(conversation, agent_key, cfg, service, result)
     if result[:error]
       attempt = retry_later(conversation, trigger_message_id, agent_key, result[:error])
       note = result[:error].to_s.truncate(120)
@@ -338,6 +348,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       send_replies(conversation, [booked == :sem_horario ? MISSING_SLOT_TEXT : SLOT_TAKEN_TEXT], trigger_message_id, agent_key)
       log_event(account, agent_key, conversation, 'horario_invalido',
                 "#{result.dig(:agendamento, :dia)} #{result.dig(:agendamento, :hora)} não validou")
+      track_experiment(conversation, agent_key, cfg, service, 'reply' => true)
       return
     end
 
@@ -353,18 +364,42 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
         log_event(account, agent_key, conversation, outcome == :tarefa ? 'cancelar_pendente' : 'erro', CANCEL_EVENT_NOTES[outcome])
         # a equipe assume daqui (senão a próxima resposta do paciente repete o pedido)
         hand_over!(conversation, result, agent_key, task_opened: outcome == :tarefa)
+        track_experiment(conversation, agent_key, cfg, service, 'reply' => true, 'handoff' => true)
         return
       end
     end
 
-    send_replies(conversation, Array(result[:mensagens]), trigger_message_id, agent_key, encerrou: self.class.farewell?(result))
+    send_replies(conversation, Array(result[:mensagens]), trigger_message_id, agent_key, encerrou: self.class.farewell?(result),
+                                                                                         modelo: result[:modelo])
     # 🩺 item 251 + auditoria 10/2026 (#458): chamar humano SEMPRE deixa uma
     # tarefa com responsável no Meu Painel (e aviso no Radar quando é urgência
     # clínica) — nos três atendentes (antes só no pós-operatório)
     hand_over!(conversation, result, agent_key) if result[:chamar_humano]
     detail = "etapa #{result[:etapa]} · #{Array(result[:mensagens]).size} msg(s)"
     detail += " · 🔧 #{acoes_text(result)}" if Array(result[:acoes]).any?
+    detail += " · 🛟 #{result[:reserva]}" if result[:reserva].present? # item 399
     log_event(account, agent_key, conversation, booked ? 'agendou' : 'respondeu', detail.truncate(220))
+    track_experiment(conversation, agent_key, cfg, service, 'reply' => true, 'booked' => booked == true, 'handoff' => result[:chamar_humano])
+  end
+
+  # ── 🧪 item 400: placar do teste A/B de motor (Crm::EngineExperiment) ─────
+  # toda chamada entra com o custo e o modelo, mesmo a que deu erro ou a que o
+  # paciente atropelou com outra mensagem (o dinheiro foi gasto do mesmo jeito)
+  def track_experiment_call(conversation, agent_key, cfg, service, result)
+    return if Crm::EngineExperiment.active(cfg).nil?
+
+    track_experiment(conversation, agent_key, cfg, service,
+                     'cost_usd' => service.spent_usd, 'model' => result[:modelo], 'error' => result[:error].present?,
+                     'fallback' => result[:reserva].present?)
+  end
+
+  def track_experiment(conversation, agent_key, cfg, service, event)
+    return if Crm::EngineExperiment.active(cfg).nil? # sem teste ligado, nada muda no job
+
+    arm = service.experiment_arm
+    return if arm.blank?
+
+    Crm::EngineExperiment.track!(conversation, agent_key, cfg, arm, event)
   end
 
   # ── 🚫 cancelar=true sem ferramenta (#457) ──────────────────────────────
@@ -609,11 +644,12 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     (result[:etapa].to_s == 'encerramento' || result[:pausar] == true) && result[:chamar_humano] != true
   end
 
-  def send_replies(conversation, texts, trigger_message_id, agent_key, encerrou: false) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity
+  def send_replies(conversation, texts, trigger_message_id, agent_key, encerrou: false, modelo: nil) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/ParameterLists
     # 🔁 (#100) última conferência antes de falar: alguém já respondeu esta mensagem?
     return if self.class.already_replied?(conversation, trigger_message_id)
 
     attrs = { 'cevico_ia_agent' => agent_key }
+    attrs['cevico_ia_model'] = modelo if modelo.present? # 🧠 item 399: qual motor escreveu (Claude × ChatGPT)
     attrs['cevico_encerrou'] = true if encerrou # carimbo lido pelo Crm::FollowupClosure
     medias = Crm::ScriptImages.for(conversation.account)
     texts.first(3).each_with_index do |text, index|
