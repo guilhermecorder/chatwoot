@@ -620,7 +620,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       effects_text = Crm::BookingSideEffects.summary(effects)
       Crm::PatientLink.link!(requester: requester, patient: patient) if other # depois do card nascer (a linha vai nele)
       # 💳 22/11 (ótica): exame marcado → o sistema pede o PIX de R$ 29,90 (depois da fala do agente) e o card vai pra "PIX do exame"
-      if modality == 'exame'
+      # 🗣️ 23/11: só quando ela escolheu o Pix antecipado ("Visita com exame - paga na hora" não recebe chave nem lembrete)
+      if modality == 'exame' && Otica::ExamPix.pix_chosen?(ag[:procedimento])
         exam_task = account.tasks.where(contact_id: patient.id, task_type: 'consulta', due_at: starts_at, canceled_at: nil).last
         Otica::ExamPix.request!(account: account, conversation: conversation, contact: patient, task: exam_task)
       end

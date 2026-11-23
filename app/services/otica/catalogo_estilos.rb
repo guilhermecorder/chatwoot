@@ -14,6 +14,9 @@
 module Otica::CatalogoEstilos
   module_function
 
+  # estilos "transparente" só contam armação de cor transparente/cristal (o formato sozinho não basta)
+  TRANSPARENT = /transpar|cristal/i
+
   STYLES = {
     'M1' => { publico: 'masculino', nome: 'Quadrado clássico', descricao: 'acetato encorpado, marcante',
               formatos: %w[quadrada], preferencia: 'acetato' },
@@ -24,7 +27,7 @@ module Otica::CatalogoEstilos
     'M4' => { publico: 'masculino', nome: 'Geométrico moderno', descricao: 'sextavado, metal fino',
               formatos: %w[geometrica], preferencia: 'metal' },
     'M5' => { publico: 'masculino', nome: 'Quadrado transparente', descricao: 'acetato cristal, leve e moderno',
-              formatos: %w[quadrada retangular], preferencia: 'transparente' },
+              formatos: %w[quadrada retangular], preferencia: 'transparente', cor: TRANSPARENT },
     'M6' => { publico: 'masculino', nome: 'Aviador', descricao: 'metal com ponte dupla',
               formatos: %w[aviador], preferencia: 'metal' },
     'M7' => { publico: 'masculino', nome: 'Redondo', descricao: 'acetato tartaruga, estilo vintage',
@@ -46,7 +49,7 @@ module Otica::CatalogoEstilos
     'F7' => { publico: 'feminino', nome: 'Geométrico', descricao: 'sextavado, metal fino',
               formatos: %w[geometrica], preferencia: 'metal dourada' },
     'F8' => { publico: 'feminino', nome: 'Transparente', descricao: 'acetato cristal, leve e moderno',
-              formatos: %w[quadrada redonda oval retangular], preferencia: 'transparente' }
+              formatos: %w[quadrada redonda oval retangular], preferencia: 'transparente', cor: TRANSPARENT }
   }.freeze
 
   IMAGES = { 'masculino' => 'masculino.jpg', 'feminino' => 'feminino.jpg' }.freeze
@@ -90,6 +93,19 @@ module Otica::CatalogoEstilos
     s = style(code)
     return [] if s.nil?
 
-    products.select { |p| s[:formatos].include?(p.frame_shape.to_s) }
+    products.select do |p|
+      s[:formatos].include?(p.frame_shape.to_s) && (s[:cor].nil? || [p.color, p.name].join(' ').match?(s[:cor]))
+    end
+  end
+
+  # 📖 23/11 (Guilherme: "se a gente não tem, não pode pôr no menu"): os códigos do público que têm
+  # pelo menos uma armação no estoque (com foto e saldo: a lista já vem filtrada pela prova virtual)
+  def available(gender, products)
+    for_gender(gender).keys.select { |code| products_for(code, products).any? }
+  end
+
+  # "M1 Quadrado clássico · M3 Aro em cima (browline)" — só os códigos dados
+  def legend_for(codes)
+    codes.map { |code| "#{code} #{STYLES[code][:nome]}" }.join(' · ')
   end
 end

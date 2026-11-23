@@ -138,7 +138,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     # Foto lida antes de 22/11 não tem 'genero': ao vivo, relê só isso uma vez (e guarda na foto).
     rosto = rosto.merge('genero' => read_gender!(attachment)) if @live && !rosto.key?('genero')
     estilo_code = Otica::CatalogoEstilos.normalize(estilo, publico || rosto['genero']) if estilo.present?
-    return estilo_desconhecido(publico || rosto['genero']) if estilo.present? && estilo_code.nil?
+    return refuse(ESTILO_DESCONHECIDO) if estilo.present? && estilo_code.nil?
 
     genero = Otica::Visagismo.gender_of(publico) || Otica::Visagismo.gender_of(rosto['genero'])
     genero ||= Otica::CatalogoEstilos.style(estilo_code)&.dig(:publico)
@@ -147,18 +147,19 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     return refuse(GENERO_INCERTO) if genero.nil?
 
     rosto = rosto.merge('genero' => genero.to_s)
-    # 📖 22/11: 2 provas e nada agradou → catálogo de estilos (a pessoa escolhe pelo código)
-    if estilo_code.nil? && parecida_com.blank? && rounds_sent >= ROUNDS_BEFORE_CATALOG
-      return catalogo_ja_enviado(genero) if catalog_sent?
-      return refuse(JA_ENVIADAS) if @live && just_sent?
-
-      return send_catalog!(genero)
-    end
-
     products = Otica::Visagismo.filter_gender(self.class.candidates(account), genero)
     # 🕶️ 22/11: óculos de sol só entra na prova quando ela pede sol (antes 22 solares iam pra quem quer grau)
     products = products.reject { |p| p.kind.to_s == 'solar' } unless preferencia.to_s.match?(/\bsol\b|solar/i) || parecida_com.present?
     return refuse('Nenhuma armação do estoque está pronta para a prova virtual (precisa de foto e saldo). Convide para a loja.') if products.empty?
+
+    # 📖 22/11: 2 provas e nada agradou → catálogo de estilos (a pessoa escolhe pelo código)
+    # 📖 23/11: o cardápio só leva os estilos que a loja TEM (Otica::CatalogoEstilos.available)
+    if estilo_code.nil? && parecida_com.blank? && rounds_sent >= ROUNDS_BEFORE_CATALOG
+      return catalogo_ja_enviado(genero, products) if catalog_sent?
+      return refuse(JA_ENVIADAS) if @live && just_sent?
+
+      return send_catalog!(genero, products)
+    end
 
     already = sent_product_ids
     tiers = {}
@@ -184,8 +185,10 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
       fresh = in_style.reject { |p| already.include?(p.id) }
       in_style = fresh if fresh.any?
       if in_style.empty?
-        return refuse("Hoje a loja não tem armação do estilo #{estilo_code} (#{s[:nome]}) com foto e saldo pra prova. Fale a verdade, " \
-                      'ofereça outro código do catálogo ou convide pra ver as novidades na loja (e marcar o exame).')
+        others = Otica::CatalogoEstilos.available(genero, products)
+        return refuse("O estilo #{estilo_code} (#{s[:nome]}) não está no estoque de hoje. NÃO diga que a loja não tem: " \
+                      "ofereça, numa frase, os estilos que existem (#{Otica::CatalogoEstilos.legend_for(others).presence || 'nenhum'}) " \
+                      'e pergunte qual ela quer ver no rosto; ou convide pra ver pessoalmente na loja.')
       end
 
       ranked = Otica::Visagismo.recommend(in_style, face_shape: rosto['formato'], preference: [s[:preferencia], preferencia].compact.join(' '),
@@ -492,6 +495,7 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     end
   end
 
+  ESTILO_DESCONHECIDO = 'Código de estilo não reconhecido. Use só um dos códigos do cardápio enviado nesta conversa.'.freeze
   GENERO_INCERTO = 'Pela foto não deu pra ter certeza se o óculos é pra homem ou pra mulher. Antes de mostrar armações, ' \
                    'pergunte de um jeito leve (ex.: "É pra você mesmo que vamos escolher?" ou, se precisar, "Prefere ver modelos ' \
                    'masculinos ou femininos?") e chame de novo com publico.'.freeze
@@ -523,39 +527,45 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
                    'te agrada (por exemplo, {exemplo}) que eu já te mostro no seu rosto.'.freeze
 
   # 📖 manda a imagem do catálogo (homem ou mulher) + a pergunta do código
-  def send_catalog!(genero) # rubocop:disable Metrics/MethodLength
-    styles = Otica::CatalogoEstilos.for_gender(genero)
-    exemplo = genero == 'masculino' ? 'M3' : 'F1'
-    base = { ok: true, catalogo: true, publico: genero, estilos: styles.map { |code, s| "#{code} #{s[:nome]} (#{s[:descricao]})" } }
+  def send_catalog!(genero, products) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+    codes = Otica::CatalogoEstilos.available(genero, products)
+    if codes.empty?
+      return refuse('Nenhum estilo do catálogo tem armação com foto e saldo hoje. NÃO mande cardápio nem diga que falta: ' \
+                    'diga que na loja ela vê as novidades no rosto e conduza pro grau ("Você já sabe o seu grau ou precisa descobrir?").')
+    end
+
+    exemplo = codes.first
+    base = { ok: true, catalogo: true, publico: genero,
+             estilos: codes.map { |code| "#{code} #{Otica::CatalogoEstilos.style(code).values_at(:nome, :descricao).join(' (')})" } }
     instrucao = 'Duas provas e nada agradou: o CATÁLOGO DE ESTILOS (imagem com os principais tipos, cada um com um código) ' \
                 'e a pergunta do código JÁ FORAM ENVIADOS. Não repita a lista: responda com NADA ou no máximo 1 linha leve. ' \
                 'Quando ela disser o código (ou descrever um deles), chame experimentar_armacoes com estilo = o código.'
     return base.merge(simulado: true, aviso: "SIMULAÇÃO: o catálogo #{genero} seria enviado agora. #{instrucao}") unless @live
 
-    path = Otica::CatalogoEstilos.image_path(genero)
-    return refuse('O catálogo de estilos não está instalado. Pergunte que estilo ela prefere em palavras.') unless File.exist?(path)
+    unless Otica::CatalogoPrancha.installed?(genero, codes)
+      return refuse('O catálogo de estilos não está instalado. Pergunte que estilo ela prefere em palavras.')
+    end
 
+    path = Otica::CatalogoPrancha.compose(genero, codes)
     message = @conversation.messages.new(
       account_id: account.id, inbox_id: @conversation.inbox_id, message_type: :outgoing,
-      content: Otica::CatalogoEstilos.legend(genero),
+      content: Otica::CatalogoEstilos.legend_for(codes),
       additional_attributes: { 'cevico_ia_agent' => @agent_key.presence || Otica::TryOnImage::AGENT_KEY,
-                               CATALOGO_KEY => { 'publico' => genero } }
+                               CATALOGO_KEY => { 'publico' => genero, 'codigos' => codes } }
     )
     message.attachments.build(account_id: account.id, file_type: :image,
                               file: { io: File.open(path, 'rb'), filename: "catalogo-#{genero}.jpg", content_type: 'image/jpeg' })
     message.save!
+    FileUtils.rm_f(path)
     send_text!(CATALOGO_TEXTO.gsub('{exemplo}', exemplo), PERGUNTA_KEY)
     base.merge(aviso: instrucao)
   end
 
-  def catalogo_ja_enviado(genero)
+  def catalogo_ja_enviado(genero, products)
     refuse("O catálogo de estilos #{genero} JÁ foi enviado nesta conversa. Peça o código do estilo que ela mais gostou " \
-           "(#{Otica::CatalogoEstilos.legend(genero)}) e chame com estilo. Se nada agradar, não insista: diga que " \
+           "(#{Otica::CatalogoEstilos.legend_for(Otica::CatalogoEstilos.available(genero, products))}) e chame com estilo. " \
+           'Se nada agradar, não insista: diga que ' \
            'na loja ela experimenta vários pessoalmente e conduza para marcar o exame de vista.')
-  end
-
-  def estilo_desconhecido(genero)
-    refuse("Código de estilo não reconhecido. Os códigos são: #{Otica::CatalogoEstilos.legend(genero)}.")
   end
 
   # balão de texto da loja na conversa (sai pelo WhatsApp), carimbado; `wait` = sai depois das fotos

@@ -12,6 +12,12 @@
 #      valor R$ 29,90 no comprovante → etiqueta "exame-pago", card na coluna "Exame pago" (a automação da
 #      coluna manda o evento de conversão), nota "PIX recebido" no agendamento, confirmação pra cliente
 #      e tarefa pra equipe conferir no banco; valor diferente → só a tarefa pra equipe conferir.
+#
+# 🗣️ 23/11 (Guilherme, conversa curta): a OFERTA vem ANTES de marcar, na fala da Val (R$ 150 no optometrista ×
+# R$ 29,90 agendando agora no Pix × R$ 70 na hora). Ela escolhe: Pix → o agendamento vai com procedimento
+# "Visita com exame - Pix" e o sistema manda só a chave e "pode me enviar o comprovante?"; na hora → procedimento
+# "Visita com exame - paga na hora" e NADA de Pix (nem chave, nem coluna, nem lembrete). Comprovante chegou →
+# "Um instante, estou terminando o seu agendamento." e, logo depois, "Deu certo. Parabéns!" com o agendamento.
 module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
   module_function
 
@@ -27,6 +33,13 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
   SEND_WAIT = 8.seconds
   WEEKDAYS = %w[domingo segunda terça quarta quinta sexta sábado].freeze
   AMOUNT = /29[,.]90/
+  AT_DOOR = /na hora|na loja|no dia/
+  ADDRESS = 'Sua Ótica, R. Brg. Vilela Júnior, 100, Jardim Cachoeira'.freeze
+
+  # o agendamento é com o Pix antecipado? ("Visita com exame - paga na hora" = não)
+  def pix_chosen?(procedure)
+    !I18n.transliterate(procedure.to_s).downcase.match?(AT_DOOR)
+  end
 
   # ── 1. pedido do PIX (depois de marcar o exame) ──────────────────────────
   def enabled?(account)
@@ -48,22 +61,14 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
     move!(account, contact, 'pix_exame')
     return if already_asked # remarcou antes de pagar: a chave já foi mandada
 
-    send!(conversation, request_text(task.due_at, deadline))
+    send!(conversation, REQUEST_TEXT)
     send!(conversation, PIX_KEY, wait: SEND_WAIT + 2.seconds) # a chave sozinha num balão, fácil de copiar
   rescue StandardError => e
     Rails.logger.error "[Otica::ExamPix] pedido do PIX na conversa #{conversation&.id}: #{e.class}: #{e.message}"
   end
 
-  # 🤝 22/11 (Guilherme: "zero de cobrança… a gente está só ajudando… quando ela quiser, se ela quiser"):
-  # o PIX é uma VANTAGEM opcional (preço menor + horário garantido), nunca cobrança nem ameaça.
-  def request_text(starts_at, deadline)
-    "Seu horário com a Fabi ficou marcado: #{when_label(starts_at)}.\n\n" \
-      "Uma vantagem pra você: em clínica, esse exame costuma custar uns R$ #{PRICE_FULL}. Aqui, se você preferir " \
-      "garantir o horário pagando antes pelo PIX, ele sai por R$ 29,90 (na hora, fica R$ #{PRICE_AT_DOOR}).\n\n" \
-      "Esse valor de R$ 29,90 vale pro PIX feito até #{when_label(deadline)}. É só se fizer sentido pra você.\n\n" \
-      'A chave PIX é o CNPJ da loja e vai na próxima mensagem. Se pagar, me manda o comprovante por aqui que eu ' \
-      'deixo tudo certo pro seu exame.'
-  end
+  # 🗣️ 23/11: a oferta (150 × 29,90 × 70) já foi feita pela Val antes de marcar; aqui vai só a chave e o pedido do comprovante
+  REQUEST_TEXT = 'A chave Pix é o CNPJ da loja, vai logo abaixo. Assim que fizer, pode me enviar o comprovante?'.freeze
 
   # 🤝 os lembretes da coluna "PIX do exame" (só benefício, zero cobrança) ficam no robô de follow-up da VPS:
   # OTICA/agente/ferramentas/aplica_exame_pix.rb
@@ -119,11 +124,18 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
     contact.add_labels([PAID_LABEL])
     comment!(task, '✅ PIX do exame (R$ 29,90) recebido: comprovante na conversa. Conferir no banco.') if task
     move!(account, contact, 'exame_pago')
-    horario = task&.due_at ? " #{when_label(task.due_at)}." : '.'
-    send!(conversation, "Recebi o seu comprovante! O seu exame com a Fabi está reservado:#{horario}\n\nQualquer coisa, é só me chamar por aqui.",
-          wait: 2.seconds)
+    send!(conversation, 'Um instante, estou terminando o seu agendamento.', wait: 2.seconds)
+    send!(conversation, confirmation_text(contact, task), wait: 9.seconds, space: false) # já vem uma informação por linha
     team_task!(account, conversation, contact, 'Conferir PIX do exame (R$ 29,90)',
                "Comprovante recebido e horário confirmado na conversa#{task&.due_at ? " (#{when_label(task.due_at)})" : ''}. Conferir no banco.")
+  end
+
+  # "Deu certo. Parabéns!" + o agendamento (nome, dia e hora, valor pago, local), uma informação por linha
+  def confirmation_text(contact, task)
+    lines = ['Deu certo. Parabéns!', '', "Agendamento de #{contact&.name.presence || 'você'}"]
+    lines << "Exame com a Fabi: #{when_label(task.due_at)}" if task&.due_at
+    lines.push('Valor pago: R$ 29,90', "Local: #{ADDRESS}")
+    lines.join("\n")
   end
 
   # ── peças ────────────────────────────────────────────────────────────────
@@ -156,9 +168,9 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
                            motivo: motivo, detalhes: detalhes, urgencia: 'normal')
   end
 
-  def send!(conversation, text, wait: SEND_WAIT)
+  def send!(conversation, text, wait: SEND_WAIT, space: true)
     message = conversation.messages.new(account_id: conversation.account_id, inbox_id: conversation.inbox_id, message_type: :outgoing,
-                                        content: Otica::TextSpacing.space(text),
+                                        content: space ? Otica::TextSpacing.space(text) : text,
                                         additional_attributes: { 'cevico_ia_agent' => AGENT_KEY, STAMP_KEY => true })
     message.cevico_send_wait = wait
     message.save!

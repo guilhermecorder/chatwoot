@@ -3,6 +3,8 @@ require 'rails_helper'
 # rubocop:disable Layout/LineLength
 
 # 🪞 08/11: prova virtual pelo WhatsApp — da foto da cliente às imagens na conversa
+RSpec::Matchers.define_negated_matcher :not_include, :include
+
 RSpec.describe Otica::VirtualTryOn do
   let(:account) { create(:account) }
   let(:inbox) { create(:inbox, account: account) }
@@ -329,17 +331,43 @@ RSpec.describe Otica::VirtualTryOn do
       catalogo = conversation.messages.outgoing.where("additional_attributes ? 'cevico_catalogo_estilos'").last
       expect(catalogo.attachments.size).to eq(1)
       expect(catalogo.content).to include('F1 Gatinho')
+      # 📖 23/11: o cardápio só leva o que a loja tem (nada de redondo nem transparente aqui)
+      expect(catalogo.content).to not_include('F2').and(not_include('F8'))
+      expect(catalogo.additional_attributes['cevico_catalogo_estilos']['codigos']).to include('F1').and(not_include('F2'))
       expect(conversation.messages.outgoing.last.content).to include('código')
 
       ela_responde!
       expect(service.run(quantidade: 2)[:motivo]).to include('JÁ foi enviado')
       expect(service(live: false).run(quantidade: 2, estilo: 'x9')[:motivo]).to include('não reconhecido')
 
+      fora = service(live: false).run(quantidade: 2, estilo: 'f2')
+      expect(fora[:motivo]).to include('não está no estoque de hoje').and include('F1 Gatinho').and include('NÃO diga que a loja não tem')
+
       out = service(live: false).run(quantidade: 2, estilo: 'f1')
       expect(out).to include(ok: true, estilo: 'F1 Gatinho')
       expect(out[:armacoes].pluck(:id)).to contain_exactly(gat_preta.id, gat_nude.id)
       expect(out[:armacoes].pluck(:tom)).to contain_exactly('escura', 'clara')
       expect(out[:aviso]).to include('NADA substitui')
+    end
+
+    it 'sem nenhum estilo do cardápio no estoque, não manda cardápio: conduz pro grau', :aggregate_failures do
+      armacao('Aviador', 'aviador').update!(frame_fit: 'feminina') # aviador não está em nenhum estilo feminino
+      selfie!
+      prova_enviada!('a1')
+      prova_enviada!('b2')
+      ela_responde!
+      out = service.run(quantidade: 2)
+      expect(out[:ok]).to be(false)
+      expect(out[:motivo]).to include('NÃO mande cardápio')
+      expect(conversation.messages.outgoing.where("additional_attributes ? 'cevico_catalogo_estilos'")).to be_empty
+    end
+
+    it 'a prancha sob medida: só os quadros pedidos, ímpar centralizado', :aggregate_failures do
+      expect(Otica::CatalogoPrancha.installed?('masculino', %w[M1 M3 M7])).to be(true)
+      path = Otica::CatalogoPrancha.compose('masculino', %w[M1 M3 M7])
+      expect(MiniMagick::Image.open(path).dimensions).to eq([1080, 250 + 8 + (2 * 388) + 110])
+    ensure
+      File.delete(path) if path && File.exist?(path)
     end
 
     it 'o código aceita "o 1" e o público do código vale quando a foto não diz' do

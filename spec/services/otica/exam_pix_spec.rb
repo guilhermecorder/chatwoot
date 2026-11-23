@@ -35,16 +35,15 @@ RSpec.describe Otica::ExamPix do
   def card = Crm::Contact.find_by(contact_id: contact.id, pipeline_id: pipeline.id)
   def state = conversation.reload.additional_attributes['cevico_exame_pix']
 
-  it 'marcou o exame: pede o PIX com a ancoragem, manda a chave sozinha, guarda o estado e move o card', :aggregate_failures do
+  it 'marcou o exame no Pix: manda só a chave e o pedido do comprovante, guarda o estado e move o card', :aggregate_failures do
     travel_to tz.parse('2026-11-27 10:00') do
       described_class.request!(account: account, conversation: conversation, contact: contact, task: exame)
     end
 
     msgs = conversation.messages.outgoing.order(:id)
     expect(msgs.size).to eq(2)
-    expect(msgs.first.content).to include('sábado, 28/11, às 9h10').and include('R$ 150').and include('R$ 29,90')
-                              .and include('R$ 70').and include('sexta, 27/11, às 20h').and include('se fizer sentido')
-    expect(msgs.first.content).not_to match(/muita gente|falta|perdido/i) # 🤝 zero cobrança
+    # 🗣️ 23/11: a oferta (150 × 29,90 × 70) já foi feita pela Val antes de marcar
+    expect(msgs.first.content).to include('chave Pix é o CNPJ').and include('pode me enviar o comprovante?')
     expect(msgs.last.content).to eq('32.951.767/0001-92')
     expect(msgs).to all(satisfy { |m| m.cevico_send_wait.present? || m.additional_attributes['cevico_exame_pix_msg'] })
     expect(state).to include('status' => 'aguardando', 'task_id' => exame.id, 'valor' => 29.9)
@@ -65,7 +64,10 @@ RSpec.describe Otica::ExamPix do
     expect(contact.reload.label_list).to include('exame-pago')
     expect(card.stage_id).to eq(pago.id)
     expect(exame.reload.comments.last['text']).to include('recebido')
-    expect(conversation.messages.outgoing.order(:id).last.content).to include('Recebi o seu comprovante').and include('sábado, 28/11, às 9h10')
+    outs = conversation.messages.outgoing.order(:id).last(2).map(&:content)
+    expect(outs.first).to eq('Um instante, estou terminando o seu agendamento.')
+    expect(outs.last).to start_with('Deu certo. Parabéns!').and include('Agendamento de Maria Silva')
+      .and include('sábado, 28/11, às 9h10').and include('Valor pago: R$ 29,90').and include('Brg. Vilela Júnior')
     expect(account.tasks.where.not(task_type: 'consulta').last.title.to_s + account.tasks.where.not(task_type: 'consulta').last.description.to_s)
       .to include('Conferir PIX do exame')
   end
@@ -83,6 +85,13 @@ RSpec.describe Otica::ExamPix do
 
     Cevico::Company.save!(account, 'segment' => 'clinica')
     expect(described_class.enabled?(account)).to be(false)
+  end
+
+  it 'quem escolhe pagar na hora (R$ 70) não recebe Pix; o resto escolheu o Pix', :aggregate_failures do
+    expect(described_class.pix_chosen?('Visita com exame - paga na hora')).to be(false)
+    expect(described_class.pix_chosen?('Visita com exame - na loja')).to be(false)
+    expect(described_class.pix_chosen?('Visita com exame - Pix')).to be(true)
+    expect(described_class.pix_chosen?('Visita com exame')).to be(true)
   end
 
   it 'prazo do valor: até 24 h, no máximo até as 20 h da véspera, nunca menos de 1 h antes', :aggregate_failures do
