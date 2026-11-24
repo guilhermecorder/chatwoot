@@ -9,17 +9,13 @@
 #                    (o RESUMO em imagem NÃO vai no 1º envio — "é uma arma para usar depois", Guilherme 12/11:
 #                    sai no follow-up de 3 dias pelo [resumo])
 #     → :aguardando  janela fechada: manda o modelo life_orcamento_pronto ("Pode mandar"); o atendente envia quando ele responder
-#     → :enviado_modelo  janela fechada e o modelo life_orcamento_pdf APROVADO (24/11, Guilherme: "precisamos enviar 100% dos
-#                    orçamentos"): o PDF vai no cabeçalho do modelo, com a pergunta de fechamento. Não depende de o cliente
-#                    responder ao "seu orçamento está pronto" — 4 orçamentos ficaram presos assim em 22/11.
+#     (24/11: o PDF dentro da mensagem modelo, life_orcamento_pdf, SAIU no mesmo dia — Guilherme: "não dá para mandar
+#     orçamento por mensagem modelo… elas são para pegar confirmação de sim e não, ou para reabrir a conversa". Quem não
+#     responde ao "pronto" é chamado pelo vigia quando escrever e pelo robô do orçamento.)
 #     → :sem_conversa / :sem_arquivos  (nada sai; a tela explica)
 class Crm::KitQuote::Delivery
   READY_TEMPLATE = 'life_orcamento_pronto'.freeze
   READY_PREVIEW = 'Oi! Seu orçamento está pronto. Quando estiver por aí, me avisa que já te mando, ok?'.freeze
-  PDF_TEMPLATE = 'life_orcamento_pdf'.freeze
-  PDF_TEXT = "Oi, {{1}}! Aqui está o seu orçamento oficial de energia solar, com os valores atualizados.\n\n" \
-             'Dá uma olhada com calma. Se fizer sentido para você e couber no seu planejamento, em 25 a 40 dias o sistema já ' \
-             "fica instalado e gerando energia na sua casa.\n\nÉ possível para você fazer esse investimento agora?".freeze
   WAITING_KEY = 'aguardando_envio'.freeze
   DELIVERY_STAMP = 'cevico_orcamento_enviado'.freeze
 
@@ -95,39 +91,9 @@ class Crm::KitQuote::Delivery
     Crm::QuoteSent.call(@quote.contact, value: @quote.price)
   end
 
-  # janela fechada: com o modelo do PDF aprovado, o orçamento vai direto; sem ele, o "Pode mandar" de antes
+  # janela fechada: só o abridor ("Seu orçamento está pronto… me avisa que já te mando"); o atendente envia quando ele responder
   def notify_ready!
-    return send_pdf_template! if pdf_template_approved?
-
     notify_ready_old!
-  end
-
-  def pdf_template_approved?
-    Array(@conversation.inbox&.channel.try(:message_templates)).any? do |t|
-      t['name'] == PDF_TEMPLATE && t['status'].to_s.casecmp('approved').zero?
-    end
-  end
-
-  def pdf_url
-    host = ENV.fetch('FRONTEND_URL', nil)
-    host && Rails.application.routes.url_helpers.rails_blob_url(proposal_file, host: host)
-  end
-
-  def send_pdf_template!
-    url = pdf_url
-    return notify_ready_old! if url.blank?
-
-    first = @quote.contact&.name.to_s.split.first.presence || 'tudo bem'
-    params = { 'name' => PDF_TEMPLATE, 'language' => 'pt_BR',
-               'processed_params' => { 'body' => { '1' => first },
-                                       'header' => { 'media_url' => url, 'media_type' => 'document',
-                                                     'media_name' => proposal_file.filename.to_s } } }
-    source = Crm::TemplateSource.new(@conversation.account, @conversation.inbox, @sender, params,
-                                     PDF_TEXT.gsub('{{1}}', first), 'orcamento-pdf')
-    return :sem_conversa if Crm::SendTemplateService.new(source: source, contact: @quote.contact).perform.nil?
-
-    mark_sent!
-    :enviado_modelo
   end
 
   # O cliente toca em "Pode mandar" e o atendente envia (enviar_orcamento).

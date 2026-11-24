@@ -83,10 +83,41 @@ class Crm::QuoteJourney # rubocop:disable Metrics/ClassLength
     @lead_ids = Array(contact_ids).map(&:to_i).uniq if contact_ids
   end
 
-  def call
-    reach = lead_ids.index_with { |id| reached_index(id) }
-    { since: @since, until: @until,
-      steps: steps_json(reach.values), jumps: jumps_json(reach.values), sources: sources_json(reach) }
+  # series_since/series_until (24/11): a janela do mini gráfico de cada etapa — a do período ou, em "hoje" e "ontem",
+  # os 7 dias que terminam nele
+  def call(series_since: nil, series_until: nil)
+    out = { since: @since, until: @until,
+            steps: steps_json(reach.values), jumps: jumps_json(reach.values), sources: sources_json(reach) }
+    out[:series] = series(series_since || @since, series_until || @until) if @since && @until
+    out
+  end
+
+  # 📈 24/11 (Guilherme: "cada indicador com um mini gráfico de linha com o histórico… hoje e ontem, 7 dias; semana
+  # passada, a semana; o mês, o mês; 90 dias, esse ano…"). Mesma régua dos cartões, por data de chegada: em cada dia
+  # (semana ou mês) do gráfico, quantos dos que chegaram ali alcançaram a etapa.
+  def series(from, to)
+    journey = from == @since && to == @until ? self : self.class.new(@account, since: from, until_at: to)
+    journey.series_json
+  end
+
+  def series_json
+    gran = granularity
+    starts = bucket_starts(gran)
+    rows = reach_by_bucket(starts)
+    { granularity: gran, labels: starts.map { |start| bucket_label(start, gran) },
+      values: STEPS.each_with_index.to_h { |step, i| [step[:key], rows.map { |list| list.count { |r| r >= i } }] } }
+  end
+
+  # 👥 24/11 ("janelas expansíveis para mostrar quem foram os contatos, poder abrir a conversa"): quem chegou no período
+  # e alcançou a etapa; 'parou' = esta é a etapa mais adiantada da pessoa
+  def people(step_key, limit: 300)
+    index = step_index(step_key.to_s)
+    return [] if index.nil?
+
+    ids = reach.select { |_, r| r >= index }.keys
+    extras = { conversations: latest_conversations(ids), stages: current_stages(ids) }
+    @account.contacts.where(id: ids).order(created_at: :desc).limit(limit).pluck(:id, :name, :phone_number, :created_at)
+            .map { |row| person_json(row, index, extras) }
   end
 
   # índice da etapa mais adiantada que a pessoa alcançou (0 = só chegou)
@@ -94,7 +125,66 @@ class Crm::QuoteJourney # rubocop:disable Metrics/ClassLength
     STEPS.each_index.reverse_each.find { |i| i.zero? || signals[STEPS[i][:key]].include?(contact_id) }
   end
 
+  protected
+
+  def reach
+    @reach ||= lead_ids.index_with { |id| reached_index(id) }
+  end
+
   private
+
+  TZ = Crm::ResolvesPeriod::PERIOD_TZ
+
+  # [[alcances de quem chegou no 1º balde], …]
+  def reach_by_bucket(starts)
+    rows = starts.map { [] }
+    @account.contacts.where(id: lead_ids).pluck(:id, :created_at).each do |id, at|
+      index = starts.rindex { |start| at >= start }
+      rows[index] << reach[id] if index
+    end
+    rows
+  end
+
+  def latest_conversations(ids)
+    @account.conversations.where(contact_id: ids).order(:last_activity_at, :id).pluck(:contact_id, :display_id).to_h
+  end
+
+  def current_stages(ids)
+    Crm::Contact.where(contact_id: ids).includes(:stage).to_h { |card| [card.contact_id, card.stage&.name] }
+  end
+
+  def person_json((id, name, phone, created_at), index, extras)
+    { id: id, contact_id: id, name: name.presence || phone, phone: phone, when: created_at&.iso8601,
+      origin: SOURCE_LABELS[source_by_contact[id] || 'sem_origem'], conversation_id: extras[:conversations][id],
+      meta: extras[:stages][id], parou: reach[id] == index, etapa: STEPS[reach[id]][:label] }
+  end
+
+  # dia até 31 dias, semana até 120, mês acima disso
+  def granularity
+    days = ((@until - @since) / 1.day).ceil
+    return 'day' if days <= 31
+
+    days <= 120 ? 'week' : 'month'
+  end
+
+  def bucket_starts(gran)
+    first = @since.in_time_zone(TZ)
+    first = { 'day' => first.beginning_of_day, 'week' => first.beginning_of_week, 'month' => first.beginning_of_month }[gran]
+    step = { 'day' => 1.day, 'week' => 1.week, 'month' => 1.month }[gran]
+    starts = []
+    cursor = first
+    while cursor <= @until
+      starts << cursor
+      cursor += step
+    end
+    starts
+  end
+
+  MONTHS = %w[jan fev mar abr mai jun jul ago set out nov dez].freeze
+
+  def bucket_label(start, gran)
+    gran == 'month' ? MONTHS[start.month - 1] : start.strftime('%d/%m')
+  end
 
   # quem chegou no período: a mesma régua de "leads novos" do Meu Painel
   def lead_ids

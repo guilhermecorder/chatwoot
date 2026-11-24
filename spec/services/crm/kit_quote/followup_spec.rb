@@ -27,7 +27,7 @@ RSpec.describe Crm::KitQuote::Followup do
     expect(preview['texto']).to start_with('Oi, Maria! Sobre o orçamento que eu te mandei')
     expect(preview['texto']).to include('em 60x de R$ 520, o sistema sai por R$ 31.200 no total',
                                         'até 6x sem juros: R$ 3.150 por mês, e o total fica nos R$ 18.900')
-    expect(preview).to include('falta' => [], 'modelo' => 'life_orcamento_2_dias_pagamento', 'modelo_aprovado' => false)
+    expect(preview).to include('falta' => [], 'modelo' => 'life_abrir_conversa', 'modelo_aprovado' => false)
     expect(described_class.new(quote, 'prazo').preview['texto'])
       .to include('vale até 21/11', 'são R$ 380 que vão para a CPFL')
   end
@@ -56,17 +56,19 @@ RSpec.describe Crm::KitQuote::Followup do
     expect(conversation.messages.outgoing).to be_empty
   end
 
-  it 'janela fechada e modelo aprovado: manda o modelo com o nome e os números na ordem do modelo' do
-    channel.update_columns(message_templates: [{ 'name' => 'life_orcamento_5_dias_prazo', 'status' => 'APPROVED', 'language' => 'pt_BR' }]) # rubocop:disable Rails/SkipsModelValidations
+  # 24/11 (Guilherme): mensagem modelo só ABRE a conversa — os números ficam guardados e saem quando ele responder
+  it 'janela fechada: manda só o abridor com o nome e guarda o texto com os números', :aggregate_failures do
+    channel.update_columns(message_templates: [{ 'name' => 'life_abrir_conversa', 'status' => 'APPROVED', 'language' => 'pt_BR' }]) # rubocop:disable Rails/SkipsModelValidations
     service = instance_double(Crm::SendTemplateService, perform: conversation)
     allow(Crm::SendTemplateService).to receive(:new).and_return(service)
 
     expect(described_class.new(quote, 'prazo').call).to eq(:modelo_enviado)
     expect(Crm::SendTemplateService).to have_received(:new) do |source:, contact:|
       expect(contact).to eq(self.contact)
-      expect(source.template_params).to include('name' => 'life_orcamento_5_dias_prazo',
-                                                'processed_params' => { 'body' => { '1' => 'Maria', '2' => '21/11', '3' => 'R$ 380' } })
+      expect(source.template_params).to include('name' => 'life_abrir_conversa',
+                                                'processed_params' => { 'body' => { '1' => 'Maria' } })
     end
+    expect(Crm::PendingContent.pending(conversation.reload)['texto']).to start_with('Oi, Maria! O seu orçamento vale até 21/11.')
   end
 
   it 'sem conversa no WhatsApp' do

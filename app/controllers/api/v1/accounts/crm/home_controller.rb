@@ -21,6 +21,7 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def show
     # 🧭 12/11 (LIFE): só a faixa "Jornada do orçamento" (ela tem o período dela: 7, 30 ou 90 dias)
     return render json: { quote_journey: quote_journey_json } if params[:only] == 'quote_journey'
+    return render json: { people: quote_journey_people } if params[:only] == 'quote_journey_people'
     # 📬 22/11 (LIFE): só a faixa "Follow-up da venda" (com o período dela)
     return render json: { followup_panel: followup_panel_json } if params[:only] == 'followup_panel'
 
@@ -976,8 +977,21 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def quote_journey_json
     now = Crm::ResolvesPeriod::PERIOD_TZ.now
     since, until_at = standard_period_range || [(now - 6.days).beginning_of_day, now.end_of_day] # padrão: últimos 7 dias
-    Rails.cache.fetch(['cevico:quote_journey:v3', account.id, since.to_i, until_at.to_i], expires_in: 5.minutes) do
-      JSON.parse(Crm::QuoteJourney.new(account, since: since, until_at: until_at).call.to_json)
+    # 📈 24/11: em "hoje" e "ontem" o mini gráfico mostra os 7 dias que terminam no período
+    series_since = %w[today yesterday].include?(params[:preset]) ? (until_at - 6.days).beginning_of_day : since
+    Rails.cache.fetch(['cevico:quote_journey:v4', account.id, since.to_i, until_at.to_i], expires_in: 5.minutes) do
+      journey = Crm::QuoteJourney.new(account, since: since, until_at: until_at)
+      JSON.parse(journey.call(series_since: series_since, series_until: until_at).to_json)
+    end
+  end
+
+  # 👥 24/11: quem está em cada etapa da jornada (?step=enviado + o período), para a janela com a lista
+  def quote_journey_people
+    now = Crm::ResolvesPeriod::PERIOD_TZ.now
+    since, until_at = standard_period_range || [(now - 6.days).beginning_of_day, now.end_of_day]
+    Rails.cache.fetch(['cevico:quote_journey_people:v1', account.id, since.to_i, until_at.to_i, params[:step].to_s],
+                      expires_in: 2.minutes) do
+      JSON.parse(Crm::QuoteJourney.new(account, since: since, until_at: until_at).people(params[:step]).to_json)
     end
   end
 
@@ -1071,6 +1085,9 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     alerts = Array(state['alerts']).reverse
     alerts = alerts.select { |a| a['user_id'].blank? || a['user_id'].to_i == Current.user.id } unless Current.account_user.administrator?
     alerts = visible_robot_alerts(alerts)
+    # 🔕 24/11 (LIFE): tipos de aviso desligados na conta não aparecem (ficam só os do agente de oportunidade)
+    off = Array(settings&.ai_config&.dig(Crm::AgentAlert::OFF_KEY)).map(&:to_s)
+    alerts = alerts.reject { |a| off.include?(a['kind'].to_s) } if off.any?
     {
       last_run_at: state['last_run_at'],
       alerts: with_conversation_info(alerts.first(10)),

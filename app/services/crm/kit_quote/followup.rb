@@ -8,14 +8,18 @@
 #
 #   f = Crm::KitQuote::Followup.new(quote, 'pagamento', sender: user)
 #   f.preview → { 'texto', 'falta' => [...], 'janela_aberta', 'modelo', 'modelo_aprovado' }
-#   f.call    → :enviado (janela de 24 h aberta: texto livre) · :modelo_enviado (janela fechada: modelo aprovado na Meta)
-#               :modelo_pendente (janela fechada e o modelo ainda não foi aprovado) · :sem_dados · :sem_conversa
+#   f.call    → :enviado (janela de 24 h aberta: texto livre) · :modelo_enviado (janela fechada: vai o ABRIDOR aprovado na
+#               Meta e o texto com os números fica guardado — sai quando o cliente responder, Crm::PendingContent)
+#               :modelo_pendente (janela fechada e o abridor ainda não foi aprovado) · :sem_dados · :sem_conversa
+# 24/11 (Guilherme): "não dá para mandar orçamento por mensagem modelo… elas são para pegar confirmação de sim e não, ou
+# para reabrir a conversa". Os modelos com os números (life_orcamento_2_dias_pagamento / 5_dias_prazo) não saem mais.
 class Crm::KitQuote::Followup
   STAMP = 'cevico_orcamento_followup'.freeze
+  OPENER = 'life_abrir_conversa'.freeze
+  OPENER_TEXT = "Oi, {{1}}! Tudo bem?\n\nTenho uma informação sobre a sua proposta de energia solar. Posso te mandar aqui?".freeze
   KINDS = {
     'pagamento' => {
       'rotulo' => 'forma de pagamento',
-      'modelo' => 'life_orcamento_2_dias_pagamento',
       'campos' => %w[financiamento financiamento_total cartao_6x preco],
       'texto' => "Oi, {nome}! Sobre o orçamento que eu te mandei, fiz umas contas da forma de pagamento.\n\n" \
                  "No financiamento, os juros pesam: em {financiamento}, o sistema sai por {financiamento_total} no total.\n\n" \
@@ -24,7 +28,6 @@ class Crm::KitQuote::Followup
     },
     'prazo' => {
       'rotulo' => 'prazo',
-      'modelo' => 'life_orcamento_5_dias_prazo',
       'campos' => %w[validade economia_mes],
       'texto' => "Oi, {nome}! O seu orçamento vale até {validade}.\n\nCada mês sem as placas são {economia_mes} que vão para a " \
                  'CPFL em vez de ficar com você. E os equipamentos acompanham o dólar, então não consigo garantir esse preço na ' \
@@ -53,7 +56,7 @@ class Crm::KitQuote::Followup
     {
       'tipo' => @kind_key, 'rotulo' => @kind['rotulo'], 'texto' => missing.empty? ? text : nil,
       'falta' => missing.map { |key| FIELD_NAMES[key] }.uniq,
-      'janela_aberta' => open_window?, 'modelo' => @kind['modelo'], 'modelo_aprovado' => template_approved?,
+      'janela_aberta' => open_window?, 'modelo' => OPENER, 'modelo_aprovado' => template_approved?,
       'tem_conversa' => @conversation.present?
     }
   end
@@ -93,7 +96,7 @@ class Crm::KitQuote::Followup
 
   def template_approved?
     Array(@conversation&.inbox&.channel.try(:message_templates)).any? do |t|
-      t['name'] == @kind['modelo'] && t['status'].to_s.casecmp('approved').zero?
+      t['name'] == OPENER && t['status'].to_s.casecmp('approved').zero?
     end
   end
 
@@ -103,14 +106,15 @@ class Crm::KitQuote::Followup
     :enviado
   end
 
-  # {{1}} = primeiro nome; {{2}}… = os campos na ordem do modelo
+  # janela fechada: o abridor ({{1}} = primeiro nome) e o texto com os números guardado para depois do "pode mandar"
   def send_template!
-    body = { '1' => first_name || 'tudo bem' }
-    @kind['campos'].each_with_index { |key, i| body[(i + 2).to_s] = values[key] }
-    params = { 'name' => @kind['modelo'], 'language' => 'pt_BR', 'processed_params' => { 'body' => body } }
-    source = Crm::TemplateSource.new(@conversation.account, @conversation.inbox, @sender, params, text, "orcamento-#{@kind_key}")
+    name = first_name || 'tudo bem'
+    params = { 'name' => OPENER, 'language' => 'pt_BR', 'processed_params' => { 'body' => { '1' => name } } }
+    source = Crm::TemplateSource.new(@conversation.account, @conversation.inbox, @sender, params, OPENER_TEXT.gsub('{{1}}', name),
+                                     "orcamento-#{@kind_key}")
     return :sem_conversa if Crm::SendTemplateService.new(source: source, contact: @quote.contact).perform.nil?
 
+    Crm::PendingContent.store!(@conversation, text: text, origin: "botão #{@kind['rotulo']}")
     :modelo_enviado
   end
 end

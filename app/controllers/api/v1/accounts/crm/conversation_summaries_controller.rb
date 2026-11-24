@@ -168,7 +168,7 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
     auto = Crm::ResponderAutoResumeJob.config(CrmSetting.new(ai_config: cfg))
     return nil if auto.nil?
 
-    Crm::ResponderAutoResumeJob.resume_at(@conversation, state, auto['minutes'])&.iso8601
+    Crm::ResponderAutoResumeJob.resume_at(@conversation, state, Crm::ResponderAutoResumeJob.minutes_for(@conversation, auto))&.iso8601
   rescue StandardError
     nil
   end

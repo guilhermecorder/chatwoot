@@ -24,8 +24,20 @@ class Crm::AgentAlert
   AGENT_NAMES = { 'atendente_agendamento' => 'Atendente de Agendamento', 'atendente_pos' => 'Atendente Pós-agendamento',
                   'atendente_pos_op' => 'Atendente de Pós-operatório', 'voice' => 'Agente de Ligação' }.freeze
 
+  # 🔕 24/11/2026 (LIFE, Guilherme: "pode desativar aquele que deixa uma notificação vermelha na tela… o Fernando não tem
+  # a disciplina para zerar aquilo e já acumulou demais… vamos deixar só o agente de oportunidade"): tipos de aviso
+  # desligados na conta (ai_config.radar_avisos_desligados, ex.: tarefa_no_prazo, atendimento_atencao) não entram no
+  # Radar nem no popup. A tarefa continua na lista de Tarefas; só o aviso some.
+  OFF_KEY = 'radar_avisos_desligados'.freeze
+
+  def self.off?(account, kind)
+    off = Array(CrmSetting.find_by(account_id: account.id)&.ai_config&.dig(OFF_KEY)).map(&:to_s)
+    off.include?(kind.to_s)
+  end
+
   def self.push(account:, kind:, task:, conversation:, agent_key:)
     raise ArgumentError, "kind inválido: #{kind}" unless KINDS.include?(kind.to_s)
+    return nil if off?(account, kind)
 
     new(account: account, kind: kind.to_s, task: task, conversation: conversation, agent_key: agent_key.to_s).push
   rescue StandardError => e
@@ -35,7 +47,9 @@ class Crm::AgentAlert
 
   # o aviso continua valendo? (24 h, e a consulta ainda existe nesta conta;
   # o de robô parado vale enquanto o robô continuar com problema)
-  def self.still_open?(account, alert)
+  def self.still_open?(account, alert) # rubocop:disable Metrics/CyclomaticComplexity
+    return false if off?(account, alert['kind'])
+
     created = Time.zone.parse(alert['created_at'].to_s)
     return false if created.nil? || created < TTL.ago
     return robot_still_open?(alert) if alert['kind'] == ROBOT_KIND

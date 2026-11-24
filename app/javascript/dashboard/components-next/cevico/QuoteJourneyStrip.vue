@@ -13,9 +13,15 @@
 // em duas linhas de 5 no computador.
 // Pouco texto, número grande, cartões retos. A régua está em
 // app/services/crm/quote_journey.rb.
+// 📈 24/11/2026 (pedido do Guilherme): cada cartão ganha um mini gráfico de
+// linha com o histórico do período (hoje e ontem: os 7 dias que terminam
+// nele; semana, mês, 90 dias, ano: o próprio período) e, no clique, a lista
+// de quem está naquela etapa, com atalho para a conversa.
 import { ref, computed, watch, onMounted } from 'vue';
 import CrmAPI from 'dashboard/api/crm';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
+import PatientListPopup from 'dashboard/components-next/cevico/PatientListPopup.vue';
+import { useAccount } from 'dashboard/composables/useAccount';
 
 const TXT = {
   title: 'Jornada da venda',
@@ -28,7 +34,14 @@ const TXT = {
   empty: 'Ninguém chegou neste período.',
   error: 'Não consegui carregar a jornada agora.',
   arrow: '→',
+  open: 'Ver quem está nesta etapa',
+  stopped: 'parou aqui',
+  loadingPeople: 'Carregando os contatos',
+  peopleError: 'Não consegui carregar os contatos agora.',
+  noun: 'contato',
 };
+
+const { accountId } = useAccount();
 
 // o período escolhido fica lembrado neste navegador (só comodidade)
 const PERIOD_KEY = 'cevico:jornada:periodo';
@@ -53,6 +66,54 @@ const jumps = computed(() =>
 );
 const sources = computed(() => journey.value?.sources || []);
 const leads = computed(() => steps.value[0]?.count || 0);
+
+// 📈 mini gráfico: pontos da linha e da área num quadro de 100 × 30
+const series = computed(() => journey.value?.series || null);
+const SPARK_W = 100;
+const SPARK_H = 30;
+const spark = key => {
+  const values = series.value?.values?.[key] || [];
+  if (values.length < 2) return null;
+  const max = Math.max(1, ...values);
+  const pts = values.map((v, i) => [
+    (i / (values.length - 1)) * SPARK_W,
+    SPARK_H - 2 - (v / max) * (SPARK_H - 6),
+  ]);
+  const line = pts.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const last = pts[pts.length - 1];
+  return {
+    line,
+    area: `0,${SPARK_H} ${line} ${SPARK_W},${SPARK_H}`,
+    last,
+    tip: values.map((v, i) => `${series.value.labels[i]}: ${v}`).join(' · '),
+  };
+};
+
+// 👥 lista de quem está na etapa (janela com atalho para a conversa)
+const popup = ref(null);
+const openStep = async step => {
+  popup.value = { title: step.label, subtitle: TXT.loadingPeople, people: [] };
+  try {
+    const { data } = await CrmAPI.getHome({
+      only: 'quote_journey_people',
+      step: step.key,
+      preset: periodo.value.preset,
+      from: periodo.value.from,
+      to: periodo.value.to,
+    });
+    if (popup.value?.title !== step.label) return;
+    const people = data.people || [];
+    const stopped = people.filter(p => p.parou).length;
+    popup.value = {
+      title: step.label,
+      subtitle: stopped ? `${stopped} ${TXT.stopped}` : '',
+      people,
+    };
+  } catch {
+    if (popup.value) popup.value.subtitle = TXT.peopleError;
+  }
+};
+const rightOf = person => (person.parou ? TXT.stopped : person.etapa);
 
 const pctText = value =>
   value === null || value === undefined ? '' : `${value}%`;
@@ -121,11 +182,40 @@ onMounted(load);
           <li
             v-for="(step, index) in steps"
             :key="step.key"
-            class="qj-step"
+            class="qj-step qj-click"
             :class="`qj-step-${index}`"
+            role="button"
+            tabindex="0"
+            :title="TXT.open"
+            @click="openStep(step)"
+            @keydown.enter="openStep(step)"
           >
             <span class="qj-label">{{ step.label }}</span>
-            <b class="qj-count tabular-nums">{{ step.count }}</b>
+            <div class="qj-top">
+              <b class="qj-count tabular-nums">{{ step.count }}</b>
+              <svg
+                v-if="spark(step.key)"
+                class="qj-spark"
+                :viewBox="`0 0 ${SPARK_W} ${SPARK_H}`"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <title>{{ spark(step.key).tip }}</title>
+                <polygon class="qj-spark-area" :points="spark(step.key).area" />
+                <polyline
+                  class="qj-spark-line"
+                  :points="spark(step.key).line"
+                  vector-effect="non-scaling-stroke"
+                />
+                <circle
+                  class="qj-spark-dot"
+                  :cx="spark(step.key).last[0]"
+                  :cy="spark(step.key).last[1]"
+                  r="2.2"
+                  vector-effect="non-scaling-stroke"
+                />
+              </svg>
+            </div>
             <span class="qj-bar">
               <span class="qj-bar-fill" :style="{ width: barWidth(step) }" />
             </span>
@@ -184,6 +274,19 @@ onMounted(load);
         </template>
       </template>
     </div>
+    <PatientListPopup
+      v-if="popup"
+      :title="popup.title"
+      :subtitle="popup.subtitle"
+      :people="popup.people"
+      :account-id="accountId"
+      :right="rightOf"
+      :noun="TXT.noun"
+      grad="linear-gradient(135deg, #c2410c, #fb923c)"
+      icon="i-lucide-route"
+      empty-text="Ninguém nesta etapa no período."
+      @close="popup = null"
+    />
   </div>
 </template>
 
@@ -444,6 +547,75 @@ onMounted(load);
   .qj-count {
     font-size: 26px;
   }
+}
+
+/* 📈 mini gráfico e clique (24/11) */
+.qj-click {
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.qj-click:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+}
+.qj-click:focus-visible {
+  outline: 2px solid var(--qj-accent);
+  outline-offset: 2px;
+}
+.qj-top {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.qj-spark {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  overflow: visible;
+}
+.qj-spark-line {
+  fill: none;
+  stroke: var(--qj-accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.qj-spark-area {
+  fill: var(--qj-accent);
+  opacity: 0.12;
+}
+.qj-spark-dot {
+  fill: var(--qj-accent);
+}
+.qj-step-0 .qj-spark-line {
+  stroke: #1e293b;
+}
+.qj-step-0 .qj-spark-area,
+.qj-step-0 .qj-spark-dot {
+  fill: #1e293b;
+}
+.qj-step-8 .qj-spark-line,
+.qj-step-9 .qj-spark-line {
+  stroke: #16a34a;
+}
+.qj-step-8 .qj-spark-area,
+.qj-step-9 .qj-spark-area,
+.qj-step-8 .qj-spark-dot,
+.qj-step-9 .qj-spark-dot {
+  fill: #16a34a;
+}
+:global(.dark .qj-step-0 .qj-spark-line) {
+  stroke: #e2e8f0;
+}
+:global(.dark .qj-step-0 .qj-spark-area),
+:global(.dark .qj-step-0 .qj-spark-dot) {
+  fill: #e2e8f0;
+}
+:global(.dark .qj-click:hover) {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
 
 /* tema escuro */

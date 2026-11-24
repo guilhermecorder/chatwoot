@@ -90,8 +90,8 @@ class Crm::KitQuoteWatchdogJob < ApplicationJob
     return nil if asked.nil? || asked > now - WAITING_HOURS.hours
     return [:refazer, conversation, stale_reason(quote)] if quote.created_at < now - REBUILD_AFTER
 
-    delivery = Crm::KitQuote::Delivery.new(quote)
-    return nil unless conversation.can_reply? || delivery.send(:pdf_template_approved?)
+    # 24/11: só com a janela aberta (o cliente escreveu) — orçamento não vai dentro de mensagem modelo
+    return nil unless conversation.can_reply?
 
     [:enviar_pdf, conversation, "orçamento ##{quote.id} preso no \"me avisa que eu te mando\" há mais de #{WAITING_HOURS} h"]
   end

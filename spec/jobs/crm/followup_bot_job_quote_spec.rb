@@ -191,4 +191,54 @@ RSpec.describe Crm::FollowupBotJob do
       expect(job.send(:render_message, eco['message'], conversation)).to eq('Economia de na sua conta de luz.')
     end
   end
+
+  # 📨 24/11 (Guilherme): "não dá para mandar orçamento por mensagem modelo" — o modelo só abre; o conteúdo vem depois
+  describe '24/11: abridor + conteúdo depois do "pode mandar"' do
+    let(:job) { described_class.new }
+    let(:proposal) { { 'economia' => { 'mensal' => 410, 'anual' => 4920 } } }
+    let(:step) do
+      { 'delay_value' => 7, 'delay_unit' => 'days', 'message' => 'Oi, [nome]! Hoje é o último dia. Posso te mandar?',
+        'depois_do_sim' => 'Com energia solar você economiza [economia_ano] em 1 ano.',
+        'template_params' => { 'name' => 'life_orcamento_7d_ultimo_dia_v2', 'language' => 'pt_BR',
+                               'processed_params' => { 'body' => { '1' => '[nome]' } } } }
+    end
+
+    before { Crm::Quote.create!(account: account, contact: contact, price: 18_900, kind: 'micro', payload: { 'proposta' => proposal }) }
+
+    it 'janela fechada: sai só o abridor (modelo) e o conteúdo fica guardado', :aggregate_failures do
+      allow(job).to receive(:can_reply?).and_return(false)
+      job.send(:send_nudge, bot, conversation, { step: step, index: 0 }, 'Oi, Ivan! Hoje é o último dia. Posso te mandar?')
+
+      sent = conversation.messages.outgoing.last
+      expect(sent.content).to eq('Oi, Ivan! Hoje é o último dia. Posso te mandar?')
+      expect(sent.additional_attributes['template_params']).to include('name' => 'life_orcamento_7d_ultimo_dia_v2')
+      expect(Crm::PendingContent.pending(conversation.reload)['texto']).to eq('Com energia solar você economiza R$ 4.920 em 1 ano.')
+    end
+
+    it 'janela aberta: o conteúdo vai direto, como mensagem normal, sem o abridor', :aggregate_failures do
+      allow(job).to receive(:can_reply?).and_return(true)
+      expect do
+        job.send(:send_nudge, bot, conversation, { step: step, index: 0 }, 'Oi, Ivan! Hoje é o último dia. Posso te mandar?')
+      end.to change { conversation.messages.outgoing.count }.by(1)
+
+      sent = conversation.messages.outgoing.last
+      expect(sent.content).to eq('Com energia solar você economiza R$ 4.920 em 1 ano.')
+      expect(sent.additional_attributes['template_params']).to be_nil
+      expect(Crm::PendingContent.pending(conversation.reload)).to be_nil
+    end
+
+    it 'etapa de texto com a imagem do resumo: vai anexada (o resumo de 3 h, dentro da janela)' do
+      quote = Crm::Quote.where(contact: contact).last
+      quote.files.attach(io: StringIO.new('png'), filename: 'resumo.png', content_type: 'image/png')
+      texto = { 'delay_value' => 3, 'delay_unit' => 'hours', 'message' => 'Oi, [nome]! Um resumo do seu orçamento.', 'imagem' => 'resumo' }
+      job.send(:send_nudge, bot, conversation, { step: texto, index: 0 }, 'Oi, Ivan! Um resumo do seu orçamento.')
+
+      expect(conversation.messages.outgoing.last.attachments.first.file.filename.to_s).to eq('resumo.png')
+    end
+
+    it 'o número que falta no conteúdo também pula a etapa' do
+      falta = step.merge('depois_do_sim' => 'No cartão: 6x de [cartao_6x]. Em [financiamento].')
+      expect(job.send(:missing_quote_numbers, falta, conversation)).to include('financiamento')
+    end
+  end
 end

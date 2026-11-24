@@ -102,7 +102,10 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     # 📊 item 256: nota da pesquisa de satisfação lida ANTES do atendente (ele já
     # recebe a nota gravada no contexto quando responde)
     Crm::NpsSurvey.handle_reply(message, message.conversation&.contact) if message.message_type == 'incoming'
-    handle_responder_agents(message) # 🗣️ respondedores do WhatsApp por coluna (rodada 188)
+    # 📨 24/11 (LIFE): o cliente respondeu ao abridor ("Posso te mandar?") → o conteúdo guardado sai agora; se foi só o
+    # botão ("Pode mandar"), o atendente IA não responde junto
+    pending = Crm::PendingContent.handle_reply(message) if message.message_type == 'incoming'
+    handle_responder_agents(message, skip_agent: pending == :curto) # 🗣️ respondedores do WhatsApp por coluna (rodada 188)
 
     contact = message.conversation&.contact
     return if contact.blank?
@@ -452,7 +455,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   RESPONDER_KEYS = %w[atendente_agendamento atendente_pos atendente_pos_op].freeze
   RESPONDER_STATE_KEY = Crm::ResponderAgentJob::STATE_KEY
 
-  def handle_responder_agents(message)
+  def handle_responder_agents(message, skip_agent: false)
     conversation = message.conversation
     return if conversation.blank?
 
@@ -467,6 +470,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       # embaixo do anexo; o Atendente lê como se fosse escrito) — em toda caixa
       # atendida, mesmo que a coluna não tenha dono ou o agente esteja pausado
       Crm::MediaReadingJob.perform_later(message.id) if Crm::MediaReadingService.message_has_media?(message)
+      return if skip_agent
 
       key = responder_owner_for(conversation, agents)
       # 🕶️ 12/11 (LIFE): quem só OBSERVA a coluna (sombra_stage_ids) escreve a nota de sombra ao lado do dono
@@ -610,7 +614,7 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   # campanha, robô de follow-up, agente de IA) não é "atendente respondeu":
   # não dispara automação de coluna por mensagem ENVIADA — a menos que a
   # automação peça de propósito (action_config.include_automated = true).
-  AUTOMATED_MARKS = %w[cevico_auto cevico_journey cevico_followup_bot_id cevico_ia_agent].freeze
+  AUTOMATED_MARKS = %w[cevico_auto cevico_journey cevico_followup_bot_id cevico_ia_agent cevico_conteudo_guardado].freeze
   def automated_outgoing?(automation, message)
     return false unless message.message_type == 'outgoing'
     return false if automation.action_config&.dig('include_automated') == true

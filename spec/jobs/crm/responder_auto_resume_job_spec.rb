@@ -94,4 +94,43 @@ RSpec.describe Crm::ResponderAutoResumeJob do
 
     expect(described_class.resume_at(conversation, state, 3)).to be_within(5.seconds).of(2.minutes.from_now)
   end
+
+  # ⏱️ 24/11 (Fernando): a partir de "Orçamento Enviado" a IA espera 10 min; antes, os 3 de sempre
+  context 'with minutes_pos (10 min a partir do orçamento enviado)' do
+    let(:auto) { { 'enabled' => true, 'minutes' => 3, 'minutes_pos' => 10 } }
+    let(:pipeline) { Crm::Pipeline.create!(account: account, name: 'Funil LIFE') }
+    let!(:stages) do
+      ['Orçamento a fazer', 'Orçamento Enviado', 'Negociação'].each_with_index.to_h do |name, i|
+        [name, Crm::Stage.create!(pipeline: pipeline, name: name, position: i)]
+      end
+    end
+
+    def on_stage(conversation, name)
+      Crm::Contact.create!(contact: conversation.contact, pipeline: pipeline, stage: stages.fetch(name))
+      conversation
+    end
+
+    it 'card em "Orçamento Enviado" ou depois: 5 min sem a equipe ainda não religa; 11 min religa', :aggregate_failures do
+      enviado = on_stage(paused_talk(reason: 'botao', paused_ago: 5).first, 'Orçamento Enviado')
+      negociacao = on_stage(paused_talk(reason: 'humano_assumiu', paused_ago: 11, human_ago: 11).first, 'Negociação')
+
+      described_class.perform_now
+      expect(paused?(enviado)).to be(true)
+      expect(paused?(negociacao)).to be(false)
+      expect(negociacao.messages.where(private: true).last.content).to include('10 min sem mensagem da equipe')
+    end
+
+    it 'card antes do orçamento enviado: continuam os 3 min' do
+      antes = on_stage(paused_talk(reason: 'botao', paused_ago: 5).first, 'Orçamento a fazer')
+
+      described_class.perform_now
+      expect(paused?(antes)).to be(false)
+    end
+
+    it 'minutes_for diz os minutos de cada conversa (a chavinha mostra a hora certa)', :aggregate_failures do
+      cfg = described_class.config(settings)
+      expect(described_class.minutes_for(on_stage(paused_talk(reason: 'botao', paused_ago: 1).first, 'Negociação'), cfg)).to eq(10)
+      expect(described_class.minutes_for(paused_talk(reason: 'botao', paused_ago: 1).first, cfg)).to eq(3)
+    end
+  end
 end

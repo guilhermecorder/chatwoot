@@ -1131,7 +1131,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     end
   end
 
-  def send_nudge(bot, conversation, chosen, content)
+  def send_nudge(bot, conversation, chosen, content) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
     step = chosen[:step]
     # cada cutucada carrega o robô E o nº da etapa (linha do tempo da previsão)
     attrs = { cevico_followup_bot_id: bot.id, cevico_followup_step: chosen[:index] }
@@ -1139,11 +1139,28 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     stage_id = conversation.contact_id && Crm::Contact.where(contact_id: conversation.contact_id).order(updated_at: :desc).pick(:stage_id)
     attrs[:cevico_followup_stage_id] = stage_id if stage_id
     attrs[:cevico_followup_ai] = true if Crm::FollowupBot.ai_step?(step) # item 315: escrita pela IA
-    # etapa de MENSAGEM MODELO: envia o template oficial (funciona fora da
-    # janela de 24h do WhatsApp — ideal para cadências em dias)
-    attrs[:template_params] = render_template_params(step['template_params'], conversation) if step['template_params'].present?
+    # 📨 24/11 (LIFE, Guilherme): mensagem modelo só ABRE a conversa ("Posso te mandar?"); o conteúdo ('depois_do_sim':
+    # números, resumo) vai direto com a janela aberta, ou fica guardado e sai quando o cliente responder
+    after_yes = step['depois_do_sim'].present? ? render_message(step['depois_do_sim'], conversation) : nil
+    image = step['imagem'] == 'resumo' ? Crm::KitQuote::Numbers.for(conversation.contact)&.resumo_blob : nil
+    if step['template_params'].present? && after_yes.present? && can_reply?(conversation)
+      return create_nudge!(bot, conversation, after_yes, attrs, image)
+    end
 
-    conversation.messages.create!(
+    if step['template_params'].present?
+      # etapa de MENSAGEM MODELO: envia o template oficial (funciona fora da
+      # janela de 24h do WhatsApp — ideal para cadências em dias)
+      attrs[:template_params] = render_template_params(step['template_params'], conversation)
+      create_nudge!(bot, conversation, content, attrs, nil)
+      Crm::PendingContent.store!(conversation, text: after_yes, image_blob_id: image&.id, origin: "robo #{bot.id} etapa #{chosen[:index]}")
+      return
+    end
+
+    create_nudge!(bot, conversation, content, attrs, image)
+  end
+
+  def create_nudge!(bot, conversation, content, attrs, image)
+    message = conversation.messages.new(
       account_id: bot.account_id,
       inbox_id: conversation.inbox_id, # robô por coluna envia na caixa da própria conversa
       message_type: :outgoing,
@@ -1151,6 +1168,9 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       sender: bot.sender,
       additional_attributes: attrs
     )
+    message.attachments.new(account_id: bot.account_id, file_type: :image, file: image) if image
+    message.save!
+    message
   end
 
   # [nome] → primeiro nome do paciente, LIMPO: sem emojis/números/símbolos
@@ -1182,7 +1202,8 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
   # etapa que usa um número da proposta que este cliente não tem (sem orçamento, sem financiamento…) → não sai
   def missing_quote_numbers(step, conversation)
-    keys = [step['message'], step['template_params'].to_json].join(' ').scan(QUOTE_FIELD).flatten.map(&:downcase).uniq
+    keys = [step['message'], step['depois_do_sim'], step['template_params'].to_json].join(' ').scan(QUOTE_FIELD)
+                                                                                    .flatten.map(&:downcase).uniq
     keys -= QUOTE_FALLBACK.keys
     return [] if keys.empty?
 

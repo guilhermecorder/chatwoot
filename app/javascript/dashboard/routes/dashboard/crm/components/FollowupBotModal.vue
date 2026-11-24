@@ -75,6 +75,9 @@ const normalizeStep = s => ({
   mesmo_adiada: s.mesmo_adiada === true,
   // 24/11 (LIFE): minutos de conversa parada antes de sair (sem campo na tela: só preservado ao salvar)
   silencio_min: Number(s.silencio_min) || 0,
+  // 24/11 (LIFE): conteúdo que sai depois do "pode mandar" e a imagem do resumo (sem campo na tela: só preservados)
+  depois_do_sim: s.depois_do_sim ?? '',
+  imagem: s.imagem ?? '',
   kind: s.kind === 'ai' ? 'ai' : s.template_params ? 'template' : 'text',
   message: s.message ?? '',
   template_params: s.template_params ?? null,
@@ -232,6 +235,8 @@ const save = async () => {
         // 📨 24/11 (LIFE): sai mesmo depois do "vou analisar" (resumo do orçamento)
         mesmo_adiada: s.mesmo_adiada === true,
         silencio_min: Number(s.silencio_min) || 0,
+        depois_do_sim: s.depois_do_sim || '',
+        imagem: s.imagem || '',
         kind: s.kind,
         message: s.kind === 'template' ? s.message : (s.message || '').trim(),
         template_params: s.kind === 'template' ? s.template_params : null,

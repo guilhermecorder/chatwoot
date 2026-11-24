@@ -47,6 +47,11 @@ class Crm::KitQuote::Numbers
     (@quote.created_at.in_time_zone(TIME_ZONE) + (days.positive? ? days : 7).days).to_date
   end
 
+  # a imagem do resumo (para ir anexada numa mensagem normal, com a janela aberta)
+  def resumo_blob
+    resumo_image&.blob
+  end
+
   private
 
   def brl(value) = self.class.brl(value)
@@ -91,8 +96,12 @@ class Crm::KitQuote::Numbers
   def field_validade = valid_until.strftime('%d/%m')
 
   def field_resumo
-    image = @quote.files.find { |f| f.content_type.to_s.start_with?('image/') }
+    image = resumo_image
     host = ENV.fetch('FRONTEND_URL', nil)
     image && host ? Rails.application.routes.url_helpers.rails_blob_url(image, host: host) : nil
+  end
+
+  def resumo_image
+    @quote.files.find { |f| f.content_type.to_s.start_with?('image/') }
   end
 end

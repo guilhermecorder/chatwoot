@@ -19,6 +19,8 @@ const props = defineProps({
   accountId: { type: [Number, String], required: true },
   // colunas extras à direita (função por pessoa → texto)
   right: { type: Function, default: null },
+  // 24/11 (LIFE): palavra da contagem ("contato" na Jornada da venda)
+  noun: { type: String, default: 'paciente' },
 });
 const emit = defineEmits(['close']);
 // 🏠 11/11 (LIFE): nome do ambiente da pessoa pelo vocabulário da empresa
@@ -112,7 +114,7 @@ const copyList = async () => {
             </button>
           </div>
           <p class="text-xs text-white/85 mt-1">
-            {{ people.length }} paciente{{ people.length === 1 ? '' : 's' }}
+            {{ people.length }} {{ noun }}{{ people.length === 1 ? '' : 's' }}
             <template v-if="subtitle"> · {{ subtitle }}</template>
           </p>
           <div class="flex items-center gap-2 mt-3">

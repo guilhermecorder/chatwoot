@@ -140,4 +140,46 @@ RSpec.describe Crm::QuoteJourney do
     expect(journey(days: 90)[:steps].first[:count]).to eq(3)
     expect(described_class.new(account, since: now - 30.days, until_at: now - 10.days).call[:steps].first[:count]).to eq(1)
   end
+
+  describe '24/11: mini gráfico de cada etapa e a lista de quem está nela' do
+    it 'até 31 dias, um ponto por dia, contado pelo dia de chegada', :aggregate_failures do
+      lead('Chegou e parou', days_ago: 2)
+      card(lead('Recebeu o orçamento', days_ago: 2), 'Novos Contatos', 'Orçamento Enviado')
+      card(lead('Mandou a conta', days_ago: 0), 'Novos Contatos', 'Orçamento a fazer')
+
+      sp = now.in_time_zone('America/Sao_Paulo') # o painel manda o período no fuso de São Paulo
+      series = described_class.new(account, since: (sp - 6.days).beginning_of_day, until_at: sp).call[:series]
+      expect(series[:granularity]).to eq('day')
+      expect(series[:labels].size).to eq(7)
+      expect(series[:values]['leads']).to eq([0, 0, 0, 0, 2, 0, 1])
+      expect(series[:values]['enviado']).to eq([0, 0, 0, 0, 1, 0, 0])
+      expect(series[:values]['conta']).to eq([0, 0, 0, 0, 1, 0, 1])
+    end
+
+    it 'hoje: o gráfico mostra os 7 dias que terminam hoje' do
+      lead('Ontem', days_ago: 1)
+      journey = described_class.new(account, since: now.beginning_of_day, until_at: now)
+      series = journey.call(series_since: (now - 6.days).beginning_of_day, series_until: now)[:series]
+      expect(series[:values]['leads'].sum).to eq(1)
+    end
+
+    it 'acima de 120 dias, um ponto por mês' do
+      expect(described_class.new(account, since: now.beginning_of_year, until_at: now).call[:series][:granularity]).to eq('month')
+    end
+
+    it 'lista quem alcançou a etapa, com a conversa e se parou ali', :aggregate_failures do
+      parou = lead('Parou no orçamento', origin: 'anuncio')
+      card(parou, 'Novos Contatos', 'Orçamento Enviado')
+      foi = card(lead('Foi além'), 'Novos Contatos', 'Orçamento Enviado', 'Negociação').contact
+      lead('Só chegou')
+
+      people = described_class.new(account, since: now - 30.days, until_at: now).people('enviado')
+      expect(people.pluck(:name)).to contain_exactly('Parou no orçamento', 'Foi além')
+      row = people.find { |p| p[:name] == 'Parou no orçamento' }
+      expect(row).to include(parou: true, origin: 'Anúncio', meta: 'Orçamento Enviado',
+                             conversation_id: parou.conversations.first.display_id)
+      expect(people.find { |p| p[:contact_id] == foi.id }).to include(parou: false, etapa: 'Proposta de fechamento')
+      expect(described_class.new(account, since: now - 30.days, until_at: now).people('nao_existe')).to eq([])
+    end
+  end
 end

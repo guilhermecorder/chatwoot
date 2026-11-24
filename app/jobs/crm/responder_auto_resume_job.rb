@@ -10,6 +10,11 @@
 # NÃO religa: pausa por URGÊNCIA clínica (#443) nem por teto diário de mensagens (proteção). A conta de tempo
 # parte da ÚLTIMA mensagem humana (ou da pausa, o que for mais recente): enquanto a pessoa da equipe conversa,
 # cada mensagem dela empurra o relógio.
+#
+# ⏱️ 24/11 (LIFE, pedido do Fernando pelo Guilherme): "quando ele estiver conversando com as pessoas, ela não vai
+# conflitar com o que ele está falando… quando ele desativar, ficar pelo menos 10 minutos desligada… a partir de
+# orçamento enviado". auto_resume.minutes_pos = minutos a partir da coluna "Orçamento Enviado" (e todas as que vêm
+# depois: vistoria, negociação, contrato…); antes dela continua auto_resume.minutes (3), para o orçamento não esperar.
 class Crm::ResponderAutoResumeJob < ApplicationJob
   queue_as :high
 
@@ -24,7 +29,28 @@ class Crm::ResponderAutoResumeJob < ApplicationJob
     return nil unless raw.is_a?(Hash) && raw['enabled'] == true
 
     minutes = raw['minutes'].to_i
-    { 'enabled' => true, 'minutes' => MINUTES_RANGE.cover?(minutes) ? minutes : DEFAULT_MINUTES }
+    minutes = DEFAULT_MINUTES unless MINUTES_RANGE.cover?(minutes)
+    pos = raw['minutes_pos'].to_i
+    { 'enabled' => true, 'minutes' => minutes, 'minutes_pos' => MINUTES_RANGE.cover?(pos) ? pos : nil }.compact
+  end
+
+  # os minutos desta conversa: depois do orçamento enviado, os de 'minutes_pos' (quando configurados)
+  def self.minutes_for(conversation, cfg)
+    return cfg['minutes'] if cfg['minutes_pos'].nil? || !after_quote_sent?(conversation)
+
+    cfg['minutes_pos']
+  end
+
+  QUOTE_SENT_STAGE = /or[çc]amento enviado/i
+
+  # o card está na coluna "Orçamento Enviado" ou numa coluna depois dela, no mesmo funil
+  def self.after_quote_sent?(conversation)
+    contact_id = conversation.contact_id
+    stage = contact_id && Crm::Contact.where(contact_id: contact_id).order(:updated_at).last&.stage
+    return false if stage.nil?
+
+    mark = Crm::Stage.where(pipeline_id: stage.pipeline_id).order(:position).detect { |s| s.name.to_s.match?(QUOTE_SENT_STAGE) }
+    mark.present? && stage.position.to_i >= mark.position.to_i
   end
 
   # pausa que o relógio religa?
@@ -71,7 +97,7 @@ class Crm::ResponderAutoResumeJob < ApplicationJob
     settings.account.conversations.open.where(inbox_id: inbox_ids)
             .where("conversations.additional_attributes -> ? ->> 'paused' = 'true'", Crm::ResponderAgentJob::STATE_KEY)
             .order(last_activity_at: :desc).limit(LIMIT).each do |conversation|
-      resume_one(conversation, agents, cfg['minutes'], now)
+      resume_one(conversation, agents, self.class.minutes_for(conversation, cfg), now)
     end
   end
 
