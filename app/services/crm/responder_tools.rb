@@ -607,9 +607,20 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
                                      motivo: motivo, detalhes: args['detalhes'], urgencia: urgencia, due_at: due_at)
     task = outcome[:task]
     Crm::JourneyLabel.bill_received!(@contact) if Crm::JourneyLabel.quote_task?(motivo)
+    mark_not_now!(motivo)
     verb = outcome[:created] ? 'abriu' : 'complementou'
     log_acao('abrir_tarefa', true, "#{verb} tarefa ##{task.id} (#{urgencia})#{quando_txt} p/ #{task.assignee&.name || 'equipe'}: #{motivo}")
     { ok: true, id: task.id, criada: outcome[:created], responsavel: task.assignee&.name, urgencia: urgencia, prazo: task.due_at&.iso8601 }
+  end
+
+  # 📨 24/11 (LIFE): "Orçamento: agora não" marca o contato — ele sai da sequência da validade da proposta (1, 3, 6 e
+  # 7 dias) e fica só no acompanhamento de médio e longo prazo. Quem disse "vou analisar" não leva a etiqueta.
+  NOT_NOW_LABEL = 'orcamento-agora-nao'.freeze
+
+  def mark_not_now!(motivo)
+    @contact&.add_labels([NOT_NOW_LABEL]) if motivo.match?(/agora n[aã]o/i)
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderTools] etiqueta agora-não: #{e.message}"
   end
 
   def fake_motivo?(motivo, urgencia)

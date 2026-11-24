@@ -10,8 +10,13 @@
 #   financiamento "60x de R$ 520"      (o MAIOR prazo da proposta)  financiamento_total "R$ 31.200" (parcelas × valor)
 #   validade      "21/11"              (dia em que a proposta deixa de valer: criação + validade_dias, padrão 7)
 #   resumo        endereço público da imagem do resumo
+#   economia_10   "R$ 66.500"          (economia em 10 anos, da proposta)
+#   investido_10  "R$ 94.300"          (24/11, Guilherme: "se esse dinheiro fosse investido a 1% ao mês, em 10 anos você já tem
+#                                       tanto") — a economia de todo mês aplicada a 1% ao mês por 120 meses
 class Crm::KitQuote::Numbers
-  KEYS = %w[economia economia_ano economia_mes economia_25 preco cartao_6x financiamento financiamento_total validade resumo].freeze
+  KEYS = %w[economia economia_ano economia_mes economia_10 economia_25 investido_10 preco cartao_6x financiamento financiamento_total
+            validade resumo].freeze
+  INVEST_RATE = 0.01 # ao mês
   TIME_ZONE = 'America/Sao_Paulo'.freeze
 
   def self.for(contact)
@@ -62,6 +67,14 @@ class Crm::KitQuote::Numbers
   def field_economia_ano = brl(economy('anual'))
   def field_economia_mes = brl(economy('mensal'))
   def field_economia_25 = brl(economy('em_25_anos'))
+  def field_economia_10 = brl(economy('em_10_anos'))
+
+  # valor futuro de uma aplicação mensal: P × ((1 + i)^n − 1) / i
+  def field_investido_10
+    monthly = economy('mensal').to_f
+    monthly.positive? ? brl(monthly * (((1 + INVEST_RATE)**120) - 1) / INVEST_RATE) : nil
+  end
+
   def field_preco = brl(price)
   def field_cartao_6x = price.positive? ? brl(price / 6) : nil
 

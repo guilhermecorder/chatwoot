@@ -26,6 +26,13 @@ RSpec.describe Crm::KitQuote::Numbers do
     expect(numbers[:economia]).to eq('R$ 4.560 por ano')
   end
 
+  it '24/11: economia em 10 anos e a economia investida a 1% ao mês por 10 anos', :aggregate_failures do
+    proposal['economia']['em_10_anos'] = 66_500
+    numbers = described_class.new(quote)
+    expect(numbers[:economia_10]).to eq('R$ 66.500')
+    expect(numbers[:investido_10]).to eq('R$ 87.415') # 380 × ((1,01^120 − 1) / 0,01)
+  end
+
   it 'a validade editada no Gerador vale' do
     proposal['proposta']['validade_dias'] = 3
     expect(described_class.new(quote)[:validade]).to eq('17/11')

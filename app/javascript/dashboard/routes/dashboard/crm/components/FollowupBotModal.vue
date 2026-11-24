@@ -73,6 +73,8 @@ const normalizeStep = s => ({
   delay_from: s.delay_from ?? 'silence',
   stop_on_reply: s.stop_on_reply === true,
   mesmo_adiada: s.mesmo_adiada === true,
+  // 24/11 (LIFE): minutos de conversa parada antes de sair (sem campo na tela: só preservado ao salvar)
+  silencio_min: Number(s.silencio_min) || 0,
   kind: s.kind === 'ai' ? 'ai' : s.template_params ? 'template' : 'text',
   message: s.message ?? '',
   template_params: s.template_params ?? null,
@@ -229,6 +231,7 @@ const save = async () => {
           s.delay_from === 'stage_entry' && s.stop_on_reply === true,
         // 📨 24/11 (LIFE): sai mesmo depois do "vou analisar" (resumo do orçamento)
         mesmo_adiada: s.mesmo_adiada === true,
+        silencio_min: Number(s.silencio_min) || 0,
         kind: s.kind,
         message: s.kind === 'template' ? s.message : (s.message || '').trim(),
         template_params: s.kind === 'template' ? s.template_params : null,

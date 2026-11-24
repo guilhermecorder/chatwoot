@@ -705,4 +705,14 @@ RSpec.describe Crm::ResponderTools do
       end
     end
   end
+
+  describe '24/11: tarefa "Orçamento: agora não" marca o contato' do
+    it 'põe a etiqueta orcamento-agora-nao; "vou analisar" não', :aggregate_failures do
+      t = tools(live: true, agent_key: 'atendente_pos')
+      t.call('abrir_tarefa', { 'motivo' => 'Retorno: saber o que achou do orçamento', 'urgencia' => 'normal' })
+      expect(contact.reload.label_list).not_to include('orcamento-agora-nao')
+      t.call('abrir_tarefa', { 'motivo' => 'Orçamento: agora não · motivo: reforma', 'urgencia' => 'normal' })
+      expect(contact.reload.label_list).to include('orcamento-agora-nao')
+    end
+  end
 end

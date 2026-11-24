@@ -501,6 +501,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     plan.merge!(anchor: anchor, state: state, pending: pending)
 
     due, waiting = pending.partition { |d| d[:overdue] >= 0 }
+    # 📨 24/11 (LIFE): modelo que a Meta ainda não aprovou não sai — voltaria "falhou" e a conversa travaria
+    # ('entrega_falhou'). A etapa fica esperando a aprovação.
+    unapproved, due = due.partition { |d| template_unapproved?(conversation, d[:step]) }
+    waiting += unapproved
     plan[:wait] = waiting.min_by { |d| d[:due_at] }
 
     # Regras de etiqueta POR ETAPA (item 127): etapa vencida cuja etiqueta
@@ -616,6 +620,20 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     { clinic_id: clinic_id, atendente_encerrou: encerrou, leitura_pendente: cfg['leitura'] && cached.nil?,
       cold: cfg['lead_frio'] && cold_lead?(conversation) }
+  end
+
+  def template_unapproved?(conversation, step)
+    name = step.dig('template_params', 'name').to_s
+    return false if name.blank?
+
+    # só segura o modelo que está na lista da caixa com outro status (PENDING, REJECTED…); fora da lista segue como antes
+    found = Array(conversation.inbox&.channel.try(:message_templates)).select { |t| t['name'] == name }
+    found.any? && found.none? { |t| t['status'].to_s.casecmp('approved').zero? }
+  end
+
+  # última mensagem da conversa (cliente, equipe ou IA), para a etapa 'silencio_min'
+  def quiet_since(conversation)
+    conversation.messages.where(message_type: %i[incoming outgoing], private: false).maximum(:created_at) || Time.zone.at(0)
   end
 
   # 📨 24/11: leitura "adiada/encerrada" (ou despedida do Atendente) não segura as etapas marcadas 'mesmo_adiada'
@@ -793,6 +811,8 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       next if from_stage && step['stop_on_reply'] && replied_since?(conversation, base_time)
 
       due_at = base_time + delays[index].hours
+      # 📨 24/11 (LIFE): 'silencio_min' = só sai com a conversa parada há esse tanto (não interrompe quem está conversando)
+      due_at = [due_at, quiet_since(conversation) + step['silencio_min'].to_i.minutes].max if step['silencio_min'].to_i.positive?
       spacing = false
       if index.positive? && (last_at = own_last_nudge_at(bot, conversation))
         spaced = last_at + [delays[index] - delays[index - 1], 0].max.hours
@@ -1170,18 +1190,29 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     keys.reject { |key| numbers && numbers[key].present? }
   end
 
+  # 24/11 (LIFE, nomes do WhatsApp que viravam "Oi, Na!", "Oi, Tv!", "Oi, Yhwh!"): nome de empresa ou de usuário
+  # (com número), palavra de 1–2 letras e sigla sem vogal não são nome — melhor "Oi, tudo bem!" do que errar o nome.
+  NOT_A_NAME = /consultoria|constru|solu[cç][oõ]es|ltda|eireli|com[eé]rcio|servi[cç]os|empresa|loja|cidade|\btv\b|neg[oó]cios/i
+
   def sanitized_first_name(contact)
     raw = contact&.name.to_s
-    cleaned = raw.gsub(/[^\p{L}\p{M}\s'-]/, ' ').squish # só letras (emoji/nº fora)
-    first = cleaned.split.first.to_s
-    return '' if first.length < 2 # sobra de símbolo/letra solta não é nome
+    return '' if raw.match?(NOT_A_NAME)
+
+    token = raw.split(/[\s,;.!?-]+/).find { |t| t.match?(/\p{L}/) }.to_s
+    return '' if token.match?(/\d/) # "jcgoncalves2017" é usuário, não nome
+
+    first = token.gsub(/[^\p{L}\p{M}']/, '')
+    return '' if first.length < 3 || !first.match?(/[aeiouáéíóúâêôãõà]/i)
 
     first.capitalize
   end
 
-  # substitui [nome] também nos parâmetros preenchidos do modelo
+  # substitui [nome] também nos parâmetros preenchidos do modelo. Sem nome, o modelo da Meta diz "Oi, {{1}}!" →
+  # "Oi, tudo bem!" (e não "Oi, oi!")
   def render_template_params(params, conversation)
-    JSON.parse(render_message(params.to_json, conversation))
+    text = params.to_json
+    text = text.gsub(/\[nome\]/i, 'tudo bem') if sanitized_first_name(conversation.contact).blank?
+    JSON.parse(render_message(text, conversation))
   rescue JSON::ParserError
     params
   end

@@ -111,6 +111,55 @@ RSpec.describe Crm::FollowupBotJob do
     end
   end
 
+  describe '24/11: nome do WhatsApp que não é nome' do
+    let(:job) { described_class.new }
+
+    it 'empresa, usuário com número, 1–2 letras e sigla sem vogal viram "tudo bem" no modelo', :aggregate_failures do
+      { 'Na luta, sempre!!!' => '', 'Tv Cidade' => '', 'ANB Consultoria' => '', 'jcgoncalves2017' => '', 'YHWH' => '',
+        '🐉' => '', 'ROBERTO CARLOS DA COSTA' => 'Roberto', 'lucilei' => 'Lucilei', 'Liu' => 'Liu',
+        'Ednéia Camargo' => 'Ednéia' }.each do |raw, esperado|
+        expect(job.send(:sanitized_first_name, build(:contact, name: raw))).to eq(esperado), raw
+      end
+      contact.update!(name: 'Tv Cidade')
+      params = { 'name' => 'x', 'processed_params' => { 'body' => { '1' => '[nome]' } } }
+      expect(job.send(:render_template_params, params, conversation).dig('processed_params', 'body', '1')).to eq('tudo bem')
+    end
+  end
+
+  describe '24/11: modelo que a Meta ainda não aprovou' do
+    it 'a etapa espera (não sai como "falhou")', :aggregate_failures do
+      job = described_class.new
+      channel = create(:channel_whatsapp, account: account, sync_templates: false, validate_provider_config: false)
+      wa_conversation = create(:conversation, account: account, inbox: create(:inbox, account: account, channel: channel), contact: contact)
+      step = { 'template_params' => { 'name' => 'life_orcamento_resumo_3h' } }
+      channel.update_columns(message_templates: [{ 'name' => 'life_orcamento_resumo_3h', 'status' => 'PENDING' }]) # rubocop:disable Rails/SkipsModelValidations
+      expect(job.send(:template_unapproved?, wa_conversation.reload, step)).to be(true)
+      channel.update_columns(message_templates: [{ 'name' => 'life_orcamento_resumo_3h', 'status' => 'APPROVED' }]) # rubocop:disable Rails/SkipsModelValidations
+      expect(job.send(:template_unapproved?, wa_conversation.reload, step)).to be(false)
+      expect(job.send(:template_unapproved?, wa_conversation, { 'message' => 'texto' })).to be(false)
+    end
+  end
+
+  describe '24/11: etapa que espera a conversa parar (silencio_min)' do
+    let(:bot) do
+      steps = [{ 'delay_value' => 3, 'delay_unit' => 'hours', 'delay_from' => 'stage_entry', 'silencio_min' => 60,
+                 'message' => 'Resumo' }]
+      Crm::FollowupBot.create!(account: account, name: 'LIFE · Orçamento sem resposta', sender: admin, steps: steps,
+                               stage_id: enviado.id, stage_ids: [enviado.id], required_labels: ['orcamento-enviado'])
+    end
+
+    it 'conversa acontecendo às 3 h: espera 60 min depois da última mensagem' do
+      contact.add_labels(['orcamento-enviado'])
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, sender: contact,
+                       content: 'Qual a garantia?', created_at: sent_at + 2.hours + 50.minutes)
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, sender: admin,
+                       content: '25 anos nas placas', created_at: sent_at + 2.hours + 55.minutes)
+      travel_to sent_at + 3.hours + 5.minutes
+      due = plan[:pending].first[:due_at]
+      expect(due).to be_within(2.minutes).of(sent_at + 3.hours + 55.minutes)
+    end
+  end
+
   describe '16/11: números da proposta na mensagem' do
     let(:proposal) do
       { 'economia' => { 'mensal' => 380 },
