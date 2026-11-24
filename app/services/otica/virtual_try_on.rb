@@ -54,6 +54,10 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
                'e conduza para MARCAR o exame (ofereça 2 horários). Não precisa acertar a armação perfeita agora: ' \
                'o importante é entender o estilo dela.'.freeze
   LOOKBACK_MESSAGES = 30
+  # 🏆 24/11 (Guilherme: "pegar os modelos mais vendidos… não acessar mais 100% do banco")
+  VITRINE_TEXTO = 'As opções vêm da VITRINE DOS MAIS VENDIDOS da loja (as armações que mais saem, masculinas e femininas). ' \
+                  'Pode dizer isso uma vez, com naturalidade ("separei entre os modelos que mais saem aqui na loja"). ' \
+                  'Nunca ofereça modelo de fora da vitrine.'.freeze
 
   attr_reader :account
 
@@ -70,7 +74,8 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
     false
   end
 
-  # armações que podem entrar na prova: ativas, com foto, marcadas e com saldo
+  # armações que podem entrar na prova: ativas, com foto, marcadas e com saldo. 🏆 24/11: "marcada" (try_on) = está na
+  # VITRINE DOS MAIS VENDIDOS (Otica::Vitrine); o resto do estoque não entra na prova nem no catálogo de estilos
   def self.candidates(account)
     Otica::Product.where(account_id: account.id).active.where(kind: %w[armacao solar], try_on: true)
                   .where('quantity > 0').with_attached_photo.select { |p| p.photo.attached? }
@@ -209,7 +214,9 @@ class Otica::VirtualTryOn # rubocop:disable Metrics/ClassLength
              foto_usada: (media(attachment).dig('rosto', 'angulo') == 'tres_quartos' ? 'de 3/4' : 'de frente'),
              visagismo: Otica::Visagismo.explain(rosto['formato'], genero), parecidas: parecida_com.present?,
              estilo: (estilo_code ? "#{estilo_code} #{Otica::CatalogoEstilos.style(estilo_code)[:nome]}" : nil),
-             tentativa: rounds_sent + 1 }.compact
+             tentativa: rounds_sent + 1,
+             # 🏆 24/11: a prova só usa a vitrine dos mais vendidos (Otica::Vitrine); a IA pode usar isso como argumento
+             vitrine: VITRINE_TEXTO }.compact
     if nivel == 'aproximada'
       base[:combinacao] = 'aproximada'
       base[:aviso_honesto] = 'ATENÇÃO: nenhuma armação com foto e saldo é do formato IDEAL pro rosto dela (' \

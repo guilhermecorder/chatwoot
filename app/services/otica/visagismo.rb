@@ -312,7 +312,8 @@ module Otica::Visagismo
                 product.lens_material].join(' ').downcase
     words.each { |w| s += 2.0 if haystack.include?(w) }
     s += 0.5 if product.promo_active?
-    s
+    # 🏆 24/11: entre as que combinam igual, a grife que mais vende vem primeiro (Otica::Vitrine)
+    s + Otica::Vitrine.bonus(product)
   end
 
   # "preta fininha" → ["preto", "preta", "black", "fina", "fino", …]

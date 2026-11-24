@@ -126,7 +126,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
                    'rosto marcada como "serve para a prova virtual" e disse (ou aceitou) que quer ver armações nela. ' \
                    'Devolve ok=true com as armações enviadas (as fotos já chegaram a ela: só comente), ou ok=false com o ' \
                    'motivo (foto não serve, limite do dia, SEM MODELO PRO ROSTO): aí peça outra foto, ou fale a verdade e ofereça ' \
-                   'chamar depois (agendar_retorno), ou convide para a loja. Só mostra o que a loja TEM (foto + saldo) e que combina; ' \
+                   'chamar depois (agendar_retorno), ou convide para a loja. Só mostra a VITRINE DOS MAIS VENDIDOS da loja (as armações ' \
+                   'masculinas e femininas que mais saem, com foto e saldo) e que combinam; nunca ofereça modelo de fora dela; ' \
                    'quando só há aproximadas, o resultado avisa (combinacao=aproximada): diga que são as mais próximas de hoje. ' \
                    'O sistema avisa a cliente sozinho ("recebi sua foto, já estou montando") antes das imagens, e cada legenda ' \
                    'já traz o motivo da escolha. Com parecida_com (id da armação que ela gostou) manda 2 do mesmo estilo em ' \
