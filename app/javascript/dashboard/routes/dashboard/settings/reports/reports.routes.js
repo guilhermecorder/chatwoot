@@ -25,6 +25,7 @@ import LiveReports from './LiveReports.vue';
 import SLAReports from './SLAReports.vue';
 import LabelDashboard from './LabelDashboard.vue';
 import CrmDashboardReport from './CrmDashboardReport.vue';
+import InboxComparison from './InboxComparison.vue';
 import WhatsappHealth from './WhatsappHealth.vue';
 import WhatsappSpend from './WhatsappSpend.vue';
 import AcquisitionCost from './AcquisitionCost.vue';
@@ -181,6 +182,15 @@ export default {
             permissions: ['administrator', 'agent', 'report_manage'],
           },
           component: CrmDashboardReport,
+        },
+        {
+          // 🆚 item 413: Comparativo de caixas — mesmo acesso do Dashboard CRM
+          path: 'comparativo_caixas',
+          name: 'inbox_comparison_reports',
+          meta: {
+            permissions: ['administrator', 'agent', 'report_manage'],
+          },
+          component: InboxComparison,
         },
         {
           path: 'whatsapp_health',

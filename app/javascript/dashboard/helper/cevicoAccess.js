@@ -60,6 +60,7 @@ export const ROUTE_NODES = {
   patient_space: 'pacientes',
   cevico_business: 'empresario',
   crm_dashboard_reports: 'relatorios.crm',
+  inbox_comparison_reports: 'relatorios.crm', // 🆚 item 413
   traffic_funnel_reports: 'relatorios.funil_trafego',
   doctors_reports: 'relatorios.medicos',
   agents_dashboard_reports: 'relatorios.agentes',

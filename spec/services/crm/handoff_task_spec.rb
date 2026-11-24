@@ -126,7 +126,7 @@ RSpec.describe Crm::HandoffTask do
       result = { mensagens: ['Procure um pronto atendimento oftalmológico agora.', 'Equipe: (11) 98769-0286.'], etapa: 'pos_cirurgico',
                  agendar: false, agendamento: {}, cancelar: false, pausar: false, chamar_humano: true,
                  leitura: 'Dor forte no pós-op: sintoma de alerta.', acoes: [] }
-      service = instance_double(Crm::ResponderAgentService, call: result)
+      service = instance_double(Crm::ResponderAgentService, call: result, spent_usd: 0.0, script_version: 'v1')
       allow(Crm::ResponderAgentService).to receive(:new).and_return(service)
       allow(Crm::MediaReadingService).to receive(:read_pending!).and_return({})
 

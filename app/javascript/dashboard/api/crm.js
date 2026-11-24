@@ -1429,6 +1429,11 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/save_ai_experiment`, payload);
   }
 
+  // 🆚 item 413: Comparativo de caixas de entrada (a turma de cada caixa lado a lado)
+  getInboxComparison(params = {}) {
+    return axios.get(`${this.url}/inbox_comparison`, { params });
+  }
+
   // 🧪 item 403: Laboratório de atendimento (comparação dos testes A/B)
   getAttendanceLab(params) {
     return axios.get(`${this.url}/attendance_lab`, { params });

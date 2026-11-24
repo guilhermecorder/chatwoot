@@ -33,7 +33,7 @@ RSpec.describe Crm::ResponderAgentJob do
   end
 
   def stub_ai(result)
-    allow(Crm::ResponderAgentService).to receive(:new).and_return(instance_double(Crm::ResponderAgentService, call: result))
+    allow(Crm::ResponderAgentService).to receive(:new).and_return(instance_double(Crm::ResponderAgentService, call: result, spent_usd: 0.0, script_version: 'v1'))
   end
 
   def patient(content, minutes_ago: 0)

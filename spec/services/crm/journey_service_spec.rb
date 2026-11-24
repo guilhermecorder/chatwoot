@@ -81,6 +81,31 @@ RSpec.describe Crm::JourneyService do
     expect(payload[:comparacao]).to include(modo: 'previous')
   end
 
+  # 🧾 item 413: "quanto por cento de envio de orçamento resultou em agendamento?"
+  it 'diz quantos dos que receberam orçamento agendaram depois (conta de turma)', :aggregate_failures do
+    dani = person('Dani', now - 1.day)
+    enter(dani, 'Envio de Orçamento', now - 1.day) # recebeu orçamento e não agendou
+    edu = person('Edu', now - 3.days)
+    enter(edu, 'Agendamento de Consulta', now - 3.days) # agendou ANTES do orçamento: não é conversão dele
+    enter(edu, 'Envio de Orçamento', now - 2.days)
+
+    payload = journey
+
+    expect(payload[:orcamento_consulta][:agora]).to eq(orcamentos: 3, agendaram: 1, taxa: 33.3)
+    expect(payload[:orcamento_consulta][:antes]).to eq(orcamentos: 0, agendaram: 0, taxa: nil)
+    expect(step(payload, 'orcamento')[:base]).to be_nil # sem "% de Chegaram" (dava mais de 100%)
+  end
+
+  # 🧹 item 413: o teste do Luna abriu ~400 conversas e o "Conversaram" foi a 469
+  it 'não conta as conversas de teste do 🧪 Simulador', :aggregate_failures do
+    simulator = create(:inbox, account: account, name: Crm::AgentSimulator::INBOX_NAME)
+    patient = create(:contact, account: account, name: 'Paciente de teste', created_at: now - 40.days)
+    create_list(:conversation, 3, account: account, inbox: simulator, contact: patient, created_at: now)
+
+    expect(step(journey, 'conversaram')[:valor]).to eq(2)
+    expect(Crm::KpiBagService.new(account: account, since: since, until_at: until_at).send(:conversations, since, until_at).count).to eq(2)
+  end
+
   it 'a linha de agora e a de antes têm o mesmo tamanho e somam o número de cima', :aggregate_failures do
     payload = journey
     agendaram = step(payload, 'agendaram')

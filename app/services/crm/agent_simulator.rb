@@ -9,6 +9,19 @@ class Crm::AgentSimulator
   INBOX_NAME = '🧪 Simulador de agentes'.freeze
   FAKE_PHONE = '+5511900000000'.freeze
 
+  # 🧹 item 413 (24/11): conversa de TESTE nunca conta em indicador. O teste do
+  # Luna abriu ~400 conversas numa madrugada e o "Conversaram" do dia foi de
+  # ~65 para 469. Toda contagem de conversa passa por aqui (a lente das fontes
+  # já chama sozinha): a caixa do simulador fica fora, para sempre.
+  def self.inbox_ids(account)
+    account.inboxes.where(name: INBOX_NAME).pluck(:id)
+  end
+
+  def self.without(account, scope, column = 'conversations.inbox_id')
+    ids = inbox_ids(account)
+    ids.any? ? scope.where("#{column} NOT IN (?)", ids) : scope
+  end
+
   # objective (🎙️ rodada 195, só o Agente de Ligação): "Motivo da ligação" que a
   # tela manda — vira {{campanha_objetivo}} no prompt do simulador por texto
   # script_version (22/09): 'v1' = Roteiro oficial, 'v2' = Roteiro paralelo em

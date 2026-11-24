@@ -306,7 +306,7 @@ RSpec.describe Crm::EngineExperiment do
     before { stub_const('Crm::ResponderAgentJob::LIVE_ENABLED', true) }
 
     it 'carimba a conversa com variante, modelo, custo e resposta', :aggregate_failures do
-      service = instance_double(Crm::ResponderAgentService, call: reply, experiment_arm: 'b', spent_usd: 0.0042)
+      service = instance_double(Crm::ResponderAgentService, call: reply, experiment_arm: 'b', spent_usd: 0.0042, script_version: 'v2')
       allow(Crm::ResponderAgentService).to receive(:new).and_return(service)
 
       Crm::ResponderAgentJob.perform_now(conversation.id, incoming.id, 'atendente_agendamento')
@@ -315,6 +315,11 @@ RSpec.describe Crm::EngineExperiment do
       expect(stamp).to include('test' => test_id, 'arm' => 'b', 'model' => 'gpt-6.2-sol', 'respostas' => 1)
       expect(stamp['custo_usd']).to be_within(0.000001).of(0.0042)
       expect(stamp['humano_at']).to be_present
+      # 🧾 item 413: o registro permanente (com ou sem teste) soma a mesma resposta
+      usage = conversation.reload.additional_attributes['cevico_ia_uso']
+      expect(usage).to include('chamadas' => 1, 'respostas' => 1, 'roteiros' => { 'v2' => 1 },
+                               'modelos' => { 'gpt-6.2-sol' => { 'n' => 1, 'usd' => 0.0042 } })
+      expect(usage['humano_at']).to be_present
     end
   end
 end

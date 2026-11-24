@@ -61,8 +61,9 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     day = ->(col) { Arel.sql("to_char(#{col} AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD')") }
     fill = ->(counts) { dates.map { |d| (counts[d.iso8601] || 0).to_f.round(2) } }
 
-    new_conversations = Current.account.conversations.where(created_at: range)
-                               .group(day.call('conversations.created_at')).count
+    # 🧹 item 413: sem as conversas de teste do 🧪 Simulador
+    real_conversations = Crm::AgentSimulator.without(Current.account, Current.account.conversations.where(created_at: range))
+    new_conversations = real_conversations.group(day.call('conversations.created_at')).count
     new_leads = pipeline.crm_contacts.joins(:contact)
                         .where(contacts: { created_at: range })
                         .group(day.call('contacts.created_at')).count
@@ -99,8 +100,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     # primeira conversa numa porta de captação)
     inbox_palette = %w[#1D4ED8 #DB2777 #B8860B #059669 #7C3AED #0D9488 #EA580C #DC2626]
     inboxes = Current.account.inboxes.order(:id).to_a
-    conv_by_inbox = Current.account.conversations.where(created_at: range)
-                           .group(:inbox_id).group(day.call('conversations.created_at')).count
+    conv_by_inbox = real_conversations.group(:inbox_id).group(day.call('conversations.created_at')).count
     rev_by_contact_day = revenue_logs.group('crm_contacts.contact_id')
                                      .group(day.call('crm_contact_stage_logs.entered_at'))
                                      .sum('COALESCE(crm_contacts.value, 0)')
@@ -838,7 +838,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     return empty_financials.merge(investment_mode: mode) if cfg.nil?
 
     case mode
-    when 'meta_auto' then meta_auto_financials(stat, range)
+    when 'meta_auto' then meta_auto_financials(inbox_id, stat, range)
     when 'google_auto' then google_auto_financials(stat, range)
     else
       monthly = cfg['monthly'].to_f
@@ -849,15 +849,28 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
     end
   end
 
-  def meta_auto_financials(stat, range)
+  # 💸 item 413: a caixa recebe SÓ a parte do gasto do Meta dos anúncios que
+  # abriram conversa nela (Crm::MetaSpendByInbox). Antes cada caixa levava a
+  # conta inteira e o mesmo dinheiro aparecia em três caixas.
+  def meta_auto_financials(inbox_id, stat, range)
     meta = meta_spend_for(range.first, range.last)
-    spend = meta[:spend].to_f
-    unless spend.positive?
+    total = meta[:spend].to_f
+    unless total.positive?
       reason = meta[:error].presence || (meta[:configured] ? 'sem gasto no período' : 'Meta Ads não configurado em Integrações')
       return empty_financials.merge(investment_mode: 'meta_auto', investment_note: reason)
     end
 
-    build_financials(stat, spend.round(2), monthly: nil, mode: 'meta_auto')
+    spend = meta_split_for(range, total)[:by_inbox][inbox_id].to_f
+    unless spend.positive?
+      note = "nenhum anúncio do Meta abriu conversa nesta caixa no período (a conta toda gastou R$ #{format('%.2f', total).tr('.', ',')})"
+      return empty_financials.merge(investment_mode: 'meta_auto', investment_note: note, investment_total: total.round(2))
+    end
+
+    build_financials(stat, spend.round(2), monthly: nil, mode: 'meta_auto').merge(investment_total: total.round(2))
+  end
+
+  def meta_split_for(range, total)
+    @meta_split_for ||= Crm::MetaSpendByInbox.new(account: Current.account, since: range.first, until_at: range.last, total: total).call
   end
 
   # gasto do Google lido pela API de dados do GA4 (conta de serviço) —

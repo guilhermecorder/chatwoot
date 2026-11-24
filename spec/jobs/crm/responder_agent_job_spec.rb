@@ -26,7 +26,7 @@ RSpec.describe Crm::ResponderAgentJob do
   end
 
   def stub_ai(result)
-    service = instance_double(Crm::ResponderAgentService, call: result)
+    service = instance_double(Crm::ResponderAgentService, call: result, spent_usd: 0.0, script_version: 'v1')
     allow(Crm::ResponderAgentService).to receive(:new).and_return(service)
   end
 
@@ -57,7 +57,7 @@ RSpec.describe Crm::ResponderAgentJob do
     end
     allow(Crm::ResponderAgentService).to receive(:new) do
       order << [:ia]
-      instance_double(Crm::ResponderAgentService, call: ai_reply)
+      instance_double(Crm::ResponderAgentService, call: ai_reply, spent_usd: 0.0, script_version: 'v1')
     end
 
     run
@@ -189,7 +189,7 @@ RSpec.describe Crm::ResponderAgentJob do
       travel_to(now) do
         live_cfg = { 'mode' => 'live', 'live_days' => [6, 0], 'hours_start' => '08:00', 'hours_end' => '18:00' }
         settings.update!(ai_config: settings.ai_config.deep_merge('agents' => { 'atendente_agendamento' => live_cfg }))
-        service = instance_double(Crm::ResponderAgentService, call: ai_reply)
+        service = instance_double(Crm::ResponderAgentService, call: ai_reply, spent_usd: 0.0, script_version: 'v1')
         allow(Crm::ResponderAgentService).to receive(:new).and_return(service)
         run
         expect(Crm::ResponderAgentService).to have_received(:new).with(hash_including(live: true))

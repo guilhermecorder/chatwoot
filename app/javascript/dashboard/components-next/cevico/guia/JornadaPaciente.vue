@@ -55,6 +55,27 @@ const rendimento = etapa => {
   };
 };
 
+// 🧾 item 413: do ORÇAMENTO para a CONSULTA (conta de turma, vem pronta do servidor)
+const orcCons = computed(() => {
+  const o = props.dados?.orcamento_consulta;
+  if (!o?.agora?.orcamentos) return null;
+  const antes = o.antes?.orcamentos ? o.antes : null;
+  return {
+    ...o.agora,
+    antes,
+    dif: antes ? variation(o.agora.taxa, antes.taxa, { pontos: true }) : null,
+  };
+});
+
+const orcConsFrase = computed(() => {
+  const o = orcCons.value;
+  if (!o) return '';
+  const antes = o.antes
+    ? ` (antes ${pct(o.antes.taxa)}: ${n(o.antes.agendaram)} de ${n(o.antes.orcamentos)})`
+    : '';
+  return `${pct(o.taxa)}. Das ${n(o.orcamentos)} pessoas que receberam orçamento no período, ${n(o.agendaram)} agendaram a consulta depois${antes}. É conta de turma: segue as mesmas pessoas.`;
+});
+
 const cartao = (etapa, i = null) => {
   const bom = etapa.bom_quando_sobe !== false;
   return {
@@ -172,7 +193,10 @@ const vazio = computed(
             bare
           />
           <span class="cvj-rend">
-            <template v-if="e.rend">
+            <template v-if="e.key === 'orcamento' && orcCons">
+              {{ pct(orcCons.taxa) }} viraram consulta
+            </template>
+            <template v-else-if="e.rend">
               {{ pct(e.rend.agora) }} de “{{ e.rend.de }}”
             </template>
             <template v-else>{{ e.medida }}</template>
@@ -225,6 +249,12 @@ const vazio = computed(
               >) </template
             >. É a conta do período: divide esta etapa pela anterior e mistura
             turmas — quem está aqui agora pode ter chegado antes.
+          </p>
+          <p
+            v-if="orcCons && ['orcamento', 'agendaram'].includes(detalhe.key)"
+            class="cvj-detalhe-p"
+          >
+            <b>Do orçamento para a consulta:</b> {{ orcConsFrase }}
           </p>
           <p class="cvj-detalhe-p"><b>O que conta:</b> {{ detalhe.formula }}</p>
         </div>

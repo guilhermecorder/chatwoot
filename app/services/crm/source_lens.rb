@@ -123,7 +123,9 @@ class Crm::SourceLens
   end
 
   # conversas e mensagens: pela caixa de entrada (caixa que nenhuma fonte pegou = da casa)
+  # 🧹 item 413: a caixa do 🧪 Simulador nunca entra (conversa de teste não é paciente)
   def inboxes(scope, column = 'conversations.inbox_id')
+    scope = Crm::AgentSimulator.without(account, scope, column)
     return scope if all?
 
     taken = foreign_inbox_ids

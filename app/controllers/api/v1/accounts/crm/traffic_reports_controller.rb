@@ -52,7 +52,7 @@ class Api::V1::Accounts::Crm::TrafficReportsController < Api::V1::Accounts::Base
   end
 
   def conversations_started(since, until_at)
-    Current.account.conversations.where(created_at: since..until_at).count
+    Crm::AgentSimulator.without(Current.account, Current.account.conversations.where(created_at: since..until_at)).count
   end
 
   def funnel_pipeline

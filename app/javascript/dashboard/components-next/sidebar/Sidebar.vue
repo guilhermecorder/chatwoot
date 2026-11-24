@@ -1303,6 +1303,13 @@ const menuItems = computed(() => {
             route: 'crm_dashboard_reports',
           },
           {
+            // 🆚 item 413: cada caixa de entrada lado a lado (nó relatorios.crm)
+            name: 'Inbox Comparison',
+            icon: 'i-lucide-swords',
+            label: 'Comparativo de caixas',
+            route: 'inbox_comparison_reports',
+          },
+          {
             name: 'Campaigns Dashboard',
             icon: 'i-lucide-send',
             label: 'Dashboard Campanhas',

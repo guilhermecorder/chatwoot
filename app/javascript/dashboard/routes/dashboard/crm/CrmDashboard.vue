@@ -1392,6 +1392,9 @@ const agentView = computed(() => {
               <span v-if="showFinancials && row.investment_mode === 'meta_auto' && row.investment_period" class="text-[11px] text-n-slate-10">
                 investimento: {{ formatCurrency(row.investment_period) }} no período
                 · <span style="color: #1877F2" class="font-semibold">puxado do Meta Ads</span>
+                <template v-if="row.investment_total">
+                  · parte desta caixa (a conta toda gastou {{ formatCurrency(row.investment_total) }})
+                </template>
               </span>
               <span v-else-if="showFinancials && row.investment_mode === 'google_auto' && row.investment_period" class="text-[11px] text-n-slate-10">
                 investimento: {{ formatCurrency(row.investment_period) }} no período

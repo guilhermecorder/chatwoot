@@ -72,20 +72,38 @@ class Crm::GoogleAdCostService
     JWT.encode(payload, OpenSSL::PKey::RSA.new(creds['private_key']), 'RS256')
   end
 
+  # 🩹 item 413 (24/11): o GA4 passou a RECUSAR o gasto pedido sozinho ("Please add
+  # sessionCampaignName to make the request compatible") — a métrica de custo só
+  # sai acompanhada da campanha. Pede por campanha e SOMA as linhas. A segunda
+  # dimensão é a reserva (a mesma que o custo por campanha já usa), caso o Google
+  # troque a regra de novo.
+  CAMPAIGN_DIMENSIONS = %w[sessionCampaignName sessionGoogleAdsCampaignName].freeze
+  ROW_LIMIT = 1000
+
   def fetch_cost(token)
-    response = HTTParty.post(
+    response = nil
+    CAMPAIGN_DIMENSIONS.each do |dimension|
+      response = run_report(token, dimension)
+      break if response.success?
+    end
+    return { configured: true, error: extract_error(response) } unless response.success?
+
+    cost = Array(response.parsed_response['rows']).sum { |row| row.dig('metricValues', 0, 'value').to_f }
+    { configured: true, cost: cost.round(2) }
+  end
+
+  def run_report(token, dimension)
+    HTTParty.post(
       "#{DATA_API}/properties/#{property_id}:runReport",
       headers: { 'Authorization' => "Bearer #{token}", 'Content-Type' => 'application/json' },
       body: {
         dateRanges: [{ startDate: @since_date.iso8601, endDate: @until_date.iso8601 }],
-        metrics: [{ name: 'advertiserAdCost' }]
+        dimensions: [{ name: dimension }],
+        metrics: [{ name: 'advertiserAdCost' }],
+        limit: ROW_LIMIT
       }.to_json,
       timeout: 15
     )
-    return { configured: true, error: extract_error(response) } unless response.success?
-
-    cost = response.parsed_response.dig('rows', 0, 'metricValues', 0, 'value').to_f
-    { configured: true, cost: cost.round(2) }
   end
 
   def extract_error(response)

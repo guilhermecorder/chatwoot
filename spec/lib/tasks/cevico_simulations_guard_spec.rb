@@ -166,7 +166,8 @@ RSpec.describe 'cevico: comandos de simulação travados fora do desenvolvimento
       create(:user, account: account, role: :administrator)
       agent = { 'enabled' => true, 'mode' => 'live', 'inbox_ids' => [inbox.id] }
       CrmSetting.create!(account: account, ai_config: { 'api_key' => 'sk-teste', 'agents' => { 'atendente_agendamento' => agent } })
-      allow(Crm::ResponderAgentService).to receive(:new).and_return(instance_double(Crm::ResponderAgentService, call: ai_reply))
+      service = instance_double(Crm::ResponderAgentService, call: ai_reply, spent_usd: 0.0, script_version: 'v1')
+      allow(Crm::ResponderAgentService).to receive(:new).and_return(service)
     end
 
     it 'com o agente AO VIVO, a conversa simulada fica em SOMBRA: nota interna, nenhum balão outgoing', :aggregate_failures do

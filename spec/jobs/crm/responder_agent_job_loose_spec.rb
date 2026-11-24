@@ -27,7 +27,7 @@ RSpec.describe Crm::ResponderAgentJob do
     # cada rodada é uma mensagem NOVA do paciente (a anterior já foi respondida)
     def run_with(result)
       incoming = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: 'oi')
-      allow(Crm::ResponderAgentService).to receive(:new).and_return(instance_double(Crm::ResponderAgentService, call: result))
+      allow(Crm::ResponderAgentService).to receive(:new).and_return(instance_double(Crm::ResponderAgentService, call: result, spent_usd: 0.0, script_version: 'v1'))
       described_class.perform_now(conversation.id, incoming.id, 'atendente_agendamento')
       conversation.reload.additional_attributes&.dig(described_class::STATE_KEY)
     end

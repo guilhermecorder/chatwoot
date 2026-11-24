@@ -28,7 +28,9 @@ class Crm::JourneyService # rubocop:disable Metrics/ClassLength
      'Contatos novos que chegaram pelas portas de entrada no período (o mesmo número de "Contatos novos").'],
     ['conversaram', 'Conversaram', 'conversas novas', 'i-lucide-messages-square', nil,
      'Conversas abertas no período nas caixas de entrada desta fonte (o mesmo número de "Novas conversas").'],
-    ['orcamento', 'Receberam orçamento', 'pessoas', 'i-lucide-receipt', 'chegaram',
+    # 🧾 item 413: sem "% de Chegaram" (dava 121%: quem recebe orçamento hoje pode ter
+    # chegado antes). A conta que vale aqui é a da TURMA: orçamento → consulta.
+    ['orcamento', 'Receberam orçamento', 'pessoas', 'i-lucide-receipt', nil,
      'Pessoas (sem repetir) que entraram na coluna de orçamento no período, de qualquer turma. Carga em massa fica fora.'],
     ['agendaram', 'Agendaram consulta', 'pessoas', 'i-lucide-calendar-plus', 'chegaram',
      'Pessoas (sem repetir) que entraram na coluna de agendamento de consulta no período: leads novos + pacientes da base. ' \
@@ -82,6 +84,8 @@ class Crm::JourneyService # rubocop:disable Metrics/ClassLength
       rotulos: keys.map { |k| bucket_label(k) },
       rotulos_anterior: aligned(prev_keys, keys.size).map { |k| k && bucket_label(k) },
       etapas: STEPS.map { |step| step_json(step, keys, prev_keys) },
+      orcamento_consulta: { agora: budget_to_booking(@since, @until_at),
+                            antes: budget_to_booking(@compare.since, @compare.until_at) },
       desvios: DETOURS.map { |detour| detour_json(detour, keys, prev_keys) }
     }
   end
@@ -166,6 +170,25 @@ class Crm::JourneyService # rubocop:disable Metrics/ClassLength
     return Crm::StageLog.none unless stage
 
     lens.stage_logs(Crm::StageLog.where(stage_id: stage.id, event_type: Crm::StageLogBulk::ENTERED, entered_at: since..until_at))
+  end
+
+  # 🧾 item 413 (24/11, pedido do Guilherme: "quanto por cento de envio de orçamento
+  # resultou em agendamento de consulta?"). É conta de TURMA: das pessoas que
+  # receberam orçamento no período, quantas entraram na coluna de agendamento
+  # DEPOIS do orçamento. A base de comparação ganha a mesma folga de tempo que o
+  # período de agora já teve (senão o passado sempre pareceria melhor).
+  def budget_to_booking(since, until_at) # rubocop:disable Metrics/AbcSize
+    budget = budget_logs(since, until_at).joins(:crm_contact).reorder('crm_contact_stage_logs.entered_at')
+                                         .pluck('crm_contacts.contact_id', 'crm_contact_stage_logs.entered_at')
+                                         .uniq(&:first).to_h
+    return { orcamentos: 0, agendaram: 0, taxa: nil } if budget.empty?
+
+    horizon = [until_at + [Time.current - @until_at, 0].max, Time.current].min
+    booked = Crm::BookingRate.entries(account, budget.values.min, horizon, lens: lens).joins(:crm_contact)
+                             .where(crm_contacts: { contact_id: budget.keys })
+                             .pluck('crm_contacts.contact_id', 'crm_contact_stage_logs.entered_at')
+    hits = booked.select { |contact_id, at| at >= budget[contact_id] }.map(&:first).uniq.size
+    { orcamentos: budget.size, agendaram: hits, taxa: ((hits.to_f / budget.size) * 100).round(1) }
   end
 
   def consultas_todas

@@ -68,7 +68,8 @@ RSpec.describe 'CRM settings — Atendente de Agendamento', type: :request do
   it 'simulador: abre conversa numa caixa interna sem envio e responde como nota de sombra', :aggregate_failures do
     reply = { mensagens: ['Olá! Aqui é o Guilherme, da CEVICO.', 'É para você ou para um familiar?'], etapa: 'recepcao',
               agendar: false, agendamento: {}, pausar: false, chamar_humano: false, leitura: 'primeiro contato' }
-    allow(Crm::ResponderAgentService).to receive(:new).and_return(instance_double(Crm::ResponderAgentService, call: reply))
+    service = instance_double(Crm::ResponderAgentService, call: reply, spent_usd: 0.0, script_version: 'v1')
+    allow(Crm::ResponderAgentService).to receive(:new).and_return(service)
 
     post "#{base}/ai_simulate", params: { agent: 'atendente_agendamento' }, headers: admin.create_new_auth_token, as: :json
     expect(response).to have_http_status(:ok)

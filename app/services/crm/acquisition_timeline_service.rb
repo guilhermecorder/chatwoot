@@ -211,9 +211,9 @@ class Crm::AcquisitionTimelineService
 
   # ══ NOVAS CONVERSAS ══
   def conversations_by_day
-    @account.conversations.where(created_at: @since..@until_at)
-            .group(Arel.sql("DATE(conversations.created_at #{TZ_DATE_SQL})")).count
-            .transform_keys { |day| Date.parse(day.to_s) }
+    Crm::AgentSimulator.without(@account, @account.conversations.where(created_at: @since..@until_at))
+                       .group(Arel.sql("DATE(conversations.created_at #{TZ_DATE_SQL})")).count
+                       .transform_keys { |day| Date.parse(day.to_s) }
   end
 
   # ══ ETAPAS: entradas em cada coluna, por funil ══

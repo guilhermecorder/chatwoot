@@ -231,7 +231,7 @@ class Crm::KpiBagService # rubocop:disable Metrics/ClassLength
 
   def conversations(since, until_at)
     scope = @account.conversations.where(created_at: since..until_at)
-    @lens ? @lens.inboxes(scope) : scope
+    @lens ? @lens.inboxes(scope) : Crm::AgentSimulator.without(@account, scope)
   end
 
   # funis cujas colunas viram indicador: sem lente, o principal da casa; com

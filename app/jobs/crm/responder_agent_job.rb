@@ -431,16 +431,23 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   # ── 🧪 item 400: placar do teste A/B de motor (Crm::EngineExperiment) ─────
   # toda chamada entra com o custo e o modelo, mesmo a que deu erro ou a que o
   # paciente atropelou com outra mensagem (o dinheiro foi gasto do mesmo jeito)
+  # 🧾 item 413: com ou SEM teste, a conversa guarda quem a atendeu (motor,
+  # Roteiro, custo): é o que alimenta o Comparativo de caixas (Crm::AttendanceUsage)
   def track_experiment_call(conversation, agent_key, cfg, service, result)
-    return if Crm::EngineExperiment.active(cfg).nil?
-
-    track_experiment(conversation, agent_key, cfg, service,
-                     'cost_usd' => service.spent_usd, 'model' => result[:modelo], 'error' => result[:error].present?,
-                     'fallback' => result[:reserva].present?)
+    call = { 'cost_usd' => service.spent_usd, 'model' => result[:modelo], 'error' => result[:error].present?,
+             'fallback' => result[:reserva].present? }
+    Crm::AttendanceUsage.track!(conversation, agent_key, call.merge('script' => service.script_version))
+    track_arm(conversation, agent_key, cfg, service, call)
   end
 
   def track_experiment(conversation, agent_key, cfg, service, event)
-    return if Crm::EngineExperiment.active(cfg).nil? # sem teste ligado, nada muda no job
+    Crm::AttendanceUsage.track!(conversation, agent_key, event)
+    track_arm(conversation, agent_key, cfg, service, event)
+  end
+
+  # o placar do teste A/B: só com teste ligado e a conversa numa variante
+  def track_arm(conversation, agent_key, cfg, service, event)
+    return if Crm::EngineExperiment.active(cfg).nil? # sem teste ligado, nada muda no placar
 
     arm = service.experiment_arm
     return if arm.blank?
