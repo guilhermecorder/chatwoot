@@ -22,8 +22,10 @@ class Crm::KitQuoteAutoJob < ApplicationJob
                 'o seu orçamento, combinado?'.freeze
   TASK_REASON = 'Orçamento automático não saiu'.freeze
 
-  def self.enqueue!(conversation, agent_key)
-    mark!(conversation, 'status' => 'gerando', 'em' => Time.current.iso8601, 'espera' => delay_for(conversation.account, agent_key))
+  # origem 'vigia' (Crm::KitQuoteWatchdogJob, 24/11): se o fornecedor falhar, o cliente não ouve "instabilidade" (a tarefa sai igual)
+  def self.enqueue!(conversation, agent_key, origem: nil)
+    mark!(conversation, { 'status' => 'gerando', 'em' => Time.current.iso8601, 'espera' => delay_for(conversation.account, agent_key),
+                          'origem' => origem }.compact)
     Crm::JourneyLabel.bill_received!(conversation.contact) # cartão vai para "Orçamento a fazer"
     set(wait: WAIT).perform_later(conversation.id, agent_key.to_s)
   end
@@ -56,14 +58,21 @@ class Crm::KitQuoteAutoJob < ApplicationJob
     @agent_key = agent_key
     return deliver_ready(quote_id) if quote_id
 
-    result = Crm::KitQuote::AutoBuild.new(@conversation.account, @conversation.contact).call
-    result.ok? ? hold_or_deliver(result.quote) : fallback(result)
+    build_and_deliver
   rescue StandardError => e
     Rails.logger.error "[Crm::KitQuoteAutoJob] #{e.class}: #{e.message}"
     fallback(Crm::KitQuote::AutoBuild::Result.new(status: :erro, motivo: "#{e.class}: #{e.message.truncate(120)}")) if @conversation
   end
 
   private
+
+  def build_and_deliver
+    result = Crm::KitQuote::AutoBuild.new(@conversation.account, @conversation.contact).call
+    return fallback(result) unless result.ok?
+
+    ask_to_check(result) if result.conferir.present?
+    hold_or_deliver(result.quote)
+  end
 
   def state
     (@conversation.reload.additional_attributes || {})[STATE_KEY].to_h
@@ -106,13 +115,25 @@ class Crm::KitQuoteAutoJob < ApplicationJob
 
   def deliver(quote)
     situacao = Crm::KitQuote::Delivery.new(quote, agent_key: @agent_key).call
-    note!("⚡ Orçamento automático #{situacao == :enviado ? 'ENVIADO' : "gerado (#{situacao})"}: " \
+    note!("⚡ Orçamento automático #{%i[enviado enviado_modelo].include?(situacao) ? 'ENVIADO' : "gerado (#{situacao})"}: " \
           "#{Crm::KitQuote::CardUpdate.new(quote).summary_text}. Confira no Gerador de proposta → Orçamentos gerados.")
     self.class.mark!(@conversation, 'status' => situacao.to_s, 'em' => Time.current.iso8601, 'orcamento_id' => quote.id)
   end
 
+  # 📨 24/11: o orçamento saiu, mas com algo a conferir (aumento fora da tabela, telhado não reconhecido) — tarefa normal
+  def ask_to_check(result)
+    Crm::HandoffTask.open!(
+      account: @conversation.account, contact: @conversation.contact, conversation: @conversation, agent_key: @agent_key,
+      motivo: 'Conferir orçamento automático', urgencia: 'normal',
+      detalhes: "O orçamento foi para o cliente, mas confira: #{Array(result.conferir).join('; ')}."
+    )
+    note!("🔎 Orçamento automático vai sair, mas precisa de conferência: #{Array(result.conferir).join('; ')}. Tarefa aberta.")
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::KitQuoteAutoJob] tarefa de conferência: #{e.message}"
+  end
+
   def fallback(result)
-    say!(INSTABILITY) if @conversation.can_reply?
+    say!(INSTABILITY) if @conversation.can_reply? && state['origem'] != 'vigia'
     Crm::HandoffTask.open!(
       account: @conversation.account, contact: @conversation.contact, conversation: @conversation, agent_key: @agent_key,
       motivo: "#{TASK_REASON} · gerar pelo botão Gerar orçamento da conversa", urgencia: 'alta',

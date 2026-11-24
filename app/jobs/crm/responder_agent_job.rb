@@ -664,7 +664,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       # legenda no lugar do balão. Uma vez por conversa (Crm::ScriptImages#gatilho).
       if (media = Crm::ScriptImages.triggered_by(conversation, clean, medias))
         Crm::ScriptImages.send!(conversation, media, agent_key)
-        Rails.logger.info "[Crm::ResponderAgentJob] balão trocado pela imagem do roteiro #{media['chave']} (gatilho)"
+        Rails.logger.info "[Crm::ResponderAgentJob] balão trocado pela mídia do roteiro #{media['chave']} (gatilho)"
         next
       end
 

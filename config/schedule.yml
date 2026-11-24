@@ -329,3 +329,10 @@ crm_kit_quote_keepalive_job:
   cron: '15 * * * *'
   class: 'Crm::KitQuoteKeepaliveJob'
   queue: low
+
+# 🛡️ 24/11 (LIFE): vigia dos orçamentos — de hora em hora (o próprio job só age das 8h às 20h de São Paulo) monta e
+# envia o orçamento de quem tem conta + telhado e ficou sem, e manda o PDF de quem ficou preso no "me avisa que eu te mando"
+crm_kit_quote_watchdog_job:
+  cron: '40 * * * *'
+  class: 'Crm::KitQuoteWatchdogJob'
+  queue: low

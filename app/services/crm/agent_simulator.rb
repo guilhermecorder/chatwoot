@@ -57,7 +57,20 @@ class Crm::AgentSimulator
     return { error: result[:error] } if result[:error]
 
     Crm::ResponderAgentJob.write_shadow_note!(conversation, @agent_key, result, message.id)
+    send_triggered_media(conversation, result)
     { ok: true }
+  end
+
+  # 🔊 24/11 (LIFE): no ar, o balão-pergunta que casa com o gatilho de uma mídia do roteiro sai como a
+  # mídia (Crm::ResponderAgentJob#send_replies; ex.: o áudio do Fernando na pergunta do consumo). No
+  # teste a mídia entra logo depois da resposta, para a conversa de teste ter o mesmo histórico.
+  # A caixa do simulador não tem canal: nada sai dela.
+  def send_triggered_media(conversation, result)
+    medias = Crm::ScriptImages.for(@account)
+    Array(result[:mensagens]).each do |text|
+      media = Crm::ScriptImages.triggered_by(conversation, text.to_s, medias)
+      Crm::ScriptImages.send!(conversation, media, @agent_key) if media
+    end
   end
 
   # a conversa como balões: paciente (incoming) e agente (notas de sombra)
@@ -68,7 +81,7 @@ class Crm::AgentSimulator
       if m.incoming?
         { role: 'patient', text: m.content.to_s, at: m.created_at.iso8601, id: m.id }
       elsif m.outgoing?
-        { role: 'media', text: m.content.to_s, at: m.created_at.iso8601, id: m.id, images: image_urls(m) }
+        { role: 'media', text: m.content.to_s, at: m.created_at.iso8601, id: m.id, images: image_urls(m), audios: audio_urls(m) }
       elsif (shadow = m.additional_attributes&.[]('cevico_ia_shadow'))
         { role: 'agent', id: m.id, at: m.created_at.iso8601, messages: Array(shadow['mensagens']),
           meta: shadow.slice('etapa', 'agendar', 'agendamento', 'slot_valid', 'chamar_humano', 'cancelar', 'pausar', 'leitura', 'acoes',
@@ -79,6 +92,12 @@ class Crm::AgentSimulator
 
   def image_urls(message)
     message.attachments.select { |a| a.file_type.to_s == 'image' && a.file.attached? }.map(&:file_url)
+  rescue StandardError
+    []
+  end
+
+  def audio_urls(message)
+    message.attachments.select { |a| a.file_type.to_s == 'audio' && a.file.attached? }.map(&:file_url)
   rescue StandardError
     []
   end

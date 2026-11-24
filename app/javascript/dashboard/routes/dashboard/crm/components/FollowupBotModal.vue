@@ -46,11 +46,18 @@ const STOP_ON_REPLY = {
     'Depois que o cliente manda qualquer mensagem (a partir da entrada na coluna), esta etapa não sai mais. Quem assume é a pessoa.',
 };
 
+const MESMO_ADIADA = {
+  label: 'sai mesmo se ele disse "vou analisar"',
+  title:
+    'Esta etapa sai mesmo depois que o cliente pediu tempo ("vou analisar", "depois te chamo"). As outras etapas param. Recusa clara para tudo.',
+};
+
 const newStep = () => ({
   delay_value: 3,
   delay_unit: 'hours',
   delay_from: 'silence',
   stop_on_reply: false,
+  mesmo_adiada: false,
   kind: 'text',
   message: 'Oi, pode falar?',
   template_params: null,
@@ -65,6 +72,7 @@ const normalizeStep = s => ({
   delay_unit: s.delay_unit ?? 'hours',
   delay_from: s.delay_from ?? 'silence',
   stop_on_reply: s.stop_on_reply === true,
+  mesmo_adiada: s.mesmo_adiada === true,
   kind: s.kind === 'ai' ? 'ai' : s.template_params ? 'template' : 'text',
   message: s.message ?? '',
   template_params: s.template_params ?? null,
@@ -219,6 +227,8 @@ const save = async () => {
         // 🏷️ 11/11 (LIFE): só vale para etapa contada da entrada na coluna
         stop_on_reply:
           s.delay_from === 'stage_entry' && s.stop_on_reply === true,
+        // 📨 24/11 (LIFE): sai mesmo depois do "vou analisar" (resumo do orçamento)
+        mesmo_adiada: s.mesmo_adiada === true,
         kind: s.kind,
         message: s.kind === 'template' ? s.message : (s.message || '').trim(),
         template_params: s.kind === 'template' ? s.template_params : null,
@@ -425,6 +435,18 @@ const save = async () => {
                     class="!m-0"
                   />
                   {{ STOP_ON_REPLY.label }}
+                </label>
+                <!-- 📨 24/11 (LIFE): sai mesmo depois do "vou analisar" -->
+                <label
+                  class="flex items-center gap-1.5 text-xs text-n-slate-11"
+                  :title="MESMO_ADIADA.title"
+                >
+                  <input
+                    v-model="step.mesmo_adiada"
+                    type="checkbox"
+                    class="!m-0"
+                  />
+                  {{ MESMO_ADIADA.label }}
                 </label>
                 <span class="text-xs text-n-slate-10">→ enviar:</span>
 

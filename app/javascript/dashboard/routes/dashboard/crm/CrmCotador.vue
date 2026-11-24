@@ -243,9 +243,12 @@ const enviarWhatsapp = async orcamento => {
     const { data } = await CrmAPI.deliverKitQuote(orcamento.id);
     trocarNasListas(orcamento.id, data.orcamento);
     useAlert(
-      data.situacao === 'enviado'
-        ? 'Enviado pelo WhatsApp com a pergunta de fechamento.'
-        : 'Fora da janela de 24 h: foi o aviso "seu orçamento está pronto". Quando o cliente responder, o atendente manda a proposta.'
+      {
+        enviado: 'Enviado pelo WhatsApp com a pergunta de fechamento.',
+        enviado_modelo:
+          'Fora da janela de 24 h: o PDF foi pelo modelo aprovado, com a pergunta de fechamento.',
+      }[data.situacao] ||
+        'Fora da janela de 24 h: foi o aviso "seu orçamento está pronto". Quando o cliente responder, o atendente manda a proposta.'
     );
   } catch (e) {
     useAlert(erroDe(e, 'Não foi possível enviar pelo WhatsApp.'));

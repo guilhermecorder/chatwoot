@@ -22,7 +22,8 @@ class Crm::KitQuote::ClientData
       'kwh' => kwh,
       'aumento' => increase,
       'cidade' => field('cidade').to_s.split(%r{[/,-]}).first.to_s.strip,
-      'telhado' => self.class.roof_from_text(field('telhado'))
+      'telhado' => self.class.roof_from_text(field('telhado')),
+      'telhado_texto' => field('telhado').to_s.strip[0, 80] # 24/11: o que a ficha diz, mesmo sem tipo reconhecido
     }
   end
 

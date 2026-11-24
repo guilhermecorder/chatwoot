@@ -35,16 +35,19 @@ RSpec.describe Crm::KitQuote::Proposal do
     expect(proposal.dig('sistema', 'paineis')).to eq([{ 'quantidade' => 7, 'marca' => 'Helius', 'potencia_w' => 630 }])
     expect(proposal.dig('sistema', 'inversores')).to eq([{ 'quantidade' => 2, 'tipo' => 'Microinversor', 'marca' => 'Growatt', 'modelo' => '2,5K' }])
     expect(proposal['garantias'].last).to eq('item' => 'Microinversores', 'anos' => 12, 'cobre' => 'contra defeito de fabricação')
-    # a conta não zera (13/11): R$ 500 − taxa mínima da CPFL (50 kWh × R$ 0,95 na bifásica) = R$ 452,50 de economia
-    expect(proposal['economia']).to include('mensal' => 452.5, 'anual' => 5430.0, 'em_10_anos' => 66_500, 'em_25_anos' => 388_000,
-                                            'conta_mensal' => 500.0, 'taxa_minima' => { 'valor' => 47.5, 'kwh' => 50, 'rede' => 'bifásica' })
-    expect(proposal.dig('economia', 'observacao')).to include('não zera', 'R$ 47,50 por mês', '50 kWh', 'já está com essa taxa descontada')
+    # a conta não zera (13/11): R$ 500 − taxa mínima da CPFL (24/11: R$ 80 a 90, desconta o teto) = R$ 410 de economia
+    expect(proposal['economia']).to include('mensal' => 410.0, 'anual' => 4920.0, 'conta_mensal' => 500.0,
+                                            'taxa_minima' => { 'valor' => 90.0, 'de' => 80.0, 'kwh' => 50, 'rede' => 'bifásica' })
+    expect(proposal.dig('economia', 'observacao')).to include('não zera', 'de R$ 80,00 a R$ 90,00 por mês', 'já está com essa taxa descontada')
   end
 
-  it 'na ligação trifásica desconta a taxa mínima de 100 kWh' do
+  it 'taxa mínima de R$ 90 em qualquer ligação (24/11); sem valor na config, volta ao kWh mínimo da ligação', :aggregate_failures do
     budget = Crm::KitQuote::Budget.new(Crm::KitQuote::DEFAULTS.merge('tarifa' => 0.95),
                                        client: {}, bill: { 'hoje' => 500, 'rede' => 'trifasico' }, option: {}, quotes: [], dre: {})
-    expect([budget.minimum_fee, budget.monthly_saving]).to eq([95.0, 405.0])
+    expect([budget.minimum_fee, budget.minimum_fee_floor, budget.monthly_saving]).to eq([90.0, 80.0, 410.0])
+    antiga = Crm::KitQuote::Budget.new(Crm::KitQuote::DEFAULTS.merge('tarifa' => 0.95, 'taxa_minima' => nil),
+                                       client: {}, bill: { 'hoje' => 500, 'rede' => 'trifasico' }, option: {}, quotes: [], dre: {})
+    expect([antiga.minimum_fee, antiga.monthly_saving]).to eq([95.0, 405.0])
   end
 
   it 'usa o preço do DRE e a condição nova do cartão', :aggregate_failures do

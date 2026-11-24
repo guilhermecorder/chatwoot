@@ -58,6 +58,7 @@ import MagnetBoard from 'dashboard/routes/dashboard/business/MagnetBoard.vue';
 import { dueCountdown } from 'dashboard/helper/taskDue';
 import TaskPriorityList from 'dashboard/components-next/cevico/TaskPriorityList.vue';
 import QuoteJourneyStrip from 'dashboard/components-next/cevico/QuoteJourneyStrip.vue';
+import FollowupStrip from 'dashboard/components-next/cevico/FollowupStrip.vue';
 import {
   mergeLayout,
   place as placeBlock,
@@ -5449,6 +5450,8 @@ onUnmounted(() => {
         class="cvg-arejado-jornada"
       >
         <QuoteJourneyStrip />
+        <!-- 📬 22/11 (LIFE): o follow-up da venda logo abaixo da jornada -->
+        <FollowupStrip />
       </div>
 
       <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin).
@@ -6806,6 +6809,7 @@ onUnmounted(() => {
                 <template v-else-if="blockId === 'tarefas' && estiloClassico">
                   <!-- 🧭 12/11 (LIFE): jornada do orçamento — só fora da clínica -->
                   <QuoteJourneyStrip v-if="tasksByHeat" />
+                  <FollowupStrip v-if="tasksByHeat" />
                   <!-- 📋 Tarefas e notas (redesenho 27/09, "clean e organizado"):
                        UMA lista por vez (abas), linhas com fio em vez de caixinhas,
                        sem coluna vazia ocupando espaço -->

@@ -484,12 +484,19 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     # 🧠 follow-up inteligente: entrega falhou, conversa já lida como
     # encerrada/adiada/recusou, carimbo de despedida do Atendente, lead frio
     smart_check = closure_check(bot, conversation, anchor)
-    return plan.merge(smart_check) if smart_check[:reason]
+    # 📨 24/11 (LIFE): etapa 'mesmo_adiada' sai mesmo depois do "vou analisar" (resumo do orçamento 3 h depois);
+    # as outras etapas seguem paradas pela leitura
+    postponed = after_postpone?(smart_check, steps)
+    return plan.merge(smart_check) if smart_check[:reason] && !postponed
 
-    plan.merge!(smart_check)
+    plan.merge!(smart_check.except(:reason, :leitura))
     stage_entered = stage_entry_at(bot, conversation) # nil se não for robô de coluna
     state = followup_state(conversation, bot, anchor, stage_entered)
     pending = pending_steps(bot, conversation, steps, state, anchor, stage_entered, now)
+    if postponed
+      pending = pending.select { |d| d[:step]['mesmo_adiada'] == true }
+      return plan.merge(smart_check) if pending.empty?
+    end
     pending = cold_lead_steps(pending, steps) if plan[:cold]
     plan.merge!(anchor: anchor, state: state, pending: pending)
 
@@ -609,6 +616,14 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     { clinic_id: clinic_id, atendente_encerrou: encerrou, leitura_pendente: cfg['leitura'] && cached.nil?,
       cold: cfg['lead_frio'] && cold_lead?(conversation) }
+  end
+
+  # 📨 24/11: leitura "adiada/encerrada" (ou despedida do Atendente) não segura as etapas marcadas 'mesmo_adiada'
+  # (ex.: o resumo do orçamento 3 h depois do envio). Recusa clara e entrega que falhou seguram tudo.
+  POSTPONE_REASONS = %w[conversa_adiada conversa_encerrada atendente_encerrou].freeze
+
+  def after_postpone?(smart_check, steps)
+    POSTPONE_REASONS.include?(smart_check[:reason].to_s) && Array(steps).any? { |s| s['mesmo_adiada'] == true }
   end
 
   # lead FRIO = nunca escreveu nada (nesta conversa nem em outra do contato):

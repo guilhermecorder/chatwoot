@@ -115,7 +115,10 @@ RSpec.describe Crm::ResponderTools do
                                                                     'legenda' => 'Qual é o seu?' },
                                                                   { 'chave' => 'apresentacao_fernando', 'quando' => 'depois da conta recebida',
                                                                     'arquivo' => 'brand-assets/life/roteiro/fernando-apresentacao.ogg',
-                                                                    'legenda' => 'Ouve o Fernando:', 'faz_pergunta' => false }
+                                                                    'legenda' => 'Ouve o Fernando:', 'faz_pergunta' => false },
+                                                                  { 'chave' => 'consumo_fernando', 'quando' => 'no passo 4',
+                                                                    'arquivo' => 'brand-assets/life/roteiro/fernando-consumo.ogg',
+                                                                    'gatilho' => 'ar.condicionado', 'so_gatilho' => true }
                                                                 ]
                                                               })
     end
@@ -131,6 +134,12 @@ RSpec.describe Crm::ResponderTools do
       expect(audio[:description]).to include('apresentacao_fernando = depois da conta recebida', 'Ouve o Fernando:')
       expect(defs.find { |d| d[:name] == 'enviar_imagem' }.dig(:input_schema, :properties, :imagem, :enum)).to eq(%w[telhados])
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).not_to include('enviar_audio')
+    end
+
+    it 'áudio só_gatilho (24/11: pergunta do consumo) fica fora da ferramenta e não pode ser chamado pela IA', :aggregate_failures do
+      audio = audio_tools.definitions.find { |d| d[:name] == 'enviar_audio' }
+      expect(audio.dig(:input_schema, :properties, :audio, :enum)).to eq(%w[apresentacao_fernando])
+      expect(audio_tools(live: true).call('enviar_audio', { 'audio' => 'consumo_fernando' })[:ok]).to be(false)
     end
 
     it 'ao vivo manda frase + áudio uma vez; em sombra não manda nada', :aggregate_failures do
@@ -653,10 +662,14 @@ RSpec.describe Crm::ResponderTools do
       expect { tools(live: true, agent_key: 'atendente_agendamento').call(name, {}) }.to have_enqueued_job(Crm::KitQuoteAutoJob)
     end
 
-    it 'aumento fora da tabela não gera: abre tarefa para a equipe', :aggregate_failures do
+    it '24/11: aumento fora da tabela também gera sozinho (a equipe confere depois)' do
       ficha('conta' => 'R$ 300', 'telhado' => 'cerâmica', 'consumo_futuro' => 'uma sauna')
-      expect { tools(live: true, agent_key: 'atendente_agendamento').call(name, {}) }.not_to have_enqueued_job(Crm::KitQuoteAutoJob)
-      expect(account.tasks.last.title).to include('aumento de consumo previsto')
+      expect { tools(live: true, agent_key: 'atendente_agendamento').call(name, {}) }.to have_enqueued_job(Crm::KitQuoteAutoJob)
+    end
+
+    it '24/11: telhado que a ficha não reconhece não segura o orçamento' do
+      ficha('conta' => 'R$ 400', 'telhado' => 'nenhuma das 4 opções da imagem')
+      expect { tools(live: true, agent_key: 'atendente_agendamento').call(name, {}) }.to have_enqueued_job(Crm::KitQuoteAutoJob)
     end
 
     it 'em sombra só simula' do
@@ -680,10 +693,10 @@ RSpec.describe Crm::ResponderTools do
         expect(result).to include(ok: false, motivo: include('gerar_orcamento'))
       end
 
-      it 'aumento fora da tabela: a tarefa sai normal (fica com a equipe)' do
+      it '24/11: aumento fora da tabela também vai pelo automático (recusa a tarefa)' do
         ficha('conta' => 'R$ 500', 'telhado' => 'cerâmica', 'consumo_futuro' => 'uma sauna')
         result = t.call('abrir_tarefa', { 'motivo' => 'Orçamento: aumento de consumo previsto · sauna', 'urgencia' => 'normal' })
-        expect(result).to include(ok: true)
+        expect(result).to include(ok: false, motivo: include('gerar_orcamento'))
       end
 
       it 'sem o telhado na ficha: a tarefa sai normal' do

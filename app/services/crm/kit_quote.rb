@@ -32,6 +32,10 @@ module Crm::KitQuote
     # R$ por kWh para passar a conta de luz para consumo (mesma relação da proposta do
     # Residencial Potengi: R$ 4.400 para 4.250 kWh). O consumo calculado pode ser ajustado na tela.
     'tarifa' => 0.95, # R$ por kWh (Guilherme, 12/11: "o cálculo fica mais correto"; era 1,035)
+    # 💡 taxa mínima da CPFL que continua na conta (Guilherme, 24/11: "o mínimo é sempre de uns 80 a 90 reais"): a
+    # economia desconta o teto (R$ 90) e a proposta mostra a faixa. Era o kWh mínimo da ligação × tarifa (R$ 47,50).
+    'taxa_minima' => 90.0,
+    'taxa_minima_de' => 80.0,
     # Serviço que transforma os dados do orçamento em PDF (o gerador aprovado, em Python + Chrome).
     # Sem endereço, o sistema monta os dados e avisa que o PDF não pôde ser gerado.
     'gerador_pdf' => { 'url' => nil, 'token' => nil },

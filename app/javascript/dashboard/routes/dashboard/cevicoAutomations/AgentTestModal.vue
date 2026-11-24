@@ -419,6 +419,15 @@ const guide = turn => {
                   alt="imagem"
                   class="rounded-lg max-w-[260px] mb-1"
                 />
+                <!-- 🔊 24/11: áudio do roteiro (LIFE: o Fernando) toca aqui no teste -->
+                <audio
+                  v-for="(src, i) in t.audios || []"
+                  :key="`${t.id}-aud-${i}`"
+                  :src="src"
+                  controls
+                  preload="none"
+                  class="max-w-[260px] mb-1"
+                />
                 <p v-if="t.text" class="whitespace-pre-wrap">{{ t.text }}</p>
                 <span class="cv-bubble-time"
                   >{{ fmtTime(t.at) }} · {{ agentName }} · ferramenta</span

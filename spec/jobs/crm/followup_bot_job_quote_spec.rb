@@ -65,6 +65,52 @@ RSpec.describe Crm::FollowupBotJob do
     expect(pending_days(plan)).to eq([60])
   end
 
+  describe '24/11: resumo 3 h depois, mesmo depois do "vou analisar"' do
+    let(:bot) do
+      steps = [
+        { 'delay_value' => 3, 'delay_unit' => 'hours', 'delay_from' => 'stage_entry', 'mesmo_adiada' => true,
+          'message' => 'Oi, [nome]! Aproveitando para te enviar um resumo do seu orçamento.' },
+        { 'delay_value' => 1, 'delay_unit' => 'days', 'delay_from' => 'stage_entry', 'stop_on_reply' => true, 'message' => 'Conseguiu abrir?' }
+      ]
+      Crm::FollowupBot.create!(account: account, name: 'LIFE · Orçamento sem resposta', sender: admin, steps: steps,
+                               stage_id: enviado.id, stage_ids: [enviado.id], required_labels: ['orcamento-enviado'])
+    end
+
+    def adiou!(situacao)
+      contact.add_labels(['orcamento-enviado'])
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, sender: contact,
+                       content: 'Vou analisar com calma e depois te chamo', created_at: sent_at + 20.minutes)
+      reply = create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, sender: admin,
+                               content: 'Combinado, fica à vontade', created_at: sent_at + 21.minutes)
+      Crm::FollowupClosure.save!(conversation, 'key' => reply.id, 'situacao' => situacao, 'motivo' => 'vai analisar', 'fonte' => 'ia')
+    end
+
+    it 'adiada: só o resumo sai (3 h depois do envio); as outras etapas param', :aggregate_failures do
+      adiou!('adiada')
+      travel_to sent_at + 3.hours + 5.minutes
+      the_plan = plan
+      expect(the_plan[:reason]).to be_nil
+      expect(the_plan[:pending].map { |d| d[:step]['delay_value'] }).to eq([3])
+      expect(the_plan[:chosen][:step]['mesmo_adiada']).to be(true)
+    end
+
+    it 'recusou: nada sai, nem o resumo' do
+      adiou!('recusou')
+      travel_to sent_at + 3.hours + 5.minutes
+      expect(plan[:reason]).to eq('conversa_recusou')
+    end
+
+    it 'depois que o resumo saiu, a leitura "adiada" volta a segurar tudo' do
+      adiou!('adiada')
+      travel_to sent_at + 3.hours + 5.minutes
+      the_plan = plan
+      described_class.new.send(:mark_steps, the_plan[:state], [the_plan[:chosen]])
+      described_class.new.send(:persist_state, conversation, bot, the_plan[:anchor], the_plan[:state])
+      travel_to sent_at + 2.days
+      expect(plan[:reason]).to eq('conversa_adiada')
+    end
+  end
+
   describe '16/11: números da proposta na mensagem' do
     let(:proposal) do
       { 'economia' => { 'mensal' => 380 },

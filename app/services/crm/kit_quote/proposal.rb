@@ -72,14 +72,16 @@ class Crm::KitQuote::Proposal
   end
 
   def minimum_fee_block
-    { 'valor' => @budget.minimum_fee, 'kwh' => @budget.minimum_kwh, 'rede' => Crm::KitQuote::Budget::GRID_NAMES[@budget.grid] }
+    { 'valor' => @budget.minimum_fee, 'de' => @budget.minimum_fee_floor, 'kwh' => @budget.minimum_kwh,
+      'rede' => Crm::KitQuote::Budget::GRID_NAMES[@budget.grid] }
   end
 
-  # "Sua conta não zera: continua a taxa mínima da CPFL, de R$ 47,50 por mês (...). A economia já está com ela descontada."
+  # "Sua conta de luz não zera: continua a taxa mínima da CPFL, de R$ 80 a R$ 90 por mês (...). A economia já está com ela descontada."
   def minimum_fee_note
-    "Sua conta de luz não zera: continua a taxa mínima da CPFL, de #{@budget.money(@budget.minimum_fee)} por mês " \
-      "(o mínimo de #{@budget.minimum_kwh} kWh que toda ligação #{Crm::KitQuote::Budget::GRID_NAMES[@budget.grid]} paga), " \
-      'mais a iluminação pública que já vem na conta. A economia mostrada aqui já está com essa taxa descontada.'
+    floor = @budget.minimum_fee_floor
+    fee = floor ? "de #{@budget.money(floor)} a #{@budget.money(@budget.minimum_fee)}" : "de #{@budget.money(@budget.minimum_fee)}"
+    "Sua conta de luz não zera: continua a taxa mínima da CPFL, #{fee} por mês (o mínimo da ligação, com a iluminação " \
+      'pública e os impostos). A economia mostrada aqui já está com essa taxa descontada.'
   end
 
   def investment

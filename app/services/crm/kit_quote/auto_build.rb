@@ -9,8 +9,12 @@
 #     → Result(status: :falta_dados | :com_aumento | :fornecedor_fora | :erro, motivo: '...')
 # Aumento de consumo previsto (ar, carro elétrico, piscina...) entra pela tabela aprovada (Crm::KitQuote::Increase);
 # o que a tabela não cobre (:com_aumento) fica com o Fernando.
+# 📨 24/11/2026 (Guilherme: "precisamos enviar 100% dos orçamentos, a não ser os que a gente não faz, bateria etc."):
+# o aumento fora da tabela e o telhado que a ficha não reconhece ("nenhuma das 4", "não sei") NÃO seguram mais o
+# orçamento. Ele sai com o que a tabela cobre (+ a folga de 10%) e, no telhado, com telha cerâmica (a visita técnica
+# confere); o que ficou de fora vai em Result#conferir, e o job abre uma tarefa para a equipe conferir.
 class Crm::KitQuote::AutoBuild
-  Result = Struct.new(:status, :quote, :motivo, keyword_init: true) do
+  Result = Struct.new(:status, :quote, :motivo, :conferir, keyword_init: true) do
     def ok?
       status == :pronto
     end
@@ -27,17 +31,17 @@ class Crm::KitQuote::AutoBuild
   def self.missing(contact)
     data = Crm::KitQuote::ClientData.new(contact).call
     return 'falta o valor da conta de luz na ficha do cliente' unless data['hoje'].positive?
-    return 'falta o tipo de telhado na ficha do cliente' if data['telhado'].blank?
+    return 'falta o tipo de telhado na ficha do cliente' if data['telhado'].blank? && data['telhado_texto'].blank?
 
     nil
   end
 
+  # telhado que a ficha não reconhece: cerâmica, a mais comum (a visita técnica confere)
+  ROOF_FALLBACK = 'ceramica'.freeze
+
   def call
     problem = self.class.missing(@contact)
     return fail_with(:falta_dados, problem) if problem
-
-    unknown = increase[:desconhecido]
-    return fail_with(:com_aumento, "aumento de consumo fora da tabela (#{unknown}): o Fernando estima") if unknown
 
     build
   rescue Crm::KitQuote::Dre::NoAdequacyBand => e
@@ -52,14 +56,14 @@ class Crm::KitQuote::AutoBuild
   private
 
   def build # rubocop:disable Metrics/AbcSize
-    result = Crm::KitQuote::Engine.new(store.config, store.secrets, store).run(kwh_month: kwh, grid: GRID, roof: data['telhado'])
+    result = Crm::KitQuote::Engine.new(store.config, store.secrets, store).run(kwh_month: kwh, grid: GRID, roof: roof)
     option = best_option(result['opcoes'])
     return fail_with(:fornecedor_fora, 'nenhum fornecedor trouxe kit completo (kit + estrutura + frete)') unless option
 
     quotes = quotes_for(result['medias'], option)
     dre = calculator(quotes, option).result(nil, margin: Crm::KitQuote::Dre::STANDARD_MARGIN)
     documents = Crm::KitQuote::Proposal.new(
-      config: store.config, client: client, bill: bill, roof: data['telhado'], option: option, quotes: quotes, dre: dre
+      config: store.config, client: client, bill: bill, roof: roof, option: option, quotes: quotes, dre: dre
     ).call
     files = render(documents)
     return fail_with(:erro, @render_error || 'o gerador de PDF não respondeu') if files.blank?
@@ -67,14 +71,26 @@ class Crm::KitQuote::AutoBuild
     quote = Crm::KitQuote::Save.call(
       account: @account, contact: @contact, user: nil, documents: documents, dre: dre, files: files,
       floor: floor(quotes, option),
-      input: { 'cliente' => client, 'conta' => bill, 'telhado' => data['telhado'], 'opcao' => option, 'cotacoes' => quotes,
-               'automatico' => true }
+      input: { 'cliente' => client, 'conta' => bill, 'telhado' => roof, 'opcao' => option, 'cotacoes' => quotes,
+               'automatico' => true, 'conferir' => to_check.presence }.compact
     )
-    Result.new(status: :pronto, quote: quote)
+    Result.new(status: :pronto, quote: quote, conferir: to_check.presence)
   end
 
   def data
     @data ||= Crm::KitQuote::ClientData.new(@contact).call
+  end
+
+  def roof
+    data['telhado'].presence || ROOF_FALLBACK
+  end
+
+  # o que a equipe precisa conferir neste orçamento (vazio = nada)
+  def to_check
+    @to_check ||= [
+      ("aumento de consumo fora da tabela (#{increase[:desconhecido]}): o orçamento saiu só com o que a tabela cobre" if increase[:desconhecido]),
+      ("telhado não reconhecido (\"#{data['telhado_texto']}\"): o orçamento saiu com telha cerâmica" if data['telhado'].blank?)
+    ].compact
   end
 
   def store

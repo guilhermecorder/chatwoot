@@ -158,9 +158,10 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     }
   end
 
-  # mídias do roteiro desta conta (só as que têm arquivo de verdade)
+  # mídias do roteiro desta conta (só as que têm arquivo de verdade). As 'so_gatilho' saem
+  # sozinhas no lugar do balão-pergunta (Crm::ResponderAgentJob#send_replies): a IA não as chama.
   def script_medias
-    @script_medias ||= Crm::ScriptImages.for(@account)
+    @script_medias ||= Crm::ScriptImages.for(@account).reject { |m| m['so_gatilho'] }
   end
 
   def script_images
@@ -929,22 +930,13 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     }
   end
 
-  def gerar_orcamento # rubocop:disable Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def gerar_orcamento
     return refuse(AUTO_QUOTE_TOOL_NAME, 'Esta ferramenta não está disponível agora.') unless auto_quote_available?
 
     missing = Crm::KitQuote::AutoBuild.missing(@contact)
     return refuse(AUTO_QUOTE_TOOL_NAME, "Ainda não dá para gerar: #{missing}. Pergunte isso ao cliente (uma pergunta só).") if missing
 
-    increase = Crm::KitQuote::ClientData.new(@contact).call['aumento']
-    if increase && Crm::KitQuote::Increase.parse(increase)[:desconhecido]
-      opened = @live && open_handoff_quote!("Orçamento: aumento de consumo previsto · #{increase} · gerar contando com o aumento")
-      log_acao(AUTO_QUOTE_TOOL_NAME, true, "aumento fora da tabela (#{increase}): orçamento fica com a equipe#{' (simulado)' unless @live}",
-               'tarefa_aberta' => opened)
-      return { ok: true, automatico: false,
-               mensagem: 'Com aumento de consumo o orçamento é montado pela equipe. Diga que vai montar contando com o que ' \
-                         'ele comentou e que em alguns minutos manda aqui, combinado? Não prometa horário.' }
-    end
-
+    # 📨 24/11: aumento fora da tabela não segura mais o orçamento (sai com o que a tabela cobre; a equipe confere)
     unless @live
       log_acao(AUTO_QUOTE_TOOL_NAME, true, 'geraria e enviaria o orçamento automático (simulado)')
       return { simulado: true, ok: true, mensagem: 'Em sombra nada é gerado; ao vivo o orçamento sairia em alguns minutos.' }
@@ -965,15 +957,13 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
   # 13/11 (LIFE, caso do Regis): com o orçamento automático ligado a IA seguiu o roteiro antigo ("te mando entre hoje e
   # segunda" + tarefa "Orçamento: conta recebida") e o orçamento não saiu sozinho. Com a ferramenta disponível e a ficha
-  # completa, a tarefa de orçamento é recusada e a IA é mandada para o gerar_orcamento. Aumento fora da tabela segue
-  # com a equipe (tarefa liberada).
-  def auto_quote_instead(motivo) # rubocop:disable Metrics/CyclomaticComplexity
+  # completa, a tarefa de orçamento é recusada e a IA é mandada para o gerar_orcamento. 24/11: aumento fora da tabela
+  # também vai pelo automático (a equipe só confere depois).
+  def auto_quote_instead(motivo)
     return nil unless Crm::JourneyLabel.quote_task?(motivo) && auto_quote_available?
     return nil if Crm::KitQuote::AutoBuild.missing(@contact)
 
     increase = Crm::KitQuote::ClientData.new(@contact).call['aumento']
-    return nil if increase && Crm::KitQuote::Increase.parse(increase)[:desconhecido]
-
     if motivo.match?(/conta recebida/i) && increase.nil?
       return 'NÃO abra tarefa de orçamento: o orçamento é AUTOMÁTICO. Se ainda não perguntou, pergunte se ele vai aumentar o ' \
              'consumo (ar-condicionado, piscina…), sem falar de prazo; se ele já respondeu, chame gerar_orcamento agora.'

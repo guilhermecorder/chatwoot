@@ -56,9 +56,21 @@ RSpec.describe Crm::KitQuote::AutoBuild do
     expect(result.quote.payload.dig('conta', 'acrescimos')).to eq([{ 'rotulo' => '2 ar-condicionados (12.000 BTU)', 'valor' => 171.0 }])
   end
 
-  it 'aumento fora da tabela fica com a equipe' do
+  it '24/11: aumento fora da tabela sai com o que a tabela cobre e pede conferência', :aggregate_failures do
     ficha('conta' => 'R$ 300', 'telhado' => 'cerâmica', 'consumo_futuro' => 'vai pôr uma sauna')
-    expect(described_class.new(account, contact).call.status).to eq(:com_aumento)
+    result = described_class.new(account, contact).call
+    expect(result.status).to eq(:pronto)
+    expect(engine).to have_received(:run).with(kwh_month: (300 / 0.95).round, grid: 'bifasico', roof: 'ceramica')
+    expect(result.conferir.first).to include('fora da tabela', 'sauna')
+    expect(result.quote.payload['conferir']).to eq(result.conferir)
+  end
+
+  it '24/11: telhado que a ficha não reconhece sai como cerâmica e pede conferência', :aggregate_failures do
+    ficha('conta' => 'R$ 300', 'telhado' => 'nenhuma das 4 opções da imagem')
+    result = described_class.new(account, contact).call
+    expect(result.status).to eq(:pronto)
+    expect(engine).to have_received(:run).with(kwh_month: (300 / 0.95).round, grid: 'bifasico', roof: 'ceramica')
+    expect(result.conferir.first).to include('telhado não reconhecido', 'nenhuma das 4')
   end
 
   it 'sem kit completo de nenhum fornecedor = fornecedor fora' do

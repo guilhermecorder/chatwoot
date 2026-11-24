@@ -81,8 +81,19 @@ class Crm::KitQuote::Budget
     MINIMUM_KWH.fetch(grid)
   end
 
+  # 💡 24/11/2026 (Guilherme): "o mínimo da CPFL é sempre de uns 80 a 90 reais… para não ter surpresas futuras". A conta
+  # que continua não é só o mínimo de kWh: vem com a iluminação pública e os impostos. A taxa passa a ser o valor da
+  # config (padrão R$ 90, o teto da faixa: a economia mostrada nunca fica maior do que a real). Sem valor na config,
+  # volta à regra antiga (kWh mínimo da ligação × tarifa).
   def minimum_fee
-    (minimum_kwh * tariff).round(2)
+    fee = config['taxa_minima'].to_f
+    fee.positive? ? fee.round(2) : (minimum_kwh * tariff).round(2)
+  end
+
+  # o piso da faixa que a proposta mostra ("de R$ 80 a R$ 90"); sem piso, só o valor da taxa
+  def minimum_fee_floor
+    floor = config['taxa_minima_de'].to_f
+    floor.positive? && floor < minimum_fee ? floor.round(2) : nil
   end
 
   # o que o cliente deixa de pagar por mês: a conta (com os acréscimos) menos a taxa mínima que continua

@@ -18,6 +18,10 @@ RSpec.describe Crm::ScriptImages do
                                                                 { 'chave' => 'apresentacao_fernando', 'quando' => 'depois da conta',
                                                                   'arquivo' => 'brand-assets/life/roteiro/fernando-apresentacao.ogg',
                                                                   'legenda' => 'Ouve o Fernando contando quem é a Life:', 'faz_pergunta' => false },
+                                                                { 'chave' => 'consumo_fernando', 'quando' => 'passo 4',
+                                                                  'arquivo' => 'brand-assets/life/roteiro/fernando-consumo.ogg',
+                                                                  'gatilho' => 'ar.condicionado|piscina|aument\\w* (a|sua) conta',
+                                                                  'so_gatilho' => true },
                                                                 { 'chave' => 'quebrado', 'quando' => 'nunca', 'gatilho' => '(',
                                                                   'arquivo' => 'brand-assets/life/roteiro/google.jpg' }
                                                               ]
@@ -26,10 +30,12 @@ RSpec.describe Crm::ScriptImages do
 
   it 'separa imagem e áudio pela extensão e guarda o gatilho', :aggregate_failures do
     lista = described_class.for(account)
-    expect(lista.map { |m| [m['chave'], m['tipo']] }).to eq([%w[telhados imagem], %w[apresentacao_fernando audio], %w[quebrado imagem]])
+    esperado = [%w[telhados imagem], %w[apresentacao_fernando audio], %w[consumo_fernando audio], %w[quebrado imagem]]
+    expect(lista.map { |m| [m['chave'], m['tipo']] }).to eq(esperado)
     expect(lista.first['gatilho']).to eq('tipo de telhado|telha,? laje|laje ou|ou metalic')
     expect(described_class.images(account).pluck('chave')).to eq(%w[telhados quebrado])
-    expect(described_class.audios(account).pluck('chave')).to eq(%w[apresentacao_fernando])
+    expect(described_class.audios(account).pluck('chave')).to eq(%w[apresentacao_fernando consumo_fernando])
+    expect(lista.map { |m| m['so_gatilho'] }).to eq([false, false, true, false])
   end
 
   it 'manda o áudio com a frase de apresentação num balão antes (o WhatsApp não aceita legenda em áudio)', :aggregate_failures do
@@ -64,6 +70,16 @@ RSpec.describe Crm::ScriptImages do
       described_class.send!(conversation, described_class.images(account).first, 'atendente_agendamento')
       expect(described_class.triggered_by(conversation, 'O seu telhado é de telha, laje ou metálico?')).to be_nil
       expect(described_class.trigger_regexp('(')).to be_nil
+    end
+
+    it '24/11: vale para ÁUDIO também (pergunta do consumo vira o áudio do Fernando), uma vez por conversa', :aggregate_failures do
+      balao = "Pra eu montar do tamanho certo:\n\nalém do consumo de hoje, você pensa em instalar algo que aumente a conta? Ar-condicionado, piscina?"
+      media = described_class.triggered_by(conversation, balao)
+      expect(media&.dig('chave')).to eq('consumo_fernando')
+      expect(described_class.triggered_by(conversation, 'Anotei o ar-condicionado, beleza.')).to be_nil
+      described_class.send!(conversation, media, 'atendente_agendamento')
+      expect(conversation.messages.outgoing.last.attachments.first.file_type).to eq('audio')
+      expect(described_class.triggered_by(conversation, balao)).to be_nil
     end
   end
 end

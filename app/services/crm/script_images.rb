@@ -24,6 +24,11 @@
 # texto (ex.: "telha, laje ou metálico?"), Crm::ResponderAgentJob#send_replies
 # troca esse balão pela imagem com a legenda — uma vez por conversa.
 #
+# 🔊 24/11 (LIFE, áudios do Fernando: endereço e pergunta do consumo): o gatilho vale
+# também para ÁUDIO, e 'so_gatilho' => true tira a mídia da lista das ferramentas da IA.
+# Assim o áudio da pergunta do consumo sai NO LUGAR do balão-pergunta, na ordem certa
+# (depois do "Beleza! … a chance é grande"); pela ferramenta ele sairia antes dos balões.
+#
 # A mensagem leva o carimbo MEDIA_STAMP: a trava de "já respondi esta
 # mensagem" (Crm::ResponderAgentJob.already_replied?) ignora a imagem, senão os
 # balões de texto que vêm logo depois seriam barrados.
@@ -51,7 +56,7 @@ class Crm::ScriptImages
     { 'chave' => key, 'quando' => e['quando'].to_s.strip[0, 200], 'legenda' => e['legenda'].to_s.strip[0, 900],
       'faz_pergunta' => e['faz_pergunta'] != false, 'caminho' => path,
       'tipo' => AUDIO_TYPES.key?(File.extname(path.to_s).downcase) ? 'audio' : 'imagem',
-      'gatilho' => e['gatilho'].to_s.strip[0, 300] }
+      'gatilho' => e['gatilho'].to_s.strip[0, 300], 'so_gatilho' => e['so_gatilho'] == true }
   end
 
   def self.images(account)
@@ -62,15 +67,15 @@ class Crm::ScriptImages
     self.for(account).select { |i| i['tipo'] == 'audio' }
   end
 
-  # 🛟 a IA perguntou em TEXTO o que a imagem devia perguntar? Devolve a mídia cujo
+  # 🛟 a IA perguntou em TEXTO o que a imagem (ou o áudio) devia perguntar? Devolve a mídia cujo
   # 'gatilho' casa com o balão (sem acento, sem maiúscula), ainda não enviada nesta
   # conversa e só quando o balão é pergunta (termina com "?"): "Telha, anotado!" não dispara.
-  def self.triggered_by(conversation, text, medias = nil) # rubocop:disable Metrics/CyclomaticComplexity
+  def self.triggered_by(conversation, text, medias = nil)
     plain = I18n.transliterate(text.to_s).downcase
     return if plain.exclude?('?')
 
     (medias || self.for(conversation.account)).find do |m|
-      next false if m['gatilho'].blank? || m['tipo'] != 'imagem'
+      next false if m['gatilho'].blank?
 
       re = trigger_regexp(m['gatilho'])
       re.present? && plain.match?(re) && sent_count(conversation, m['chave']).zero?
