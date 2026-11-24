@@ -92,6 +92,20 @@ class Crm::FollowupAiNudgeService
     AGENT_KEY
   end
 
+  # 🧭 item 405 (motor por coluna): a cutucada sai pelo MESMO motor que atende
+  # a coluna em que o paciente está (ex.: ChatGPT em "Novos Contatos", Claude
+  # depois do orçamento). Coluna sem escolha, ou motor sem chave salva = o
+  # modelo do cartão "Lembrete com IA", como sempre.
+  def model
+    return @model if defined?(@model)
+
+    staged = Crm::StageEngine.owner_model_for(@conversation, ai_config).to_s
+    @model = staged.present? && Crm::LlmCatalog.valid_id?(staged) && model_runnable?(staged) ? staged : super
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::FollowupAiNudge] motor por coluna: #{e.message}"
+    @model = super
+  end
+
   def ask_ai(transcript)
     message = client.messages.create(
       model: model, max_tokens: 600, system_: cached_system(system_prompt),

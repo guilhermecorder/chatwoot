@@ -144,4 +144,45 @@ RSpec.describe 'CRM settings — Atendente de Agendamento', type: :request do
     post "#{base}/ai_simulate", params: { agent: 'atendente_agendamento', script_version: 'v9' }, headers: admin.create_new_auth_token, as: :json
     expect(response.parsed_body['script_version']).to eq('v1')
   end
+
+  # 🔁 23/11 (atendimento sem buraco): prazos de religar a IA, resgate e motor reserva (chaves da conta)
+  describe 'chaves de conta do atendimento sem buraco' do
+    it 'sem nada gravado devolve os padrões seguros' do
+      post "#{base}/update_ai", params: { effort: 'medium' }, headers: admin.create_new_auth_token, as: :json
+
+      expect(response.parsed_body['responder_settings']).to eq(
+        'responder_resume_after_human_minutes' => 2, 'responder_resume_after_handoff_minutes' => 10,
+        'responder_rescue_max_hours' => 23, 'responder_rescue_per_round' => 15, 'responder_engine_reserve' => true,
+        'responder_reserve_openai_model' => 'gpt-6.2-sol', 'responder_reserve_gemini_model' => 'gemini-4-carbon'
+      )
+    end
+
+    it 'grava o que chegou (dentro dos limites), 0 = nunca, em branco = volta ao padrão', :aggregate_failures do
+      post "#{base}/update_ai",
+           params: { responder_resume_after_human_minutes: 0, responder_resume_after_handoff_minutes: '20', responder_rescue_max_hours: 99,
+                     responder_rescue_per_round: 'abc', responder_engine_reserve: false, responder_reserve_openai_model: 'gemini-4-carbon',
+                     responder_reserve_gemini_model: 'gemini-4-hydrogen' },
+           headers: admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:ok)
+      saved = CrmSetting.find_by(account: account).ai_config
+      expect(saved).to include('responder_resume_after_human_minutes' => 0, 'responder_resume_after_handoff_minutes' => 20,
+                               'responder_rescue_max_hours' => 23, 'responder_engine_reserve' => false,
+                               'responder_reserve_gemini_model' => 'gemini-4-hydrogen')
+      expect(saved).not_to include('responder_rescue_per_round')       # texto que não é número: ignorado
+      expect(saved).not_to include('responder_reserve_openai_model')   # modelo de outro fornecedor: ignorado
+      expect(response.parsed_body['responder_settings']).to include('responder_resume_after_human_minutes' => 0,
+                                                                    'responder_rescue_per_round' => 15)
+
+      post "#{base}/update_ai", params: { responder_resume_after_human_minutes: '' }, headers: admin.create_new_auth_token, as: :json
+      expect(CrmSetting.find_by(account: account).ai_config).not_to include('responder_resume_after_human_minutes')
+      expect(response.parsed_body.dig('responder_settings', 'responder_resume_after_human_minutes')).to eq(2)
+    end
+
+    it 'quem não é administrador não altera' do
+      post "#{base}/update_ai", params: { responder_resume_after_human_minutes: 0 }, headers: agent_user.create_new_auth_token, as: :json
+
+      expect(response).not_to have_http_status(:ok)
+      expect(CrmSetting.find_by(account: account).ai_config).not_to include('responder_resume_after_human_minutes')
+    end
+  end
 end

@@ -21,6 +21,7 @@ import WhatsAppTemplateParser from 'dashboard/components-next/whatsapp/WhatsAppT
 import FollowupBotModal from 'dashboard/routes/dashboard/crm/components/FollowupBotModal.vue';
 import DataTreatmentTools from 'dashboard/routes/dashboard/crm/components/DataTreatmentTools.vue';
 import AiAgentsDashboard from './AiAgentsDashboard.vue';
+import AttendanceLab from './AttendanceLab.vue';
 import ShadowReviewModal from './ShadowReviewModal.vue';
 import AgentTestModal from './AgentTestModal.vue';
 import GuidancesPanel from './GuidancesPanel.vue';
@@ -29,6 +30,7 @@ import ConfirmationAgentCard from './ConfirmationAgentCard.vue';
 import NpsSurveyCard from './NpsSurveyCard.vue';
 import FollowupSmartCard from './FollowupSmartCard.vue';
 import AgentEngineExperiment from './AgentEngineExperiment.vue';
+import AgentStageEngines from './AgentStageEngines.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import {
   PERIOD_PRESETS,
@@ -94,6 +96,7 @@ const TABS = [
   'regras',
   'agentes',
   'painel_ia',
+  'laboratorio',
   'fluxos',
   'programacao',
   'resultados',
@@ -525,6 +528,9 @@ const ATENDENTE_EVENT_LABELS = {
   midia: '👂 leu áudio/imagem do paciente',
   teto_diario: '🛑 teto diário — pausado',
   erro: '❌ erro',
+  resgate: '🛟 resgate: paciente sem resposta voltou ao agente',
+  religou: '▶️ religou sozinho (equipe em silêncio)',
+  motor_reserva: '🛟 motor reserva respondeu no lugar',
 };
 const shadowTodayConversations = key =>
   (settings.value?.ai?.responder_shadow_today?.[key]?.conversation_ids || [])
@@ -3470,6 +3476,14 @@ onUnmounted(() => {
             <span class="i-lucide-activity text-xs" />Painel dos agentes
           </button>
           <button
+            v-if="visibleTabs.includes('laboratorio')"
+            class="cv-seg-item"
+            :class="{ 'cv-seg-on': activeTab === 'laboratorio' }"
+            @click="activeTab = 'laboratorio'"
+          >
+            <span class="i-lucide-flask-conical text-xs" />Laboratório
+          </button>
+          <button
             v-if="visibleTabs.includes('fluxos')"
             class="cv-seg-item"
             :class="{ 'cv-seg-on': activeTab === 'fluxos' }"
@@ -4840,7 +4854,7 @@ onUnmounted(() => {
                       </span>
                     </div>
 
-                    <!-- 🧪 item 400: teste A/B de motor (variante A × B por caixa ou sorteio) -->
+                    <!-- 🧪 itens 400/403: teste A/B do atendente (prompt e/ou motor; A × B por caixa ou sorteio) -->
                     <AgentEngineExperiment
                       v-if="openaiAllowed(key)"
                       :agent-key="key"
@@ -4852,6 +4866,21 @@ onUnmounted(() => {
                       :claude-models="AGENT_MODELS"
                       :openai-models="openaiModels"
                       :llm-catalog="llmCatalog"
+                      @open-lab="activeTab = 'laboratorio'"
+                    />
+
+                    <!-- 🧭 23/11: motor por coluna do CRM (um modelo de IA para cada coluna que o atendente lê) -->
+                    <AgentStageEngines
+                      v-if="openaiAllowed(key)"
+                      :agent-key="key"
+                      :claude-models="AGENT_MODELS"
+                      :openai-models="openaiModels"
+                      :llm-catalog="llmCatalog"
+                      :refresh-key="
+                        `${(settings?.ai?.agents?.[key]?.stage_ids || []).join(',')}|${
+                          settings?.ai?.agents?.[key]?.no_card ? 1 : 0
+                        }|${settings?.ai?.agents?.[key]?.model || ''}`
+                      "
                     />
 
                     <!-- 🗣️ Config específica do Atendente de Agendamento (rodada 188): sombra × ao vivo, caixas, colunas -->
@@ -8767,6 +8796,12 @@ onUnmounted(() => {
 
         <!-- ══ PAINEL DOS AGENTES DE IA (item 85, só admin) ══ -->
         <AiAgentsDashboard v-else-if="activeTab === 'painel_ia'" />
+
+        <!-- ══ 🧪 LABORATÓRIO DE ATENDIMENTO (item 403, só admin) ══ -->
+        <AttendanceLab
+          v-else-if="activeTab === 'laboratorio'"
+          @open-agent="activeTab = 'agentes'"
+        />
 
         <!-- ══ 🗺️ MAPA DE FLUXOS (item 170) — componente sob demanda ══ -->
         <div v-else-if="activeTab === 'fluxos'">

@@ -18,7 +18,11 @@ class Crm::AttendanceReflector
       elsif task.attendance == 'missed'
         stages_cfg['missed_stage_id']
       elsif task.attendance == 'attended'
-        stages_cfg['attended_stage_id']
+        # 🎯 item 402: "sem indicação" e "aguardando exame" têm coluna própria;
+        # sem coluna escolhida, vale a de "compareceu" (como era antes)
+        { 'not_indicated' => stages_cfg['not_indicated_stage_id'],
+          'awaiting_exam' => stages_cfg['awaiting_exam_stage_id'] }[task.surgery_indication].presence ||
+          stages_cfg['attended_stage_id']
       end
     return if target_id.blank?
 

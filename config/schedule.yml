@@ -194,7 +194,8 @@ crm_nps_survey_send_job:
   queue: low
 
 # 🛟 Resgate do Atendente de IA (item 291): a cada 5 min devolve ao agente as
-# conversas em que o paciente ficou sem resposta (3 min a 2 h); 1 vez por mensagem
+# conversas em que o paciente ficou sem resposta (3 min a 23 h); repete a mesma
+# mensagem a cada 30 min enquanto o motor falhar; até 15 conversas por rodada (23/11)
 crm_responder_rescue_job:
   cron: '*/5 * * * *'
   class: 'Crm::ResponderRescueJob'

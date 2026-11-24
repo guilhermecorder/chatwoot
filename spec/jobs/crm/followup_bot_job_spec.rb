@@ -244,4 +244,99 @@ RSpec.describe Crm::FollowupBotJob do
     described_class.perform_now
     expect(nudges(conv, bot).count).to eq(1)
   end
+
+  # 📆 23/11/2026: o robô só olhava conversas com movimento nos últimos 3 dias,
+  # então etapa de mensagem modelo de 7, 10 ou 30 dias NUNCA saía (em produção
+  # os robôs de 7 e 30 dias tinham o registro vazio). Agora o alcance acompanha
+  # a etapa mais longa, e das conversas antigas só entra quem está cruzando o prazo.
+  describe 'etapa longa de mensagem modelo (7 dias, 30 dias)' do
+    let(:wa_inbox) do
+      create(:channel_whatsapp, account: account, provider: 'whatsapp_cloud', sync_templates: false,
+                                validate_provider_config: false).inbox
+    end
+    let(:template) { { 'name' => 'orc_7d', 'language' => 'pt_BR', 'processed_params' => { 'body' => { '1' => '[nome]' } } } }
+
+    def long_reach!(enabled: true)
+      CrmSetting.find_or_create_by!(account_id: account.id).update!(agenda_config: { 'followup_smart' => { 'etapas_longas' => enabled } })
+    end
+
+    before { long_reach! }
+
+    def model_step(days, from: nil)
+      { 'delay_value' => days, 'delay_unit' => 'days', 'message' => 'Oi [nome], tudo bem?', 'template_params' => template,
+        'delay_from' => from }.compact
+    end
+
+    it 'sai para quem completou 7 dias de silêncio agora; quem passou do prazo há dias não recebe atrasado', :aggregate_failures do
+      # hoje = terça 13/10 14:00. Clínica falou por último em 06/10 13:30 → os 7 dias vencem 13/10 13:30
+      na_hora = silent_conversation('Renata', answered: '2026-10-06 13:30', the_inbox: wa_inbox)
+      # venceu ontem: entra na rodada, mas é tratada sem envio (anti-rajada)
+      atrasada = silent_conversation('Bruno', answered: '2026-10-05 13:30', the_inbox: wa_inbox)
+      # só 5 dias de silêncio: ainda não é hora e nem entra na rodada
+      cedo = silent_conversation('Carla', answered: '2026-10-08 13:30', the_inbox: wa_inbox)
+      bot = bot_with([model_step(7)], name: '7 dias')
+
+      described_class.perform_now
+
+      sent = nudges(na_hora, bot).sole
+      expect(sent.additional_attributes.dig('template_params', 'name')).to eq('orc_7d')
+      expect(nudges(atrasada)).to be_empty
+      expect(nudges(cedo)).to be_empty
+      expect(state_of(atrasada, bot)['sent']).to eq([0]) # tratada: não volta a tentar
+    end
+
+    it 'alcança também a conversa que já foi RESOLVIDA (em produção quase todas são)' do
+      conv = silent_conversation('Renata', answered: '2026-10-06 13:30', the_inbox: wa_inbox)
+      conv.update!(status: :resolved)
+      conv.update!(last_activity_at: at('2026-10-06 13:30'))
+      bot = bot_with([model_step(7)], name: '7 dias')
+
+      described_class.perform_now
+
+      expect(nudges(conv, bot).count).to eq(1)
+    end
+
+    it 'com a chave DESLIGADA (o padrão) nada muda: conversa parada há 7 dias não entra na rodada', :aggregate_failures do
+      long_reach!(enabled: false)
+      conv = silent_conversation('Renata', answered: '2026-10-06 13:30', the_inbox: wa_inbox)
+      bot = bot_with([model_step(7)], name: '7 dias')
+
+      described_class.perform_now
+
+      expect(nudges(conv)).to be_empty
+      expect(described_class.new.send(:reach_scope, bot, bot.ordered_steps).pluck(:id)).to be_empty
+    end
+
+    it 'conversa antiga fora da faixa de qualquer etapa não entra na rodada (o robô não relê a base inteira)' do
+      silent_conversation('Renata', answered: '2026-10-06 13:30', the_inbox: wa_inbox)
+      velha = silent_conversation('Antiga', answered: '2026-09-20 10:00', the_inbox: wa_inbox)
+      bot = bot_with([model_step(7)], name: '7 dias')
+
+      ids = described_class.new.send(:reach_scope, bot, bot.ordered_steps).pluck(:id)
+
+      expect(ids).not_to include(velha.id)
+    end
+
+    it 'robô só de etapas curtas continua olhando só os últimos 3 dias' do
+      silent_conversation('Renata', answered: '2026-10-06 13:30', the_inbox: wa_inbox)
+      bot = bot_with([text_step(1)])
+
+      expect(described_class.new.send(:reach_scope, bot, bot.ordered_steps).pluck(:id)).to be_empty
+    end
+
+    it 'etapa "desde a entrada na coluna" alcança o card que entrou na coluna há 10 dias', :aggregate_failures do
+      pipeline = Crm::Pipeline.create!(account: account, name: 'Funil', position: 1)
+      desmarcou = Crm::Stage.create!(pipeline: pipeline, name: 'Desmarcou', position: 1, color: '#059669')
+      conv = silent_conversation('Paula', answered: '2026-10-03 13:20', the_inbox: wa_inbox)
+      card = Crm::Contact.create!(contact: conv.contact, pipeline: pipeline, stage: desmarcou)
+      moved = at('2026-10-03 13:30')
+      card.update_columns(stage_moved_at: moved, created_at: moved) # rubocop:disable Rails/SkipsModelValidations
+      Crm::StageLog.where(crm_contact_id: card.id).update_all(entered_at: moved) # rubocop:disable Rails/SkipsModelValidations
+      bot = bot_with([model_step(10, from: 'stage_entry')], name: '10 dias', stage_id: desmarcou.id)
+
+      described_class.perform_now
+
+      expect(nudges(conv, bot).count).to eq(1)
+    end
+  end
 end

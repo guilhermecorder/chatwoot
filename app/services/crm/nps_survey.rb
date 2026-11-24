@@ -305,12 +305,13 @@ class Crm::NpsSurvey # rubocop:disable Metrics/ClassLength
   end
 
   # o Atendente de Pós-operatório vai responder nesta conversa?
-  def self.pos_op_answers?(conversation) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def self.pos_op_answers?(conversation) # rubocop:disable Metrics/CyclomaticComplexity
     agent = (CrmSetting.find_by(account_id: conversation.account_id)&.ai_config || {}).dig('agents', 'atendente_pos_op') || {}
     return false unless agent['enabled'] == true && Array(agent['inbox_ids']).map(&:to_i).include?(conversation.inbox_id)
     return false unless Crm::ResponderAgentJob.live_mode?(agent)
 
-    (conversation.additional_attributes || {}).dig(Crm::ResponderAgentJob::STATE_KEY, 'paused') != true
+    # 🔁 23/11: pausa com prazo vencido não conta (o atendente vai responder)
+    !Crm::ResponderPause.active?(conversation)
   end
 
   def self.record_answer_state(contact, band)

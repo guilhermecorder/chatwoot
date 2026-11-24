@@ -41,9 +41,20 @@ RSpec.describe Crm::CevicoScript do
       expect(text).to include('OCT de segmento R$ 700').and include('curva tensional diária R$ 200')
       expect(text).to include('CERATOCONE').and include('LENTE ESCLERAL').and include('Vinicius Almeida')
       expect(text).to include('== VÍDEOS DOS MÉDICOS ==').and include('Dr. Gustavo Bittar · refrativa: https://www.instagram.com/reel/DPUSQsyAjdK/')
-      expect(described_class.stage_prompt(account, 'atendente_agendamento', version)).to include('D2. VÍDEO DO MÉDICO')
+      # v1: passo D2 (pergunta antes do nome). v2 (Roteiro 3, 23/11): o vídeo vai DEPOIS da confirmação
+      video_step = version == 'v1' ? 'D2. VÍDEO DO MÉDICO' : 'mande o vídeo'
+      expect(described_class.stage_prompt(account, 'atendente_agendamento', version)).to include(video_step)
     end
     expect(described_class::SECTIONS.pluck('key')).to include('doctor_videos')
+  end
+
+  it 'consulta de rotina: a clínica atende por R$ 250 e a pessoa sai com o laudo (v1 e v2)', :aggregate_failures do
+    %w[v1 v2].each do |version|
+      text = described_class.text(account, version)
+      expect(text).to include('CONSULTA DE ROTINA').and include('A consulta oftalmológica de rotina é R$ 250')
+      expect(text).to include('sai da consulta com o laudo médico').and include('nunca dispense')
+      expect(text).not_to include('QUEM JÁ DISSE QUE NÃO VAI OPERAR')
+    end
   end
 
   it 'seção personalizada vence o padrão; seção em branco volta ao padrão' do

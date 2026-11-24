@@ -90,8 +90,8 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
 
   def sanitize_smart(current) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity
     raw = params.require(:followup_smart)
-    out = current.slice('leitura', 'fim_de_semana', 'lead_frio', 'reativacao')
-    %w[leitura fim_de_semana lead_frio].each { |k| out[k] = BOOL.cast(raw[k]) == true if raw.key?(k) }
+    out = current.slice('leitura', 'fim_de_semana', 'lead_frio', 'etapas_longas', 'reativacao')
+    %w[leitura fim_de_semana lead_frio etapas_longas].each { |k| out[k] = BOOL.cast(raw[k]) == true if raw.key?(k) }
     return out unless raw.key?(:reativacao)
 
     re = raw[:reativacao]

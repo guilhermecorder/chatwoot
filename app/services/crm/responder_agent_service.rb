@@ -99,6 +99,8 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     @script_version = Crm::CevicoScript.normalize_version(
       script_version.presence || conversation.additional_attributes&.[]('cevico_simulado_script')
     )
+    # 🧪 item 403: conversa REAL dentro de um teste A/B lê o Roteiro da variante dela
+    @script_version = Crm::EngineExperiment.script_for(Crm::EngineExperiment.active(agent_config), experiment_arm) if experiment_arm
   end
 
   def call # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
@@ -112,7 +114,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     # 🧠 22/11: Gemini (ou qualquer outro modelo fora do Claude) pela tomada universal
     text = if openai_engine? then openai_reply_or_fallback(transcript)
            elsif gateway_engine? then gateway_reply_or_fallback(transcript)
-           else anthropic_reply(transcript)
+           else claude_reply_or_reserve(transcript) # 🛟 23/11: Claude falhou → ChatGPT ou Gemini no lugar
            end
     return { error: 'Resposta vazia da IA.' } if text.blank?
 
@@ -133,10 +135,10 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     MODELS.include?(candidate) || Crm::LlmCatalog.valid_id?(candidate)
   end
 
-  # 🧪 item 400: variante do teste A/B de motor desta conversa ('a' | 'b' | nil).
-  # Só conversa REAL entra (o 🧪 Testar agente tem o seletor de motor dele). Se a
-  # variante B é do ChatGPT e a chave da OpenAI sumiu, a conversa fica FORA do
-  # teste (segue no modelo do cartão e não suja o placar).
+  # 🧪 itens 400/403: variante do teste A/B desta conversa ('a' | 'b' | nil).
+  # Só conversa REAL entra (o 🧪 Testar agente tem os seletores dele). Se a
+  # variante B pede um motor cuja chave sumiu, a conversa fica FORA do teste
+  # (segue no oficial e não suja o placar).
   def experiment_arm
     return @experiment_arm if defined?(@experiment_arm)
 
@@ -154,9 +156,11 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   private
 
   # 🎓 item 389: aprendizados aprovados do Motor de Educação — só nas caixas
-  # piloto e só no Roteiro 1 (o Roteiro 2 é laboratório à parte)
+  # piloto e só no Roteiro 1 (o Roteiro 2 é laboratório à parte). 🧪 item 403:
+  # numa conversa REAL do teste A/B as duas variantes recebem o mesmo bloco —
+  # a única diferença entre elas tem que ser o que está sendo testado
   def motor_block
-    return '' if @script_version != 'v1'
+    return '' if @script_version != 'v1' && experiment_arm.nil?
 
     Crm::EducationEngine.prompt_block(@conversation, @agent_key).to_s
   end
@@ -258,6 +262,74 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     claude_fallback!(e) { anthropic_reply(transcript) }
   end
 
+  # ── 🛟 MOTOR RESERVA DO CLAUDE (23/11, atendimento sem buraco) ───────────
+  # O sentido que faltava: quando o motor principal é o Claude e a chamada
+  # falha (limite de uso da chave, serviço fora do ar, rede), outro fornecedor
+  # responde AQUELA mensagem na mesma hora: primeiro o ChatGPT, depois o
+  # Gemini, cada um só se a chave dele estiver salva. Em 23/11 a chave da
+  # Anthropic bateu no limite e todo paciente ficou sem resposta.
+  # Sem laço: cada reserva é tentada UMA vez e o erro dela não chama outra
+  # rede de segurança (aqui dentro o Claude já está fora do jogo). Mesmas
+  # cercas do sentido inverso: nunca no 🧪 teste (o erro tem que aparecer) e
+  # nunca depois de uma ferramenta já ter rodado (não repete remarcação).
+  # Desliga com ai_config['responder_engine_reserve'] = false; os modelos
+  # podem ser trocados em responder_reserve_openai_model / _gemini_model.
+  # Tempo: uma queda rápida (erro 400/429) cabe com folga na trava da conversa;
+  # o pior caso teórico (três motores estourando o tempo) passa dela e o
+  # resgate cobre.
+  RESERVE_MODELS = { 'openai' => 'gpt-6.2-sol', 'google' => 'gemini-4-carbon' }.freeze
+  RESERVE_MODEL_KEYS = { 'openai' => 'responder_reserve_openai_model', 'google' => 'responder_reserve_gemini_model' }.freeze
+
+  def claude_reply_or_reserve(transcript)
+    anthropic_reply(transcript)
+  rescue Anthropic::Errors::APIError => e
+    reserve_reply!(e, transcript)
+  end
+
+  def reserve_reply!(error, transcript)
+    candidates = reserve_models
+    raise error if @simulation || candidates.empty? || tool_ran?
+
+    failures = ["#{provider_label(model)} falhou (#{error.message.to_s.truncate(60)})"]
+    candidates.each do |candidate|
+      return reserve_attempt(candidate, transcript, failures)
+    rescue Crm::LlmEngines::OpenaiResponses::Error, Anthropic::Errors::APIError => e
+      @fallback_reason = nil
+      failures << "#{provider_label(candidate)} também (#{e.message.to_s.truncate(60)})"
+      break if tool_ran? # uma ferramenta já rodou: não repete com o próximo
+    end
+    raise StandardError, failures.join('; ')
+  end
+
+  def reserve_attempt(candidate, transcript, failures)
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] #{failures.join('; ')} — #{provider_label(candidate)} responde no lugar"
+    @fallback_reason = "#{failures.join('; ')}; #{provider_label(candidate)} respondeu no lugar"
+    @fallback_model = candidate
+    @client = nil
+    # os 4 modelos do motor ChatGPT dedicado vão por ele; o resto (Gemini) pela tomada universal
+    Crm::LlmEngines.openai?(candidate) ? openai_reply(transcript) : anthropic_reply(transcript)
+  end
+
+  # alguma ferramenta (buscar, remarcar, cancelar…) já rodou nesta resposta?
+  def tool_ran?
+    tools&.acoes&.any? == true
+  end
+
+  # reservas que podem rodar AGORA (chave do fornecedor salva), na ordem: ChatGPT, Gemini
+  def reserve_models
+    return [] if ai_config['responder_engine_reserve'] == false
+
+    RESERVE_MODELS.filter_map do |provider, default|
+      chosen = ai_config[RESERVE_MODEL_KEYS[provider]].to_s.strip
+      candidate = Crm::LlmCatalog.valid_id?(chosen) && Crm::LlmCatalog.provider(chosen) == provider ? chosen : default
+      candidate if Crm::LlmCatalog.usable?(ai_config, candidate)
+    end
+  end
+
+  def provider_label(model_id)
+    Crm::LlmCatalog::PROVIDERS.dig(Crm::LlmCatalog.provider(model_id), :label) || model_id
+  end
+
   def openai_reply(transcript) # rubocop:disable Metrics/AbcSize
     engine = Crm::LlmEngines::OpenaiResponses.new(api_key: openai_api_key, model: model, effort: effort)
     definitions = tools ? Crm::LlmEngines::OpenaiResponses.tool_definitions(tools.definitions) : nil
@@ -308,25 +380,58 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   def model
     return @fallback_model if @fallback_model
     return @model_override if @model_override
-    return experiment_model_b if experiment_arm == 'b'
+    return experiment_model_b if experiment_b_motor?
 
+    # 🧭 23/11: motor POR COLUNA do CRM (Crm::StageEngine) > o modelo do cartão
     # 🧠 22/11: qualquer modelo dos 3 fornecedores, com a chave salva (Crm::AiAgentConfig#model)
-    super
+    stage_model || super
   end
 
-  # 🧪 item 400: o modelo da variante B, se este agente pode usá-lo agora
-  def experiment_model_b
-    candidate = Crm::EngineExperiment.active(agent_config)&.dig('model_b').to_s
-    return nil unless engine_model?(candidate) && model_runnable?(candidate)
+  # 🧭 23/11 (motor por coluna): o modelo escolhido para a coluna em que o card
+  # deste paciente está, se ele pode rodar agora (id reconhecido + chave do
+  # fornecedor salva). Só em conversa REAL: o 🧪 Testar agente tem o seletor
+  # dele. Calculado uma vez por resposta (a coluna não muda no meio dela).
+  def stage_model
+    return @stage_model if defined?(@stage_model)
 
-    candidate
+    @stage_model = resolve_stage_model
+  end
+
+  def resolve_stage_model
+    return nil if @simulation || !Crm::LlmEngines.openai_agent?(@agent_key)
+
+    candidate = Crm::StageEngine.model_for(@conversation, agent_config).to_s
+    candidate if engine_model?(candidate) && model_runnable?(candidate)
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] motor por coluna: #{e.message}"
+    nil
+  end
+
+  # 🧪🧭 item 405: a variante B troca o motor NESTA conversa? Só se ela tem
+  # motor próprio e a coluna do card está entre as escolhidas para a troca
+  # (sem colunas escolhidas = em todas). Fora disso a B segue o mesmo mapa de
+  # motor por coluna da A — é o que deixa o teste de prompt limpo.
+  def experiment_b_motor?
+    experiment_arm == 'b' && experiment_model_b.present? &&
+      Crm::EngineExperiment.model_b_here?(Crm::EngineExperiment.active(agent_config), @conversation)
+  end
+
+  # 🧪 item 400: o modelo da variante B, se este agente pode usá-lo agora.
+  # 🧪 item 403: em branco = a B usa o MESMO motor da A (teste só de prompt)
+  def experiment_model_b
+    return @experiment_model_b if defined?(@experiment_model_b)
+
+    candidate = Crm::EngineExperiment.active(agent_config)&.dig('model_b').to_s
+    @experiment_model_b = candidate.present? && engine_model?(candidate) && model_runnable?(candidate) ? candidate : nil
   end
 
   def resolve_experiment_arm
     return nil if @simulation || !Crm::LlmEngines.openai_agent?(@agent_key)
 
+    experiment = Crm::EngineExperiment.active(agent_config)
     arm = Crm::EngineExperiment.arm_for(@conversation, @agent_key, agent_config)
-    arm == 'b' && experiment_model_b.nil? ? nil : arm
+    # a B pede um motor que não dá para usar agora: conversa fora do teste
+    arm == 'b' && experiment['model_b'].present? && experiment_model_b.nil? ? nil : arm
   end
 
   # soma o custo da chamada do Claude no total desta resposta (item 400)
@@ -389,6 +494,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       - Paciente (cadastro): #{contact&.name.presence || 'sem nome'} · telefone deste WhatsApp: #{phone || 'desconhecido (peça o número antes de agendar)'}
       - Coluna do paciente no CRM: #{card_stage_name || 'sem card (contato novo)'}
       - Consulta futura já marcada: #{future_appointment_text}
+      #{attention_lines}
       #{OTHER_PERSON_RULE unless voice?}
       #{"- Motivo da ligação: #{call_objective}\n" if voice?}#{pos_op_context if pos_op?}
       HORÁRIOS DISPONÍVEIS (vagas LIVRES reais das próximas 4 semanas; ofereça no máximo 2 por vez, só destes; para um dia específico fora desta lista use a ferramenta horarios_do_dia — agendamento futuro é liberado):#{slots_note}
@@ -396,6 +502,74 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
       #{Crm::AgendaSlots.rules_block(@account)}
     CTX
+  end
+
+  # ── 🔁 23/11 (atendimento sem buraco): avisos de SITUAÇÃO para o modelo ────
+  # Só ao vivo (sombra e 🧪 teste seguem iguais). Duas situações:
+  # 1) a IA chamou a equipe, ninguém respondeu no prazo e ela voltou a atender
+  #    (Crm::ResponderPause deixa a marca handoff_pending na conversa);
+  # 2) o paciente está esperando há mais de 15 min (motor fora do ar, pausa
+  #    que venceu, mensagem fora do horário): pede desculpas em meia frase e
+  #    continua de onde parou. Só fala em "instabilidade do sistema" quando
+  #    houve mesmo erro do motor registrado para aquela espera; nos outros
+  #    casos pede desculpas pela demora sem inventar motivo.
+  LATE_AFTER = 15.minutes
+  HANDOFF_PENDING_LINE = '- ATENÇÃO: você já encaminhou este assunto para a equipe e ninguém respondeu ainda. Não prometa de novo ' \
+                         'que a equipe vai responder; resolva o que estiver ao seu alcance com o roteiro e ofereça o próximo passo.'.freeze
+  LATE_TAIL = 'e continue do ponto exato em que a conversa estava, sem se apresentar de novo se já se apresentou e sem recomeçar.'.freeze
+  FIRST_CONTACT_TAIL = ' Como este é o primeiro contato do paciente (ele ainda não recebeu nenhuma resposta nossa), faça a recepção ' \
+                       'normal do roteiro logo depois do pedido de desculpas.'.freeze
+
+  def attention_lines
+    return '' unless @live && !voice?
+
+    [(HANDOFF_PENDING_LINE if Crm::ResponderPause.handoff_pending?(@conversation)), late_reply_line].compact.join("\n")
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] avisos de situação: #{e.message}"
+    ''
+  end
+
+  # mensagens do paciente ainda SEM resposta (depois da última fala da
+  # clínica), só das últimas 24 h: [[id, hora], …] + se é o primeiro contato
+  def unanswered_incoming
+    messages = @conversation.messages.where(private: false)
+    last_out = messages.where(message_type: :outgoing).maximum(:id)
+    waiting = messages.where(message_type: :incoming).where('id > ?', last_out.to_i).where('created_at > ?', 24.hours.ago)
+                      .order(:id).limit(20).pluck(:id, :created_at)
+    [waiting, last_out.nil?]
+  end
+
+  # De quando contar o atraso: se o motor FALHOU em alguma mensagem ainda sem
+  # resposta (desfecho 'erro' gravado pelo job), conta da mais antiga delas e a
+  # causa é instabilidade; senão conta da última mensagem do paciente (a que
+  # está sendo respondida) e o pedido de desculpas não inventa motivo.
+  def late_reply_line
+    waiting, first_contact = unanswered_incoming
+    return nil if waiting.empty?
+
+    failed = waiting.find { |id, _| Crm::ResponderAgentJob.outcome(id) == 'erro' }
+    waited = Time.current - (failed || waiting.last).last
+    return nil if waited < LATE_AFTER
+
+    opening = if failed
+                "- ATENÇÃO: esta resposta está saindo com atraso de #{waited_text(waited)} por uma instabilidade do nosso sistema. " \
+                  "Comece com um pedido de desculpas em meia frase (ex.: 'Desculpa a demora, tivemos uma instabilidade no sistema e " \
+                  "só agora consegui te responder.')"
+              else
+                "- ATENÇÃO: esta resposta está saindo com atraso de #{waited_text(waited)}. Comece com um pedido de desculpas em " \
+                  "meia frase (ex.: 'Desculpa a demora, só agora consegui te responder.'), sem inventar motivo para a demora,"
+              end
+    "#{opening} #{LATE_TAIL}#{FIRST_CONTACT_TAIL if first_contact}"
+  end
+
+  # "25 minutos" · "1 hora" · "3 horas e 20 minutos"
+  def waited_text(seconds)
+    minutes = (seconds / 60).round
+    return "#{minutes} minutos" if minutes < 60
+
+    hours, rest = minutes.divmod(60)
+    text = "#{hours} hora#{'s' unless hours == 1}"
+    rest >= 5 ? "#{text} e #{rest} minutos" : text
   end
 
   # 💸 item 232 (25/09): a CONVERSA vai primeiro, em bloco próprio marcado

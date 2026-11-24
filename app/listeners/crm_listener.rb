@@ -472,10 +472,17 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
       return if key.blank?
 
       if Crm::ResponderAgentJob.live_mode?(agents[key])
-        state = conversation.additional_attributes&.[](RESPONDER_STATE_KEY) || {}
+        # 🔁 23/11 (atendimento sem buraco): pausa com prazo VENCIDO (equipe em
+        # silêncio há N min) é limpa aqui mesmo e a mensagem segue para o agente
+        state = Crm::ResponderPause.refresh!(conversation, cfg)
         # 🚨 auditoria 10/2026 (#443): pausado por URGÊNCIA clínica, a mensagem
         # ainda vai ao job — ele só repete a orientação de pronto atendimento
-        return if state['paused'] && !state['urgente']
+        if state['paused'] && !state['urgente']
+          # a IA chamou a equipe e o paciente escreveu: se ninguém responder
+          # no prazo, o Crm::ResponderResumeJob devolve a conversa ao agente
+          Crm::ResponderPause.schedule_handoff_resume(conversation, state, cfg)
+          return
+        end
       end
       # item 200: responde entre 5 e 10 s da mensagem do paciente (config
       # reply_delay_seconds do agente; padrão 6 s; junta mensagens picadas)
@@ -494,13 +501,20 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
         # 🚨 auditoria 10/2026 (#443): pausada por URGÊNCIA clínica e uma pessoa
         # da equipe respondeu: a urgência agora é dela — a pausa continua, mas
         # sem a marca (o job para de repetir a orientação de pronto atendimento
-        # no meio da conversa humana)
-        set_responder_pause(conversation, true, reason: 'humano_assumiu', by: human_name(message))
+        # no meio da conversa humana). 🔁 23/11: esta pausa NÃO religa sozinha
+        # (sem_prazo): caso clínico urgente fica com a pessoa até ela religar.
+        set_responder_pause(conversation, true, reason: 'humano_assumiu', by: human_name(message), no_expiry: true)
         note_instagram(conversation, "🙋 #{human_name(message)} assumiu esta conversa — o agente para de repetir a orientação de urgência.")
       elsif !state['paused']
         set_responder_pause(conversation, true, reason: 'humano_assumiu', by: human_name(message))
         note_instagram(conversation, "⏸ Atendente IA do WhatsApp pausado — #{human_name(message)} assumiu esta conversa. " \
-                                     'Ligue de novo pela chavinha no topo da conversa (ou mande 👍).')
+                                     "#{responder_resume_hint(cfg)}")
+        Crm::ResponderPause.schedule_resume(conversation, cfg, 'responder_resume_after_human_minutes')
+      elsif responder_pause_renewable?(state)
+        # 🔁 23/11: a equipe escreveu de novo (ou respondeu ao pedido da IA): o
+        # prazo de religar conta a partir DESTA mensagem. Sem nota repetida.
+        set_responder_pause(conversation, true, reason: 'humano_assumiu', by: human_name(message))
+        Crm::ResponderPause.schedule_resume(conversation, cfg, 'responder_resume_after_human_minutes')
       end
     end
   rescue StandardError => e
@@ -548,9 +562,29 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     false
   end
 
-  def set_responder_pause(conversation, paused, reason: nil, by: nil)
+  # no_expiry (23/11): pausa que NÃO religa sozinha (quem assumiu uma urgência clínica)
+  def set_responder_pause(conversation, paused, reason: nil, by: nil, no_expiry: false)
     value = paused ? { 'paused' => true, 'reason' => reason, 'by' => by, 'at' => Time.current.iso8601 }.compact : {}
+    value['sem_prazo'] = true if paused && no_expiry
     Cevico::AttributeMerge.merge!(conversation) { |attrs| attrs.merge(RESPONDER_STATE_KEY => value) }
+  end
+
+  # 🔁 23/11: pausa que a mensagem seguinte da equipe RENOVA — a de quem já
+  # assumiu (o prazo recomeça) e a da IA que chamou a equipe (a pessoa
+  # respondeu ao pedido: agora é ela quem conduz). Chavinha, teto diário e a
+  # pausa sem prazo (urgência) ficam como estão.
+  def responder_pause_renewable?(state)
+    return false if state['sem_prazo']
+
+    [Crm::ResponderPause::HUMAN, Crm::ResponderPause::HANDOFF].include?(state['reason'])
+  end
+
+  # fim da nota de pausa: diz quando a IA volta sozinha (ou como religar à mão)
+  def responder_resume_hint(cfg)
+    minutes = Crm::ResponderPause.setting(cfg, 'responder_resume_after_human_minutes')
+    return 'Ligue de novo pela chavinha no topo da conversa (ou mande 👍).' unless minutes.positive?
+
+    "Volta sozinho #{minutes} min depois da última mensagem da equipe; para deixar desligado, use a chavinha no topo da conversa."
   end
 
   # item 212: mensagem ENVIADA por uma pessoa da equipe? Tudo o que é
@@ -562,6 +596,11 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
     return false unless message.sender.is_a?(User)
 
     attrs = message.additional_attributes || {}
+    # 📨 23/11: MODELO do WhatsApp (confirmação de cirurgia, dados da cirurgia…)
+    # é disparo, não conversa: sai pela API em nome de um usuário (ou pela
+    # tela) só com template_params, sem as marcas de robô. Não é "humano assumiu".
+    return false if attrs['template_params'].present? || attrs[:template_params].present?
+
     AUTOMATED_MARKS.none? { |k| attrs[k].present? }
   end
 
@@ -604,7 +643,10 @@ class CrmListener < BaseListener # rubocop:disable Metrics/ClassLength
   # campanha, robô de follow-up, agente de IA) não é "atendente respondeu":
   # não dispara automação de coluna por mensagem ENVIADA — a menos que a
   # automação peça de propósito (action_config.include_automated = true).
-  AUTOMATED_MARKS = %w[cevico_auto cevico_journey cevico_followup_bot_id cevico_ia_agent].freeze
+  # 23/11: cevico_followup_reativacao (modelo de quem "adiou") também é disparo
+  # automático — sem a marca aqui, automação de coluna de "mensagem enviada"
+  # disparava como se a equipe tivesse escrito
+  AUTOMATED_MARKS = %w[cevico_auto cevico_journey cevico_followup_bot_id cevico_followup_reativacao cevico_ia_agent].freeze
   def automated_outgoing?(automation, message)
     return false unless message.message_type == 'outgoing'
     return false if automation.action_config&.dig('include_automated') == true

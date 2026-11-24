@@ -435,6 +435,7 @@ const FEATURE_BY_ITEM_NAME = {
   Agenda: 'agenda',
   'Cevico Appointments': 'appointments',
   'Cevico Oftalmofacil': 'oftalmofacil',
+  'Cevico Surgery Indications': 'indicacoes',
   Academy: 'academy',
   Settings: 'settings',
   Goals: 'goals',
@@ -483,6 +484,7 @@ const DEFAULT_MENU_ORDER = [
   'Tasks',
   'Agenda',
   'Cevico Appointments',
+  'Cevico Surgery Indications',
   'Cevico Appointment Alerts',
   'Cevico Oftalmofacil',
   'Cevico Pages',
@@ -499,6 +501,7 @@ const AGENT_MENU_ORDER = [
   'Cevico Calls',
   'Agenda',
   'Cevico Appointments',
+  'Cevico Surgery Indications',
   'Cevico Appointment Alerts',
   'Cevico Oftalmofacil',
   'Goals',
@@ -635,6 +638,7 @@ const MENU_LAYOUT = [
       'Cevico Calls',
       'Agenda',
       'Cevico Appointments',
+      'Cevico Surgery Indications',
       'Cevico Appointment Alerts',
       'Cevico Oftalmofacil',
       'Canned',
@@ -655,6 +659,7 @@ const MENU_LAYOUT = [
       'Segmentação', // 🧪 item 383: testes de mensagem + escala
       'Automations Hub > Automations AI Agents',
       'Automations Hub > Automations AI Panel',
+      'Automations Hub > Automations AI Lab', // 🧪 item 403: comparação dos testes A/B
       'Automations Hub > Automations Flows',
       'Automations Hub > Automations Rules',
       'Automations Hub > Automations Programming',
@@ -767,6 +772,7 @@ const TILE_COLORS = {
   Inbox: '#007aff',
   Agenda: '#ff3b30',
   'Cevico Appointments': '#0a84ff',
+  'Cevico Surgery Indications': '#bf5af2', // 🎯 item 402
   'Cevico Appointment Alerts': '#ff9f0a', // 🔔 item 346: âmbar = conferir
   'Cevico Oftalmofacil': '#64d2ff',
   Tasks: '#ff9500',
@@ -843,6 +849,7 @@ const TILE_COLORS = {
   'Automations Rules': '#ff9f0a',
   'Automations AI Agents': '#af52de',
   'Automations AI Panel': '#30d158',
+  'Automations AI Lab': '#bf5af2',
   'Automations Programming': '#ff3b30',
   'Automations Results': '#34c759',
   'Automations Treatment': '#64d2ff',
@@ -1055,6 +1062,13 @@ const automationChildren = computed(() =>
       label: 'Painel dos agentes',
       icon: 'i-lucide-activity',
       tab: 'painel_ia',
+    },
+    // 🧪 item 403: Laboratório de atendimento (testes A/B de prompt e de motor)
+    {
+      name: 'Automations AI Lab',
+      label: 'Laboratório',
+      icon: 'i-lucide-flask-conical',
+      tab: 'laboratorio',
     },
     {
       name: 'Automations Programming',
@@ -1519,6 +1533,14 @@ const menuItems = computed(() => {
       label: 'Agendamentos',
       icon: 'i-lucide-calendar-check',
       to: accountScopedRoute('crm_appointments'),
+    },
+    // 🎯 item 402: Indicações cirúrgicas — fila de quem compareceu e espera
+    // a resposta do médico (indicação | sem indicação | aguardando exame)
+    {
+      name: 'Cevico Surgery Indications',
+      label: 'Indicações cirúrgicas',
+      icon: 'i-lucide-target',
+      to: accountScopedRoute('crm_surgery_indications'),
     },
     // 🔔 item 346: Notificações sobre agendamentos — cadastros e consultas
     // com dados que não batem (o número = quantos esperam conferência)

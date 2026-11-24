@@ -177,6 +177,9 @@ namespace :crm do
     # 🧪 item 400: teste A/B de motor do atendente (config + placar)
     get :ai_experiment
     post :save_ai_experiment
+    # 🧭 23/11: motor por coluna do CRM (um modelo de IA para cada coluna que o atendente lê)
+    get :ai_stage_models
+    post :save_ai_stage_models
     # Estúdio do Copywriter: conteúdo multi-formato (carrossel, reels...)
     post :copywriter_content
     post :update_google_ads
@@ -428,6 +431,11 @@ namespace :crm do
   resource :agents_dashboard, only: [:show], controller: 'agents_dashboards'
   # Dashboard dos AGENTES DE IA (item 85, só admin)
   resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'
+  # 🧪 Laboratório de atendimento (item 403, só admin): comparação dos testes A/B dos atendentes
+  resource :attendance_lab, only: [:show], controller: 'attendance_labs' do
+    post :finish
+    post :copy_script
+  end
   # 💸 Gasto do WhatsApp (item 303, só admin): fatura da Meta + quem gastou
   resource :whatsapp_spend, only: [:show], controller: 'whatsapp_spends' do
     post :rates
@@ -480,6 +488,8 @@ namespace :crm do
   # 📅 Painel de Agendamentos (item 200): marcadas/remarcadas/canceladas no período
   get 'appointments/feed', to: 'appointments#feed'
   get 'appointments/stage_entries', to: 'appointments#stage_entries'
+  # 🎯 item 402: fila das Indicações cirúrgicas (quem compareceu e espera a resposta do médico)
+  resources :surgery_indications, only: [:index, :update]
   # 🌪️ item 271: funil de aquisição por turma + da porta pra dentro (Gestor)
   get 'funnels/acquisition', to: 'funnels#acquisition'
   get 'funnels/clinic', to: 'funnels#clinic'

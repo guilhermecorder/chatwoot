@@ -52,6 +52,9 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   BUSY_WAIT = 15.seconds
   BUSY_MAX = 40
   BUSY_KEY = 'cevico:responder:busy:%<id>s'.freeze
+  OUTCOME_KEY = 'cevico:responder:desfecho:%<id>s'.freeze
+  OUTCOME_TTL = 24.hours
+  RETRIABLE_OUTCOMES = %w[pendente erro].freeze
   # balões que contam como "já respondi": só os atendentes de TEXTO. O Agente
   # de Ligação também grava WhatsApp com cevico_ia_agent = 'voice' e não pode
   # calar o Atendente (a mensagem do paciente ficaria sem resposta).
@@ -109,6 +112,23 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     attempt = Redis::Alfred.incr(key).to_i
     Redis::Alfred.expire(key, 1.hour.to_i)
     attempt <= BUSY_MAX ? attempt : nil
+  end
+
+  # 🛟 23/11 (resgate que não desiste): DESFECHO da última tentativa de responder
+  # a mensagem do paciente — 'pendente' (a chamada da IA começou; se o job
+  # morrer no meio fica assim), 'erro' (o motor falhou), 'config' (falta chave /
+  # agente desligado) ou 'ok' (a IA respondeu ao sistema). O resgate só repete a
+  # MESMA mensagem enquanto o desfecho é 'pendente' ou 'erro'. Vale 24 h.
+  def self.mark_outcome(trigger_message_id, outcome)
+    Redis::Alfred.set(format(OUTCOME_KEY, id: trigger_message_id), outcome, ex: OUTCOME_TTL.to_i)
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgentJob] desfecho não gravado: #{e.message}"
+  end
+
+  def self.outcome(trigger_message_id)
+    Redis::Alfred.get(format(OUTCOME_KEY, id: trigger_message_id)).presence
+  rescue StandardError
+    nil
   end
 
   # ao vivo AGORA? modo live E dentro da janela (dia da semana + horas)
@@ -300,13 +320,19 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
   # ── AO VIVO (rodada 193; a janela já foi conferida em live_mode?) ────────
   def run_live(account, conversation, cfg, agent_key, trigger_message_id) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
-    state = conversation.additional_attributes&.[](STATE_KEY) || {}
+    # 🔁 23/11 (atendimento sem buraco): pausa com prazo VENCIDO não conta — é
+    # limpa aqui mesmo, com nota para a equipe (Crm::ResponderPause)
+    # (reload: a equipe pode ter escrito enquanto este job lia áudio ou esperava a vez)
+    state = Crm::ResponderPause.refresh!(conversation.reload)
     if state['paused']
       # 🚨 auditoria 10/2026 (#443): pausado por URGÊNCIA clínica e o paciente
       # escreveu de novo ("piorou", "e agora?") sem ninguém da equipe ter
       # respondido: não fica em silêncio — repete a orientação de pronto
       # atendimento (texto fixo, sem IA, no máximo uma vez por hora)
       urgent_orientation!(account, conversation, trigger_message_id, agent_key, state) if state['urgente']
+      # 🔁 23/11: a IA chamou a equipe e o paciente escreveu enquanto ela ainda
+      # respondia (o CrmListener não viu a pausa): garante a conferência do prazo
+      Crm::ResponderPause.schedule_handoff_resume(conversation, state, Crm::ResponderPause.ai_config(conversation))
       return
     end
     # 🔁 (#100) esta mensagem já foi respondida por outro job? não chama a IA de novo
@@ -321,16 +347,29 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
       return
     end
 
+    # 🔁 23/11: a IA voltou sem a equipe ter respondido ao pedido dela? (o
+    # contexto do modelo ganha o aviso; aqui decide o que fazer se ela pedir de novo)
+    handoff_pending = Crm::ResponderPause.handoff_pending?(conversation)
+    # o resgate sabe que a tentativa começou; um 'erro' anterior fica até dar certo
+    # (é ele que diz ao modelo que o atraso foi instabilidade do sistema)
+    self.class.mark_outcome(trigger_message_id, 'pendente') unless self.class.outcome(trigger_message_id) == 'erro'
     service = Crm::ResponderAgentService.new(conversation: conversation, agent_key: agent_key, live: true)
     result = service.call
     track_experiment_call(conversation, agent_key, cfg, service, result)
     if result[:error]
+      # erro do motor = o resgate pode tentar de novo esta mensagem; erro de
+      # configuração (sem chave, agente desligado) não adianta repetir
+      self.class.mark_outcome(trigger_message_id, result[:error].to_s.match?(PERMANENT_ERRORS) ? 'config' : 'erro')
       attempt = retry_later(conversation, trigger_message_id, agent_key, result[:error])
       note = result[:error].to_s.truncate(120)
       note = "#{note} · vou tentar de novo (#{attempt}/#{RETRY_WAITS.size})" if attempt
       log_event(account, agent_key, conversation, 'erro', note)
       return
     end
+    self.class.mark_outcome(trigger_message_id, 'ok')
+    # 🛟 23/11: o motor principal falhou e outro respondeu no lugar — fica no registro do card
+    reserve_note = "#{result[:reserva]} (#{result[:modelo]})".truncate(220)
+    log_event(account, agent_key, conversation, 'motor_reserva', reserve_note) if result[:reserva].present?
     return if last_incoming_id(conversation) != trigger_message_id
 
     # 🔧 (192) a ferramenta já remarcou ao vivo? então agendar=true do JSON é
@@ -360,7 +399,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
         send_replies(conversation, [outcome == :tarefa ? CANCEL_PENDING_TEXT : CANCEL_FAILED_TEXT], trigger_message_id, agent_key)
         log_event(account, agent_key, conversation, outcome == :tarefa ? 'cancelar_pendente' : 'erro', CANCEL_EVENT_NOTES[outcome])
         # a equipe assume daqui (senão a próxima resposta do paciente repete o pedido)
-        hand_over!(conversation, result, agent_key, task_opened: outcome == :tarefa)
+        hand_over!(conversation, result, agent_key, task_opened: outcome == :tarefa, trigger_message_id: trigger_message_id)
         track_experiment(conversation, agent_key, cfg, service, 'reply' => true, 'handoff' => true)
         return
       end
@@ -371,8 +410,18 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     # 🩺 item 251 + auditoria 10/2026 (#458): chamar humano SEMPRE deixa uma
     # tarefa com responsável no Meu Painel (e aviso no Radar quando é urgência
     # clínica) — nos três atendentes (antes só no pós-operatório)
-    hand_over!(conversation, result, agent_key) if result[:chamar_humano]
+    again = result[:chamar_humano] && handoff_pending && !clinical_urgency?(result)
+    if again
+      # 🔁 23/11: a IA já tinha chamado a equipe, ninguém respondeu e ela voltou a
+      # atender. Pedir de novo NÃO cala o paciente outra vez nem abre outra
+      # tarefa: só complementa a que já está aberta (Crm::HandoffTask). Urgência
+      # clínica segue o caminho inteiro (tarefa 🔴 + pausa com orientação).
+      ensure_handoff_task(conversation, result, agent_key)
+    elsif result[:chamar_humano]
+      hand_over!(conversation, result, agent_key, trigger_message_id: trigger_message_id)
+    end
     detail = "etapa #{result[:etapa]} · #{Array(result[:mensagens]).size} msg(s)"
+    detail += ' · pediu a equipe de novo (segue atendendo; tarefa já aberta)' if again
     detail += " · 🔧 #{acoes_text(result)}" if Array(result[:acoes]).any?
     detail += " · 🛟 #{result[:reserva]}" if result[:reserva].present? # item 399
     log_event(account, agent_key, conversation, booked ? 'agendou' : 'respondeu', detail.truncate(220))
@@ -665,10 +714,10 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
   # passagem para a equipe, sempre na mesma ordem: tarefa → nota (dizendo se a
   # tarefa nasceu) → pausa (com a marca de urgência clínica, se for o caso)
-  def hand_over!(conversation, result, agent_key, task_opened: false)
+  def hand_over!(conversation, result, agent_key, task_opened: false, trigger_message_id: nil)
     task_opened = ensure_handoff_task(conversation, result, agent_key) || task_opened if result[:chamar_humano]
     handoff_note(conversation, agent_key, task_opened: task_opened)
-    pause!(conversation, 'chamou_humano', agent_key, urgente: clinical_urgency?(result))
+    pause!(conversation, 'chamou_humano', agent_key, urgente: clinical_urgency?(result), trigger_message_id: trigger_message_id)
   end
 
   # devolve true se a tarefa existe (aberta agora, complementada, ou aberta
@@ -699,10 +748,13 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
 
   # urgente: true (#443) = pausa por urgência clínica — o CrmListener ainda
   # manda a mensagem seguinte do paciente para cá, e o job repete a orientação
-  def pause!(conversation, reason, agent_key, urgente: false)
+  # trigger_message_id (23/11) = a mensagem do paciente que a IA respondeu ao
+  # pausar ('msg'): o prazo do chamou_humano conta do que ele escrever DEPOIS dela
+  def pause!(conversation, reason, agent_key, urgente: false, trigger_message_id: nil)
     Cevico::AttributeMerge.merge!(conversation) do |attrs|
       value = { 'paused' => true, 'reason' => reason, 'agent' => agent_key, 'at' => Time.current.iso8601 }
       value['urgente'] = true if urgente
+      value['msg'] = trigger_message_id.to_i if trigger_message_id.to_i.positive?
       attrs.merge(STATE_KEY => value)
     end
   end

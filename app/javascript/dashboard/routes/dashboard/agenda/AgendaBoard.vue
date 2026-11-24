@@ -299,7 +299,7 @@ const EXAMES = [
   'Iridotomia', 'Capsulotomia',
 ];
 const PROCEDURES = [
-  'Catarata', 'Refrativa PRK', 'Refrativa Lasik', 'Lente Fácica',
+  'Catarata', 'Refrativa PRK', 'Refrativa Lasik', 'Facorrefrativa', 'Lente Fácica',
   'Lente de Foco Estendido', 'Trifocal', 'Anel de Ferrara', 'Pterígio',
   'Capsulotomia YAG', 'Outro',
 ];
@@ -1521,6 +1521,7 @@ const scheduleFollowUpFrom = task => {
 const allCrmStages = ref([]);
 const attendanceStages = ref({
   attended_stage_id: '', missed_stage_id: '', indicated_stage_id: '',
+  not_indicated_stage_id: '', awaiting_exam_stage_id: '',
   surgery_done_stage_id: '', surgery_missed_stage_id: '',
 });
 const attendanceOwners = ref({ consulta_user_id: '', cirurgia_user_id: '', deadline: '19:00' });
@@ -1548,6 +1549,8 @@ const loadCrmStages = async () => {
       attended_stage_id: cfg.attended_stage_id || '',
       missed_stage_id: cfg.missed_stage_id || '',
       indicated_stage_id: cfg.indicated_stage_id || '',
+      not_indicated_stage_id: cfg.not_indicated_stage_id || '',
+      awaiting_exam_stage_id: cfg.awaiting_exam_stage_id || '',
       surgery_done_stage_id: cfg.surgery_done_stage_id || '',
       surgery_missed_stage_id: cfg.surgery_missed_stage_id || '',
     };
@@ -1563,6 +1566,8 @@ const saveAttendanceStages = async () => {
       attended_stage_id: attendanceStages.value.attended_stage_id || null,
       missed_stage_id: attendanceStages.value.missed_stage_id || null,
       indicated_stage_id: attendanceStages.value.indicated_stage_id || null,
+      not_indicated_stage_id: attendanceStages.value.not_indicated_stage_id || null,
+      awaiting_exam_stage_id: attendanceStages.value.awaiting_exam_stage_id || null,
       surgery_done_stage_id: attendanceStages.value.surgery_done_stage_id || null,
       surgery_missed_stage_id: attendanceStages.value.surgery_missed_stage_id || null,
     });
@@ -3391,6 +3396,8 @@ const pendingCount = computed(() => dayViewTasks.value.filter(t => !t.attendance
               { key: 'attended_stage_id', label: '✓ Compareceu → mover card para' },
               { key: 'missed_stage_id', label: '✗ Faltou → mover card para' },
               { key: 'indicated_stage_id', label: '🎯 Cirurgia indicada → mover card para' },
+              { key: 'not_indicated_stage_id', label: 'Sem indicação → mover card para (vazio = a de Compareceu)' },
+              { key: 'awaiting_exam_stage_id', label: '🔬 Aguardando exame → mover card para (vazio = a de Compareceu)' },
               { key: 'surgery_done_stage_id', label: '🔪 Cirurgia realizada → mover card para' },
               { key: 'surgery_missed_stage_id', label: '✗ Não veio à cirurgia → mover card para' },
             ]" :key="opt.key">

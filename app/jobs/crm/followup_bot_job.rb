@@ -26,6 +26,23 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   LOOKBACK = 3.days # não cutuca conversas antigas demais
+  # 📆 23/11/2026 — ETAPA LONGA (7, 10, 30 dias…): o LOOKBACK de 3 dias tirava
+  # da rodada toda conversa parada há mais tempo, então etapa de mensagem
+  # modelo com prazo maior que 3 dias NUNCA saía (em produção, os robôs de 7 e
+  # 30 dias ficaram com o registro vazio desde que foram criados). Agora o
+  # alcance do robô acompanha a etapa mais longa dele, e das conversas antigas
+  # só entram as que estão CRUZANDO o prazo de uma etapa longa (última fala do
+  # paciente, ou entrada na coluna, dentro da faixa). O anti-rajada continua:
+  # etapa vencida há mais de STALE_HOURS é tratada sem enviar.
+  # Em produção quase toda conversa é RESOLVIDA em um ou dois dias, então as
+  # antigas entram abertas ou resolvidas (a mensagem modelo não reabre a
+  # conversa; a resposta do paciente reabre e volta para o atendente).
+  # DESLIGADO por padrão (followup_smart.etapas_longas): ligar faz saírem, pela
+  # primeira vez, mensagens modelo pagas à Meta. A decisão é do dono da conta.
+  LONG_STEP_HOURS = 48  # etapa com prazo a partir daqui é "longa"
+  LONG_SLACK = 1.day    # folga do alcance além da faixa
+  LONG_BAND = 3.days    # faixa depois do prazo (fim de semana e horário de envio empurram a etapa)
+  LONG_STATUSES = %i[open resolved].freeze
   EVENTS_CAP = 60   # histórico de envios/erros guardado por robô
   # EXPEDIENTE PADRÃO: cutucada só entre 08h e 20h (SP). O admin pode mudar a
   # janela em Automações → Robôs → "Horário de envio" (até 24h por dia) —
@@ -59,7 +76,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   REACTIVATIONS_PER_ROUND = 20  # "adiou" → mensagem modelo dias depois
   REACTIVATION_STALE_DAYS = 3   # reativação que passou do dia há mais que isso não sai
   SMART_DEFAULTS = {
-    'leitura' => true, 'fim_de_semana' => true, 'lead_frio' => true,
+    'leitura' => true, 'fim_de_semana' => true, 'lead_frio' => true, 'etapas_longas' => false,
     'reativacao' => { 'ativa' => true, 'dias' => 7, 'modelos' => {} }
   }.freeze
   # ── ETIQUETAS DE ENCERRAMENTO (rodada 158) ──
@@ -232,7 +249,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     # UMA conversa por contato: a de última atividade (caixa prioritária) —
     # evita cutucar o mesmo paciente em várias caixas de entrada ao mesmo tempo.
-    ids = conversations(bot)
+    ids = reach_scope(bot, steps)
           .select('DISTINCT ON (conversations.contact_id) conversations.id')
           .order('conversations.contact_id, conversations.last_activity_at DESC')
           .map(&:id).sort
@@ -300,10 +317,56 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     record_run(item[:bot], **run, events: item[:events])
   end
 
-  def conversations(bot)
+  # 📆 conversas da rodada deste robô: as de sempre (movimento nos últimos 3
+  # dias) + as antigas que estão cruzando o prazo de uma etapa longa
+  def reach_scope(bot, steps)
+    return conversations(bot) unless smart(bot.account)['etapas_longas']
+
+    long = steps.select { |s| Crm::FollowupBot.step_delay_hours(s) >= LONG_STEP_HOURS }
+    return conversations(bot) if long.empty?
+
+    reach = long.map { |s| Crm::FollowupBot.step_delay_hours(s) }.max.hours + LONG_BAND + LONG_SLACK
+    wide = conversations(bot, lookback: reach, statuses: LONG_STATUSES)
+    old_ids = long_step_ids(bot, long, wide.where('conversations.last_activity_at < ?', LOOKBACK.ago))
+    return conversations(bot) if old_ids.empty?
+
+    # as de sempre (abertas, movimento em 3 dias) + as antigas na faixa de uma etapa longa
+    wide.where('(conversations.status = ? AND conversations.last_activity_at >= ?) OR conversations.id IN (?)',
+               Conversation.statuses[:open], LOOKBACK.ago, old_ids)
+  end
+
+  # das conversas antigas, quais estão na faixa de alguma etapa longa
+  def long_step_ids(bot, long_steps, old_scope) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    rows = old_scope.pluck(:id, :contact_id)
+    return [] if rows.empty?
+
+    now = Time.current
+    bands = lambda do |steps|
+      steps.map { |s| Crm::FollowupBot.step_delay_hours(s).hours }.uniq.map { |d| (now - d - LONG_BAND)..(now - d) }
+    end
+    stage_steps, silence_steps = long_steps.partition { |s| s['delay_from'] == 'stage_entry' }
+    keep = []
+    if silence_steps.any?
+      last_in = Message.unscope(:order).where(conversation_id: rows.map(&:first), message_type: :incoming, private: false)
+                       .group(:conversation_id).maximum(:created_at)
+      silence_bands = bands.call(silence_steps)
+      keep += last_in.select { |_id, at| silence_bands.any? { |b| b.cover?(at) } }.keys
+    end
+    keep += stage_entry_ids(bot, rows, bands.call(stage_steps)) if stage_steps.any? && bot.stage_scoped?
+    keep.uniq
+  end
+
+  # etapa "desde a entrada na coluna": cards que entraram na coluna dentro da faixa
+  def stage_entry_ids(bot, rows, stage_bands)
+    entered = Crm::Contact.where(pipeline_id: bot.stage.pipeline_id, stage_id: bot.stage_id, contact_id: rows.filter_map(&:last))
+                          .pluck(:contact_id, Arel.sql('COALESCE(crm_contacts.stage_moved_at, crm_contacts.created_at)')).to_h
+    rows.select { |_id, contact_id| (at = entered[contact_id]) && stage_bands.any? { |b| b.cover?(at) } }.map(&:first)
+  end
+
+  def conversations(bot, lookback: LOOKBACK, statuses: :open)
     scope = bot.account.conversations
-               .where(status: :open)
-               .where('conversations.last_activity_at >= ?', LOOKBACK.ago)
+               .where(status: statuses)
+               .where('conversations.last_activity_at >= ?', lookback.ago)
 
     # item 315: colunas do CRM em que o robô atua (robô de coluna = a dele;
     # robô global = as marcadas; nenhuma = qualquer coluna, com ou sem card)

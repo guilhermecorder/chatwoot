@@ -152,6 +152,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/forms' => { node: 'crm.formularios', view: %w[index summary preview_link] },
     'crm/appointments' => { node: 'crm.agendamentos', view: %w[feed] },
     'crm/appointment_alerts' => { node: 'agenda.notificacoes', view: %w[index count] }, # 🔔 item 346
+    'crm/surgery_indications' => { node: 'agenda.indicacoes', view: %w[index] }, # 🎯 item 402
     'crm/sources' => { node: 'crm.fontes' },
     # ── Agenda / pacientes ──
     'crm/patients' => { node: 'pacientes', view: %w[show search phone_owner] }, # 🔎 item 346: a busca só lê
@@ -188,6 +189,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/script_versions' => { node: 'automacoes.agentes_ia', view: %w[index] },
     'crm/education_engines' => { node: 'automacoes.agentes_ia', view: %w[show] },
     'crm/ai_dashboards' => { node: 'automacoes.agentes_ia', view: %w[show] },
+    'crm/attendance_labs' => { node: 'automacoes.agentes_ia', view: %w[show] },
     'crm/batch_updates' => { node: 'automacoes.tratamento', view: %w[preview] },
     'crm/retro_labels' => { node: 'automacoes.tratamento', view: %w[preview] },
     'crm/label_replacements' => { node: 'automacoes.tratamento', view: %w[preview] },

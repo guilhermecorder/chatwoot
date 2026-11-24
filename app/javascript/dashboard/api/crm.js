@@ -488,6 +488,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/appointments/feed`, { params });
   }
 
+  // 🎯 item 402: fila das Indicações cirúrgicas
+  surgeryIndications(params) {
+    return axios.get(`${this.url}/surgery_indications`, { params });
+  }
+
+  updateSurgeryIndication(id, payload) {
+    return axios.patch(`${this.url}/surgery_indications/${id}`, payload);
+  }
+
   // item 277: quem entrou na coluna Agendamento de Consulta (caixa de origem, como foi, lista)
   appointmentsStageEntries(params) {
     return axios.get(`${this.url}/appointments/stage_entries`, { params });
@@ -1398,6 +1407,30 @@ class CrmAPI extends ApiClient {
 
   saveAiExperiment(payload) {
     return axios.post(`${this.url}/settings/save_ai_experiment`, payload);
+  }
+
+  // 🧪 item 403: Laboratório de atendimento (comparação dos testes A/B)
+  getAttendanceLab(params) {
+    return axios.get(`${this.url}/attendance_lab`, { params });
+  }
+
+  finishAttendanceLab(payload) {
+    return axios.post(`${this.url}/attendance_lab/finish`, payload);
+  }
+
+  copyScriptToLab(payload) {
+    return axios.post(`${this.url}/attendance_lab/copy_script`, payload);
+  }
+
+  // 🧭 23/11: motor por coluna do CRM (um modelo de IA para cada coluna do atendente)
+  getAiStageModels(agent) {
+    return axios.get(`${this.url}/settings/ai_stage_models`, {
+      params: { agent },
+    });
+  }
+
+  saveAiStageModels(payload) {
+    return axios.post(`${this.url}/settings/save_ai_stage_models`, payload);
   }
 
   // popup de prioridade máxima do Radar + pausa manual (com registro)

@@ -73,6 +73,13 @@ const RULES = [
     title: 'Fim de semana só para quem escreveu no dia',
     sub: 'Sábado e domingo a cutucada só sai se o paciente escreveu naquele mesmo dia. Senão, espera a segunda na abertura do horário de envio.',
   },
+  {
+    key: 'etapas_longas',
+    icon: 'i-lucide-calendar-clock',
+    color: '#EA580C',
+    title: 'Etapas longas (7, 10, 30 dias) alcançam conversas antigas',
+    sub: 'Desligado, o robô só olha conversas abertas com movimento nos últimos 3 dias, e etapa de mensagem modelo com prazo maior que isso nunca sai. Ligado, a etapa longa sai para quem completou o prazo, mesmo com a conversa já resolvida. Cada mensagem modelo de marketing é cobrada pela Meta.',
+  },
 ];
 
 const toggleRule = rule =>

@@ -100,6 +100,12 @@
       levels: [view, edit]
       default: inherit
       segment: clinica
+    - key: indicacoes
+      label: Indicações cirúrgicas
+      hint: "ver = a fila de quem compareceu; editar = marca indicação, sem indicação ou aguardando exame"
+      levels: [view, edit]
+      default: inherit
+      segment: clinica
     - key: bloqueios
       label: Fechar e reabrir dias
       hint: bloquear um dia, uma unidade ou um profissional

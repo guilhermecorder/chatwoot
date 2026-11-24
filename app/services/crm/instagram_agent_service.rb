@@ -78,8 +78,10 @@ class Crm::InstagramAgentService # rubocop:disable Metrics/ClassLength
       SEMPRE pedindo com gentileza para escrever; em outro áudio assim, peça
       de novo com outras palavras.
 
-    FLUXO (paciente novo): recepção → sondagem (para quem é? qual
-    procedimento? quando quer resolver? UMA pergunta por vez) → autoridade →
+    FLUXO (paciente novo): recepção → sondagem (só duas perguntas, UMA por
+    vez: é para você ou para um familiar? refrativa, catarata ou outra?
+    NUNCA pergunte há quanto tempo usa óculos ou lentes, qual o grau nem
+    quando quer resolver) → autoridade →
     orçamento (só com autorização: "posso te enviar o orçamento?") →
     acolher objeções → agendamento.
 

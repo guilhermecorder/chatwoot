@@ -684,6 +684,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       fresh[Crm::LlmEngines::OPENAI_KEY] = params[:openai_api_key].to_s.strip if params[:openai_api_key].present?
       fresh['model']  = params[:model]  if params.key?(:model) && (params[:model].blank? || Crm::LlmCatalog.valid_id?(params[:model]))
       fresh['effort'] = params[:effort] if params.key?(:effort)
+      # 🔁 23/11 (atendimento sem buraco): prazos de religar a IA, resgate e motor reserva
+      apply_responder_settings!(fresh)
       if permitted
         fresh['agents'] = (fresh['agents'] || {}).merge(permitted) do |_key, old_agent, new_agent|
           merged = (old_agent || {}).merge(new_agent || {})
@@ -871,44 +873,83 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     render json: { success: false, message: "Erro de conexão: #{e.message}" }
   end
 
-  # 🧪 item 400: TESTE A/B DE MOTOR do atendente (Crm::EngineExperiment) —
-  # devolve a config (variante B + modo de cada caixa) e o placar
+  # 🧭 23/11: MOTOR POR COLUNA do atendente (Crm::StageEngine) — devolve as
+  # colunas que o agente lê, o modelo escolhido em cada uma e o gasto por
+  # modelo dos últimos 7 dias. Salva na hora (não passa pelo rascunho/publicar).
+  def ai_stage_models
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    key = experiment_agent_key
+    return render json: { error: 'O motor por coluna só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+
+    render json: stage_models_json(key)
+  end
+
+  def save_ai_stage_models # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    key = experiment_agent_key
+    return render json: { error: 'O motor por coluna só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+
+    cfg = crm_settings.ai_config || {}
+    choices = Crm::StageEngine.sanitize(params[:stage_models] || {}, cfg.dig('agents', key) || {})
+    error = choices.values.uniq.filter_map { |chosen| llm_choice_error(cfg, chosen) }.first
+    return render json: { error: error }, status: :unprocessable_entity if error
+
+    Cevico::SettingMerge.merge!(crm_settings, :ai_config) do |fresh|
+      fresh['agents'] ||= {}
+      fresh['agents'][key] = (fresh['agents'][key] || {}).merge(Crm::StageEngine::CONFIG_KEY => choices)
+      fresh
+    end
+    render json: stage_models_json(key)
+  end
+
+  # 🧪 itens 400/403: TESTE A/B do atendente (Crm::EngineExperiment) —
+  # devolve a config (variante B: prompt + motor; modo de cada caixa) e o placar
   def ai_experiment
     return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     key = experiment_agent_key
-    return render json: { error: 'O teste de motor só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+    return render json: { error: 'O teste A/B só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
 
     render json: experiment_json(key)
   end
 
-  # liga/desliga o teste, troca a variante B, o modo de cada caixa e zera o
-  # placar (reset). Trocar o modelo da variante B também começa um teste novo:
-  # o placar antigo comparava outra coisa.
+  # liga/desliga o teste, troca a variante B (Roteiro e/ou modelo), o modo de
+  # cada caixa e zera o placar (reset). Mudar o que a B é também começa um teste
+  # novo: o placar antigo comparava outra coisa — e vai para o histórico.
   def save_ai_experiment # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     key = experiment_agent_key
-    return render json: { error: 'O teste de motor só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+    return render json: { error: 'O teste A/B só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
 
     agent = (crm_settings.ai_config || {}).dig('agents', key) || {}
     current = agent[Crm::EngineExperiment::CONFIG_KEY] || {}
     enabled = ActiveModel::Type::Boolean.new.cast(params[:enabled]) == true
-    model_b = params[:model_b].to_s.presence || current['model_b'].to_s
+    model_b = experiment_model_b_param(key, agent, current)
+    script_b = params.key?(:script_b) ? Crm::CevicoScript.normalize_version(params[:script_b]) : Crm::EngineExperiment.script_b(current)
     inboxes = experiment_inboxes(agent)
-    error = experiment_error(key, agent, enabled, model_b, inboxes)
+    stages_b = model_b.present? ? experiment_stages_b(agent, current) : []
+    error = experiment_error(enabled, model_b, script_b, inboxes)
     return render json: { error: error }, status: :unprocessable_entity if error
 
-    restart = ActiveModel::Type::Boolean.new.cast(params[:reset]) == true || current['started_at'].blank? || current['model_b'] != model_b
+    changed = current['model_b'].to_s != model_b || Crm::EngineExperiment.script_b(current) != script_b ||
+              Crm::EngineExperiment.stages_b(current).sort != stages_b.sort
+    restart = ActiveModel::Type::Boolean.new.cast(params[:reset]) == true || current['started_at'].blank? || current['ended_at'].present? || changed
+    fresh_test = {
+      'enabled' => enabled, 'model_b' => model_b.presence, 'script_b' => script_b, 'inboxes' => inboxes,
+      'stages_b' => stages_b.presence,
+      'name' => (params.key?(:name) ? params[:name].to_s.strip.first(120) : current['name']).presence,
+      'started_at' => restart ? experiment_new_id(agent) : current['started_at'],
+      'updated_by' => Current.user&.name
+    }.compact
+    fresh_test['digests'] = restart ? Crm::EngineExperiment.digests(Current.account, key, fresh_test) : current['digests']
+    archived = restart ? experiment_archive(key, agent, current) : nil
     Cevico::SettingMerge.merge!(crm_settings, :ai_config) do |fresh|
       fresh['agents'] ||= {}
-      fresh['agents'][key] = (fresh['agents'][key] || {}).merge(
-        Crm::EngineExperiment::CONFIG_KEY => {
-          'enabled' => enabled, 'model_b' => model_b.presence, 'inboxes' => inboxes,
-          'started_at' => restart ? Time.current.iso8601 : current['started_at'],
-          'updated_by' => Current.user&.name
-        }.compact
-      )
+      fresh['agents'][key] = (fresh['agents'][key] || {}).merge(Crm::EngineExperiment::CONFIG_KEY => fresh_test.compact)
+      fresh['agents'][key][Crm::EngineExperiment::HISTORY_KEY] = Crm::EngineExperiment.push_history(fresh['agents'][key], archived) if archived
       fresh
     end
     render json: experiment_json(key)
@@ -1571,6 +1612,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     if params.key?(:attendance_stages)
       cfg['attendance_stages'] = params.require(:attendance_stages)
                                        .permit(:attended_stage_id, :missed_stage_id, :indicated_stage_id,
+                                               :not_indicated_stage_id, :awaiting_exam_stage_id,
                                                :surgery_done_stage_id, :surgery_missed_stage_id)
                                        .to_h.transform_values { |v| v.presence&.to_i }
     end
@@ -2643,6 +2685,59 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     Crm::LlmEngines.openai_agent?(key) ? key : nil
   end
 
+  # o "número" de um teste novo é a hora em que ele começa; nunca repete o de um
+  # teste que já está no histórico (encerrar e recomeçar no mesmo segundo)
+  def experiment_new_id(agent)
+    taken = Crm::EngineExperiment.history(agent).pluck('id')
+    at = Time.current.change(usec: 0)
+    at += 1.second while taken.include?(at.iso8601)
+    at.iso8601
+  end
+
+  # o motor da B que veio da tela: em branco ou igual ao da A = "o mesmo da A"
+  # 🧭 item 405: com motor por coluna, o modelo do cartão TAMBÉM vale como motor
+  # da B (ele pode ser diferente do que a A usa numa coluna)
+  def experiment_model_b_param(key, agent, current)
+    chosen = params.key?(:model_b) ? params[:model_b].to_s.strip : current['model_b'].to_s
+    return chosen if Crm::StageEngine.config(agent).any?
+
+    chosen == Crm::EngineExperiment.model_a(key, agent) ? '' : chosen
+  end
+
+  # 🧭 item 405: em quais colunas a B troca o motor (só colunas que o agente lê;
+  # vazio = em todas)
+  def experiment_stages_b(agent, current)
+    return Crm::EngineExperiment.stages_b(current) unless params.key?(:stages_b)
+
+    allowed = Array(agent['stage_ids']).map { |id| id.to_i.to_s }
+    allowed << Crm::StageEngine::NO_CARD if agent['no_card'] == true
+    Array(params[:stages_b]).map(&:to_s).uniq & allowed
+  end
+
+  # 🧭 23/11 (motor por coluna): colunas do agente na ordem do funil (+ "sem
+  # card" quando ele atende contato novo), a escolha de cada uma, o modelo do
+  # cartão (o que vale onde não há escolha) e o gasto por modelo em 7 dias
+  def stage_models_json(key)
+    agent = (crm_settings.reload.ai_config || {}).dig('agents', key) || {}
+    stages = Crm::Stage.joins(:pipeline)
+                       .where(crm_pipelines: { account_id: Current.account.id }, id: Array(agent['stage_ids']).map(&:to_i))
+                       .order('crm_pipelines.id', :position)
+                       .map { |stage| { slot: stage.id.to_s, name: stage.name } }
+    stages.unshift({ slot: Crm::StageEngine::NO_CARD, name: 'Sem card ainda (contato novo)' }) if agent['no_card'] == true
+    {
+      agent: key, default_model: experiment_model_a(key, agent), stages: stages,
+      stage_models: Crm::StageEngine.config(agent).slice(*stages.pluck(:slot)),
+      usage_7d: stage_models_usage(key), usd_brl: experiment_usd_rate
+    }
+  end
+
+  def stage_models_usage(key)
+    Crm::AiUsage.where(account_id: Current.account.id, agent_key: key, created_at: 7.days.ago..)
+                .group(:model).pluck(:model, Arel.sql('COUNT(*)'), Arel.sql('SUM(cost_usd)'))
+                .map { |model, calls, cost| { model: model, calls: calls, cost_usd: cost.to_f.round(4) } }
+                .sort_by { |row| -row[:cost_usd] }
+  end
+
   # o modelo que a variante A usa de verdade (o do cartão; em branco = recomendado)
   def experiment_model_a(key, agent)
     agent['model'].presence || Crm::AiAgentConfig::RECOMMENDED.dig(key, 'model') || Crm::AiAgentConfig::DEFAULT_MODEL
@@ -2655,27 +2750,54 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     raw.to_h { |id, mode| [id.to_s, mode.to_s] }.select { |id, mode| allowed.include?(id) && %w[b split].include?(mode) }
   end
 
-  def experiment_error(key, agent, enabled, model_b, inboxes) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    return nil if !enabled && model_b.blank?
+  def experiment_error(enabled, model_b, script_b, inboxes) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    same = model_b.blank? && script_b != 'v2'
+    return nil if !enabled && same
+    return 'A variante B está igual à A: escolha o Roteiro 2 (outro prompt) ou outro motor para ela.' if same
 
-    return 'Escolha o modelo da variante B.' unless Crm::LlmCatalog.valid_id?(model_b)
-    return 'As duas variantes estão com o mesmo modelo: escolha outro para a B.' if model_b == experiment_model_a(key, agent)
+    if model_b.present?
+      return 'Modelo da variante B não reconhecido.' unless Crm::LlmCatalog.valid_id?(model_b)
 
-    choice_error = llm_choice_error(crm_settings.ai_config || {}, model_b)
-    return choice_error if choice_error
+      choice_error = llm_choice_error(crm_settings.ai_config || {}, model_b)
+      return choice_error if choice_error
+    end
     return 'Escolha pelo menos uma caixa para a variante B ou para o sorteio.' if enabled && inboxes.empty?
 
     nil
   end
 
+  def experiment_kind(config, model_a, agent)
+    return nil unless Crm::EngineExperiment.variant_b?(config)
+
+    Crm::EngineExperiment.kind(config, model_a, staged: Crm::StageEngine.config(agent).any?)
+  end
+
+  # o teste que está saindo de cena (trocou a B ou zerou o placar) vai para o
+  # histórico com a foto do placar — só se chegou a atender alguém e ainda não
+  # foi guardado pelo "Encerrar teste" do Laboratório
+  def experiment_archive(key, agent, current)
+    return nil if current['started_at'].blank? || current['ended_at'].present?
+    return nil unless Crm::EngineExperiment.any_rows?(Current.account, key, current['started_at'])
+
+    report = Crm::EngineExperiment.report(Current.account, key, current['started_at'])
+    Crm::EngineExperiment.history_entry(current, key, agent, by: Current.user&.name)
+                         .merge('snapshot' => Crm::EngineExperiment.snapshot(report))
+  end
+
   def experiment_json(key)
     agent = (crm_settings.reload.ai_config || {}).dig('agents', key) || {}
     config = agent[Crm::EngineExperiment::CONFIG_KEY] || {}
+    model_a = Crm::EngineExperiment.model_a(key, agent)
     {
-      agent: key, model_a: experiment_model_a(key, agent),
-      config: { enabled: config['enabled'] == true, model_b: config['model_b'], inboxes: config['inboxes'] || {},
-                started_at: config['started_at'] },
+      agent: key, model_a: model_a,
+      # 🧭 item 405: o mapa de motor por coluna da A e onde a B troca o motor
+      stages: Crm::StageEngine.rows(Current.account, agent),
+      config: { enabled: config['enabled'] == true, model_b: config['model_b'], script_b: Crm::EngineExperiment.script_b(config),
+                stages_b: Crm::EngineExperiment.stages_b(config),
+                name: config['name'], inboxes: config['inboxes'] || {}, started_at: config['started_at'], ended_at: config['ended_at'],
+                kind: experiment_kind(config, model_a, agent) },
       report: Crm::EngineExperiment.report(Current.account, key),
+      history_count: Crm::EngineExperiment.history(agent).size,
       usd_brl: experiment_usd_rate
     }
   end
@@ -2832,6 +2954,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         (cfg.dig("#{k}_state", 'shadow_days', Time.current.in_time_zone('America/Sao_Paulo').to_date.to_s) || {}).slice('count', 'conversation_ids')
       end,
       live_enabled: Crm::ResponderAgentJob::LIVE_ENABLED,
+      # 🔁 23/11 (atendimento sem buraco): prazos de religar a IA, resgate e motor reserva (valor em uso)
+      responder_settings: responder_settings_json(cfg),
       # 🎙️ rodada 195: Agente de Ligação — registro, lista "ligaria hoje" (sombra) ou
       # "ligações hoje" (ao vivo), ElevenLabs pronta e se está ao vivo AGORA
       voice_events: Array(cfg.dig('voice_state', 'events')).first(30),
@@ -2917,6 +3041,51 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
         }]
       end
     }
+  end
+
+  # ── 🔁 23/11 (atendimento sem buraco): chaves de CONTA dos atendentes do WhatsApp ──
+  # Vão soltas no corpo do update_ai (fora de `agents`), valem para os três atendentes:
+  #   responder_resume_after_human_minutes    IA religa N min depois da última mensagem da equipe (padrão 2; 0 = nunca)
+  #   responder_resume_after_handoff_minutes  IA chamou a equipe, paciente escreveu e ninguém respondeu em N min (padrão 10; 0 = nunca)
+  #   responder_rescue_max_hours              até quando o resgate insiste (padrão 23; 1 a 23)
+  #   responder_rescue_per_round              conversas resgatadas por rodada de 5 min (padrão 15; 1 a 40)
+  #   responder_engine_reserve                Claude falhou → ChatGPT/Gemini respondem no lugar (padrão ligado)
+  #   responder_reserve_openai_model / responder_reserve_gemini_model   modelo da reserva (em branco = padrão)
+  # Número em branco = volta ao padrão; fora dos limites = encaixa no limite; texto que não é número é ignorado.
+  def apply_responder_settings!(fresh)
+    Crm::ResponderPause::SETTINGS.each do |key, (_default, min, max)|
+      next unless params.key?(key)
+
+      raw = params[key].to_s.strip
+      value = Integer(raw, 10, exception: false)
+      if raw.empty? then fresh.delete(key)
+      elsif value then fresh[key] = value.clamp(min, max)
+      end
+    end
+    apply_responder_reserve!(fresh)
+  end
+
+  def apply_responder_reserve!(fresh)
+    if params.key?(:responder_engine_reserve)
+      fresh['responder_engine_reserve'] = ActiveModel::Type::Boolean.new.cast(params[:responder_engine_reserve]) != false
+    end
+    Crm::ResponderAgentService::RESERVE_MODEL_KEYS.each do |provider, key|
+      next unless params.key?(key)
+
+      chosen = params[key].to_s.strip
+      if chosen.empty? then fresh.delete(key)
+      elsif Crm::LlmCatalog.valid_id?(chosen) && Crm::LlmCatalog.provider(chosen) == provider then fresh[key] = chosen
+      end
+    end
+  end
+
+  def responder_settings_json(cfg)
+    json = Crm::ResponderPause::SETTINGS.keys.index_with { |key| Crm::ResponderPause.setting(cfg, key) }
+    json['responder_engine_reserve'] = cfg['responder_engine_reserve'] != false
+    Crm::ResponderAgentService::RESERVE_MODEL_KEYS.each do |provider, key|
+      json[key] = cfg[key].presence || Crm::ResponderAgentService::RESERVE_MODELS[provider]
+    end
+    json
   end
 
   # rascunho de um agente sem as chaves sensíveis (nil quando não sobra nada)

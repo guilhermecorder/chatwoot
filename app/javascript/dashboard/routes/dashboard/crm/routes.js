@@ -7,6 +7,7 @@ import CrmJourney from './CrmJourney.vue';
 import CrmCalls from './CrmCalls.vue';
 import CrmAppointments from './CrmAppointments.vue';
 import AppointmentAlerts from './AppointmentAlerts.vue';
+import SurgeryIndications from './SurgeryIndications.vue';
 import OftalmofacilHub from './OftalmofacilHub.vue';
 import CrmCampaignsDashboard from './CrmCampaignsDashboard.vue';
 import CrmForms from './CrmForms.vue';
@@ -41,6 +42,13 @@ export default {
       name: 'crm_appointments',
       meta: { permissions: ['administrator', 'agent'] },
       component: CrmAppointments,
+    },
+    // 🎯 item 402: Indicações cirúrgicas (fila de quem compareceu)
+    {
+      path: frontendURL('accounts/:accountId/crm/indicacoes'),
+      name: 'crm_surgery_indications',
+      meta: { permissions: ['administrator', 'agent'] },
+      component: SurgeryIndications,
     },
     // 🔔 item 346: Notificações sobre agendamentos (divergências para conferir)
     {

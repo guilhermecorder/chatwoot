@@ -1,9 +1,12 @@
 <script setup>
-// 🧪 TESTE A/B DE MOTOR (item 400, 22/11): o mesmo atendente e o mesmo Roteiro
-// em duas variantes. A = o modelo do cartão; B = outro modelo (Claude ou
-// ChatGPT). Cada caixa em que o agente lê fica em A, em B ou em sorteio meio a
-// meio por conversa. O placar compara conversão e custo por atendimento.
-// Salva na hora (não passa pelo rascunho/publicar do cartão).
+// 🧪 TESTE A/B DO ATENDENTE (item 400, 22/11 → item 403, 23/11): o mesmo
+// atendente em duas variantes. Cada variante é PROMPT + MOTOR. A = o oficial
+// (Roteiro 1 + o modelo do cartão); B = o desafiante (Roteiro 1 ou Roteiro 2,
+// com o mesmo motor da A ou outro). Uma coisa de cada vez: primeiro o prompt,
+// depois a inteligência. Cada caixa em que o agente lê fica em A, em B ou em
+// sorteio meio a meio por conversa. Aqui se MONTA o teste e vê o placar
+// resumido; a comparação completa (gráficos, confiança, decisão) é o
+// Laboratório. Salva na hora (não passa pelo rascunho/publicar do cartão).
 import { ref, computed, watch, onMounted } from 'vue';
 import LlmModelPicker from 'dashboard/components-next/cevico/LlmModelPicker.vue';
 import { useAlert } from 'dashboard/composables';
@@ -19,6 +22,18 @@ const props = defineProps({
   llmCatalog: { type: Array, default: () => [] },
 });
 
+const emit = defineEmits(['openLab']);
+
+const SCRIPTS = [
+  { key: 'v1', label: 'O mesmo da A (Roteiro 1)' },
+  { key: 'v2', label: 'Roteiro 2' },
+];
+const KIND_LABEL = {
+  prompt: 'teste de prompt',
+  motor: 'teste de motor',
+  ambos: 'prompt + motor juntos',
+};
+
 const MODES = [
   { key: 'a', label: 'A' },
   { key: 'b', label: 'B' },
@@ -32,7 +47,11 @@ const saving = ref(false);
 const data = ref(null);
 const enabled = ref(false);
 const modelB = ref('');
+const scriptB = ref('v1');
+const testName = ref('');
 const modes = ref({});
+// 🧭 item 405: colunas em que a B troca o motor (vazio = em todas)
+const stagesB = ref([]);
 
 const shortLabel = label => String(label || '').split(' — ')[0];
 const modelLabel = id => {
@@ -47,7 +66,10 @@ const apply = payload => {
   data.value = payload;
   enabled.value = payload.config.enabled === true;
   modelB.value = payload.config.model_b || '';
+  scriptB.value = payload.config.script_b === 'v2' ? 'v2' : 'v1';
+  testName.value = payload.config.name || '';
   modes.value = { ...(payload.config.inboxes || {}) };
+  stagesB.value = [...(payload.config.stages_b || [])];
 };
 
 const load = async () => {
@@ -78,6 +100,9 @@ const save = async ({ reset = false, turnOn = null } = {}) => {
       agent: props.agentKey,
       enabled: turnOn === null ? enabled.value : turnOn,
       model_b: modelB.value,
+      script_b: scriptB.value,
+      stages_b: stagesB.value,
+      name: testName.value,
       inboxes: modes.value,
       reset,
     });
@@ -98,12 +123,51 @@ const resetScore = () => {
     save({ reset: true });
 };
 
+// 🧭 item 405: o mapa de motor por coluna da A ([{ slot, name, model }])
+const stages = computed(() => data.value?.stages || []);
+const staged = computed(() => stages.value.some(s => s.model));
+const stageOn = slot => stagesB.value.includes(slot);
+const toggleStage = slot => {
+  stagesB.value = stageOn(slot)
+    ? stagesB.value.filter(s => s !== slot)
+    : [...stagesB.value, slot];
+};
+const sameStages = computed(() => {
+  const saved = [...(data.value?.config?.stages_b || [])].sort();
+  return JSON.stringify(saved) === JSON.stringify([...stagesB.value].sort());
+});
+
 const dirty = computed(() => {
   const cfg = data.value?.config;
   if (!cfg) return false;
   return (
     (cfg.model_b || '') !== modelB.value ||
-    JSON.stringify(cfg.inboxes || {}) !== JSON.stringify(modes.value)
+    (cfg.script_b === 'v2' ? 'v2' : 'v1') !== scriptB.value ||
+    (cfg.name || '') !== testName.value ||
+    JSON.stringify(cfg.inboxes || {}) !== JSON.stringify(modes.value) ||
+    sameStages.value === false
+  );
+});
+
+// o que a B muda em relação à A, do jeito que está na tela agora (com motor
+// por coluna, o modelo do cartão também vale como motor diferente na B)
+const sameModel = computed(
+  () => !modelB.value || (!staged.value && modelB.value === data.value?.model_a)
+);
+const liveKind = computed(() => {
+  const prompt = scriptB.value === 'v2';
+  if (prompt && !sameModel.value) return 'ambos';
+  if (prompt) return 'prompt';
+  return sameModel.value ? '' : 'motor';
+});
+// trocar o que a B é começa um teste novo (o placar antigo vai para o histórico)
+const restarts = computed(() => {
+  const cfg = data.value?.config;
+  if (!cfg?.started_at) return false;
+  return (
+    (cfg.model_b || '') !== modelB.value ||
+    (cfg.script_b === 'v2' ? 'v2' : 'v1') !== scriptB.value ||
+    (!!modelB.value && sameStages.value === false)
   );
 });
 
@@ -167,6 +231,11 @@ const ROWS = [
   },
   { label: 'Custo total', value: a => money(a.custo_usd) },
   {
+    label: 'Paciente respondeu de volta',
+    hint: 'conversas em que o paciente escreveu de novo depois da 1ª resposta do atendente',
+    value: a => withRate(a.respondeu, a.taxa_respondeu),
+  },
+  {
     label: 'Falhas / Claude cobriu',
     hint: 'chamadas com erro · vezes em que o motor falhou e o Claude respondeu no lugar',
     value: a => `${a.erros ?? 0} / ${a.reservas ?? 0}`,
@@ -197,7 +266,10 @@ watch(() => props.agentKey, load);
     <div class="flex items-start gap-3">
       <div class="min-w-0 flex-1">
         <p class="text-sm font-bold text-n-slate-12">
-          🧪 Teste A/B de motor
+          🧪 Teste A/B do atendente
+          <span v-if="liveKind" class="cv-chip ml-1 align-middle">{{
+            KIND_LABEL[liveKind]
+          }}</span>
           <span
             v-if="enabled"
             class="cv-chip cv-chip-on ml-1 align-middle"
@@ -206,8 +278,9 @@ watch(() => props.agentKey, load);
           >
         </p>
         <p class="text-[11px] text-n-slate-10 mt-0.5">
-          O mesmo atendente e o mesmo Roteiro em duas variantes. Só muda o
-          motor. O placar compara conversão e custo.
+          O mesmo atendente em duas variantes. Mude uma coisa de cada vez:
+          primeiro o prompt (Roteiro 2), depois a inteligência (motor). O
+          Laboratório compara conversão, custo e retorno.
         </p>
       </div>
       <button
@@ -226,29 +299,102 @@ watch(() => props.agentKey, load);
     </p>
 
     <template v-else>
-      <!-- as duas variantes -->
+      <!-- o que este teste quer descobrir (vira o nome dele no Laboratório) -->
+      <div>
+        <p class="text-xs font-medium text-n-slate-11 mb-1">
+          O que você quer descobrir com este teste
+        </p>
+        <input
+          v-model="testName"
+          type="text"
+          maxlength="120"
+          class="w-full rounded-lg border border-n-weak bg-n-alpha-1 px-3 py-1.5 text-sm text-n-slate-12 outline-none focus:border-n-brand"
+          placeholder="Ex.: recepção sem a palavra cirurgia marca mais consulta?"
+          :disabled="saving"
+        />
+      </div>
+
+      <!-- as duas variantes: cada uma é prompt + motor -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div class="cv-stat px-3 py-2">
-          <p class="text-[10px] text-n-slate-10">Variante A (a de hoje)</p>
-          <p class="text-sm font-bold text-n-slate-12">
-            {{ modelLabel(data.model_a) }}
+          <p class="text-[10px] text-n-slate-10">Variante A (a oficial)</p>
+          <p class="text-sm font-bold text-n-slate-12">Roteiro 1</p>
+          <p class="text-xs text-n-slate-11">
+            {{ staged ? 'Motor por coluna' : modelLabel(data.model_a) }}
           </p>
-          <p class="text-[10px] text-n-slate-9">
-            É o "Modelo de IA" deste cartão
+          <p class="text-[10px] text-n-slate-9 mt-0.5">
+            {{
+              staged
+                ? 'O Roteiro deste cartão e o motor escolhido em cada coluna'
+                : 'O Roteiro e o "Modelo de IA" deste cartão'
+            }}
           </p>
         </div>
-        <div class="cv-stat px-3 py-2">
-          <p class="text-[10px] text-n-slate-10 mb-1">Variante B</p>
-          <!-- 🧠 22/11: variante B pode ser Claude, ChatGPT ou Gemini -->
-          <LlmModelPicker
-            v-model="modelB"
-            :catalog="llmCatalog"
-            :disabled="saving"
-            :engine-note="false"
-            empty-label="Escolha o modelo…"
-          />
+        <div class="cv-stat px-3 py-2 space-y-1.5">
+          <p class="text-[10px] text-n-slate-10">Variante B (a desafiante)</p>
+          <div>
+            <p class="text-[10px] text-n-slate-9 mb-0.5">Prompt</p>
+            <div class="cv-seg cv-seg-sm">
+              <button
+                v-for="sc in SCRIPTS"
+                :key="sc.key"
+                class="cv-seg-item"
+                :class="{ 'cv-seg-on': scriptB === sc.key }"
+                :disabled="saving"
+                @click="scriptB = sc.key"
+              >
+                {{ sc.label }}
+              </button>
+            </div>
+          </div>
+          <div>
+            <p class="text-[10px] text-n-slate-9 mb-0.5">Motor</p>
+            <!-- 🧠 22/11: Claude, ChatGPT ou Gemini; vazio = o mesmo da A -->
+            <LlmModelPicker
+              v-model="modelB"
+              :catalog="llmCatalog"
+              :disabled="saving"
+              :engine-note="false"
+              empty-label="O mesmo motor da A"
+            />
+          </div>
+          <!-- 🧭 item 405: trocar o motor só em algumas colunas -->
+          <div v-if="modelB && stages.length > 1">
+            <p class="text-[10px] text-n-slate-9 mb-1">
+              Em quais colunas a B usa este motor
+              <span class="text-n-slate-9"
+                >(nenhuma marcada = em todas; nas outras ela fica igual à
+                A)</span
+              >
+            </p>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                v-for="stage in stages"
+                :key="stage.slot"
+                class="cv-chip"
+                :class="stageOn(stage.slot) ? 'cv-chip-on' : ''"
+                :style="stageOn(stage.slot) ? { background: ON_GRADIENT } : {}"
+                :disabled="saving"
+                :title="`A usa aqui: ${modelLabel(stage.model || data.model_a)}`"
+                @click="toggleStage(stage.slot)"
+              >
+                {{ stage.name }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
+      <p v-if="scriptB === 'v2'" class="text-[11px] text-n-slate-10">
+        O Roteiro 2 é editado no cartão "Roteiro" (chave atual | v2). Para mudar
+        uma coisa só, comece copiando o Roteiro 1 para o 2 pelo Laboratório.
+      </p>
+      <p v-if="liveKind === 'ambos'" class="text-[11px] text-amber-600">
+        Atenção: a B muda o prompt e o motor ao mesmo tempo. Se ela ganhar, não
+        dá para saber qual dos dois fez a diferença.
+      </p>
+      <p v-if="!liveKind" class="text-[11px] text-n-slate-10">
+        A B ainda está igual à A: escolha o Roteiro 2 ou outro motor.
+      </p>
 
       <!-- modo de cada caixa -->
       <div>
@@ -311,8 +457,16 @@ watch(() => props.agentKey, load);
         >
           Atualizar
         </button>
+        <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="emit('openLab')">
+          <span class="i-lucide-flask-conical text-xs" />
+          Abrir o Laboratório
+        </button>
         <span v-if="dirty" class="text-[11px] text-amber-600">
-          Há mudanças não salvas
+          Há mudanças não salvas{{
+            restarts
+              ? ': a B mudou, então salvar começa um teste novo (o placar de agora vai para o histórico)'
+              : ''
+          }}
         </span>
       </div>
 
@@ -327,10 +481,12 @@ watch(() => props.agentKey, load);
               <tr class="text-[11px] text-n-slate-10 text-left">
                 <th class="font-medium py-1 pr-2" />
                 <th class="font-medium py-1 px-2 text-right">
-                  A · {{ modelLabel(armOf('a').model || data.model_a) }}
+                  A · Roteiro 1 ·
+                  {{ modelLabel(armOf('a').model || data.model_a) }}
                 </th>
                 <th class="font-medium py-1 pl-2 text-right">
-                  B · {{ modelLabel(armOf('b').model || modelB) }}
+                  B · Roteiro {{ armOf('b').script === 'v2' ? 2 : 1 }} ·
+                  {{ modelLabel(armOf('b').model || modelB || data.model_a) }}
                 </th>
               </tr>
             </thead>
@@ -371,7 +527,7 @@ watch(() => props.agentKey, load);
           Sombra.
         </p>
         <p v-if="data.report.mixed" class="text-[11px] text-n-slate-10 mt-1">
-          {{ data.report.mixed }} conversa(s) viram os dois motores (a caixa
+          {{ data.report.mixed }} conversa(s) viram as duas variantes (a caixa
           mudou de variante no meio) e ficaram fora do placar.
         </p>
         <p v-if="!rate" class="text-[11px] text-n-slate-10 mt-1">
