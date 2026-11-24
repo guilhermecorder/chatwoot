@@ -482,11 +482,20 @@ watch(() => props.agentKey, load);
                 <th class="font-medium py-1 pr-2" />
                 <th class="font-medium py-1 px-2 text-right">
                   A · Roteiro 1 ·
-                  {{ modelLabel(armOf('a').model || data.model_a) }}
+                  {{
+                    staged
+                      ? 'motor por coluna'
+                      : modelLabel(armOf('a').model || data.model_a)
+                  }}
                 </th>
                 <th class="font-medium py-1 pl-2 text-right">
-                  B · Roteiro {{ armOf('b').script === 'v2' ? 2 : 1 }} ·
-                  {{ modelLabel(armOf('b').model || modelB || data.model_a) }}
+                  B · Roteiro
+                  {{ (armOf('b').script || scriptB) === 'v2' ? 2 : 1 }} ·
+                  {{
+                    staged && !modelB
+                      ? 'motor por coluna'
+                      : modelLabel(armOf('b').model || modelB || data.model_a)
+                  }}
                 </th>
               </tr>
             </thead>

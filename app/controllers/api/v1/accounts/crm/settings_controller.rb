@@ -826,6 +826,26 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   end
 
   # 🧠 22/11: testa UM modelo de verdade (mini-chamada pela tomada universal)
+  OPENAI_PING_MODELS = %w[gpt-6-luna gpt-6.1-terra].freeze
+
+  # { modelo => motivo } dos modelos que a OpenAI recusou numa resposta de verdade
+  def openai_real_check(models)
+    cfg = crm_settings.ai_config || {}
+    models.each_with_object({}) do |model, refused|
+      Crm::LlmGateway.client(model: model, ai_config: cfg, timeout: 30, max_retries: 0)
+                     .messages.create(model: Crm::LlmCatalog.api_id(model), max_tokens: 16,
+                                      messages: [{ role: 'user', content: 'Responda apenas com a palavra: ok' }])
+    rescue StandardError => e
+      refused[model] = e.message.to_s.truncate(200)
+    end
+  end
+
+  def openai_refused_message(refused, key)
+    lines = refused.map { |model, reason| "#{Crm::LlmEngines::OPENAI_MODELS.dig(model, :label) || model}: #{reason}" }.join(' · ')
+    "A chave é válida, mas a OpenAI recusou responder. #{lines} Confira em platform.openai.com → API keys se a chave de final " \
+      "#{key.to_s.last(4)} é da organização que tem o saldo (a coluna \"Last used\" dela precisa mostrar hoje)."
+  end
+
   def test_llm
     cfg = crm_settings.ai_config || {}
     chosen = params[:model].to_s.strip
@@ -859,8 +879,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     available = Crm::LlmEngines::OpenaiResponses.model_ids(key)
     catalog = Crm::LlmEngines::OPENAI_MODELS
     missing = catalog.keys - available
-    if missing.empty?
-      render json: { success: true, message: 'ChatGPT conectado! Chave válida e todos os modelos liberados. ✓' }
+    # 24/11: listar os modelos funciona até com a conta SEM SALDO, e o botão dava
+    # verde com a chave errada (de outra organização da OpenAI). Agora pede uma
+    # resposta de verdade ao Luna e ao Terra e diz o que a OpenAI devolveu.
+    refused = openai_real_check(OPENAI_PING_MODELS & available)
+    if refused.any?
+      render json: { success: false, message: openai_refused_message(refused, key) }
+    elsif missing.empty?
+      render json: { success: true, message: "ChatGPT conectado e respondendo de verdade (Luna e Terra testados). Chave final #{key.to_s.last(4)}. ✓" }
     elsif missing.size == catalog.size
       render json: { success: false, message: 'Chave válida, mas nenhum dos modelos do sistema está liberado para ela.' }
     else
@@ -2930,6 +2956,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       gemini_key_set: cfg['gemini_api_key'].present?,
       # 🧠 item 399: ChatGPT como motor dos atendentes (chave nunca volta; só o "tem/não tem")
       openai_key_set: cfg[Crm::LlmEngines::OPENAI_KEY].present?,
+      # 24/11: os 4 últimos caracteres, como a própria OpenAI mostra na lista de chaves (para conferir qual chave está gravada)
+      openai_key_hint: cfg[Crm::LlmEngines::OPENAI_KEY].to_s.last(4).presence,
       openai_models: Crm::LlmEngines.openai_catalog,
       openai_agents: Crm::LlmEngines::OPENAI_AGENT_KEYS,
       # 🧠 22/11: os 3 fornecedores para o seletor de modelo de TODO agente

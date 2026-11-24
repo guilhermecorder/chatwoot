@@ -26,12 +26,14 @@ class Crm::AgentSimulator
     contact = @account.contacts.find_by(phone_number: FAKE_PHONE) ||
               @account.contacts.create!(name: 'Paciente de teste', phone_number: FAKE_PHONE)
     contact_inbox = ContactInbox.find_or_create_by!(contact: contact, inbox: inbox) { |ci| ci.source_id = "simulador-#{contact.id}" }
-    Conversation.create!(
+    conversation = Conversation.create!(
       account: @account, inbox: inbox, contact: contact, contact_inbox: contact_inbox,
       additional_attributes: { 'cevico_simulado' => true, 'cevico_simulado_agent' => @agent_key,
                                'cevico_simulado_objective' => @objective,
                                'cevico_simulado_script' => @script_version }.compact
     )
+    self.class.archive!(conversation)
+    conversation
   end
 
   # troca o motivo numa conversa já aberta (a tela pode ajustar entre as falas)
@@ -47,6 +49,9 @@ class Crm::AgentSimulator
   # model (item 399): motor escolhido NA TELA DO TESTE para esta fala (Claude ou
   # ChatGPT); vazio = o que o cartão do agente usa. Não grava nada no agente.
   def say!(conversation, text, model: nil)
+    # 🗄️ item 412: a conversa de teste vive RESOLVIDA; abre em silêncio só durante a fala
+    # (sem o "reabrir" do paciente, que zeraria as pausas da IA) e volta a arquivar no fim
+    self.class.silent_status!(conversation, :open)
     message = conversation.messages.create!(
       account_id: @account.id, inbox_id: conversation.inbox_id, message_type: :incoming,
       content: text.to_s.strip, sender: conversation.contact
@@ -58,6 +63,8 @@ class Crm::AgentSimulator
 
     Crm::ResponderAgentJob.write_shadow_note!(conversation, @agent_key, result, message.id)
     { ok: true }
+  ensure
+    self.class.archive!(conversation)
   end
 
   # a conversa como balões: paciente (incoming) e agente (notas de sombra)
@@ -71,6 +78,19 @@ class Crm::AgentSimulator
                              'modelo', 'reserva') }
       end
     end
+  end
+
+  # 🗄️ item 412 (24/11): teste do simulador não aparece em "Abertas" para quem atende.
+  # Troca o status direto na coluna: sem aviso "conversa resolvida", sem webhook, sem
+  # automação de conversa resolvida (é só uma caixa interna de teste).
+  def self.archive!(conversation)
+    silent_status!(conversation, :resolved)
+  end
+
+  def self.silent_status!(conversation, status)
+    return if conversation.blank? || conversation.status.to_s == status.to_s
+
+    conversation.update_columns(status: Conversation.statuses.fetch(status.to_s), updated_at: Time.current) # rubocop:disable Rails/SkipsModelValidations
   end
 
   def self.simulated?(conversation)

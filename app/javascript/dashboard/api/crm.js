@@ -497,6 +497,26 @@ class CrmAPI extends ApiClient {
     return axios.patch(`${this.url}/surgery_indications/${id}`, payload);
   }
 
+  // ✉️ item 410: mensagem modelo da indicação (prévia preenchida, envio, catálogo)
+  surgeryIndicationMessage(id) {
+    return axios.get(`${this.url}/surgery_indications/${id}/message`);
+  }
+
+  sendSurgeryIndicationMessage(id, payload) {
+    return axios.post(
+      `${this.url}/surgery_indications/${id}/send_message`,
+      payload
+    );
+  }
+
+  surgeryIndicationModels() {
+    return axios.get(`${this.url}/surgery_indications/message_models`);
+  }
+
+  requestSurgeryIndicationModel(payload) {
+    return axios.post(`${this.url}/surgery_indications/request_model`, payload);
+  }
+
   // item 277: quem entrou na coluna Agendamento de Consulta (caixa de origem, como foi, lista)
   appointmentsStageEntries(params) {
     return axios.get(`${this.url}/appointments/stage_entries`, { params });
@@ -1420,6 +1440,19 @@ class CrmAPI extends ApiClient {
 
   copyScriptToLab(payload) {
     return axios.post(`${this.url}/attendance_lab/copy_script`, payload);
+  }
+
+  // 📍 24/11: marco do atendimento (antes × depois) e ponto de volta
+  markAttendanceLab(payload) {
+    return axios.post(`${this.url}/attendance_lab/mark`, payload);
+  }
+
+  unmarkAttendanceLab(payload) {
+    return axios.post(`${this.url}/attendance_lab/unmark`, payload);
+  }
+
+  restoreAttendancePoint(payload) {
+    return axios.post(`${this.url}/attendance_lab/restore_point`, payload);
   }
 
   // 🧭 23/11: motor por coluna do CRM (um modelo de IA para cada coluna do atendente)

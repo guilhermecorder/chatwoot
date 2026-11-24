@@ -181,9 +181,14 @@ RSpec.describe Crm::ReactivationPlan do
       post "#{base}/activate", headers: admin.create_new_auth_token, as: :json
       expect(response.parsed_body['status']).to eq('processing')
 
-      post "#{base}/run_now", headers: admin.create_new_auth_token, as: :json
-      expect(response.parsed_body['sent_now']).to eq(1)
+      # 📤 24/11: no automático o "mandar agora" entra na fila do robô (com a trava do plano)
+      perform_enqueued_jobs do
+        post "#{base}/run_now", headers: admin.create_new_auth_token, as: :json
+      end
+      expect(response.parsed_body).to include('sent_now' => 0, 'queued' => true)
+      get base, headers: admin.create_new_auth_token, as: :json
       expect(response.parsed_body['sent_today']).to eq(1)
+      expect(response.parsed_body['queued_batch']).to be_nil
 
       post "#{base}/pause", headers: admin.create_new_auth_token, as: :json
       expect(response.parsed_body['status']).to eq('paused')

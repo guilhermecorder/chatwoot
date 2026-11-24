@@ -64,7 +64,7 @@ class Crm::LlmEngines::OpenaiResponses
     parse(post(body))
   end
 
-  def self.error_message(response, model) # rubocop:disable Metrics/CyclomaticComplexity
+  def self.error_message(response, model) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     parsed = response.parsed_response
     detail = parsed.is_a?(Hash) ? parsed.dig('error', 'message').to_s : ''
     code = parsed.is_a?(Hash) ? parsed.dig('error', 'code').to_s : ''
@@ -73,7 +73,11 @@ class Crm::LlmEngines::OpenaiResponses
     when 403 then 'A chave da OpenAI não tem permissão para este modelo.'
     when 404 then "Modelo #{model} indisponível para esta chave da OpenAI."
     when 429
-      code == 'insufficient_quota' ? 'OpenAI sem créditos: recarregue em platform.openai.com → Billing.' : 'OpenAI: limite de uso atingido (429).'
+      return 'OpenAI sem créditos: recarregue em platform.openai.com → Billing.' if code == 'insufficient_quota'
+
+      # 24/11: limite de VELOCIDADE da conta (tokens ou pedidos por minuto/dia), não falta de crédito.
+      # O texto da OpenAI diz qual limite estourou (platform.openai.com → Settings → Limits).
+      "OpenAI: limite de uso atingido (429).#{" #{detail.truncate(240)}" if detail.present?}"
     else
       return "Modelo #{model} indisponível para esta chave da OpenAI." if code == 'model_not_found'
 

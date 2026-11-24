@@ -142,7 +142,8 @@ class Api::V1::Accounts::Crm::ConversationSummariesController < Api::V1::Account
   REASON_TEXT = {
     'humano_assumiu' => 'pausou sozinho quando o atendimento humano respondeu',
     'chamar_humano' => 'o agente pediu atendimento humano',
-    'botao' => 'desligado pelo botão'
+    'botao' => 'desligado pelo botão',
+    'indicacao' => 'a equipe conduz a indicação cirúrgica'
   }.freeze
 
   def responder_json # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity

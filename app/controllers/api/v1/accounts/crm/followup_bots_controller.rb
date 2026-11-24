@@ -88,10 +88,12 @@ class Api::V1::Accounts::Crm::FollowupBotsController < Api::V1::Accounts::BaseCo
 
   BOOL = ActiveModel::Type::Boolean.new
 
-  def sanitize_smart(current) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity
+  def sanitize_smart(current) # rubocop:disable Metrics/AbcSize,Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
     raw = params.require(:followup_smart)
-    out = current.slice('leitura', 'fim_de_semana', 'lead_frio', 'etapas_longas', 'reativacao')
+    out = current.slice('leitura', 'fim_de_semana', 'lead_frio', 'etapas_longas', 'etapas_longas_teto', 'reativacao')
     %w[leitura fim_de_semana lead_frio etapas_longas].each { |k| out[k] = BOOL.cast(raw[k]) == true if raw.key?(k) }
+    # 📆 teto diário das etapas longas por número (0 = sem teto)
+    out['etapas_longas_teto'] = raw[:etapas_longas_teto].to_i.clamp(0, 500) if raw.key?(:etapas_longas_teto)
     return out unless raw.key?(:reativacao)
 
     re = raw[:reativacao]

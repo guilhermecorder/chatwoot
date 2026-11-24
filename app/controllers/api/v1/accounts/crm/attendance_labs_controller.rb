@@ -8,6 +8,10 @@
 #                 (com foto do Roteiro antigo: "voltar para esta" desfaz)
 #   copy_script → o Roteiro 2 recomeça como cópia exata do Roteiro 1, para o
 #                 próximo teste mudar UMA coisa só
+#   mark / unmark   → 📍 marco do atendimento (24/11): a data em que algo grande
+#                     mudou; o Laboratório compara ANTES × DEPOIS por caixa
+#   restore_point   → 🔙 volta o atendimento ao formato de antes de 24/11
+#                     (Crm::AttendanceRestorePoint), com foto do que havia
 # Quem liga/desliga e escolhe a variante B continua sendo o cartão do agente
 # (settings#save_ai_experiment). A matemática mora em Crm::EngineExperiment.
 class Api::V1::Accounts::Crm::AttendanceLabsController < Api::V1::Accounts::BaseController # rubocop:disable Metrics/ClassLength
@@ -24,6 +28,36 @@ class Api::V1::Accounts::Crm::AttendanceLabsController < Api::V1::Accounts::Base
   before_action :set_agent
 
   def show
+    render json: lab_json
+  end
+
+  # 📍 anota um marco (título obrigatório; `at` em branco = agora)
+  def mark # rubocop:disable Metrics/AbcSize
+    title = params[:title].to_s.strip
+    return render json: { error: 'Dê um nome ao marco.' }, status: :unprocessable_entity if title.blank?
+
+    at = params[:at].present? ? Crm::AttendanceMilestones.parse(params[:at]) : Time.current
+    return render json: { error: 'Data do marco inválida.' }, status: :unprocessable_entity if at.nil? || at > 1.minute.from_now
+
+    Crm::AttendanceMilestones.add!(Current.account, title: title, note: params[:note], at: at.iso8601, by: Current.user&.name)
+    @settings = nil
+    render json: lab_json
+  end
+
+  def unmark
+    Crm::AttendanceMilestones.remove!(Current.account, params[:id])
+    @settings = nil
+    render json: lab_json
+  end
+
+  # 🔙 volta o atendimento ao formato de antes de 24/11 (pede confirmação escrita na tela)
+  def restore_point
+    unless ActiveModel::Type::Boolean.new.cast(params[:confirm]) == true
+      return render json: { error: 'Confirme para voltar ao atendimento antigo.' }, status: :unprocessable_entity
+    end
+
+    Crm::AttendanceRestorePoint.apply!(Current.account, by: Current.user)
+    @settings = nil
     render json: lab_json
   end
 
@@ -132,8 +166,20 @@ class Api::V1::Accounts::Crm::AttendanceLabsController < Api::V1::Accounts::Base
       inboxes: inbox_rows(viewing ? viewing['inboxes'] : experiment['inboxes']),
       prompt: prompt_compare(experiment, viewing),
       script_v2_backup_at: (settings.ai_config || {}).dig(BACKUP_KEY, 'at'),
-      usd_brl: usd_rate
+      usd_brl: usd_rate,
+      # 📍 24/11: marcos do atendimento + antes × depois do marco escolhido (?marco=id; padrão: o mais novo)
+      marcos: Crm::AttendanceMilestones.list(Current.account),
+      before_after: before_after_json,
+      restore_point: Crm::AttendanceRestorePoint.summary(Current.account)
     }
+  end
+
+  def before_after_json
+    marco = Crm::AttendanceMilestones.find(Current.account, params[:marco])
+    return nil if marco.nil?
+
+    at = Crm::AttendanceMilestones.parse(marco['at'])
+    Crm::AttendanceBeforeAfter.new(Current.account, at: at).call&.merge(marco: marco)
   end
 
   def agent_row(key, name)

@@ -43,6 +43,12 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   LONG_SLACK = 1.day    # folga do alcance além da faixa
   LONG_BAND = 3.days    # faixa depois do prazo (fim de semana e horário de envio empurram a etapa)
   LONG_STATUSES = %i[open resolved].freeze
+  # 📆 24/11 — TETO DIÁRIO das etapas longas por número (followup_smart.etapas_longas_teto,
+  # padrão 20; 0 = sem teto): mensagem modelo para lead antigo é o envio que mais
+  # pesa na nota do número na Meta, então começa pequeno e sobe aos poucos. Passou
+  # do teto, a etapa NÃO sai e NÃO fica na fila: vence e é descartada pelo anti-rajada.
+  LONG_CAP_DEFAULT = 20
+  LONG_MESSAGES_SQL = "messages.additional_attributes ->> 'cevico_followup_long' = 'true'".freeze
   EVENTS_CAP = 60   # histórico de envios/erros guardado por robô
   # EXPEDIENTE PADRÃO: cutucada só entre 08h e 20h (SP). O admin pode mudar a
   # janela em Automações → Robôs → "Horário de envio" (até 24h por dia) —
@@ -77,6 +83,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   REACTIVATION_STALE_DAYS = 3   # reativação que passou do dia há mais que isso não sai
   SMART_DEFAULTS = {
     'leitura' => true, 'fim_de_semana' => true, 'lead_frio' => true, 'etapas_longas' => false,
+    'etapas_longas_teto' => LONG_CAP_DEFAULT,
     'reativacao' => { 'ativa' => true, 'dias' => 7, 'modelos' => {} }
   }.freeze
   # ── ETIQUETAS DE ENCERRAMENTO (rodada 158) ──
@@ -102,6 +109,14 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # mensagens que contam no ritmo: cutucadas de qualquer robô + reativações
   PACE_MESSAGES_SQL = "(messages.additional_attributes ->> 'cevico_followup_bot_id' IS NOT NULL " \
                       "OR messages.additional_attributes ->> 'cevico_followup_reativacao' = 'true')".freeze
+  # 📦 mensagens de saída que NÃO são disparo em massa (campanha e plano de
+  # Reativação = cevico_auto 'Campaign'; Segmentação = cevico_segment; tela de
+  # Indicações = cevico_auto 'indicacao' / cevico_indicacao). Ver #silence_anchor.
+  BULK_ATTRS = "COALESCE(messages.additional_attributes, '{}'::jsonb)".freeze
+  NOT_BULK_SQL = "(COALESCE(messages.additional_attributes ->> 'cevico_auto', '') NOT IN ('Campaign', 'indicacao') " \
+                 "AND NOT jsonb_exists(#{BULK_ATTRS}, 'cevico_reactivation') " \
+                 "AND NOT jsonb_exists(#{BULK_ATTRS}, 'cevico_segment') " \
+                 "AND NOT jsonb_exists(#{BULK_ATTRS}, 'cevico_indicacao'))".freeze
   STOP_LABELS_FIXED = %w[nao_perturbe].freeze
   STOP_LABEL_PREFIXES = %w[perda_].freeze
   NEXT_STATUSES = %w[proxima aguardando].freeze # etapas que ainda vão sair (previsão)
@@ -115,6 +130,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     'janela_whatsapp' => 'fora da janela de 24h do WhatsApp — só mensagem modelo entrega',
     'momento_perdido' => 'etapa vencida há horas — descartada (anti-rajada)',
     'cadencia_completa' => 'cadência completa',
+    'teto_etapas_longas' => 'teto diário de etapas longas deste número atingido',
     'aguardando_espacamento' => 'aguardando o espaçamento da cadência',
     'aguardando_prazo' => 'aguardando o prazo da etapa',
     'trava_cadencia_completa' => 'todas as cutucadas já saíram (mensagens reais)',
@@ -406,6 +422,10 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
       return run[:reasons]['ritmo'] += 1
     end
 
+    # 📆 24/11: etapa longa além do teto diário do número não sai hoje (sem marcar
+    # e sem lembrete de fila: vence e é descartada pelo anti-rajada)
+    return run[:reasons]['teto_etapas_longas'] += 1 if long_cap_full?(bot.account, conversation.inbox_id, chosen[:step])
+
     # item 315: etapa de IA além do teto da rodada fica para a próxima (sem marcar)
     return run[:reasons]['ia_fila'] += 1 if ai_queue_full?(chosen)
 
@@ -434,6 +454,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
 
     send_nudge(bot, conversation, chosen, outcome[:text])
     pace_count!(conversation.inbox_id)
+    long_sent[conversation.inbox_id] += 1 if long_step?(chosen[:step])
     run[:sent] += 1
     events << event_for(conversation, 'sent', note: step_label(chosen[:step]))
   end
@@ -952,6 +973,30 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     @pace_sent ||= Hash.new(0)
   end
 
+  # ── 📆 TETO DIÁRIO DAS ETAPAS LONGAS POR NÚMERO (24/11) ──
+  def long_step?(step)
+    Crm::FollowupBot.step_delay_hours(step) >= LONG_STEP_HOURS
+  end
+
+  # o número já mandou hoje o teto de etapas longas? (mensagens reais de hoje,
+  # lidas uma vez por caixa na rodada, + o que esta rodada já enviou)
+  def long_cap_full?(account, inbox_id, step)
+    return false unless long_step?(step)
+
+    cap = smart(account)['etapas_longas_teto'].to_i
+    return false unless cap.positive? # 0 = sem teto
+
+    @long_base ||= {}
+    @long_base[inbox_id] ||= Message.unscope(:order).where(inbox_id: inbox_id, message_type: :outgoing)
+                                    .where('messages.created_at >= ?', TZ.now.beginning_of_day)
+                                    .where(LONG_MESSAGES_SQL).count
+    @long_base[inbox_id] + long_sent[inbox_id] >= cap
+  end
+
+  def long_sent
+    @long_sent ||= Hash.new(0)
+  end
+
   def pace_count!(inbox_id)
     pace_sent[inbox_id] += 1
   end
@@ -1071,14 +1116,23 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
   # reais (paciente fala primeiro). Comparação por maximum() não sofre disso.
   # Nota interna (outgoing + private) NÃO conta: o paciente não a viu — se a
   # última coisa visível é a pergunta dele, a vez é do atendimento (varredura 03/10).
+  #
+  # 📦 24/11/2026: DISPARO EM MASSA não é o atendimento falando. O modelo de
+  # uma campanha, do plano de Reativação, da Segmentação ou da tela de
+  # Indicações caía numa conversa em que o paciente tinha falado por último,
+  # virava a âncora do silêncio e 15 minutos depois o robô cutucava ("Oi, pode
+  # falar?") em cima do modelo. Agora essas mensagens não contam: nem como
+  # "o atendimento falou", nem como início do silêncio. Se o paciente responder
+  # ao disparo, o atendente responde e a cadência nasce daí, como sempre.
   def silence_anchor(conversation)
     msgs = conversation.messages.where(message_type: [:incoming, :outgoing], private: false)
     last_incoming_at = msgs.incoming.maximum(:created_at)
-    last_outgoing_at = msgs.outgoing.maximum(:created_at)
+    spoken = msgs.outgoing.where(NOT_BULK_SQL)
+    last_outgoing_at = spoken.maximum(:created_at)
     return nil if last_outgoing_at.nil? # atendimento nunca falou
     return nil if last_incoming_at && last_incoming_at >= last_outgoing_at # paciente falou por último
 
-    scope = msgs.outgoing
+    scope = spoken
     scope = scope.where('created_at > ?', last_incoming_at) if last_incoming_at
     scope.minimum(:created_at)
   end
@@ -1133,6 +1187,7 @@ class Crm::FollowupBotJob < ApplicationJob # rubocop:disable Metrics/ClassLength
     stage_id = conversation.contact_id && Crm::Contact.where(contact_id: conversation.contact_id).order(updated_at: :desc).pick(:stage_id)
     attrs[:cevico_followup_stage_id] = stage_id if stage_id
     attrs[:cevico_followup_ai] = true if Crm::FollowupBot.ai_step?(step) # item 315: escrita pela IA
+    attrs[:cevico_followup_long] = true if long_step?(step) # 📆 conta no teto diário das etapas longas
     # etapa de MENSAGEM MODELO: envia o template oficial (funciona fora da
     # janela de 24h do WhatsApp — ideal para cadências em dias)
     attrs[:template_params] = render_template_params(step['template_params'], conversation) if step['template_params'].present?

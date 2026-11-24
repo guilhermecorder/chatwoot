@@ -245,6 +245,54 @@ RSpec.describe Crm::FollowupBotJob do
     expect(nudges(conv, bot).count).to eq(1)
   end
 
+  # 📦 24/11/2026: modelo de disparo em massa (campanha, Reativação, Segmentação,
+  # Indicações) não é o atendimento falando: não vira âncora do silêncio.
+  describe 'disparo em massa não vira âncora do silêncio' do
+    def bulk!(conv, time, attrs)
+      create(:message, account: account, inbox: conv.inbox, conversation: conv, message_type: :outgoing,
+                       content: 'Oi! Aqui é o Guilherme, da CEVICO…', created_at: time, additional_attributes: attrs)
+      conv.update!(last_activity_at: time)
+    end
+
+    it 'paciente falou por último e chegou um modelo de lote: o robô não cutuca em cima', :aggregate_failures do
+      bot = bot_with([text_step(1)])
+      marks = [{ 'cevico_auto' => 'Campaign' }, { 'cevico_auto' => 'Campaign', 'cevico_reactivation' => { 'plan' => 1 } },
+               { 'cevico_segment' => { 'segment_id' => 1 } }, { 'cevico_auto' => 'indicacao', 'cevico_indicacao' => { 'task_id' => 1 } }]
+      convs = marks.each_with_index.map do |attrs, index|
+        conv = silent_conversation("Paciente #{index}", answered: '2026-10-13 09:00')
+        incoming!(conv, at('2026-10-13 10:00'), 'vou pensar e te falo')
+        bulk!(conv, at('2026-10-13 12:30'), attrs)
+        conv
+      end
+
+      described_class.perform_now
+
+      convs.each { |conv| expect(nudges(conv)).to be_empty }
+      expect(bot.reload.activity_log.dig('last_run', 'reasons')).to include('paciente_falou_ultimo' => marks.size)
+    end
+
+    it 'o atendimento falou e depois veio o lote: a âncora continua sendo a fala do atendimento' do
+      conv = silent_conversation('Renata', answered: '2026-10-13 12:50')
+      bulk!(conv, at('2026-10-13 13:40'), { 'cevico_auto' => 'Campaign' })
+      bot = bot_with([text_step(1)])
+
+      described_class.perform_now
+
+      expect(Time.zone.parse(state_of(conv, bot)['anchor'])).to eq(at('2026-10-13 12:50'))
+    end
+
+    it 'mensagem automática que não é lote (lembrete, formulário) continua valendo como antes' do
+      conv = silent_conversation('Bruno', answered: '2026-10-13 09:00')
+      incoming!(conv, at('2026-10-13 10:00'), 'ok')
+      bulk!(conv, at('2026-10-13 12:50'), { 'cevico_auto' => 'Lembrete' })
+      bot = bot_with([text_step(1)])
+
+      described_class.perform_now
+
+      expect(nudges(conv, bot).count).to eq(1)
+    end
+  end
+
   # 📆 23/11/2026: o robô só olhava conversas com movimento nos últimos 3 dias,
   # então etapa de mensagem modelo de 7, 10 ou 30 dias NUNCA saía (em produção
   # os robôs de 7 e 30 dias tinham o registro vazio). Agora o alcance acompanha
@@ -305,6 +353,24 @@ RSpec.describe Crm::FollowupBotJob do
 
       expect(nudges(conv)).to be_empty
       expect(described_class.new.send(:reach_scope, bot, bot.ordered_steps).pluck(:id)).to be_empty
+    end
+
+    it 'teto diário por número: passou do teto, a etapa longa não sai hoje (e a curta continua saindo)', :aggregate_failures do
+      smart = { 'etapas_longas' => true, 'etapas_longas_teto' => 1 }
+      CrmSetting.find_by(account_id: account.id).update!(agenda_config: { 'followup_smart' => smart })
+      um = silent_conversation('Renata', answered: '2026-10-06 13:30', the_inbox: wa_inbox)
+      dois = silent_conversation('Bruno', answered: '2026-10-06 13:40', the_inbox: wa_inbox)
+      curta = silent_conversation('Carla', answered: '2026-10-13 12:50', the_inbox: wa_inbox)
+      longo = bot_with([model_step(7)], name: '7 dias')
+      curto = bot_with([text_step(1)], name: '1 hora')
+
+      described_class.perform_now
+
+      long_sent = [um, dois].sum { |conv| nudges(conv, longo).count }
+      expect(long_sent).to eq(1)
+      expect(Message.where("additional_attributes ->> 'cevico_followup_long' = 'true'").count).to eq(1)
+      expect(longo.reload.activity_log.dig('last_run', 'reasons')).to include('teto_etapas_longas' => 1)
+      expect(nudges(curta, curto).count).to eq(1)
     end
 
     it 'conversa antiga fora da faixa de qualquer etapa não entra na rodada (o robô não relê a base inteira)' do

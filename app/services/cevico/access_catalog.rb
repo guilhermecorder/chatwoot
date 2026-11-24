@@ -152,7 +152,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/forms' => { node: 'crm.formularios', view: %w[index summary preview_link] },
     'crm/appointments' => { node: 'crm.agendamentos', view: %w[feed] },
     'crm/appointment_alerts' => { node: 'agenda.notificacoes', view: %w[index count] }, # 🔔 item 346
-    'crm/surgery_indications' => { node: 'agenda.indicacoes', view: %w[index] }, # 🎯 item 402
+    'crm/surgery_indications' => { node: 'agenda.indicacoes', view: %w[index message message_models] }, # 🎯 itens 402/410
     'crm/sources' => { node: 'crm.fontes' },
     # ── Agenda / pacientes ──
     'crm/patients' => { node: 'pacientes', view: %w[show search phone_owner] }, # 🔎 item 346: a busca só lê

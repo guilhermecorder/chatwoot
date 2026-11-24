@@ -45,6 +45,8 @@ const { cvVars, blockVars } = useCevicoPalette({
     { id: 'decisao', label: 'Conta da decisão', icon: 'i-lucide-calculator' },
     { id: 'prompt', label: 'O que muda', icon: 'i-lucide-file-diff' },
     { id: 'historico', label: 'Testes anteriores', icon: 'i-lucide-history' },
+    { id: 'marco', label: 'Antes × depois', icon: 'i-lucide-flag' },
+    { id: 'volta', label: 'Ponto de volta', icon: 'i-lucide-undo-2' },
   ],
 });
 
@@ -55,6 +57,10 @@ const agentKey = ref('atendente_agendamento');
 const viewingId = ref('');
 const chartView = ref('taxa');
 const note = ref('');
+// 📍 24/11: marco escolhido para o antes × depois + campos do marco novo
+const marcoId = ref('');
+const marcoTitle = ref('');
+const marcoAt = ref('');
 
 const load = async () => {
   loading.value = true;
@@ -62,6 +68,7 @@ const load = async () => {
     const { data: payload } = await CrmAPI.getAttendanceLab({
       agent: agentKey.value,
       ...(viewingId.value ? { test: viewingId.value } : {}),
+      ...(marcoId.value ? { marco: marcoId.value } : {}),
     });
     data.value = payload;
   } catch (e) {
@@ -421,6 +428,123 @@ const copyScript = async () => {
     useAlert('Roteiro 2 agora é uma cópia do Roteiro 1.');
   } catch (e) {
     useAlert(e?.response?.data?.error || 'Não consegui copiar o Roteiro.');
+  } finally {
+    busy.value = false;
+  }
+};
+
+// ── 📍 MARCO DO ATENDIMENTO: antes × depois por caixa ──
+const marcos = computed(() => data.value?.marcos || []);
+const beforeAfter = computed(() => data.value?.before_after || null);
+const restorePoint = computed(() => data.value?.restore_point || null);
+const dayTime = iso =>
+  iso
+    ? new Date(iso).toLocaleString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '—';
+const horizonLabel = computed(() => {
+  const hours = Number(beforeAfter.value?.horizon_hours || 0);
+  if (hours < 48) return `${Math.max(Math.round(hours), 1)} h`;
+  return `${Math.round(hours / 24)} dias`;
+});
+// diferença em pontos percentuais (depois − antes); null quando falta um lado
+const delta = row => {
+  const before = row?.before?.taxa;
+  const after = row?.after?.taxa;
+  if (before === null || before === undefined) return null;
+  if (after === null || after === undefined) return null;
+  return Math.round((after - before) * 10) / 10;
+};
+const deltaLabel = row => {
+  const d = delta(row);
+  if (d === null) return 'sem base';
+  if (d === 0) return 'igual';
+  return `${d > 0 ? '+' : '−'}${Math.abs(d).toLocaleString('pt-BR')} pt`;
+};
+const deltaColor = row => {
+  const d = delta(row);
+  if (d === null || d === 0) return '';
+  return d > 0 ? '#059669' : '#dc2626';
+};
+// título que conta a história do marco
+const marcoHeadline = computed(() => {
+  const ba = beforeAfter.value;
+  if (!ba) return '';
+  const after = ba.total?.after;
+  const before = ba.total?.before;
+  if (!after?.conversas)
+    return 'Ainda não chegou conversa nova depois do marco.';
+  if (before?.taxa === null || before?.taxa === undefined)
+    return `Depois do marco, ${pct(after.taxa)} das conversas novas viraram consulta.`;
+  return `Depois do marco, ${pct(after.taxa)} das conversas novas viraram consulta; antes eram ${pct(before.taxa)}.`;
+});
+const pickMarco = id => {
+  marcoId.value = id;
+  load();
+};
+const addMarco = async () => {
+  if (busy.value || !marcoTitle.value.trim()) return;
+  busy.value = true;
+  try {
+    const { data: payload } = await CrmAPI.markAttendanceLab({
+      agent: agentKey.value,
+      title: marcoTitle.value.trim(),
+      at: marcoAt.value ? new Date(marcoAt.value).toISOString() : '',
+    });
+    data.value = payload;
+    marcoId.value = '';
+    marcoTitle.value = '';
+    marcoAt.value = '';
+    useAlert('Marco anotado.');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui anotar o marco.');
+  } finally {
+    busy.value = false;
+  }
+};
+const removeMarco = async marco => {
+  if (busy.value) return;
+  // eslint-disable-next-line no-alert
+  if (!window.confirm(`Apagar o marco "${marco.title}"? Só a anotação some.`))
+    return;
+  busy.value = true;
+  try {
+    const { data: payload } = await CrmAPI.unmarkAttendanceLab({
+      agent: agentKey.value,
+      id: marco.id,
+    });
+    data.value = payload;
+    marcoId.value = '';
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui apagar o marco.');
+  } finally {
+    busy.value = false;
+  }
+};
+// 🔙 ponto de volta: um toque devolve o atendimento ao formato de antes de 24/11
+const applyRestorePoint = async () => {
+  if (busy.value) return;
+  if (
+    // eslint-disable-next-line no-alert
+    !window.confirm(
+      'Voltar o atendimento ao formato de antes de 24/11? O Roteiro 1 e os Passos do Atendente de Agendamento voltam ao texto de 23/11, o motor por coluna é apagado (volta o modelo do cartão) e o teste em andamento é encerrado. O que está valendo hoje fica guardado no Histórico do Roteiro.'
+    )
+  )
+    return;
+  busy.value = true;
+  try {
+    const { data: payload } = await CrmAPI.restoreAttendancePoint({
+      agent: agentKey.value,
+      confirm: true,
+    });
+    data.value = payload;
+    useAlert('Atendimento de volta ao formato de antes de 24/11.');
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui voltar ao ponto.');
   } finally {
     busy.value = false;
   }
@@ -1053,6 +1177,175 @@ const decisionLabel = entry => {
           </div>
         </div>
       </template>
+
+      <!-- ══ 📍 ANTES × DEPOIS DO MARCO ══ -->
+      <div class="cv-block p-6 sm:p-9 mb-6" :style="blockVars('marco')">
+        <p
+          class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-9"
+        >
+          Antes × depois do marco
+        </p>
+        <h2
+          class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12 mt-1"
+        >
+          {{
+            beforeAfter
+              ? marcoHeadline
+              : 'Anote o dia em que o atendimento mudou para comparar o antes com o depois.'
+          }}
+        </h2>
+        <p v-if="beforeAfter" class="text-xs text-n-slate-10 mt-1">
+          {{ beforeAfter.marco.title }} · {{ dayTime(beforeAfter.at) }} ·
+          conversas novas de cada caixa e quantas viraram consulta marcada em
+          até {{ horizonLabel }} da primeira mensagem (o mesmo prazo nos dois
+          lados). Antes = os {{ beforeAfter.before_days }} dias anteriores. Os
+          dias mais recentes ainda amadurecem.
+        </p>
+
+        <div v-if="marcos.length > 1" class="flex gap-1.5 flex-wrap mt-4">
+          <button
+            v-for="marco in marcos"
+            :key="marco.id"
+            class="cv-chip"
+            :class="{ 'cv-chip-on': beforeAfter?.marco?.id === marco.id }"
+            @click="pickMarco(marco.id)"
+          >
+            {{ day(marco.at) }} · {{ marco.title }}
+          </button>
+        </div>
+
+        <div v-if="beforeAfter" class="grid sm:grid-cols-2 gap-3 mt-5">
+          <div
+            v-for="row in [
+              { name: 'Todas as caixas', ...beforeAfter.total, total: true },
+              ...beforeAfter.rows,
+            ]"
+            :key="row.inbox_id || 'total'"
+            class="cv-sub p-4"
+            :class="{ 'sm:col-span-2': row.total }"
+          >
+            <div class="flex items-center gap-2 flex-wrap">
+              <p class="text-sm font-semibold text-n-slate-12 flex-1 min-w-0">
+                {{ row.name }}
+              </p>
+              <span
+                class="text-xs font-semibold tabular-nums"
+                :style="{ color: deltaColor(row) }"
+              >
+                {{ deltaLabel(row) }}
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mt-3">
+              <div v-for="side in ['before', 'after']" :key="side">
+                <p class="text-[11px] text-n-slate-9">
+                  {{ side === 'before' ? 'Antes' : 'Depois' }}
+                </p>
+                <p
+                  class="text-2xl font-bold tabular-nums tracking-tight text-n-slate-12"
+                >
+                  {{ pct(row[side].taxa) }}
+                </p>
+                <p class="text-[11px] text-n-slate-10">
+                  {{ num(row[side].consultas) }} consulta(s) em
+                  {{ num(row[side].conversas) }} conversa(s) ·
+                  {{ num(row[side].por_dia) }} por dia
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cv-sub p-4 mt-5">
+          <p class="text-xs font-semibold text-n-slate-12">Anotar um marco</p>
+          <div class="flex items-center gap-2 flex-wrap mt-2">
+            <input
+              v-model="marcoTitle"
+              type="text"
+              maxlength="120"
+              placeholder="O que mudou (ex.: ChatGPT na recepção)"
+              class="flex-1 min-w-[200px] rounded-lg border border-n-weak bg-n-alpha-1 px-3 py-2 text-sm text-n-slate-12 outline-none focus:border-n-brand"
+            />
+            <input
+              v-model="marcoAt"
+              type="datetime-local"
+              class="rounded-lg border border-n-weak bg-n-alpha-1 px-3 py-2 text-sm text-n-slate-12 outline-none focus:border-n-brand"
+              title="Em branco = agora"
+            />
+            <button
+              class="cv-btn cv-btn-sm"
+              :disabled="busy || !marcoTitle.trim()"
+              @click="addMarco"
+            >
+              <span class="i-lucide-flag text-xs" />
+              Anotar
+            </button>
+          </div>
+          <div v-if="marcos.length" class="mt-3 space-y-1">
+            <div
+              v-for="marco in marcos"
+              :key="marco.id"
+              class="flex items-start gap-2 text-[11px] text-n-slate-10"
+            >
+              <span class="tabular-nums whitespace-nowrap text-n-slate-12">
+                {{ dayTime(marco.at) }}
+              </span>
+              <span class="flex-1 min-w-0">
+                <b class="text-n-slate-12">{{ marco.title }}</b>
+                <template v-if="marco.note"> · {{ marco.note }}</template>
+              </span>
+              <button
+                class="text-n-slate-9 hover:text-n-slate-12"
+                :disabled="busy"
+                title="Apagar a anotação"
+                @click="removeMarco(marco)"
+              >
+                <span class="i-lucide-x text-xs" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 🔙 PONTO DE VOLTA ══ -->
+      <div
+        v-if="restorePoint"
+        class="cv-block p-6 sm:p-9 mb-6"
+        :style="blockVars('volta')"
+      >
+        <h2
+          class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12"
+        >
+          Se piorar, um toque volta ao atendimento de antes de 24/11
+        </h2>
+        <p class="text-xs text-n-slate-10 mt-1 leading-relaxed">
+          Guardado: o Roteiro 1 e os Passos do Atendente de Agendamento com o
+          texto exato que estava no ar até 23/11 (o que tem o histórico de
+          conversão), com tudo no Sonnet. Voltar apaga o motor por coluna,
+          encerra o teste em andamento e deixa o que vale hoje no Histórico do
+          Roteiro, para desfazer. A regra da consulta de rotina a R$ 250 é de
+          23/11 à noite e também sai; se quiser mantê-la, acrescente de novo no
+          Roteiro.
+        </p>
+        <div class="flex items-center gap-3 flex-wrap mt-4">
+          <button
+            class="cv-btn cv-btn-ghost"
+            :disabled="busy"
+            @click="applyRestorePoint"
+          >
+            <span class="i-lucide-undo-2 text-sm" />
+            Voltar ao atendimento antigo
+          </button>
+          <span
+            v-if="restorePoint.applied_at"
+            class="text-[11px] text-n-slate-10"
+          >
+            usado em {{ dayTime(restorePoint.applied_at) }}
+            <template v-if="restorePoint.applied_by">
+              por {{ restorePoint.applied_by }}
+            </template>
+          </span>
+        </div>
+      </div>
 
       <!-- ══ TESTES ANTERIORES ══ -->
       <div

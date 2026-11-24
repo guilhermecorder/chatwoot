@@ -69,4 +69,28 @@ module Crm::PatientKind
     names = account.inboxes.where(id: first.values.uniq).pluck(:id, :name).to_h
     first.transform_values { |inbox_id| { id: inbox_id, name: names[inbox_id] } }
   end
+
+  # 📱 24/11 (pedido dele: "a mensagem seja enviada pelo número que a pessoa
+  # JÁ TEM conversa"): as caixas em que o paciente conversa, da melhor para a
+  # pior: primeiro onde ele FALOU (a fala mais recente na frente), depois onde
+  # só a clínica falou (o contato mais recente na frente). Só entre as caixas
+  # informadas. { contact_id => [inbox_id, …] }; quem não tem conversa não entra.
+  def talk_inboxes_by_contact(account, contact_ids, inbox_ids) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    ids = Array(contact_ids).compact.uniq
+    boxes = Array(inbox_ids).compact.uniq
+    return {} if ids.empty? || boxes.empty?
+
+    spoke = Message.unscope(:order).where(account_id: account.id, message_type: :incoming, private: false, inbox_id: boxes)
+                   .joins(:conversation).where(conversations: { contact_id: ids })
+                   .group('conversations.contact_id', 'messages.inbox_id').maximum('messages.created_at')
+    touched = Conversation.unscope(:order).where(account_id: account.id, contact_id: ids, inbox_id: boxes)
+                          .group(:contact_id, :inbox_id).maximum(:last_activity_at)
+    out = Hash.new { |h, k| h[k] = [] }
+    spoke.sort_by { |_key, at| at }.reverse_each { |(contact_id, inbox_id), _at| out[contact_id] << inbox_id }
+    touched.sort_by { |_key, at| at || Time.zone.at(0) }.reverse_each do |(contact_id, inbox_id), _at|
+      out[contact_id] << inbox_id unless out[contact_id].include?(inbox_id)
+    end
+    out.default_proc = nil
+    out
+  end
 end

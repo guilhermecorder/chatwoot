@@ -8,7 +8,7 @@
 // 🎛️ item 382: CONTROLE DO LOTE — aprovação manual de cada lote (padrão) ×
 // automático, modo de teste com lista de números, e três blocos: quem recebe
 // na próxima fatia, a fila inteira dia a dia, e os lotes que já saíram.
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAlert } from 'dashboard/composables';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
@@ -100,7 +100,6 @@ const load = async () => {
     isLoading.value = false;
   }
 };
-onMounted(load);
 
 // ── estado do plano ─────────────────────────────────────────────────────
 const exists = computed(() => Boolean(payload.value?.exists));
@@ -139,9 +138,34 @@ const sliceNames = computed(() => {
   });
   return out;
 });
+// 📤 24/11: o lote aprovado sai pelo robô (não mais dentro do clique). A tela
+// acompanha de 5 em 5 s até ele terminar e então atualiza "Lotes que já saíram".
+let queuedTimer = null;
+const queuedBatch = computed(() => payload.value?.queued_batch || null);
+const watchQueued = (tries = 0) => {
+  clearTimeout(queuedTimer);
+  if (!queuedBatch.value || tries > 60) return;
+  queuedTimer = setTimeout(async () => {
+    try {
+      const { data: res } = await CrmAPI.getReactivationPlan();
+      // só o estado: não mexe no formulário que a pessoa pode estar editando
+      payload.value = { ...payload.value, ...res };
+      batchesKey.value += 1;
+    } catch {
+      // tenta de novo na próxima volta
+    }
+    watchQueued(tries + 1);
+  }, 5000);
+};
+onBeforeUnmount(() => clearTimeout(queuedTimer));
+onMounted(async () => {
+  await load();
+  watchQueued();
+});
 const onBatchSent = res => {
   applyPayload(res);
   batchesKey.value += 1;
+  watchQueued();
 };
 
 // ── colunas do funil da casa (o que tem "Orçamento") ────────────────────
@@ -345,7 +369,7 @@ const ritmoSentence = computed(() => {
   if (!c) return '';
   const bits = [`${c.daily_cap} por dia`, `${c.hour_from}h–${c.hour_to}h`];
   bits.push(c.weekdays_only ? 'só dias úteis' : 'todos os dias');
-  if (c.route_by_origin) bits.push('pela caixa de origem');
+  if (c.route_by_origin) bits.push('pelo número em que a pessoa já conversa');
   bits.push(c.approval === 'auto' ? 'automático' : 'eu aprovo cada lote');
   if (c.test_mode) bits.push('modo de teste');
   return bits.join(' · ');
@@ -409,6 +433,11 @@ const runNow = async () => {
     const { data: res } = await CrmAPI.runReactivationPlanNow();
     applyPayload(res);
     const n = Number(res.sent_now || 0);
+    if (res.queued) {
+      useAlert('A fatia desta hora entrou na fila de envio. Começa a sair em instantes.');
+      watchQueued();
+      return;
+    }
     useAlert(n ? `${n} ${n === 1 ? 'mensagem enviada' : 'mensagens enviadas'} agora.` : 'Nada saiu agora — veja o motivo no cabeçalho.');
   } catch (err) {
     fail(err, 'Não deu para mandar agora.');
@@ -701,10 +730,10 @@ const runNow = async () => {
             <div class="md:pt-5">
               <label class="flex items-start gap-2 text-xs text-n-slate-11 cursor-pointer select-none">
                 <input v-model="plan.route_by_origin" type="checkbox" class="rounded border-n-weak mt-0.5" @change="touch" />
-                <span>Mandar pela caixa por onde a pessoa chegou (Instagram manda para quem veio do Instagram)</span>
+                <span>Mandar pelo número em que a pessoa já conversa (onde ela falou por último)</span>
               </label>
               <p class="text-[11px] text-n-slate-10 mt-2 leading-relaxed">
-                O modelo precisa existir aprovado em cada caixa; quando não existir, vai pela caixa padrão.
+                O modelo precisa estar aprovado nesse número. Quando não estiver, vai por outro número em que ela já conversou; quem não tem conversa nenhuma recebe pelo número padrão.
               </p>
             </div>
           </div>
@@ -961,6 +990,15 @@ const runNow = async () => {
 
       <!-- ═══ 🎛️ item 382: controle do lote (todo mundo vê; só quem edita aprova) ═══ -->
       <div v-if="exists" class="space-y-6 mt-6">
+        <div v-if="queuedBatch" class="cv-block cv-strip cv-blue px-4 py-3 flex items-center gap-3">
+          <span class="i-lucide-loader-circle animate-spin text-base text-n-slate-11" />
+          <p class="text-xs text-n-slate-11 flex-1">
+            <b>Lote saindo agora</b>
+            <template v-if="queuedBatch.size"> · {{ queuedBatch.size }} {{ queuedBatch.size === 1 ? 'pessoa' : 'pessoas' }}</template>
+            <template v-if="queuedBatch.by"> · aprovado por {{ queuedBatch.by }}</template>.
+            As mensagens vão saindo uma a uma; acompanhe em “Lotes que já saíram”. Não precisa ficar nesta tela.
+          </p>
+        </div>
         <ReativacaoProximaFatia
           :can-edit="canEdit"
           :is-active="isActive"

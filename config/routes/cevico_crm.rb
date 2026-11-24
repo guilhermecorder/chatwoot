@@ -435,6 +435,9 @@ namespace :crm do
   resource :attendance_lab, only: [:show], controller: 'attendance_labs' do
     post :finish
     post :copy_script
+    post :mark          # 📍 24/11: marco do atendimento (antes × depois)
+    post :unmark
+    post :restore_point # 🔙 24/11: volta ao atendimento de antes de 24/11
   end
   # 💸 Gasto do WhatsApp (item 303, só admin): fatura da Meta + quem gastou
   resource :whatsapp_spend, only: [:show], controller: 'whatsapp_spends' do
@@ -489,7 +492,17 @@ namespace :crm do
   get 'appointments/feed', to: 'appointments#feed'
   get 'appointments/stage_entries', to: 'appointments#stage_entries'
   # 🎯 item 402: fila das Indicações cirúrgicas (quem compareceu e espera a resposta do médico)
-  resources :surgery_indications, only: [:index, :update]
+  # ✉️ item 410: mensagem modelo pré-preenchida depois da decisão (boa notícia / sem indicação)
+  resources :surgery_indications, only: [:index, :update] do
+    collection do
+      get :message_models
+      post :request_model
+    end
+    member do
+      get :message
+      post :send_message
+    end
+  end
   # 🌪️ item 271: funil de aquisição por turma + da porta pra dentro (Gestor)
   get 'funnels/acquisition', to: 'funnels#acquisition'
   get 'funnels/clinic', to: 'funnels#clinic'

@@ -33,6 +33,10 @@ module Crm::ResponderPause # rubocop:disable Metrics/ModuleLength
   }.freeze
   HUMAN = 'humano_assumiu'.freeze
   HANDOFF = 'chamou_humano'.freeze
+  # ✉️ item 410 (24/11): a equipe mandou a mensagem da INDICAÇÃO CIRÚRGICA pela
+  # tela de Indicações: a conversa é dela até a data gravada em 'until'. Não é
+  # renovada pelas mensagens da equipe; a chavinha (ou 👍) religa antes.
+  INDICATION = 'indicacao'.freeze
   # a IA voltou sem a equipe ter respondido ao pedido dela: fica esta marca no
   # estado (sem 'paused') e o contexto do modelo ganha um aviso. Some quando
   # alguém da equipe responde (a pausa nova sobrescreve) ou depois de 24 h.
@@ -57,7 +61,7 @@ module Crm::ResponderPause # rubocop:disable Metrics/ModuleLength
   end
 
   # a pausa gravada JÁ VENCEU? :human | :handoff | nil. Só leitura.
-  def due(conversation, state = state_of(conversation), cfg = nil, now: Time.current) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def due(conversation, state = state_of(conversation), cfg = nil, now: Time.current) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return nil unless state['paused']
     return nil if state['urgente'] || state['sem_prazo']
 
@@ -74,6 +78,9 @@ module Crm::ResponderPause # rubocop:disable Metrics/ModuleLength
 
       wrote_at = patient_wrote_after(conversation, state, at)
       :handoff if wrote_at && wrote_at <= now - minutes.minutes
+    when INDICATION
+      limit = parse_time(state['until'])
+      :indication if limit && limit <= now
     end
   end
 
@@ -142,7 +149,9 @@ module Crm::ResponderPause # rubocop:disable Metrics/ModuleLength
 
   def note!(conversation, kind, cfg)
     content =
-      if kind == :handoff
+      if kind == :indication
+        '▶️ Atendente IA do WhatsApp religado nesta conversa: acabou o prazo em que a equipe conduz a indicação cirúrgica.'
+      elsif kind == :handoff
         minutes = setting(cfg, 'responder_resume_after_handoff_minutes')
         '▶️ Atendente IA do WhatsApp voltou a responder sozinho: o paciente escreveu depois do pedido de atendimento humano ' \
           "e ninguém da equipe respondeu em #{minutes} min. A tarefa continua aberta no Meu Painel."

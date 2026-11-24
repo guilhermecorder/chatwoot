@@ -19,7 +19,7 @@ module Crm::ReactivationBatch # rubocop:disable Metrics/ModuleLength
 
   # ── a próxima fatia, sem mandar ──────────────────────────────────────────
   # devolve { skip: 'motivo' } ou { cfg, today, quota, remaining_today, rows, warnings, pools }
-  def plan(mother, now: Time.current, force: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
+  def plan(mother, now: Time.current, force: false, whole_day: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     cfg = Plan.config(mother)
     local = now.in_time_zone(Plan::TZ)
     today = local.to_date
@@ -34,7 +34,10 @@ module Crm::ReactivationBatch # rubocop:disable Metrics/ModuleLength
     remaining_today = cfg['daily_cap'] - Plan.sent_today(mother, today)
     return { cfg: cfg, skip: 'teto do dia atingido' } if remaining_today <= 0
 
-    hours_left = force ? 1 : [cfg['hour_to'] - local.hour, 1].max
+    # a fatia é a de UMA hora (o que falta hoje ÷ horas que faltam); só a lista
+    # que a pessoa aprova na tela (whole_day) traz tudo o que ainda cabe hoje.
+    # Antes, todo "agora" (force) levava o dia inteiro, inclusive no automático.
+    hours_left = whole_day ? 1 : [cfg['hour_to'] - [local.hour, cfg['hour_from']].max, 1].max
     quota = (remaining_today / hours_left.to_f).ceil
     slices = slices_for_pools(cfg)
     return { cfg: cfg, skip: 'nenhuma fatia com porcentagem e modelo' } if slices.empty?
@@ -47,7 +50,9 @@ module Crm::ReactivationBatch # rubocop:disable Metrics/ModuleLength
       return { cfg: cfg, skip: reason, pools: pools }
     end
 
+    # a mesma pessoa pode ter card em duas colunas escolhidas (um por funil): recebe uma vez só
     picked = slices.flat_map { |s| pools[s['key']].first(alloc[s['key']]).map { |row| row.merge(slice: s) } }
+                   .uniq { |row| row[:contact_id] }
     rows, warnings = route(mother, cfg, picked, Plan.sent_today_by_inbox(mother, today))
     { cfg: cfg, today: today, quota: quota, remaining_today: remaining_today, rows: rows, warnings: warnings, pools: pools }
   end
@@ -111,27 +116,31 @@ module Crm::ReactivationBatch # rubocop:disable Metrics/ModuleLength
     account = mother.account
     inboxes = Plan.whatsapp_inboxes(account)
     default = Plan.default_inbox(account, cfg, mother)
-    origin = cfg['route_by_origin'] ? Crm::PatientKind.origin_inbox_by_contact(account, picked.pluck(:contact_id)) : {}
+    # 📱 24/11: o número de saída é aquele em que o paciente JÁ CONVERSA (onde
+    # falou por último), desde que o modelo esteja aprovado lá e o teto do
+    # número não tenha estourado; se não der em nenhum, vai pelo padrão (e a
+    # tela mostra "via padrão" com o número da conversa)
+    talk = cfg['route_by_origin'] ? Crm::PatientKind.talk_inboxes_by_contact(account, picked.pluck(:contact_id), inboxes.map(&:id)) : {}
     by_inbox = by_inbox.dup
     warnings = []
     rows = picked.filter_map do |r|
       slice = r[:slice]
-      inbox = inboxes.find { |i| i.id == origin.dig(r[:contact_id], :id) } || default
-      origem = inbox
-      inbox = default if by_inbox[inbox.id].to_i >= cfg['inbox_daily_cap'] && inbox != default
+      frente = Plan.frente_of(r[:procedure])
+      tpl = Plan.template_for(slice, frente)
+      mine = Array(talk[r[:contact_id]]).filter_map { |id| inboxes.find { |i| i.id == id } }
+      origem = mine.first
+      inbox = mine.find { |i| by_inbox[i.id].to_i < cfg['inbox_daily_cap'] && tpl && Plan.template_in?(i, tpl) } || default
       if by_inbox[inbox.id].to_i >= cfg['inbox_daily_cap']
         warnings << "teto da caixa #{inbox.name} atingido"
         next
       end
-      frente = Plan.frente_of(r[:procedure])
-      tpl = Plan.template_for(slice, frente)
       inbox, tpl = Plan.resolve_template(inbox, default, tpl, slice, frente, warnings)
       next if tpl.nil?
 
       by_inbox[inbox.id] = by_inbox[inbox.id].to_i + 1
       { contact_id: r[:contact_id], name: r[:name].presence || 'Sem nome', phone: r[:phone], slice_key: slice['key'],
         stage_name: r[:stage_name], frente: frente, inbox_id: inbox.id, inbox_name: inbox.name,
-        origin_inbox: origem.name, fallback: inbox != origem, template: tpl.dig('template_params', 'name'),
+        origin_inbox: origem&.name || 'sem conversa', fallback: origem.present? && inbox != origem, template: tpl.dig('template_params', 'name'),
         moved_at: r[:moved_at]&.iso8601, tpl: tpl }
     end
     [rows, warnings.uniq]
@@ -160,7 +169,11 @@ module Crm::ReactivationBatch # rubocop:disable Metrics/ModuleLength
 
       child = children[inbox.id] ||= child_for!(mother, today, inbox, row[:tpl], cfg['test_mode'])
       conversation = Plan.deliver(child, inbox, row[:tpl], contact, slice: row[:slice_key], frente: row[:frente])
-      next if conversation.nil?
+      if conversation.nil?
+        # o modelo não pôde ser montado (ex.: cadastro sem nome com {{nome}}): antes sumia sem aviso
+        warnings << "#{contact.name.presence || contact.phone_number}: não recebeu (o modelo não pôde ser preenchido com os dados do cadastro)"
+        next
+      end
 
       Plan.record!(child, contact, conversation, row[:slice_key], row[:frente], mother.id)
       by_inbox[inbox.id] = by_inbox[inbox.id].to_i + 1
@@ -176,7 +189,7 @@ module Crm::ReactivationBatch # rubocop:disable Metrics/ModuleLength
       Crm::CampaignRunJob.set(wait: 10.minutes).perform_later(c.id, 'sweep')
     end
     Plan.note!(mother, 'last_run_at' => now.iso8601, 'last_check_at' => now.iso8601, 'last_run_sent' => sent,
-                       'last_skip' => nil, 'pending_batch' => nil, 'warnings' => warnings.uniq.first(10))
+                       'last_skip' => nil, 'pending_batch' => nil, 'queued_batch' => nil, 'warnings' => warnings.uniq.first(10))
     sent
   end
 
@@ -224,6 +237,7 @@ module Crm::ReactivationBatch # rubocop:disable Metrics/ModuleLength
       end
       lote += 1
       picked = slices.flat_map { |s| pools[s['key']].shift(alloc[s['key']]).map { |r| r.merge(slice: s) } }
+                     .uniq { |r| r[:contact_id] }
       entry = { lote: lote, date: date.iso8601, weekday: WEEKDAYS[date.wday],
                 total: picked.size, por_fatia: picked.group_by { |r| r[:slice]['key'] }.transform_values(&:size) }
       if detailed < detail_days

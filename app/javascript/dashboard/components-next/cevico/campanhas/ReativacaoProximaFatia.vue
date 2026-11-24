@@ -75,8 +75,11 @@ const send = async () => {
   sending.value = true;
   try {
     const { data } = await CrmAPI.sendReactivationBatch(selected.value);
-    const n = Number(data.sent_now || 0);
-    useAlert(n ? `${people(n)} recebendo agora.` : 'Nada saiu — veja os avisos do plano.');
+    // 📤 24/11: o lote aprovado entra na fila do robô (queued = quantas pessoas)
+    const n = Number(data.queued || data.sent_now || 0);
+    const queuedText = `${people(n)} na fila de envio. Começa a sair em instantes; acompanhe em “Lotes que já saíram”.`;
+    const sentText = n ? `${people(n)} recebendo agora.` : 'Nada saiu — veja os avisos do plano.';
+    useAlert(data.queued ? queuedText : sentText);
     preview.value = null;
     selected.value = [];
     confirming.value = false;

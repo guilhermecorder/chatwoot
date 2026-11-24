@@ -4,9 +4,13 @@
 # A marca fica na própria consulta da Agenda (tasks.surgery_indication), então
 # Jornada, Meu Painel e Agenda leem o mesmo dado; o card anda no CRM pelo
 # Crm::AttendanceReflector (colunas escolhidas em Agenda → Conferência do dia).
-# Não envia mensagem nenhuma: o envio do modelo é a etapa seguinte.
+# ✉️ item 410 (24/11): depois da decisão, a tela oferece a MENSAGEM MODELO já
+# preenchida (boa notícia / retorno sem indicação). Quem envia é a pessoa da
+# equipe, sem IA: a conta toda mora em Crm::IndicationMessages.
 class Api::V1::Accounts::Crm::SurgeryIndicationsController < Api::V1::Accounts::BaseController
   include Crm::ResolvesPeriod
+
+  before_action :require_administrator!, only: [:request_model]
 
   LIMIT = 400
   PROCEDURES = ['Refrativa Lasik', 'Refrativa PRK', 'Catarata', 'Facorrefrativa', 'Lente Fácica',
@@ -48,7 +52,42 @@ class Api::V1::Accounts::Crm::SurgeryIndicationsController < Api::V1::Accounts::
     render json: row_for(task, cards_for([task]), Crm::PartnerGuard.marked_contact_ids(Current.account).to_set)
   end
 
+  # GET :id/message — prévia preenchida para este paciente (modelos, números, janela de 24 h)
+  def message
+    task = queue_scope.find(params[:id])
+    data = indication_messages(task).preview
+    render json: data, status: data[:error] ? :unprocessable_entity : :ok
+  end
+
+  # POST :id/send_message { model:, inbox_id:, mode: 'text'|'template', text:, values: { '1' => … } }
+  def send_message # rubocop:disable Metrics/AbcSize
+    task = queue_scope.find(params[:id])
+    result = indication_messages(task).deliver(
+      model_key: params[:model], inbox_id: params[:inbox_id], mode: params[:mode], text: params[:text],
+      values: params[:values].respond_to?(:to_unsafe_h) ? params[:values].to_unsafe_h : {}
+    )
+    return render json: { error: result[:error] }, status: :unprocessable_entity unless result[:ok]
+
+    row = row_for(task, cards_for([task]), Crm::PartnerGuard.marked_contact_ids(Current.account).to_set)
+    render json: { row: row, conversation_id: result[:conversation_id] }
+  end
+
+  # GET message_models — os modelos desta tela e a situação de cada um na Meta, por número
+  def message_models
+    render json: Crm::IndicationMessages.new(account: Current.account).catalog
+  end
+
+  # POST request_model { model:, inbox_ids: [] } — pede a aprovação à Meta (só administrador)
+  def request_model
+    result = Crm::IndicationMessages.new(account: Current.account).request_approval(params[:model], Array(params[:inbox_ids]))
+    render json: result, status: result[:errors].any? ? :unprocessable_entity : :ok
+  end
+
   private
+
+  def indication_messages(task)
+    Crm::IndicationMessages.new(account: Current.account, task: task, user: Current.user)
+  end
 
   def queue_scope
     scope = Current.account.tasks.where(task_type: 'consulta', attendance: 'attended', archived_at: nil, canceled_at: nil)
@@ -76,8 +115,18 @@ class Api::V1::Accounts::Crm::SurgeryIndicationsController < Api::V1::Accounts::
       # Oftalmofácil: paciente do parceiro (regra de ouro: sem IA, só a caixa 12 fala com ele)
       partner: Crm::PartnerGuard.partner_task?(task) || (task.contact_id.present? && partners.include?(task.contact_id)),
       card: cards[task.contact_id],
+      message: last_message_for(task),
       waiting_days: ((Time.current - task.due_at) / 1.day).floor.clamp(0, 9999)
     }
+  end
+
+  # ✉️ último envio da mensagem da indicação anotado na consulta (nil = nenhum)
+  def last_message_for(task)
+    entry = Crm::IndicationMessages.history(task).last
+    return nil unless entry
+
+    refused = Crm::SendTemplateService.refused([entry['message_id']])[entry['message_id']]
+    entry.slice('at', 'name', 'model_label', 'mode', 'inbox', 'conversation_id').merge('refused' => refused)
   end
 
   def cards_for(tasks)

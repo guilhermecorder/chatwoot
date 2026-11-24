@@ -26,12 +26,14 @@ class Api::V1::Accounts::Crm::ReactivationPlansController < Api::V1::Accounts::B
     render json: Crm::ReactivationPlan.simulate(mother, cfg)
   end
 
-  def activate
+  def activate # rubocop:disable Metrics/CyclomaticComplexity
     cfg = Crm::ReactivationPlan.config(@mother)
     if cfg['slices'].none? { |s| s['share'].positive? && s['templates'].any? }
       return render_could_not_create_error('Defina pelo menos uma fatia com porcentagem e modelo aprovado')
     end
     return render_could_not_create_error('As porcentagens das fatias precisam somar 100') unless cfg['slices'].sum { |s| s['share'] } == 100
+    # campo {{1}}, {{2}}… em branco: a Meta recusa a mensagem e a pessoa ficaria marcada como "já recebeu"
+    return render_could_not_create_error('Preencha todos os campos dos modelos das fatias antes de ativar') if blank_variable?(cfg)
 
     @mother.update!(status: :processing, started_at: @mother.started_at || Time.current, finished_at: nil)
     render json: Crm::ReactivationPlan.payload(Current.account)
@@ -49,13 +51,23 @@ class Api::V1::Accounts::Crm::ReactivationPlansController < Api::V1::Accounts::B
   def run_now
     return render_could_not_create_error('Ative o plano antes de rodar') unless @mother.processing?
 
+    # 📤 24/11: no automático o envio vai para o robô (com a trava do plano) e é a
+    # fatia de UMA hora, como o botão promete; no manual só prepara a lista (rápido)
+    if Crm::ReactivationPlan.config(@mother)['approval'] == 'auto'
+      return render_could_not_create_error('Já tem um envio do plano em andamento. Aguarde terminar.') if sending_now?
+
+      queue_send!(nil)
+      return render json: Crm::ReactivationPlan.payload(Current.account).merge(sent_now: 0, queued: true)
+    end
+
     sent = Crm::ReactivationPlan.run!(@mother, force: true)
     render json: Crm::ReactivationPlan.payload(Current.account).merge(sent_now: sent)
   end
 
   # 🎛️ item 382: a próxima fatia, pessoa por pessoa, SEM mandar (force=1 ignora a janela)
   def preview_next
-    batch = Crm::ReactivationBatch.plan(@mother, force: params[:force].to_s == '1')
+    forced = params[:force].to_s == '1'
+    batch = Crm::ReactivationBatch.plan(@mother, force: forced, whole_day: forced)
     render json: batch.slice(:skip, :quota, :remaining_today, :warnings)
                       .merge(today: batch[:today]&.iso8601, rows: Array(batch[:rows]).map { |r| r.except(:tpl) },
                              approval: batch[:cfg]['approval'], test_mode: batch[:cfg]['test_mode'])
@@ -68,8 +80,11 @@ class Api::V1::Accounts::Crm::ReactivationPlansController < Api::V1::Accounts::B
     ids = Array(params[:contact_ids]).map(&:to_i).reject(&:zero?)
     return render_could_not_create_error('Escolha pelo menos uma pessoa') if ids.empty?
 
-    sent = Crm::ReactivationPlan.run!(@mother, force: true, approved_ids: ids)
-    render json: Crm::ReactivationPlan.payload(Current.account).merge(sent_now: sent)
+    return render_could_not_create_error('Já tem um lote saindo. Aguarde terminar antes de aprovar outro.') if sending_now?
+
+    # 📤 24/11: o envio sai pelo robô (trava do plano), não dentro deste clique
+    queue_send!(ids)
+    render json: Crm::ReactivationPlan.payload(Current.account).merge(sent_now: 0, queued: ids.size)
   end
 
   # 🎛️ item 382: a fila inteira projetada dia a dia (lote 1 = hoje…)
@@ -84,6 +99,28 @@ class Api::V1::Accounts::Crm::ReactivationPlansController < Api::V1::Accounts::B
   end
 
   private
+
+  QUEUED_TTL = 15.minutes
+
+  # lote aprovado (ou rodada automática) ainda na fila/saindo?
+  def sending_now?
+    at = @mother.reload.stats&.dig('queued_batch', 'at')
+    at.present? && Time.zone.parse(at.to_s) > QUEUED_TTL.ago
+  rescue ArgumentError
+    false
+  end
+
+  def queue_send!(ids)
+    Crm::ReactivationPlan.note!(@mother, 'queued_batch' => { 'at' => Time.current.iso8601, 'size' => ids&.size, 'by' => Current.user&.name })
+    Crm::ReactivationPlanJob.perform_later(@mother.id, force: true, approved_ids: ids, whole_day: ids.present?)
+  end
+
+  def blank_variable?(cfg)
+    cfg['slices'].select { |s| s['share'].positive? }.flat_map { |s| s['templates'].values }.any? do |tpl|
+      body = tpl.dig('template_params', 'processed_params', 'body')
+      (body.is_a?(Hash) ? body.values : Array(body)).any? { |value| value.to_s.strip.empty? }
+    end
+  end
 
   def mother
     @mother = Crm::ReactivationPlan.find(Current.account)

@@ -186,7 +186,9 @@ module Crm::LlmGateway
     def quota_error?(response)
       parsed = response.parsed_response
       text = parsed.is_a?(Hash) ? parsed.to_json : parsed.to_s
-      text.match?(/insufficient_quota|RESOURCE_EXHAUSTED.*(billing|quota)|billing/i)
+      # 24/11: "billing" solto pegava o aviso de limite de velocidade da OpenAI (o texto
+      # dele traz o endereço da página de billing) e a tela dizia "sem créditos" com saldo na conta
+      text.match?(/insufficient_quota|RESOURCE_EXHAUSTED.*(billing|quota)|credit balance is too low|billing (hard )?limit/i)
     end
 
     def error_detail(response)
@@ -207,7 +209,7 @@ module Crm::LlmGateway
         when 404 then "Modelo #{model} não existe (ou não está liberado) para esta chave do #{provider_name}."
         when 429
           if quota_error?(response) then "#{provider_name} sem créditos: recarregue na conta do fornecedor."
-          else "#{provider_name}: limite de uso atingido (429)."
+          else "#{provider_name}: limite de uso atingido (429). #{detail}".strip
           end
         else "#{provider_name} respondeu com erro #{code}: #{detail}"
         end

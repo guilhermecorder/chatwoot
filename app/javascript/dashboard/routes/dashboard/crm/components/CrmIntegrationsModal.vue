@@ -1321,7 +1321,9 @@ const fetchWorkflows = async () => {
           <div>
             <label class="text-xs font-medium text-n-slate-11 block mb-1.5">
               Chave da API (OpenAI)
-              <span v-if="aiStatus.openai_key_set" class="text-green-600 font-normal">(já configurada)</span>
+              <span v-if="aiStatus.openai_key_set" class="text-green-600 font-normal">
+                (já configurada{{ aiStatus.openai_key_hint ? `, final ${aiStatus.openai_key_hint}` : '' }})
+              </span>
             </label>
             <input
               v-model="openai.api_key"

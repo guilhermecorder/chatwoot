@@ -82,6 +82,17 @@ const RULES = [
   },
 ];
 
+// 📆 teto diário das etapas longas por número: começa pequeno e sobe aos poucos
+const LONG_CAPS = [10, 20, 40, 80, 0];
+const longCapLabel = cap => (cap === 0 ? 'sem teto' : `${cap} por dia`);
+const saveLongCap = cap =>
+  save(
+    { etapas_longas_teto: cap },
+    cap === 0
+      ? 'Etapas longas sem teto diário'
+      : `Etapas longas: até ${cap} por número por dia`
+  );
+
 const toggleRule = rule =>
   save(
     { [rule.key]: !cfg.value[rule.key] },
@@ -200,6 +211,26 @@ onMounted(() => {
             <p class="text-[11px] text-n-slate-10 leading-relaxed mt-0.5">
               {{ rule.sub }}
             </p>
+            <div
+              v-if="rule.key === 'etapas_longas' && cfg.etapas_longas"
+              class="flex items-center gap-1.5 flex-wrap mt-2"
+            >
+              <span class="text-[11px] text-n-slate-10">
+                Teto por número:
+              </span>
+              <button
+                v-for="cap in LONG_CAPS"
+                :key="cap"
+                class="cv-chip"
+                :class="
+                  Number(cfg.etapas_longas_teto) === cap ? 'cv-chip-on' : ''
+                "
+                :disabled="!canEdit || saving"
+                @click="saveLongCap(cap)"
+              >
+                {{ longCapLabel(cap) }}
+              </button>
+            </div>
           </div>
           <button
             class="cv-switch flex-shrink-0 mt-1"

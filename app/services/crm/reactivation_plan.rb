@@ -16,8 +16,10 @@
 #   hour_from / hour_to     janela em SP (padrão 9 → 18; a última hora é 17h)
 #   weekdays_only           só dias úteis (padrão true)
 #   inbox_daily_cap         teto por caixa por dia (padrão 100; regra dos ~1000/mês)
-#   route_by_origin         manda pela caixa da 1ª conversa do paciente (padrão true)
-#   default_inbox_id        caixa de quem não tem origem conhecida (padrão: a da mãe)
+#   route_by_origin         manda pelo número em que o paciente JÁ CONVERSA (padrão true; 24/11:
+#                           onde ele falou por último, entre os números com o modelo aprovado;
+#                           antes era a caixa da 1ª conversa)
+#   default_inbox_id        caixa de quem não tem conversa em número nenhum (padrão: a da mãe)
 #   max_open_conversations  pula a hora se houver mais conversas abertas que isto (0 = ignora)
 #   quiet_hours / skip_future_appointment / min_age_days  mesmas regras do item 379
 #   order                   'recent' (quem se moveu há menos tempo primeiro) | 'oldest'
@@ -155,8 +157,11 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
     Crm::CampaignContact.where(campaign_id: children(mother, day: today).select(:id)).count
   end
 
+  # soma TODAS as filhas do dia por caixa (lote de teste cria filha nova na
+  # mesma caixa: antes uma filha escondia a outra e o teto por número furava)
   def sent_today_by_inbox(mother, today)
-    children(mother, day: today).to_a.to_h { |c| [c.inbox_id, c.campaign_contacts.count] }
+    Crm::CampaignContact.joins(:campaign).where(campaign_id: children(mother, day: today).select(:id))
+                        .group('crm_campaigns.inbox_id').count
   end
 
   def day_stats(mother, today)
@@ -170,7 +175,8 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
     scope = Crm::Contact.joins(:contact).where(stage_id: slice['stage_id']).where.not(contacts: { phone_number: [nil, ''] })
     scope = scope.where.not(contact_id: recipients_ever(mother).select(:contact_id))
     # 🧪 item 383: quem está num segmento (teste ou escala) é da Segmentação — o plano não encosta
-    scope = scope.where.not(contact_id: Crm::SegmentMember.holding.joins(:segment).where(crm_segments: { account_id: account.id }).select(:contact_id))
+    held = Crm::SegmentMember.holding.joins(:segment).where(crm_segments: { account_id: account.id }).select(:contact_id)
+    scope = scope.where.not(contact_id: held)
     excluded = excluded_contact_ids(account, cfg, now)
     scope = scope.where.not(contact_id: excluded) if excluded.any?
     scope = scope.where('contacts.created_at <= ?', now - cfg['min_age_days'].days) if cfg['min_age_days'].positive?
@@ -186,6 +192,8 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
     ids = Crm::OptOut.excluded_contact_ids(account) | Crm::PartnerGuard.excluded_contact_ids(account)
     ids |= Crm::RecurringCampaign.active_conversation_contact_ids(account, cfg['quiet_hours'], now) if cfg['quiet_hours'].positive?
     ids |= Crm::RecurringCampaign.future_appointment_contact_ids(account, now) if cfg['skip_future_appointment']
+    # 🙋 24/11: quem está com a equipe da indicação cirúrgica (mensagem enviada pela tela de Indicações) fica de fora
+    ids |= Crm::IndicationMessages.human_led_contact_ids(account, now)
     ids
   end
 
@@ -238,10 +246,12 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
   #     espera o "Aprovar e enviar" na tela (approved_ids);
   #   · aprovação automática: manda a fatia da hora sozinha;
   #   · force = ignora janela/dia útil (botão "agora"); teto e regras valem sempre.
-  def run!(mother, now: Time.current, force: false, approved_ids: nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  #   · whole_day = a conta é o que ainda cabe HOJE inteiro (lista para aprovar
+  #     na tela); sem ele, é a fatia de UMA hora (robô e "mandar agora").
+  def run!(mother, now: Time.current, force: false, approved_ids: nil, whole_day: false) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return skip(mother, 'plano não está ativo') unless mother.processing?
 
-    batch = Crm::ReactivationBatch.plan(mother, now: now, force: force)
+    batch = Crm::ReactivationBatch.plan(mother, now: now, force: force, whole_day: whole_day)
     if batch[:skip]
       finish_if_exhausted!(mother, batch[:pools]) if batch[:pools] && !batch[:cfg]['test_mode']
       return skip(mother, batch[:skip])
@@ -376,7 +386,9 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
       simulation: mother ? simulate(mother, cfg, now: now) : nil,
       window_now: mother ? window_label(cfg, now) : nil,
       # 🎛️ item 382: lote preparado esperando aprovação (modo manual)
-      pending_batch: mother&.stats&.dig('pending_batch')
+      pending_batch: mother&.stats&.dig('pending_batch'),
+      # 📤 24/11: lote aprovado que está saindo pelo robô (o envio não roda mais dentro do clique)
+      queued_batch: mother&.stats&.dig('queued_batch')
     }
   end
 

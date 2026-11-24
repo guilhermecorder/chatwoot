@@ -56,6 +56,7 @@ const REASONS = {
   chamar_humano: 'o agente pediu atendimento humano',
   chamou_humano: 'o agente pediu atendimento humano',
   botao: 'desligada pela chavinha',
+  indicacao: 'a equipe conduz a indicação cirúrgica',
   teto_diario: 'limite de mensagens do dia',
 };
 const hint = computed(() => {

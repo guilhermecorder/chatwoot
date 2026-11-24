@@ -140,7 +140,8 @@ module Crm::SegmentSender # rubocop:disable Metrics/ModuleLength
     end
 
     contacts = account.contacts.where(id: members.map(&:contact_id)).index_by(&:id)
-    origin = cfg['route_by_origin'] ? Crm::PatientKind.origin_inbox_by_contact(account, members.map(&:contact_id)) : {}
+    # 📱 24/11: sai pelo número em que o paciente já conversa (onde falou por último)
+    talk = cfg['route_by_origin'] ? Crm::PatientKind.talk_inboxes_by_contact(account, members.map(&:contact_id), inboxes.map(&:id)) : {}
     blocked = blocked_now(segment, members.map(&:contact_id), now)
     by_inbox = sent_today_by_inbox(segment, now)
     children = {}
@@ -161,9 +162,9 @@ module Crm::SegmentSender # rubocop:disable Metrics/ModuleLength
         next
       end
 
-      inbox = inboxes.find { |i| i.id == origin.dig(member.contact_id, :id) } || default
-      origem = inbox
-      inbox = default if inbox != default && (by_inbox[inbox.id].to_i >= cfg['inbox_daily_cap'] || !Plan.template_in?(inbox, tpl_of(variant)))
+      mine = Array(talk[member.contact_id]).filter_map { |id| inboxes.find { |i| i.id == id } }
+      origem = mine.first || default
+      inbox = mine.find { |i| by_inbox[i.id].to_i < cfg['inbox_daily_cap'] && Plan.template_in?(i, tpl_of(variant)) } || default
       if by_inbox[inbox.id].to_i >= cfg['inbox_daily_cap']
         warnings << "teto da caixa #{inbox.name} atingido hoje"
         break
@@ -211,11 +212,14 @@ module Crm::SegmentSender # rubocop:disable Metrics/ModuleLength
 
   # as regras da peneira valem também NA HORA do envio (a fila pode levar dias):
   # não perturbe, consulta/cirurgia marcada e conversa recente → pulado com motivo
-  def blocked_now(segment, contact_ids, now) # rubocop:disable Metrics/CyclomaticComplexity
+  def blocked_now(segment, contact_ids, now) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     account = segment.account
     src = Crm::SegmentBuilder.normalize_source(segment.source)
     out = {}
     (Crm::OptOut.excluded_contact_ids(account) & contact_ids).each { |id| out[id] = 'não perturbe' }
+    # 24/11: a cerca do parceiro e a equipe da indicação também valem NA HORA (a fila pode levar dias)
+    (Crm::PartnerGuard.excluded_contact_ids(account) & contact_ids).each { |id| out[id] ||= 'paciente de parceiro' }
+    (Crm::IndicationMessages.human_led_contact_ids(account, now) & contact_ids).each { |id| out[id] ||= 'a equipe conduz a indicação' }
     if src['skip_future_appointment']
       (Crm::RecurringCampaign.future_appointment_contact_ids(account, now) & contact_ids).each { |id| out[id] ||= 'consulta marcada' }
     end

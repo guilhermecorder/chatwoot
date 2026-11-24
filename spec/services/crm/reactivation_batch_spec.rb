@@ -76,11 +76,21 @@ RSpec.describe Crm::ReactivationBatch do
       expect(body['rows'].pluck('contact_id')).to eq([ana.id, bia.id])
       expect(body['rows'].first).to include('phone' => '+5511999990001', 'origin_inbox' => 'INSTAGRAM', 'fallback' => false)
 
+      # 📤 24/11: o clique só põe o lote na fila; quem manda é o robô (com a trava do plano)
       post "#{base}/send_batch", params: { contact_ids: [bia.id] }, headers: admin.create_new_auth_token, as: :json
       expect(response).to have_http_status(:success)
-      expect(response.parsed_body['sent_now']).to eq(1)
+      expect(response.parsed_body).to include('sent_now' => 0, 'queued' => 1)
+      expect(response.parsed_body['queued_batch']).to include('size' => 1)
+      expect(sent_to).to be_empty
+
+      # segundo clique (outra aba) com o lote ainda saindo: recusado, ninguém recebe duas vezes
+      post "#{base}/send_batch", params: { contact_ids: [bia.id] }, headers: admin.create_new_auth_token, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      perform_enqueued_jobs
       expect(sent_to).to eq([[bia.id, google.id]])
       expect(mother.reload.stats['pending_batch']).to be_nil
+      expect(mother.stats['queued_batch']).to be_nil
 
       get "#{base}/batches", headers: admin.create_new_auth_token, as: :json
       lotes = response.parsed_body['batches']
@@ -106,6 +116,104 @@ RSpec.describe Crm::ReactivationBatch do
       expect(filha.audience['test']).to eq('true')
       expect(mother.reload).to be_processing
     end
+  end
+
+  # 📱 pedido dele (24/11): "a mensagem seja enviada pelo número que a pessoa já tem conversa"
+  describe 'por qual número cada pessoa recebe' do
+    let!(:confirmacao) do
+      inbox = create(:channel_whatsapp, account: account, provider: 'whatsapp_cloud', sync_templates: false, validate_provider_config: false).inbox
+      inbox.update!(name: 'CONFIRMAÇÃO') # este número NÃO tem o modelo de reativação
+      inbox
+    end
+
+    def talk!(contact, inbox, at:, type: :incoming)
+      conversation = Conversation.find_by(inbox: inbox, contact: contact) ||
+                     create(:conversation, account: account, inbox: inbox, contact: contact, created_at: at)
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: type, content: 'oi', created_at: at)
+      conversation.update_columns(last_activity_at: at) # rubocop:disable Rails/SkipsModelValidations
+    end
+
+    def rows_now(mother)
+      travel_to(tz.parse('2026-11-04 10:00')) { described_class.plan(mother)[:rows] }
+    end
+
+    it 'vale o número em que a pessoa falou por último, não o da primeira conversa' do
+      ana = card!('Ana', '+5511999990001')
+      talk!(ana, google, at: 60.days.ago)   # chegou pelo GOOGLE
+      talk!(ana, insta, at: 5.days.ago)     # hoje conversa pelo INSTAGRAM
+      mother = Crm::ReactivationPlan.upsert!(account, raw, user: admin)
+
+      expect(rows_now(mother).first).to include(inbox_name: 'INSTAGRAM', origin_inbox: 'INSTAGRAM', fallback: false)
+    end
+
+    it 'se o modelo não está aprovado onde ela falou por último, vai por outro número em que ela já conversou (não pelo padrão)' do
+      ana = card!('Ana', '+5511999990001')
+      talk!(ana, insta, at: 30.days.ago)
+      talk!(ana, confirmacao, at: 2.days.ago) # confirmou a consulta por aqui
+      mother = Crm::ReactivationPlan.upsert!(account, raw, user: admin) # padrão = GOOGLE
+
+      expect(rows_now(mother).first).to include(inbox_name: 'INSTAGRAM', origin_inbox: 'CONFIRMAÇÃO', fallback: true)
+    end
+
+    it 'quem não tem conversa nenhuma recebe pelo número padrão' do
+      card!('Ana', '+5511999990001')
+      mother = Crm::ReactivationPlan.upsert!(account, raw, user: admin)
+
+      expect(rows_now(mother).first).to include(inbox_name: 'GOOGLE', origin_inbox: 'sem conversa', fallback: false)
+    end
+  end
+
+  it 'a mesma pessoa com card em duas colunas escolhidas (um por funil) entra uma vez só' do
+    ana = card!('Ana', '+5511999990001')
+    outro_funil = account.crm_pipelines.create!(name: 'Outro funil')
+    outra_coluna = outro_funil.stages.create!(name: 'Orçamento', position: 1)
+    Crm::Contact.create!(pipeline: outro_funil, stage: outra_coluna, contact: ana).update_columns(stage_moved_at: 5.days.ago) # rubocop:disable Rails/SkipsModelValidations
+    duas = raw.merge('slices' => [raw['slices'].first.merge('share' => 50),
+                                  { 'key' => 'orcamento', 'stage_id' => outra_coluna.id, 'share' => 50, 'templates' => { 'padrao' => tpl } }])
+    mother = Crm::ReactivationPlan.upsert!(account, duas, user: admin)
+
+    travel_to tz.parse('2026-11-04 10:00') do
+      expect(described_class.plan(mother)[:rows].pluck(:contact_id)).to eq([ana.id])
+    end
+  end
+
+  it 'quem está com a equipe da indicação cirúrgica (pausa indicacao) fica de fora do lote' do
+    ana = card!('Ana', '+5511999990001')
+    bia = card!('Bia', '+5511999990002')
+    conversa = create(:conversation, account: account, inbox: google, contact: ana, created_at: 9.days.ago)
+    conversa.update!(additional_attributes: { Crm::ResponderAgentJob::STATE_KEY => {
+                       'paused' => true, 'reason' => 'indicacao', 'at' => 3.days.ago.iso8601, 'until' => 27.days.from_now.iso8601
+                     } })
+    mother = Crm::ReactivationPlan.upsert!(account, raw, user: admin)
+
+    travel_to tz.parse('2026-11-04 10:00') do
+      expect(described_class.plan(mother)[:rows].pluck(:contact_id)).to eq([bia.id])
+    end
+  end
+
+  it 'o teto por número soma todos os lotes do dia, inclusive o de teste' do
+    ana = card!('Ana', '+5511999990001')
+    bia = card!('Bia', '+5511999990002')
+    mother = Crm::ReactivationPlan.upsert!(account, raw.merge('approval' => 'auto', 'daily_cap' => 1), user: admin)
+    mother.update!(status: :processing)
+    fake_sender
+    travel_to tz.parse('2026-11-04 10:00') do
+      expect(Crm::ReactivationPlan.run!(mother)).to eq(1) # lote real: 1 pessoa pelo GOOGLE
+      Crm::ReactivationPlan.upsert!(account, raw.merge('approval' => 'auto', 'daily_cap' => 5, 'test_mode' => true,
+                                                       'test_phones' => [bia.phone_number]), user: admin)
+      expect(Crm::ReactivationPlan.run!(mother.reload)).to eq(1) # lote de teste, filha nova no mesmo número
+      expect(Crm::ReactivationPlan.sent_today_by_inbox(mother, Date.new(2026, 11, 4))).to eq(google.id => 2)
+      expect([ana.id, bia.id]).to include(*sent_to.map(&:first))
+    end
+  end
+
+  it 'não ativa plano com campo do modelo em branco', type: :request do
+    vazio = tpl.deep_merge('template_params' => { 'processed_params' => { 'body' => { '1' => ' ' } } })
+    Crm::ReactivationPlan.upsert!(account, raw.merge('slices' => [raw['slices'].first.merge('templates' => { 'padrao' => vazio })]), user: admin)
+
+    post "#{base}/activate", headers: admin.create_new_auth_token, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.to_s).to include('Preencha todos os campos')
   end
 
   it 'a fila projeta os lotes dia a dia, pulando (ou não) o fim de semana, com as pessoas dos primeiros dias' do

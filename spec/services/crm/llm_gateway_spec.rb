@@ -94,6 +94,20 @@ RSpec.describe Crm::LlmGateway do
       expect { client.messages.create(model: 'gpt-6.2-sol', max_tokens: 10, messages: [{ role: 'user', content: 'oi' }]) }
         .to raise_error(Anthropic::Errors::APIError, /sem créditos/)
     end
+
+    # 24/11: o aviso de limite de velocidade da OpenAI cita a página de billing; com saldo
+    # na conta a tela dizia "sem créditos". Agora mostra o motivo que a OpenAI devolveu.
+    it 'limite de velocidade (429) não vira "sem créditos" e leva o motivo da OpenAI', :aggregate_failures do
+      detail = 'Rate limit reached for gpt-6.2-sol on tokens per min (TPM): Limit 30000. Visit https://platform.openai.com/account/billing'
+      stub_request(:post, 'https://api.openai.com/v1/responses')
+        .to_return(status: 429, headers: { 'Content-Type' => 'application/json' },
+                   body: { error: { code: 'rate_limit_exceeded', message: detail } }.to_json)
+      expect { client.messages.create(model: 'gpt-6.2-sol', max_tokens: 10, messages: [{ role: 'user', content: 'oi' }]) }
+        .to raise_error(Anthropic::Errors::APIError) { |error|
+          expect(error.message).to include('limite de uso atingido (429)', 'tokens per min')
+          expect(error.message).not_to include('sem créditos')
+        }
+    end
   end
 
   describe 'Gemini (camada compatível do Google)' do

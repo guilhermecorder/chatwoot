@@ -69,7 +69,7 @@ const toggleAll = () => {
           <td class="py-2 pr-3 whitespace-nowrap">
             <template v-if="r.fallback">
               <span class="text-amber-700 dark:text-amber-300">
-                {{ r.inbox_name }} <span class="opacity-80">· via padrão (origem: {{ r.origin_inbox }})</span>
+                {{ r.inbox_name }} <span class="opacity-80">· não é o número da última conversa ({{ r.origin_inbox }})</span>
               </span>
             </template>
             <span v-else class="text-n-slate-11">{{ r.inbox_name || '—' }}</span>
