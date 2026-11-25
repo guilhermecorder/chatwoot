@@ -170,8 +170,18 @@ class Api::V1::Accounts::Crm::AttendanceLabsController < Api::V1::Accounts::Base
       # 📍 24/11: marcos do atendimento + antes × depois do marco escolhido (?marco=id; padrão: o mais novo)
       marcos: Crm::AttendanceMilestones.list(Current.account),
       before_after: before_after_json,
-      restore_point: Crm::AttendanceRestorePoint.summary(Current.account)
+      restore_point: Crm::AttendanceRestorePoint.summary(Current.account),
+      # 🧑‍🏫 item 414: contador do consultor superior deste atendente (hoje e 7 dias)
+      consultor: consultant_json
     }
+  end
+
+  def consultant_json
+    config = Crm::ConsultantConfig.normalize(agent_config)
+    { enabled: config['enabled'], mode: config['mode'], model: config['model'],
+      ready: Crm::ConsultantConfig.active(agent_config, settings.ai_config || {}).present?,
+      stats: Crm::ConsultantConfig.summary(settings.ai_config || {}, @agent),
+      effect_labels: Crm::ConsultantConfig::EFFECT_LABELS, trigger_labels: Crm::ConsultantConfig::TRIGGER_LABELS }
   end
 
   def before_after_json

@@ -88,7 +88,10 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # informar, vale o que a conversa de teste guardou ao nascer; conversa real = v1.
   # model_override (item 399): SÓ no 🧪 Testar agente — experimenta outro motor
   # (Claude ou ChatGPT) na conversa de teste sem mexer no que o agente usa de verdade
-  def initialize(conversation:, agent_key:, live: false, simulation: false, script_version: nil, model_override: nil) # rubocop:disable Metrics/ParameterLists
+  # consultant_override (item 414): SÓ no 🧪 Testar agente — experimenta o
+  # consultor superior ({ 'model' =>, 'mode' => }) sem ligá-lo no agente de verdade
+  def initialize(conversation:, agent_key:, live: false, simulation: false, script_version: nil, # rubocop:disable Metrics/ParameterLists
+                 model_override: nil, consultant_override: nil)
     @conversation = conversation
     @account = conversation.account
     @spent_usd = 0.0
@@ -96,35 +99,26 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
     @live = live == true
     @simulation = simulation == true
     @model_override = model_override.to_s if @simulation && engine_model?(model_override.to_s)
+    @consultant_override = simulation_consultant(consultant_override)
     @script_version = Crm::CevicoScript.normalize_version(
       script_version.presence || conversation.additional_attributes&.[]('cevico_simulado_script')
     )
     # 🧪 item 403: conversa REAL dentro de um teste A/B lê o Roteiro da variante dela
     @script_version = Crm::EngineExperiment.script_for(Crm::EngineExperiment.active(agent_config), experiment_arm) if experiment_arm
+    # 📥 item 416: a caixa com Roteiro próprio vence o do teste A/B
+    @script_version = inbox_engine['script'] if inbox_engine&.dig('script').present?
   end
 
-  def call # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def call
     return { error: 'Agente desligado.' } if agent_paused? && !@simulation
     return { error: missing_key_error } if engine_api_key.blank?
 
     transcript = build_transcript
     return { error: 'Conversa vazia.' } if transcript.blank?
 
-    # 🧠 item 399: o MODELO escolhido decide o motor (gpt-… = OpenAI; o resto = Claude)
-    # 🧠 22/11: Gemini (ou qualquer outro modelo fora do Claude) pela tomada universal
-    text = if openai_engine? then openai_reply_or_fallback(transcript)
-           elsif gateway_engine? then gateway_reply_or_fallback(transcript)
-           else claude_reply_or_reserve(transcript) # 🛟 23/11: Claude falhou → ChatGPT ou Gemini no lugar
-           end
-    return { error: 'Resposta vazia da IA.' } if text.blank?
-
-    result = JSON.parse(text).symbolize_keys
-    result[:acoes] = tools ? tools.acoes : []
-    result[:modelo] = model
-    result[:reserva] = @fallback_reason if @fallback_reason
-    result
-  rescue JSON::ParserError
-    { error: 'Resposta da IA fora do formato.' }
+    # 🧑‍🏫 item 414: o principal responde; o consultor superior (se ligado) dá a
+    # segunda opinião nos gatilhos do sistema. Desligado = nada muda aqui.
+    second_opinion(primary_result(transcript), transcript)
   rescue StandardError => e
     Rails.logger.error "[Crm::ResponderAgent##{@agent_key}] #{e.class}: #{e.message}"
     { error: e.message }
@@ -155,6 +149,113 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
   private
 
+  # 🧪 só no Testar agente: o consultor escolhido para aquela conversa de teste
+  def simulation_consultant(override)
+    override.to_h.stringify_keys if @simulation && override.present?
+  end
+
+  # a resposta do motor PRINCIPAL, já em Hash ({ error: } quando não deu)
+  def primary_result(transcript)
+    # 🧠 item 399: o MODELO escolhido decide o motor (gpt-… = OpenAI; o resto = Claude)
+    # 🧠 22/11: Gemini (ou qualquer outro modelo fora do Claude) pela tomada universal
+    text = if openai_engine? then openai_reply_or_fallback(transcript)
+           elsif gateway_engine? then gateway_reply_or_fallback(transcript)
+           else
+             claude_reply_or_reserve(transcript) # 🛟 23/11: Claude falhou → ChatGPT ou Gemini no lugar
+           end
+    return { error: 'Resposta vazia da IA.' } if text.blank?
+
+    result = JSON.parse(text).symbolize_keys
+    result[:acoes] = tools ? tools.acoes : []
+    result[:modelo] = model
+    result[:reserva] = @fallback_reason if @fallback_reason
+    result
+  rescue JSON::ParserError
+    { error: 'Resposta da IA fora do formato.' }
+  end
+
+  # ── 🧑‍🏫 CONSULTOR SUPERIOR (item 414) ────────────────────────────────────
+  # Config POR AGENTE (Crm::ConsultantConfig). Só os atendentes do WhatsApp.
+  # No 🧪 Testar agente a tela pode escolher o consultor só para aquele teste.
+  def consultant_config
+    return @consultant_config if defined?(@consultant_config)
+
+    @consultant_config = resolve_consultant_config
+  end
+
+  def resolve_consultant_config
+    return nil unless Crm::LlmEngines.openai_agent?(@agent_key)
+
+    base = agent_config
+    if @consultant_override
+      saved = base[Crm::ConsultantConfig::CONFIG_KEY].is_a?(Hash) ? base[Crm::ConsultantConfig::CONFIG_KEY] : {}
+      base = base.merge(Crm::ConsultantConfig::CONFIG_KEY => saved.merge(@consultant_override.slice('model', 'mode', 'tool'))
+                                                                  .merge('enabled' => true))
+    end
+    # com caixas escolhidas no cartão, só vale nelas (o 🧪 teste roda numa caixa interna: vale sempre)
+    Crm::ConsultantConfig.active(base, ai_config, inbox_id: @simulation ? nil : @conversation.inbox_id)
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] consultor: #{e.message}"
+    nil
+  end
+
+  # o consultor desta resposta (um por resposta; nil = desligado). Se ele não
+  # puder ser montado, o principal segue sozinho: o consultor nunca derruba a resposta.
+  def consultant(transcript)
+    return nil if consultant_config.nil?
+
+    @consultant ||= Crm::ResponderConsultant.new(
+      account: @account, conversation: @conversation, agent_key: @agent_key, ai_config: ai_config, config: consultant_config,
+      system: cached_system, user_content: user_content(transcript), tool_definitions: tools&.definitions,
+      primary_model: model, simulation: @simulation
+    )
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] consultor indisponível: #{e.class}: #{e.message}"
+    @consultant_config = nil
+  end
+
+  # a ferramenta consultar_superior entra na lista do principal? (chave própria + modo ativo)
+  def consult_tool?(transcript)
+    tools.present? && consultant(transcript)&.tool_enabled? == true
+  end
+
+  def tool_definitions(transcript)
+    consult_tool?(transcript) ? tools.definitions + [Crm::ResponderConsultant::TOOL_DEFINITION] : tools.definitions
+  end
+
+  # executa a ferramenta pedida pelo principal (a consultar_superior vai para o consultor)
+  def run_tool(name, input)
+    return tools.call(name, input) unless name.to_s == Crm::ResponderConsultant::TOOL_NAME && @consultant&.tool_enabled?
+
+    @consultant.advise(input)
+  end
+
+  # segunda opinião sobre a resposta do principal. Qualquer falha aqui dentro =
+  # vale a resposta do principal, do jeito que veio.
+  def second_opinion(result, transcript)
+    advisor = consultant(transcript)
+    return result if advisor.nil?
+
+    advisor.primary_model = result[:modelo].presence || model
+    final = advisor.advice_record ? advised(result, advisor.advice_record) : advisor.review(result)
+    @spent_usd += advisor.spent_usd
+    final
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] segunda opinião: #{e.class}: #{e.message}"
+    result
+  end
+
+  # o principal já pediu orientação pela ferramenta nesta resposta: fica o
+  # registro e a consulta entra na lista do que foi feito (não há 2ª consulta)
+  def advised(result, record)
+    return result.merge(consultor: record) if result[:error]
+
+    ok = record['status'] == 'ok'
+    action = { 'ferramenta' => Crm::ResponderConsultant::TOOL_NAME, 'ok' => ok,
+               'resumo' => ok ? 'pediu orientação ao consultor superior' : 'pediu orientação ao consultor (indisponível)' }
+    result.merge(acoes: Array(result[:acoes]) + [action], consultor: record)
+  end
+
   # 🎓 item 389: aprendizados aprovados do Motor de Educação — só nas caixas
   # piloto e só no Roteiro 1 (o Roteiro 2 é laboratório à parte). 🧪 item 403:
   # numa conversa REAL do teste A/B as duas variantes recebem o mesmo bloco —
@@ -184,7 +285,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       output_config: output_config_for({ type: 'json_schema', schema: OUTPUT_SCHEMA }),
       messages: [{ role: 'user', content: user_content(transcript) }]
     }
-    params[:tools] = tools.definitions if tools
+    params[:tools] = tool_definitions(transcript) if tools
 
     message = nil
     (MAX_TOOL_ROUNDS + 1).times do |round|
@@ -332,7 +433,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
 
   def openai_reply(transcript) # rubocop:disable Metrics/AbcSize
     engine = Crm::LlmEngines::OpenaiResponses.new(api_key: openai_api_key, model: model, effort: effort)
-    definitions = tools ? Crm::LlmEngines::OpenaiResponses.tool_definitions(tools.definitions) : nil
+    definitions = tools ? Crm::LlmEngines::OpenaiResponses.tool_definitions(tool_definitions(transcript)) : nil
     input = [
       { role: 'developer', content: system_prompt },
       { role: 'user', content: user_content(transcript).map { |block| { type: 'input_text', text: block[:text] } } }
@@ -348,7 +449,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
       # a resposta volta inteira (raciocínio cifrado + pedidos) e, em seguida, o resultado de cada ferramenta
       input += reply.items
       reply.tool_calls.each do |call|
-        input << { type: 'function_call_output', call_id: call['call_id'], output: tools.call(call['name'], openai_arguments(call)).to_json }
+        input << { type: 'function_call_output', call_id: call['call_id'], output: run_tool(call['name'], openai_arguments(call)).to_json }
       end
     end
     reply.text
@@ -380,11 +481,41 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   def model
     return @fallback_model if @fallback_model
     return @model_override if @model_override
+    return inbox_model if inbox_model # 📥 item 416: motor próprio da caixa
     return experiment_model_b if experiment_b_motor?
 
     # 🧭 23/11: motor POR COLUNA do CRM (Crm::StageEngine) > o modelo do cartão
     # 🧠 22/11: qualquer modelo dos 3 fornecedores, com a chave salva (Crm::AiAgentConfig#model)
     stage_model || super
+  end
+
+  # 📥 item 416 (motor por caixa): o que a caixa desta conversa escolheu
+  # ({ model, effort, script }), só em conversa REAL de atendente do WhatsApp
+  def inbox_engine
+    return @inbox_engine if defined?(@inbox_engine)
+
+    @inbox_engine = if @simulation || !Crm::LlmEngines.openai_agent?(@agent_key)
+                      nil
+                    else
+                      Crm::InboxEngine.entry_for(@conversation, agent_config)
+                    end
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgent##{@agent_key}] motor por caixa: #{e.message}"
+    @inbox_engine = nil
+  end
+
+  # o modelo da caixa, se ele pode rodar agora (id reconhecido + chave salva)
+  def inbox_model
+    return @inbox_model if defined?(@inbox_model)
+
+    candidate = inbox_engine&.dig('model').to_s
+    @inbox_model = candidate.present? && engine_model?(candidate) && model_runnable?(candidate) ? candidate : nil
+  end
+
+  # esforço: o da caixa (se escolhido) > a regra de sempre do cartão
+  def effort
+    chosen = inbox_engine&.dig('effort').to_s
+    EFFORTS.include?(chosen) ? chosen : super
   end
 
   # 🧭 23/11 (motor por coluna): o modelo escolhido para a coluna em que o card
@@ -479,7 +610,7 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   end
 
   def tool_result_block(use)
-    outcome = tools.call(use.name, use.input)
+    outcome = run_tool(use.name, use.input)
     { type: 'tool_result', tool_use_id: use.id, content: outcome.to_json }
   end
 
@@ -577,16 +708,20 @@ class Crm::ResponderAgentService # rubocop:disable Metrics/ClassLength
   # de ferramenta da mesma resposta, esse prefixo repete e a Anthropic cobra
   # 10%. O contexto vivo (agora, vagas, coluna) muda a cada chamada — por isso
   # vem DEPOIS, fora do trecho guardado.
+  # Montado UMA vez por resposta: as voltas de ferramenta, o motor reserva e o
+  # consultor superior (item 414) leem exatamente o mesmo contexto.
   def user_content(transcript)
-    header = if voice?
-               'LIGAÇÃO ATÉ AGORA (PACIENTE = quem está na linha; CLÍNICA = você, falando):'
-             else
-               'CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe):'
-             end
-    [
-      { type: 'text', text: "#{header}\n#{transcript}", cache_control: { type: 'ephemeral' } },
-      { type: 'text', text: "#{context_block}\nResponda à ÚLTIMA mensagem do PACIENTE da conversa acima, seguindo o Roteiro." }
-    ]
+    @user_content ||= begin
+      header = if voice?
+                 'LIGAÇÃO ATÉ AGORA (PACIENTE = quem está na linha; CLÍNICA = você, falando):'
+               else
+                 'CONVERSA ATÉ AGORA (PACIENTE = quem você atende; CLÍNICA = você/equipe):'
+               end
+      [
+        { type: 'text', text: "#{header}\n#{transcript}", cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: "#{context_block}\nResponda à ÚLTIMA mensagem do PACIENTE da conversa acima, seguindo o Roteiro." }
+      ]
+    end
   end
 
   # 🩺 item 251: o Atendente de Pós-operatório precisa saber QUAL cirurgia e há

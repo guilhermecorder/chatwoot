@@ -739,7 +739,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # 🧪 SIMULADOR (rodada 188): conversa com o agente como paciente, com a IA
   # de verdade, numa caixa interna sem canal de envio. Sem conversation_id
   # (ou reset) abre conversa nova; com text, manda a fala e devolve os balões.
-  def ai_simulate # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def ai_simulate # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/MethodLength
     return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
 
     agent_key = params[:agent].presence || 'atendente_agendamento'
@@ -755,14 +755,27 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     conversation ||= sim.start!
     sim.objective!(conversation) if params[:objective].present?
     error = nil
+    pending = false
     if params[:text].present?
       # 🧠 item 399: `model` = motor escolhido na tela do teste para esta fala (não muda o agente)
-      outcome = sim.say!(conversation, params[:text], model: params[:model])
-      error = outcome[:error]
+      # 🧑‍🏫 item 414: `consultant` = consultor superior só deste teste ({ model, mode })
+      # ⏱️ item 414: `async` = a resposta roda em segundo plano e a tela busca o resultado
+      # (a chamada da tela morre em 15 s; sem `async` segue como sempre, na hora)
+      # (sem ninguém ouvindo a fila do teste, também responde na hora)
+      if ActiveModel::Type::Boolean.new.cast(params[:async]) && Crm::AgentSimulator.background_ready?
+        pending = sim.say_later!(conversation, params[:text], model: params[:model], consultant: simulate_consultant)[:pending]
+      else
+        error = sim.say!(conversation, params[:text], model: params[:model], consultant: simulate_consultant)[:error]
+      end
+    elsif params[:conversation_id].present?
+      # a tela perguntando se a fala em segundo plano já tem resposta
+      state = Crm::AgentSimulator.status(conversation)
+      pending = state[:pending]
+      error = state[:error]
     end
     render json: { agent: agent_key, conversation_id: conversation.id, display_id: conversation.display_id,
                    script_version: Crm::AgentSimulator.script_version(conversation),
-                   turns: sim.transcript(conversation), error: error }
+                   turns: sim.transcript(conversation), error: error, pending: pending }
   end
 
   # 📋 (195) "Ver quem ligaria hoje": roda a seleção de leads não responsivos
@@ -918,16 +931,51 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     return render json: { error: 'O motor por coluna só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
 
     cfg = crm_settings.ai_config || {}
-    choices = Crm::StageEngine.sanitize(params[:stage_models] || {}, cfg.dig('agents', key) || {})
-    error = choices.values.uniq.filter_map { |chosen| llm_choice_error(cfg, chosen) }.first
+    agent = cfg.dig('agents', key) || {}
+    changes = engine_changes(agent)
+    error = engine_chosen_models(changes).uniq.filter_map { |chosen| llm_choice_error(cfg, chosen) }.first
     return render json: { error: error }, status: :unprocessable_entity if error
 
     Cevico::SettingMerge.merge!(crm_settings, :ai_config) do |fresh|
       fresh['agents'] ||= {}
-      fresh['agents'][key] = (fresh['agents'][key] || {}).merge(Crm::StageEngine::CONFIG_KEY => choices)
+      fresh['agents'][key] = (fresh['agents'][key] || {}).merge(changes)
       fresh
     end
     render json: stage_models_json(key)
+  end
+
+  # 🧑‍🏫 item 414: CONSULTOR SUPERIOR do atendente (Crm::ConsultantConfig) —
+  # devolve a config, o contador (hoje e 7 dias) e as últimas consultas (o que
+  # o principal ia fazer × o que saiu). Salva na hora (não passa pelo rascunho).
+  def ai_consultant
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    key = experiment_agent_key
+    return render json: { error: 'O consultor superior só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+
+    render json: consultant_json(key)
+  end
+
+  def save_ai_consultant # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return render json: { error: 'Apenas administradores.' }, status: :forbidden unless Current.account_user.administrator?
+
+    key = experiment_agent_key
+    return render json: { error: 'O consultor superior só existe nos atendentes do WhatsApp.' }, status: :unprocessable_entity if key.nil?
+
+    cfg = crm_settings.ai_config || {}
+    current = cfg.dig('agents', key, Crm::ConsultantConfig::CONFIG_KEY)
+    clean = Crm::ConsultantConfig.sanitize(params[:consultor] || {}, current.is_a?(Hash) ? current : {})
+    # só caixas em que este agente lê (vazio = em todas elas)
+    clean['inbox_ids'] &= Array(cfg.dig('agents', key, 'inbox_ids')).map(&:to_i)
+    error = consultant_error(cfg, clean)
+    return render json: { error: error }, status: :unprocessable_entity if error
+
+    Cevico::SettingMerge.merge!(crm_settings, :ai_config) do |fresh|
+      fresh['agents'] ||= {}
+      fresh['agents'][key] = (fresh['agents'][key] || {}).merge(Crm::ConsultantConfig::CONFIG_KEY => clean)
+      fresh
+    end
+    render json: consultant_json(key)
   end
 
   # 🧪 itens 400/403: TESTE A/B do atendente (Crm::EngineExperiment) —
@@ -1368,9 +1416,10 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     if params.key?(:windows)
       # item 307: `only` = tipos que a faixa aceita (vazio = todos)
       cfg['windows'] = Array(params[:windows]).map do |w|
-        win = w.permit(:dow, :unit, :doctor, :turno, :start, :end, :block, only: []).to_h
+        win = w.permit(:dow, :unit, :doctor, :turno, :start, :end, :block, :from, :until, :solo, only: []).to_h
         only = Array(win.delete('only')).map(&:to_s) & Crm::AgendaSlots::RESERVABLE
-        only.any? ? win.merge('only' => only) : win
+        win = only.any? ? win.merge('only' => only) : win
+        window_validity(win)
       end
     end
     # 🗂️ item 307: regras da agenda escritas pela clínica — entram no prompt dos
@@ -2740,21 +2789,120 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
     Array(params[:stages_b]).map(&:to_s).uniq & allowed
   end
 
+  # 🧑‍🏫 item 414: o consultor escolhido só para este teste do simulador
+  # ({ model, mode, tool }); em branco = o que o cartão do agente tem
+  def simulate_consultant
+    raw = params[:consultant]
+    return nil unless raw.respond_to?(:to_unsafe_h)
+
+    chosen = raw.to_unsafe_h.slice('model', 'mode', 'tool')
+    model = chosen['model'].to_s.strip
+    return nil if model.blank? || llm_choice_error(crm_settings.ai_config || {}, model)
+
+    { 'model' => model, 'mode' => Crm::ConsultantConfig::MODES.include?(chosen['mode'].to_s) ? chosen['mode'].to_s : 'ativo',
+      'tool' => ActiveModel::Type::Boolean.new.cast(chosen['tool']) == true }
+  end
+
+  # ligado exige modelo reconhecido e a chave do fornecedor dele salva
+  def consultant_error(cfg, clean)
+    return nil unless clean['enabled']
+    return 'Escolha o modelo do consultor superior.' if clean['model'].blank?
+
+    choice_error = llm_choice_error(cfg, clean['model'])
+    return choice_error if choice_error
+    return 'Salve antes a chave da Claude em CRM → Integrações.' unless Crm::LlmCatalog.usable?(cfg, clean['model'])
+    return 'Ligue pelo menos um gatilho (ou a ferramenta de orientação) para o consultor ter o que fazer.' if consultant_idle?(clean)
+
+    nil
+  end
+
+  def consultant_idle?(clean)
+    clean['triggers'].values.none? && !(clean['tool'] && clean['mode'] == 'ativo')
+  end
+
+  def consultant_json(key)
+    cfg = crm_settings.reload.ai_config || {}
+    agent = cfg.dig('agents', key) || {}
+    {
+      agent: key, config: Crm::ConsultantConfig.normalize(agent), ready: Crm::ConsultantConfig.active(agent, cfg).present?,
+      default_model: experiment_model_a(key, agent), staged: Crm::StageEngine.config(agent).any?,
+      triggers: Crm::ConsultantConfig::TRIGGERS, stages: Crm::ResponderAgentService::ETAPAS,
+      efforts: Crm::AiAgentConfig::EFFORTS, effect_labels: Crm::ConsultantConfig::EFFECT_LABELS,
+      trigger_labels: Crm::ConsultantConfig::TRIGGER_LABELS,
+      limits: { cap_max: Crm::ConsultantConfig::MAX_CAP, timeout_min: Crm::ConsultantConfig::TIMEOUT_RANGE.first,
+                timeout_max: Crm::ConsultantConfig::TIMEOUT_RANGE.last },
+      stats: Crm::ConsultantConfig.summary(cfg, key), recent: consultant_recent(key), usd_brl: experiment_usd_rate
+    }
+  end
+
+  # as últimas consultas ao superior (notas internas das conversas, 14 dias)
+  def consultant_recent(key)
+    note_key = Crm::ConsultantConfig::NOTE_KEY
+    Current.account.messages.where(message_type: :activity, private: true, created_at: 14.days.ago..)
+           .where('additional_attributes ? :key', key: note_key)
+           .includes(conversation: :contact).reorder(created_at: :desc).limit(40)
+           .filter_map { |note| consultant_item(note, key) }.first(20)
+  end
+
+  def consultant_item(note, key)
+    record = note.additional_attributes[Crm::ConsultantConfig::NOTE_KEY]
+    shadow_agent = note.additional_attributes.dig('cevico_ia_shadow', 'agent')
+    return nil unless record.is_a?(Hash) && (shadow_agent.nil? || shadow_agent == key)
+
+    conversation = note.conversation
+    { id: note.id, at: note.created_at.iso8601, conversation_id: conversation&.display_id,
+      contact: conversation&.contact&.name.to_s.truncate(40), headline: Crm::ConsultantConfig.headline(record),
+      record: record.slice('gatilho', 'modo', 'modelo', 'principal', 'status', 'efeito', 'mudou', 'aplicado', 'custo_usd', 'ms',
+                           'antes', 'depois', 'erro', 'duvida', 'orientacao', 'teste', 'tarefa_aberta') }
+  end
+
   # 🧭 23/11 (motor por coluna): colunas do agente na ordem do funil (+ "sem
   # card" quando ele atende contato novo), a escolha de cada uma, o modelo do
   # cartão (o que vale onde não há escolha) e o gasto por modelo em 7 dias
   def stage_models_json(key)
     agent = (crm_settings.reload.ai_config || {}).dig('agents', key) || {}
+    stages = stage_models_stages(agent)
+    {
+      agent: key, default_model: experiment_model_a(key, agent), stages: stages,
+      stage_models: Crm::StageEngine.config(agent).slice(*stages.pluck(:slot)),
+      usage_7d: stage_models_usage(key), usd_brl: experiment_usd_rate
+    }.merge(inbox_engines_json(agent))
+  end
+
+  # 📥 item 416: caixas que o agente lê + o motor/esforço/Roteiro próprio de cada uma
+  def inbox_engines_json(agent)
+    { inboxes: stage_models_inboxes(agent), default_effort: agent['effort'].presence,
+      inbox_engines: Crm::InboxEngine.config(agent).slice(*Array(agent['inbox_ids']).map(&:to_s)) }
+  end
+
+  # 📥 item 416: o motor por caixa vem no mesmo endereço do motor por coluna,
+  # com `part: 'inbox'`; cada salvar grava SÓ a sua parte (lista vazia = tirou
+  # tudo daquela parte, nunca apaga a outra)
+  def engine_changes(agent)
+    if params[:part].to_s == 'inbox'
+      { Crm::InboxEngine::CONFIG_KEY => Crm::InboxEngine.sanitize(params[:inbox_engines] || {}, agent) }
+    else
+      { Crm::StageEngine::CONFIG_KEY => Crm::StageEngine.sanitize(params[:stage_models] || {}, agent) }
+    end
+  end
+
+  def engine_chosen_models(changes)
+    Array(changes[Crm::StageEngine::CONFIG_KEY]&.values) +
+      Array(changes[Crm::InboxEngine::CONFIG_KEY]&.values).filter_map { |entry| entry['model'] }
+  end
+
+  def stage_models_stages(agent)
     stages = Crm::Stage.joins(:pipeline)
                        .where(crm_pipelines: { account_id: Current.account.id }, id: Array(agent['stage_ids']).map(&:to_i))
                        .order('crm_pipelines.id', :position)
                        .map { |stage| { slot: stage.id.to_s, name: stage.name } }
     stages.unshift({ slot: Crm::StageEngine::NO_CARD, name: 'Sem card ainda (contato novo)' }) if agent['no_card'] == true
-    {
-      agent: key, default_model: experiment_model_a(key, agent), stages: stages,
-      stage_models: Crm::StageEngine.config(agent).slice(*stages.pluck(:slot)),
-      usage_7d: stage_models_usage(key), usd_brl: experiment_usd_rate
-    }
+    stages
+  end
+
+  def stage_models_inboxes(agent)
+    ids = Array(agent['inbox_ids']).map(&:to_i)
+    Current.account.inboxes.where(id: ids).order(:id).map { |inbox| { id: inbox.id.to_s, name: inbox.name } }
   end
 
   def stage_models_usage(key)
@@ -3260,6 +3408,16 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       part = { 'date' => date, 'unit' => h['unit'].to_s[0, 40].presence, 'doctor' => h['doctor'].to_s[0, 80].presence }.compact
       part.size == 1 ? date : part
     end.uniq
+  end
+
+  # 🗓️ item 415: vigência (from/until em AAAA-MM-DD) e "sem encaixe" (solo) da faixa —
+  # data inválida ou vazia sai; solo só fica quando é true
+  def window_validity(win)
+    %w[from until].each do |key|
+      date = Crm::AgendaSlots.iso_date(win[key])
+      date ? win[key] = date.to_s : win.delete(key)
+    end
+    Crm::AgendaSlots.solo?(win) ? win.merge('solo' => true) : win.except('solo')
   end
 
   # 📅 item 375: abertura pontual = {date, doctor, unit, start, end, block};

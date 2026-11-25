@@ -19,17 +19,39 @@ import { useAdmin } from 'dashboard/composables/useAdmin';
 import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import CrmAPI from 'dashboard/api/crm';
 import {
-  DOCTORS, TYPE_BY_KEY, RESERVABLE, AI_MODALITY,
-  resolveAllWindows, resolveClosedDoctors, resolveBlocked, resolveBlockedDays, resolveOpenDays, resolveOpenWindows,
-  reservedFor, windowAccepts, windowAt, sameBlock, dateKey, patientNameOf, hexToRgbSpaced,
-  PRICE_TYPE_LABELS, priceLabel,
+  DOCTORS,
+  TYPE_BY_KEY,
+  RESERVABLE,
+  AI_MODALITY,
+  resolveAllWindows,
+  resolveClosedDoctors,
+  resolveBlocked,
+  resolveBlockedDays,
+  resolveOpenDays,
+  resolveOpenWindows,
+  reservedFor,
+  windowAccepts,
+  windowAt,
+  sameBlock,
+  isSoloWindow,
+  windowInForce,
+  dateKey,
+  patientNameOf,
+  hexToRgbSpaced,
+  PRICE_TYPE_LABELS,
+  priceLabel,
 } from 'dashboard/helper/cevicoAgenda';
 
 const props = defineProps({
   units: { type: Object, required: true }, // { tatuape: { label, color }, … }
   initialTab: { type: String, default: 'abrir' },
 });
-const emit = defineEmits(['close', 'reschedule', 'openExamWindows', 'openSurgeryWindows']);
+const emit = defineEmits([
+  'close',
+  'reschedule',
+  'openExamWindows',
+  'openSurgeryWindows',
+]);
 
 const store = useStore();
 const { isAdmin } = useAdmin();
@@ -46,28 +68,53 @@ const TABS = [
   { key: 'faixas', label: 'Faixas de horário', icon: 'i-lucide-clock' },
   { key: 'ia', label: 'Regras para a IA', icon: 'i-lucide-sparkles' },
   { key: 'valores', label: 'Valores', icon: 'i-lucide-badge-dollar-sign' },
-  { key: 'conferencia', label: 'Conferência do dia', icon: 'i-lucide-list-checks' },
+  {
+    key: 'conferencia',
+    label: 'Conferência do dia',
+    icon: 'i-lucide-list-checks',
+  },
 ];
-const visibleTabs = computed(() => (canConfigure.value ? TABS : TABS.filter(x => x.key === 'abrir')));
+const visibleTabs = computed(() =>
+  canConfigure.value ? TABS : TABS.filter(x => x.key === 'abrir')
+);
 const tab = ref(canConfigure.value ? props.initialTab : 'abrir');
 
-const WEEKDAY_FULL = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+const WEEKDAY_FULL = [
+  'Domingo',
+  'Segunda',
+  'Terça',
+  'Quarta',
+  'Quinta',
+  'Sexta',
+  'Sábado',
+];
 const WEEKDAY_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const unitLabel = key => props.units[key]?.label || key;
-const doctorColor = name => DOCTORS.find(d => d.name === name)?.color || '#64748B';
+const doctorColor = name =>
+  DOCTORS.find(d => d.name === name)?.color || '#64748B';
 const doctorShort = name => DOCTORS.find(d => d.name === name)?.short || name;
 const typeLabel = key => TYPE_BY_KEY[key]?.label || key;
 const typeVars = key => {
   const t = TYPE_BY_KEY[key] || {};
   return {
-    '--cv': t.color, '--cv-deep': t.deep, '--cv-grad': t.grad,
-    '--cv-rgb': hexToRgbSpaced(t.color || '#64748B'), '--cv-deep-rgb': hexToRgbSpaced(t.deep || '#334155'),
+    '--cv': t.color,
+    '--cv-deep': t.deep,
+    '--cv-grad': t.grad,
+    '--cv-rgb': hexToRgbSpaced(t.color || '#64748B'),
+    '--cv-deep-rgb': hexToRgbSpaced(t.deep || '#334155'),
   };
 };
 const reservedLabel = win => reservedFor(win).map(typeLabel).join(' + ');
 const fmtDay = d =>
-  d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).replace('.', '');
-const fmtHm = d => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  d
+    .toLocaleDateString('pt-BR', {
+      weekday: 'short',
+      day: '2-digit',
+      month: '2-digit',
+    })
+    .replace('.', '');
+const fmtHm = d =>
+  d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const parseKey = key => new Date(`${key}T12:00:00`);
 const todayKey = () => dateKey(new Date());
 
@@ -78,21 +125,42 @@ const busy = ref('');
 const savedWindows = computed(() => resolveAllWindows(settings.value));
 const closedDoctors = computed(() => resolveClosedDoctors(settings.value));
 const isDoctorClosed = name => closedDoctors.value.includes(name);
+// item 415: faixa com vigência mostra as datas; a que já acabou sai do resumo
+const shortKey = key => key.split('-').reverse().slice(0, 2).join('/');
+const summaryDates = w => {
+  if (w.from && w.until) return ` (${shortKey(w.from)}–${shortKey(w.until)})`;
+  if (w.from) return ` (a partir de ${shortKey(w.from)})`;
+  return w.until ? ` (até ${shortKey(w.until)})` : '';
+};
 const doctorSummary = name =>
   savedWindows.value
-    .filter(w => w.doctor === name)
-    .sort((a, b) => a.dow - b.dow || a.start.localeCompare(b.start))
-    .map(w => `${WEEKDAY_SHORT[w.dow]} ${w.start}–${w.end} ${unitLabel(w.unit)}`)
+    .filter(w => w.doctor === name && !(w.until && w.until < todayKey()))
+    .sort(
+      (a, b) =>
+        a.dow - b.dow ||
+        (a.from || '').localeCompare(b.from || '') ||
+        a.start.localeCompare(b.start)
+    )
+    .map(
+      w =>
+        `${WEEKDAY_SHORT[w.dow]} ${w.start}–${w.end} ${unitLabel(w.unit)}${summaryDates(w)}`
+    )
     .join(' · ') || 'sem faixa de atendimento';
 
 const toggleDoctor = async name => {
   const wasClosed = isDoctorClosed(name);
   busy.value = `doc:${name}`;
   try {
-    const next = wasClosed ? closedDoctors.value.filter(x => x !== name) : [...closedDoctors.value, name];
+    const next = wasClosed
+      ? closedDoctors.value.filter(x => x !== name)
+      : [...closedDoctors.value, name];
     await CrmAPI.updateClosedDoctors(next);
     await refresh();
-    useAlert(wasClosed ? `Agenda de ${name} reaberta!` : `Agenda de ${name} fechada — some da grade e a IA para de oferecer.`);
+    useAlert(
+      wasClosed
+        ? `Agenda de ${name} reaberta!`
+        : `Agenda de ${name} fechada — some da grade e a IA para de oferecer.`
+    );
   } catch {
     useAlert('Não consegui atualizar a agenda do médico.');
   } finally {
@@ -114,7 +182,10 @@ const futureClosings = computed(() =>
 );
 const closeScopes = computed(() => [
   { key: 'all', label: 'Dia inteiro (clínica toda)' },
-  ...Object.keys(props.units).map(u => ({ key: `u:${u}`, label: `Só ${unitLabel(u)}` })),
+  ...Object.keys(props.units).map(u => ({
+    key: `u:${u}`,
+    label: `Só ${unitLabel(u)}`,
+  })),
   ...DOCTORS.map(d => ({ key: `d:${d.name}`, label: `Só ${d.name}` })),
 ]);
 const newClose = ref({ date: '', scope: 'all' });
@@ -140,11 +211,17 @@ const addClosing = async () => {
     useAlert('Esse fechamento já existe.');
     return;
   }
-  await saveBlockedDays([...blockedDays.value, key], `${closeScopeLabel(key)} fechado em ${fmtDay(parseKey(date))} 🔒`);
+  await saveBlockedDays(
+    [...blockedDays.value, key],
+    `${closeScopeLabel(key)} fechado em ${fmtDay(parseKey(date))} 🔒`
+  );
   newClose.value = { date: '', scope: 'all' };
 };
 const reopenDay = b =>
-  saveBlockedDays(blockedDays.value.filter(x => !sameBlock(x, b)), `${fmtDay(parseKey(dayOf(b)))} reaberto ✓`);
+  saveBlockedDays(
+    blockedDays.value.filter(x => !sameBlock(x, b)),
+    `${fmtDay(parseKey(dayOf(b)))} reaberto ✓`
+  );
 
 // 📅 item 375 (28/10, Vaneide: "a Dra. Roberta pediu para abrir a agenda em
 // alguns dias específicos — 30/10 das 13h às 17h30 e 06/11 das 9h às 13h30"):
@@ -165,11 +242,30 @@ const usualBlock = (doctor, unit) => {
   return Number((wins.find(w => w.unit === unit) || wins[0])?.block) || 15;
 };
 const firstUnit = () => Object.keys(props.units)[0] || 'paulista';
-const newOpen = ref({ date: '', doctor: DOCTORS[0].name, unit: firstUnit(), start: '08:00', end: '12:00', block: usualBlock(DOCTORS[0].name, firstUnit()) });
-watch(() => [newOpen.value.doctor, newOpen.value.unit], ([d, u]) => { newOpen.value.block = usualBlock(d, u); });
+const newOpen = ref({
+  date: '',
+  doctor: DOCTORS[0].name,
+  unit: firstUnit(),
+  start: '08:00',
+  end: '12:00',
+  block: usualBlock(DOCTORS[0].name, firstUnit()),
+});
+watch(
+  () => [newOpen.value.doctor, newOpen.value.unit],
+  ([d, u]) => {
+    newOpen.value.block = usualBlock(d, u);
+  }
+);
 const openValid = computed(() => {
   const o = newOpen.value;
-  return !!(o.date && o.doctor && o.unit && o.start && o.end && o.start < o.end);
+  return !!(
+    o.date &&
+    o.doctor &&
+    o.unit &&
+    o.start &&
+    o.end &&
+    o.start < o.end
+  );
 });
 // aviso: o médico já atende nesse horário pela rotina da semana
 const openClash = computed(() => {
@@ -177,14 +273,31 @@ const openClash = computed(() => {
   if (!o.date || !o.start || !o.end) return '';
   const dow = parseKey(o.date).getDay();
   const w = savedWindows.value.find(
-    x => x.doctor === o.doctor && Number(x.dow) === dow && x.unit === o.unit && x.start < o.end && x.end > o.start
+    x =>
+      x.doctor === o.doctor &&
+      Number(x.dow) === dow &&
+      x.unit === o.unit &&
+      x.start < o.end &&
+      x.end > o.start &&
+      windowInForce(x, o.date)
   );
   return w
     ? `${doctorShort(o.doctor)} já atende ${WEEKDAY_SHORT[dow]} ${w.start}–${w.end} em ${unitLabel(w.unit)} pela rotina da semana — a abertura só precisa cobrir o que é a mais.`
     : '';
 });
-const sameOpening = (a, b) => a.date === b.date && a.doctor === b.doctor && a.unit === b.unit && a.start === b.start;
-const stripOpening = o => ({ date: o.date, doctor: o.doctor, unit: o.unit, start: o.start, end: o.end, block: Number(o.block) || 15 });
+const sameOpening = (a, b) =>
+  a.date === b.date &&
+  a.doctor === b.doctor &&
+  a.unit === b.unit &&
+  a.start === b.start;
+const stripOpening = o => ({
+  date: o.date,
+  doctor: o.doctor,
+  unit: o.unit,
+  start: o.start,
+  end: o.end,
+  block: Number(o.block) || 15,
+});
 const saveOpenDays = async (next, message) => {
   busy.value = 'open';
   try {
@@ -204,11 +317,17 @@ const addOpening = async () => {
     useAlert('Essa abertura já existe.');
     return;
   }
-  await saveOpenDays([...openDays.value, o], `${doctorShort(o.doctor)} aberto em ${fmtDay(parseKey(o.date))}, ${o.start}–${o.end} ✓`);
+  await saveOpenDays(
+    [...openDays.value, o],
+    `${doctorShort(o.doctor)} aberto em ${fmtDay(parseKey(o.date))}, ${o.start}–${o.end} ✓`
+  );
   newOpen.value = { ...newOpen.value, date: '' };
 };
 const removeOpening = o =>
-  saveOpenDays(openDays.value.filter(x => !sameOpening(x, o)), `Abertura de ${fmtDay(parseKey(o.date))} removida`);
+  saveOpenDays(
+    openDays.value.filter(x => !sameOpening(x, o)),
+    `Abertura de ${fmtDay(parseKey(o.date))} removida`
+  );
 
 // horários fechados com o cadeado — de hoje em diante
 const lockedSlots = computed(() =>
@@ -220,7 +339,8 @@ const reopenSlot = async slot => {
   busy.value = 'slots';
   try {
     const next = resolveBlocked(settings.value).filter(
-      b => !(b.date === slot.date && b.time === slot.time && b.unit === slot.unit)
+      b =>
+        !(b.date === slot.date && b.time === slot.time && b.unit === slot.unit)
     );
     await CrmAPI.updateAgendaBlocked(next);
     await refresh();
@@ -237,14 +357,23 @@ const conflicts = computed(() => {
   const now = new Date();
   const closed = closedDoctors.value;
   // item 375: a abertura pontual também é faixa válida naquele dia
-  const openWins = [...savedWindows.value.filter(w => !closed.includes(w.doctor)), ...resolveOpenWindows(settings.value)];
+  const openWins = [
+    ...savedWindows.value.filter(w => !closed.includes(w.doctor)),
+    ...resolveOpenWindows(settings.value),
+  ];
   const whole = new Set(blockedDays.value.filter(b => typeof b === 'string'));
   const parts = blockedDays.value.filter(b => b && typeof b === 'object');
   return (allTasks.value || [])
     .filter(
       t =>
-        t.task_type === 'consulta' && t.due_at && !t.canceled_at && t.status !== 'done' &&
-        !t.source && t.unit && props.units[t.unit] && !['exames', 'teleconsulta'].includes(t.modality) &&
+        t.task_type === 'consulta' &&
+        t.due_at &&
+        !t.canceled_at &&
+        t.status !== 'done' &&
+        !t.source &&
+        t.unit &&
+        props.units[t.unit] &&
+        !['exames', 'teleconsulta'].includes(t.modality) &&
         new Date(t.due_at) > now
     )
     .map(t => {
@@ -252,13 +381,29 @@ const conflicts = computed(() => {
       const key = dateKey(at);
       let reason = '';
       if (whole.has(key)) reason = 'o dia foi fechado';
-      else if (parts.some(b => b.date === key && ((b.unit && b.unit === t.unit) || (b.doctor && b.doctor === t.doctor)))) {
+      else if (
+        parts.some(
+          b =>
+            b.date === key &&
+            ((b.unit && b.unit === t.unit) ||
+              (b.doctor && b.doctor === t.doctor))
+        )
+      ) {
         reason = 'a unidade ou o médico está fechado neste dia';
-      } else if (t.doctor && closed.includes(t.doctor)) reason = `a agenda de ${doctorShort(t.doctor)} está fechada`;
+      } else if (t.doctor && closed.includes(t.doctor))
+        reason = `a agenda de ${doctorShort(t.doctor)} está fechada`;
       else {
-        const spot = { dow: at.getDay(), date: key, unit: t.unit, minutes: at.getHours() * 60 + at.getMinutes() };
-        const win = windowAt(openWins, { ...spot, doctor: t.doctor }) || windowAt(openWins, spot);
-        if (win && !windowAccepts(win, t.modality || AI_MODALITY)) reason = `faixa reservada para ${reservedLabel(win)}`;
+        const spot = {
+          dow: at.getDay(),
+          date: key,
+          unit: t.unit,
+          minutes: at.getHours() * 60 + at.getMinutes(),
+        };
+        const win =
+          windowAt(openWins, { ...spot, doctor: t.doctor }) ||
+          windowAt(openWins, spot);
+        if (win && !windowAccepts(win, t.modality || AI_MODALITY))
+          reason = `faixa reservada para ${reservedLabel(win)}`;
       }
       return reason ? { task: t, at, reason } : null;
     })
@@ -273,23 +418,43 @@ const nextUid = () => {
   uid += 1;
   return uid;
 };
-const cloneWindows = list => list.map(w => ({ ...w, only: [...reservedFor(w)], uid: nextUid() }));
+const cloneWindows = list =>
+  list.map(w => ({
+    ...w,
+    only: [...reservedFor(w)],
+    from: w.from || '',
+    until: w.until || '',
+    solo: isSoloWindow(w),
+    uid: nextUid(),
+  }));
 const cleanWindows = list =>
   list
     .filter(w => w.start && w.end && w.doctor)
     .map(w => {
       const only = reservedFor(w);
       const base = {
-        dow: Number(w.dow), unit: w.unit, doctor: w.doctor,
+        dow: Number(w.dow),
+        unit: w.unit,
+        doctor: w.doctor,
         turno: w.start < '12:00' ? 'Manhã' : 'Tarde',
-        start: w.start, end: w.end, block: Number(w.block) || 15,
+        start: w.start,
+        end: w.end,
+        block: Number(w.block) || 15,
       };
+      // 🗓️ item 415: vigência (a partir de / até) e "sem encaixe" — só gravam quando usados
+      if (w.from) base.from = w.from;
+      if (w.until) base.until = w.until;
+      if (w.solo) base.solo = true;
       // os 3 tipos marcados = aceita tudo = sem reserva
-      return only.length && only.length < RESERVABLE.length ? { ...base, only } : base;
+      return only.length && only.length < RESERVABLE.length
+        ? { ...base, only }
+        : base;
     });
 const draft = ref(cloneWindows(savedWindows.value));
 const isDirty = computed(
-  () => JSON.stringify(cleanWindows(draft.value)) !== JSON.stringify(cleanWindows(savedWindows.value))
+  () =>
+    JSON.stringify(cleanWindows(draft.value)) !==
+    JSON.stringify(cleanWindows(savedWindows.value))
 );
 watch(savedWindows, list => {
   if (!isDirty.value) draft.value = cloneWindows(list);
@@ -298,17 +463,87 @@ const resetDraft = () => {
   draft.value = cloneWindows(savedWindows.value);
 };
 const byDow = dow =>
-  draft.value.filter(w => Number(w.dow) === dow).sort((a, b) => a.start.localeCompare(b.start));
+  draft.value
+    .filter(w => Number(w.dow) === dow)
+    .sort(
+      (a, b) =>
+        (a.from || '').localeCompare(b.from || '') ||
+        a.start.localeCompare(b.start)
+    );
+// item 415: duas faixas só se chocam se as vigências também se cruzam
+const datesCross = (a, b) =>
+  (!a.until || !b.from || a.until >= b.from) &&
+  (!b.until || !a.from || b.until >= a.from);
 const addWindow = dow => {
-  draft.value.push({ dow, unit: 'paulista', doctor: DOCTORS[0].name, start: '08:00', end: '11:00', block: 15, only: [], uid: nextUid() });
+  draft.value.push({
+    dow,
+    unit: 'paulista',
+    doctor: DOCTORS[0].name,
+    start: '08:00',
+    end: '11:00',
+    block: 15,
+    only: [],
+    from: '',
+    until: '',
+    solo: false,
+    uid: nextUid(),
+  });
+};
+// 🗓️ item 415 (24/11, Dra. Roberta: "das 13 às 14 para os particulares, das 14 às 16
+// para a CEVICO"): TROCAR A GRADE A PARTIR DE UMA DATA. A faixa atual vale até a
+// véspera e uma cópia começa na data — ajusta-se a cópia (horário, bloco, sem
+// encaixe) e as semanas já marcadas continuam como estão.
+const dayBefore = key => {
+  const d = parseKey(key);
+  d.setDate(d.getDate() - 1);
+  return dateKey(d);
+};
+const changing = ref(null);
+const changeFrom = ref('');
+const startChange = w => {
+  changing.value = w.uid;
+  changeFrom.value = '';
+};
+const confirmChange = w => {
+  const at = changeFrom.value;
+  if (
+    !at ||
+    at <= todayKey() ||
+    (w.from && at <= w.from) ||
+    (w.until && at > w.until)
+  ) {
+    useAlert('Escolha uma data futura dentro da vigência desta faixa.');
+    return;
+  }
+  draft.value.push({ ...w, only: [...w.only], from: at, uid: nextUid() });
+  w.until = dayBefore(at);
+  changing.value = null;
+};
+const fmtKey = key =>
+  key
+    ? parseKey(key).toLocaleDateString('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+      })
+    : '';
+const isExpired = w => Boolean(w.until) && w.until < todayKey();
+const validityLabel = w => {
+  if (w.from && w.until) return `de ${fmtKey(w.from)} até ${fmtKey(w.until)}`;
+  if (w.from) return `a partir de ${fmtKey(w.from)}`;
+  if (w.until) return `até ${fmtKey(w.until)}`;
+  return '';
 };
 const removeWindow = w => {
   draft.value = draft.value.filter(x => x.uid !== w.uid);
 };
 const toggleOnly = (w, key) => {
-  w.only = w.only.includes(key) ? w.only.filter(k => k !== key) : [...w.only, key];
+  w.only = w.only.includes(key)
+    ? w.only.filter(k => k !== key)
+    : [...w.only, key];
 };
-const acceptsAll = w => !reservedFor(w).length || reservedFor(w).length === RESERVABLE.length;
+const acceptsAll = w =>
+  !reservedFor(w).length || reservedFor(w).length === RESERVABLE.length;
 const aiOffers = w => acceptsAll(w) || windowAccepts(w, AI_MODALITY);
 // dividir uma faixa em duas num horário (13h–17h → 13h–14h + 14h–17h)
 const splitting = ref(null);
@@ -323,23 +558,35 @@ const confirmSplit = w => {
     useAlert(`Escolha um horário entre ${w.start} e ${w.end}.`);
     return;
   }
-  draft.value.push({ ...w, start: at, only: [], uid: nextUid() });
+  draft.value.push({ ...w, start: at, only: [], solo: w.solo, uid: nextUid() });
   w.end = at;
   splitting.value = null;
 };
 const rowError = w => {
   if (!w.start || !w.end) return 'informe início e fim';
   if (w.start >= w.end) return 'o fim precisa ser depois do início';
+  if (w.from && w.until && w.from > w.until)
+    return 'a vigência termina antes de começar';
   const clash = draft.value.find(
-    x => x.uid !== w.uid && Number(x.dow) === Number(w.dow) && x.doctor === w.doctor && x.start < w.end && x.end > w.start
+    x =>
+      x.uid !== w.uid &&
+      Number(x.dow) === Number(w.dow) &&
+      x.doctor === w.doctor &&
+      x.start < w.end &&
+      x.end > w.start &&
+      datesCross(x, w)
   );
-  return clash ? `sobrepõe a faixa ${clash.start}–${clash.end} do mesmo médico` : '';
+  return clash
+    ? `sobrepõe a faixa ${clash.start}–${clash.end} do mesmo médico`
+    : '';
 };
 const hasErrors = computed(() => draft.value.some(w => rowError(w)));
 
 // ── 3. REGRAS PARA A IA ──────────────────────────────────────────────
 const aiRules = ref(settings.value?.agenda_ai_rules || '');
-const rulesDirty = computed(() => aiRules.value.trim() !== (settings.value?.agenda_ai_rules || '').trim());
+const rulesDirty = computed(
+  () => aiRules.value.trim() !== (settings.value?.agenda_ai_rules || '').trim()
+);
 const preview = ref(null);
 const previewError = ref('');
 const loadPreview = async () => {
@@ -348,14 +595,25 @@ const loadPreview = async () => {
     const { data } = await CrmAPI.getAgendaAiPreview();
     preview.value = data;
   } catch {
-    previewError.value = 'Só quem tem acesso às configurações vê o que a IA recebe.';
+    previewError.value =
+      'Só quem tem acesso às configurações vê o que a IA recebe.';
   }
 };
 // ── 4. VALORES (item 324): pré-configuração por tipo de atendimento ──
 // "avaliação geralmente é 150; retorno e 1º pós-operatório não têm custo;
 // exames, cada um tem o seu valor; particulares, cada médico tem o seu"
-const blankPrices = () => ({ avaliacao: '', retorno: '', pos_op: '', teleconsulta: '', particular: {}, exames: [], especiais: [], parceiros: [] });
-const namedPrices = list => (list || []).map(e => ({ name: e.name || '', price: e.price || '' }));
+const blankPrices = () => ({
+  avaliacao: '',
+  retorno: '',
+  pos_op: '',
+  teleconsulta: '',
+  particular: {},
+  exames: [],
+  especiais: [],
+  parceiros: [],
+});
+const namedPrices = list =>
+  (list || []).map(e => ({ name: e.name || '', price: e.price || '' }));
 const pricesFrom = raw => ({
   ...blankPrices(),
   ...(raw || {}),
@@ -366,7 +624,9 @@ const pricesFrom = raw => ({
 });
 const prices = ref(pricesFrom(settings.value?.appointment_prices));
 const pricesSaved = ref(JSON.stringify(prices.value));
-const pricesDirty = computed(() => JSON.stringify(prices.value) !== pricesSaved.value);
+const pricesDirty = computed(
+  () => JSON.stringify(prices.value) !== pricesSaved.value
+);
 watch(
   () => settings.value?.appointment_prices,
   raw => {
@@ -378,10 +638,12 @@ watch(
 const addExamPrice = () => prices.value.exames.push({ name: '', price: '' });
 const removeExamPrice = idx => prices.value.exames.splice(idx, 1);
 // 🩺 19/10: avaliação com especialista, pelo problema escrito no agendamento
-const addSpecialPrice = () => prices.value.especiais.push({ name: '', price: '' });
+const addSpecialPrice = () =>
+  prices.value.especiais.push({ name: '', price: '' });
 const removeSpecialPrice = idx => prices.value.especiais.splice(idx, 1);
 // 🤝 item 386: parceiro do Oftalmofácil com valor combinado (Amor Saúde Tatuapé = 0,00)
-const addPartnerPrice = () => prices.value.parceiros.push({ name: '', price: '' });
+const addPartnerPrice = () =>
+  prices.value.parceiros.push({ name: '', price: '' });
 const removePartnerPrice = idx => prices.value.parceiros.splice(idx, 1);
 const savePrices = async () => {
   busy.value = 'prices';
@@ -400,7 +662,12 @@ const savePrices = async () => {
 
 // ⏱️ item 367: teto de avaliações por hora em cada unidade (padrão 4)
 const hourly = ref(settings.value?.agenda_hourly_evaluations || 4);
-watch(() => settings.value?.agenda_hourly_evaluations, v => { if (v) hourly.value = v; });
+watch(
+  () => settings.value?.agenda_hourly_evaluations,
+  v => {
+    if (v) hourly.value = v;
+  }
+);
 const saveHourly = async () => {
   const n = Math.round(Number(hourly.value));
   if (!(n >= 1 && n <= 20)) {
@@ -454,7 +721,11 @@ const saveWindows = async () => {
 
 const tryClose = () => {
   // eslint-disable-next-line no-alert
-  if ((isDirty.value || rulesDirty.value) && !window.confirm('Há mudanças sem salvar. Fechar mesmo assim?')) return;
+  if (
+    (isDirty.value || rulesDirty.value) &&
+    !window.confirm('Há mudanças sem salvar. Fechar mesmo assim?')
+  )
+    return;
   emit('close');
 };
 
@@ -465,20 +736,47 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 sm:p-4" @click.self="tryClose">
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 sm:p-4"
+    @click.self="tryClose"
+  >
     <div class="cv-modal cv-ag-pop w-full max-w-3xl max-h-[92vh] flex flex-col">
       <div class="cv-modal-head flex items-center gap-3">
         <span class="i-lucide-settings-2 text-xl" />
         <div class="flex-1 min-w-0">
-          <h2 class="text-base font-bold">{{ canConfigure ? 'Configurações da agenda' : 'Abrir e fechar agenda' }}</h2>
-          <p class="text-[11px] opacity-85">{{ canConfigure ? 'abrir e fechar, para que serve cada faixa de horário e o que a IA oferece — tudo num lugar só' : 'fechar e reabrir médicos, dias e horários' }}</p>
+          <h2 class="text-base font-bold">
+            {{
+              canConfigure ? 'Configurações da agenda' : 'Abrir e fechar agenda'
+            }}
+          </h2>
+          <p class="text-[11px] opacity-85">
+            {{
+              canConfigure
+                ? 'abrir e fechar, para que serve cada faixa de horário e o que a IA oferece — tudo num lugar só'
+                : 'fechar e reabrir médicos, dias e horários'
+            }}
+          </p>
         </div>
-        <button class="cv-glass-btn cv-iconbtn" title="Fechar" @click="tryClose"><span class="i-lucide-x" /></button>
+        <button
+          class="cv-glass-btn cv-iconbtn"
+          title="Fechar"
+          @click="tryClose"
+        >
+          <span class="i-lucide-x" />
+        </button>
       </div>
 
       <div class="px-4 sm:px-5 pt-4">
-        <div class="cv-seg cv-seg-sm grid grid-cols-2 sm:grid-cols-5 gap-1 w-full">
-          <button v-for="t in visibleTabs" :key="t.key" class="cv-seg-item justify-center" :class="tab === t.key ? 'cv-seg-on' : ''" @click="tab = t.key">
+        <div
+          class="cv-seg cv-seg-sm grid grid-cols-2 sm:grid-cols-5 gap-1 w-full"
+        >
+          <button
+            v-for="t in visibleTabs"
+            :key="t.key"
+            class="cv-seg-item justify-center"
+            :class="tab === t.key ? 'cv-seg-on' : ''"
+            @click="tab = t.key"
+          >
             <span :class="t.icon" class="text-xs" /> {{ t.label }}
           </button>
         </div>
@@ -487,19 +785,46 @@ onMounted(() => {
       <div class="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
         <!-- PRECISA REAGENDAR: aparece em qualquer aba enquanto houver paciente fora da regra -->
         <div v-if="conflicts.length" class="cv-sub cv-amber p-3.5">
-          <button class="w-full flex items-center gap-2 text-left" @click="showConflicts = !showConflicts">
-            <span class="i-lucide-calendar-clock text-base" style="color: #b45309" />
+          <button
+            class="w-full flex items-center gap-2 text-left"
+            @click="showConflicts = !showConflicts"
+          >
+            <span
+              class="i-lucide-calendar-clock text-base"
+              style="color: #b45309"
+            />
             <span class="text-sm font-bold text-n-slate-12 flex-1">Precisa reagendar · {{ conflicts.length }}</span>
             <span class="text-[11px] text-n-slate-10">paciente já marcado que ficou fora da regra</span>
-            <span :class="showConflicts ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="text-sm text-n-slate-10" />
+            <span
+              :class="
+                showConflicts ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'
+              "
+              class="text-sm text-n-slate-10"
+            />
           </button>
           <div v-if="showConflicts" class="mt-2.5 space-y-1.5">
-            <div v-for="c in conflicts" :key="c.task.id" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2">
+            <div
+              v-for="c in conflicts"
+              :key="c.task.id"
+              class="cv-row flex items-center gap-2 flex-wrap px-3 py-2"
+            >
               <span class="text-xs font-semibold text-n-slate-12 tabular-nums">{{ fmtDay(c.at) }} · {{ fmtHm(c.at) }}</span>
-              <span class="text-xs text-n-slate-12 truncate flex-1 min-w-[120px]">{{ patientNameOf(c.task) }}</span>
-              <span class="cv-chip" :style="typeVars(c.task.modality || 'avaliacao')">{{ typeLabel(c.task.modality || 'avaliacao') }}</span>
-              <span class="text-[11px] text-n-slate-10 w-full sm:w-auto">{{ c.reason }}</span>
-              <button class="cv-btn cv-btn-sm" @click="emit('reschedule', c.task)"><span class="i-lucide-calendar-clock text-xs" /> Reagendar</button>
+              <span
+                class="text-xs text-n-slate-12 truncate flex-1 min-w-[120px]"
+                >{{ patientNameOf(c.task) }}</span>
+              <span
+                class="cv-chip"
+                :style="typeVars(c.task.modality || 'avaliacao')"
+                >{{ typeLabel(c.task.modality || 'avaliacao') }}</span>
+              <span class="text-[11px] text-n-slate-10 w-full sm:w-auto">{{
+                c.reason
+              }}</span>
+              <button
+                class="cv-btn cv-btn-sm"
+                @click="emit('reschedule', c.task)"
+              >
+                <span class="i-lucide-calendar-clock text-xs" /> Reagendar
+              </button>
             </div>
           </div>
         </div>
@@ -508,113 +833,270 @@ onMounted(() => {
         <template v-if="tab === 'abrir'">
           <section class="space-y-2">
             <p class="cv-ag-block-title">Médicos</p>
-            <p class="text-[11px] text-n-slate-10">Fechar tira o médico da grade inteira na hora, e a IA para de oferecer os horários dele. Reabrir devolve tudo como estava.</p>
-            <div v-for="d in DOCTORS" :key="d.name" class="cv-sub flex items-center gap-3 flex-wrap px-3.5 py-3">
-              <span class="w-3 h-3 rounded-full flex-shrink-0" :style="{ backgroundColor: d.color }" />
+            <p class="text-[11px] text-n-slate-10">
+              Fechar tira o médico da grade inteira na hora, e a IA para de
+              oferecer os horários dele. Reabrir devolve tudo como estava.
+            </p>
+            <div
+              v-for="d in DOCTORS"
+              :key="d.name"
+              class="cv-sub flex items-center gap-3 flex-wrap px-3.5 py-3"
+            >
+              <span
+                class="w-3 h-3 rounded-full flex-shrink-0"
+                :style="{ backgroundColor: d.color }"
+              />
               <div class="flex-1 min-w-[180px]">
-                <p class="text-sm font-semibold text-n-slate-12 flex items-center gap-2 flex-wrap">
+                <p
+                  class="text-sm font-semibold text-n-slate-12 flex items-center gap-2 flex-wrap"
+                >
                   {{ d.name }}
-                  <span class="cv-chip" :class="isDoctorClosed(d.name) ? 'cv-red' : 'cv-green'">{{ isDoctorClosed(d.name) ? 'agenda fechada' : 'agenda aberta' }}</span>
+                  <span
+                    class="cv-chip"
+                    :class="isDoctorClosed(d.name) ? 'cv-red' : 'cv-green'"
+                    >{{
+                      isDoctorClosed(d.name)
+                        ? 'agenda fechada'
+                        : 'agenda aberta'
+                    }}</span>
                 </p>
-                <p class="text-[11px] text-n-slate-10 mt-0.5">{{ doctorSummary(d.name) }}</p>
+                <p class="text-[11px] text-n-slate-10 mt-0.5">
+                  {{ doctorSummary(d.name) }}
+                </p>
               </div>
-              <button v-if="canLock" class="cv-btn" :class="isDoctorClosed(d.name) ? '' : 'cv-btn-ghost cv-btn-danger'" :disabled="busy === `doc:${d.name}`" @click="toggleDoctor(d.name)">
-                <span :class="isDoctorClosed(d.name) ? 'i-lucide-lock-open' : 'i-lucide-lock'" class="text-sm" />
-                {{ isDoctorClosed(d.name) ? 'Reabrir agenda' : 'Fechar agenda' }}
+              <button
+                v-if="canLock"
+                class="cv-btn"
+                :class="
+                  isDoctorClosed(d.name) ? '' : 'cv-btn-ghost cv-btn-danger'
+                "
+                :disabled="busy === `doc:${d.name}`"
+                @click="toggleDoctor(d.name)"
+              >
+                <span
+                  :class="
+                    isDoctorClosed(d.name)
+                      ? 'i-lucide-lock-open'
+                      : 'i-lucide-lock'
+                  "
+                  class="text-sm"
+                />
+                {{
+                  isDoctorClosed(d.name) ? 'Reabrir agenda' : 'Fechar agenda'
+                }}
               </button>
             </div>
           </section>
 
           <section class="space-y-2">
             <p class="cv-ag-block-title">Dias fechados</p>
-            <p class="text-[11px] text-n-slate-10">Feriado, congresso, folga: o dia some da grade e a IA não oferece. Pode ser a clínica toda, só uma unidade ou só um médico.</p>
+            <p class="text-[11px] text-n-slate-10">
+              Feriado, congresso, folga: o dia some da grade e a IA não oferece.
+              Pode ser a clínica toda, só uma unidade ou só um médico.
+            </p>
             <div class="cv-sub flex items-end gap-2 flex-wrap p-3">
               <label class="flex-1 min-w-[130px]">
                 <span class="cv-label block mb-0.5">Dia</span>
-                <input v-model="newClose.date" type="date" :min="todayKey()" class="cv-input w-full !h-9 text-xs" />
+                <input
+                  v-model="newClose.date"
+                  type="date"
+                  :min="todayKey()"
+                  class="cv-input w-full !h-9 text-xs"
+                />
               </label>
               <label class="flex-1 min-w-[170px]">
                 <span class="cv-label block mb-0.5">O que fecha</span>
-                <select v-model="newClose.scope" class="cv-input w-full !h-9 text-xs">
-                  <option v-for="s in closeScopes" :key="s.key" :value="s.key">{{ s.label }}</option>
+                <select
+                  v-model="newClose.scope"
+                  class="cv-input w-full !h-9 text-xs"
+                >
+                  <option v-for="s in closeScopes" :key="s.key" :value="s.key">
+                    {{ s.label }}
+                  </option>
                 </select>
               </label>
-              <button v-if="canLock" class="cv-btn" :disabled="!newClose.date || busy === 'days'" @click="addClosing"><span class="i-lucide-lock text-sm" /> Fechar</button>
+              <button
+                v-if="canLock"
+                class="cv-btn"
+                :disabled="!newClose.date || busy === 'days'"
+                @click="addClosing"
+              >
+                <span class="i-lucide-lock text-sm" /> Fechar
+              </button>
             </div>
-            <div v-for="(b, i) in futureClosings" :key="i" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2">
+            <div
+              v-for="(b, i) in futureClosings"
+              :key="i"
+              class="cv-row flex items-center gap-2 flex-wrap px-3 py-2"
+            >
               <span class="i-lucide-calendar-off text-sm text-n-slate-10" />
-              <span class="text-xs font-semibold text-n-slate-12">{{ fmtDay(parseKey(dayOf(b))) }}</span>
+              <span class="text-xs font-semibold text-n-slate-12">{{
+                fmtDay(parseKey(dayOf(b)))
+              }}</span>
               <span class="cv-chip cv-red">{{ closeScopeLabel(b) }}</span>
-              <button v-if="canLock" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'days'" @click="reopenDay(b)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
+              <button
+                v-if="canLock"
+                class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                :disabled="busy === 'days'"
+                @click="reopenDay(b)"
+              >
+                <span class="i-lucide-lock-open text-xs" /> Reabrir
+              </button>
             </div>
-            <p v-if="!futureClosings.length" class="text-xs text-n-slate-9 pl-1">Nenhum dia fechado daqui para frente.</p>
+            <p
+              v-if="!futureClosings.length"
+              class="text-xs text-n-slate-9 pl-1"
+            >
+              Nenhum dia fechado daqui para frente.
+            </p>
           </section>
 
           <!-- 📅 item 375: ABERTURA PONTUAL — um dia/turno a mais numa data só -->
           <section class="space-y-2">
             <p class="cv-ag-block-title">Dias abertos</p>
-            <p class="text-[11px] text-n-slate-10">Um dia ou um turno a mais, só naquela data: entra na grade e a IA passa a oferecer na hora, sem mexer na rotina da semana. Serve também para somar um turno num dia em que o médico já atende.</p>
+            <p class="text-[11px] text-n-slate-10">
+              Um dia ou um turno a mais, só naquela data: entra na grade e a IA
+              passa a oferecer na hora, sem mexer na rotina da semana. Serve
+              também para somar um turno num dia em que o médico já atende.
+            </p>
             <div class="cv-sub p-3 space-y-2">
               <div class="flex items-end gap-2 flex-wrap">
                 <label class="flex-1 min-w-[130px]">
                   <span class="cv-label block mb-0.5">Dia</span>
-                  <input v-model="newOpen.date" type="date" :min="todayKey()" class="cv-input w-full !h-9 text-xs" />
+                  <input
+                    v-model="newOpen.date"
+                    type="date"
+                    :min="todayKey()"
+                    class="cv-input w-full !h-9 text-xs"
+                  />
                 </label>
                 <label class="flex-1 min-w-[170px]">
                   <span class="cv-label block mb-0.5">Médico</span>
-                  <select v-model="newOpen.doctor" class="cv-input w-full !h-9 text-xs">
-                    <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
+                  <select
+                    v-model="newOpen.doctor"
+                    class="cv-input w-full !h-9 text-xs"
+                  >
+                    <option v-for="d in DOCTORS" :key="d.name" :value="d.name">
+                      {{ d.name }}
+                    </option>
                   </select>
                 </label>
                 <label class="flex-1 min-w-[130px]">
                   <span class="cv-label block mb-0.5">Unidade</span>
-                  <select v-model="newOpen.unit" class="cv-input w-full !h-9 text-xs">
-                    <option v-for="(u, key) in units" :key="key" :value="key">{{ u.label }}</option>
+                  <select
+                    v-model="newOpen.unit"
+                    class="cv-input w-full !h-9 text-xs"
+                  >
+                    <option v-for="(u, key) in units" :key="key" :value="key">
+                      {{ u.label }}
+                    </option>
                   </select>
                 </label>
               </div>
               <div class="flex items-end gap-2 flex-wrap">
                 <label class="w-[108px]">
                   <span class="cv-label block mb-0.5">Das</span>
-                  <input v-model="newOpen.start" type="time" step="300" class="cv-input w-full !h-9 text-xs" />
+                  <input
+                    v-model="newOpen.start"
+                    type="time"
+                    step="300"
+                    class="cv-input w-full !h-9 text-xs"
+                  />
                 </label>
                 <label class="w-[108px]">
                   <span class="cv-label block mb-0.5">Até</span>
-                  <input v-model="newOpen.end" type="time" step="300" class="cv-input w-full !h-9 text-xs" />
+                  <input
+                    v-model="newOpen.end"
+                    type="time"
+                    step="300"
+                    class="cv-input w-full !h-9 text-xs"
+                  />
                 </label>
                 <label class="w-[112px]">
                   <span class="cv-label block mb-0.5">Bloco</span>
-                  <select v-model.number="newOpen.block" class="cv-input w-full !h-9 text-xs">
-                    <option v-for="b in BLOCK_OPTIONS" :key="b" :value="b">{{ b }} min</option>
+                  <select
+                    v-model.number="newOpen.block"
+                    class="cv-input w-full !h-9 text-xs"
+                  >
+                    <option v-for="b in BLOCK_OPTIONS" :key="b" :value="b">
+                      {{ b }} min
+                    </option>
                   </select>
                 </label>
-                <button class="cv-btn ml-auto" :disabled="!openValid || busy === 'open'" @click="addOpening"><span class="i-lucide-calendar-plus text-sm" /> Abrir</button>
+                <button
+                  class="cv-btn ml-auto"
+                  :disabled="!openValid || busy === 'open'"
+                  @click="addOpening"
+                >
+                  <span class="i-lucide-calendar-plus text-sm" /> Abrir
+                </button>
               </div>
-              <p v-if="openClash" class="text-[11px]" style="color: #b45309">{{ openClash }}</p>
+              <p v-if="openClash" class="text-[11px]" style="color: #b45309">
+                {{ openClash }}
+              </p>
             </div>
-            <div v-for="(o, i) in futureOpenings" :key="i" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2" :style="{ '--cv-rgb': hexToRgbSpaced(doctorColor(o.doctor)) }">
-              <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: doctorColor(o.doctor) }" />
-              <span class="text-xs font-semibold text-n-slate-12">{{ fmtDay(parseKey(o.date)) }}</span>
+            <div
+              v-for="(o, i) in futureOpenings"
+              :key="i"
+              class="cv-row flex items-center gap-2 flex-wrap px-3 py-2"
+              :style="{ '--cv-rgb': hexToRgbSpaced(doctorColor(o.doctor)) }"
+            >
+              <span
+                class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                :style="{ backgroundColor: doctorColor(o.doctor) }"
+              />
+              <span class="text-xs font-semibold text-n-slate-12">{{
+                fmtDay(parseKey(o.date))
+              }}</span>
               <span class="text-xs text-n-slate-12 tabular-nums">{{ o.start }}–{{ o.end }}</span>
               <span class="cv-chip cv-green">{{ doctorShort(o.doctor) }}</span>
               <span class="cv-chip cv-slate">{{ unitLabel(o.unit) }}</span>
               <span class="text-[11px] text-n-slate-10">blocos de {{ o.block }} min</span>
-              <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'open'" @click="removeOpening(o)"><span class="i-lucide-x text-xs" /> Remover</button>
+              <button
+                class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                :disabled="busy === 'open'"
+                @click="removeOpening(o)"
+              >
+                <span class="i-lucide-x text-xs" /> Remover
+              </button>
             </div>
-            <p v-if="!futureOpenings.length" class="text-xs text-n-slate-9 pl-1">Nenhuma abertura pontual daqui para frente.</p>
+            <p
+              v-if="!futureOpenings.length"
+              class="text-xs text-n-slate-9 pl-1"
+            >
+              Nenhuma abertura pontual daqui para frente.
+            </p>
           </section>
 
           <section class="space-y-2">
             <p class="cv-ag-block-title">Horários com cadeado</p>
-            <p class="text-[11px] text-n-slate-10">Um horário só (almoço, atraso do médico). Para fechar, use o cadeado no canto do horário, na visão Dia.</p>
-            <div v-for="(s, i) in lockedSlots" :key="i" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2">
+            <p class="text-[11px] text-n-slate-10">
+              Um horário só (almoço, atraso do médico). Para fechar, use o
+              cadeado no canto do horário, na visão Dia.
+            </p>
+            <div
+              v-for="(s, i) in lockedSlots"
+              :key="i"
+              class="cv-row flex items-center gap-2 flex-wrap px-3 py-2"
+            >
               <span class="i-lucide-lock text-sm text-n-slate-10" />
               <span class="text-xs font-semibold text-n-slate-12 tabular-nums">{{ fmtDay(parseKey(s.date)) }} · {{ s.time }}</span>
               <span class="cv-chip cv-slate">{{ unitLabel(s.unit) }}</span>
-              <span v-if="s.doctor" class="text-[11px] text-n-slate-10">{{ doctorShort(s.doctor) }}</span>
-              <button v-if="canLock" class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" :disabled="busy === 'slots'" @click="reopenSlot(s)"><span class="i-lucide-lock-open text-xs" /> Reabrir</button>
+              <span v-if="s.doctor" class="text-[11px] text-n-slate-10">{{
+                doctorShort(s.doctor)
+              }}</span>
+              <button
+                v-if="canLock"
+                class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                :disabled="busy === 'slots'"
+                @click="reopenSlot(s)"
+              >
+                <span class="i-lucide-lock-open text-xs" /> Reabrir
+              </button>
             </div>
-            <p v-if="!lockedSlots.length" class="text-xs text-n-slate-9 pl-1">Nenhum horário fechado daqui para frente.</p>
+            <p v-if="!lockedSlots.length" class="text-xs text-n-slate-9 pl-1">
+              Nenhum horário fechado daqui para frente.
+            </p>
           </section>
         </template>
 
@@ -624,85 +1106,308 @@ onMounted(() => {
           <section class="cv-sub p-3 flex items-center gap-3 flex-wrap">
             <span class="i-lucide-gauge text-sm text-n-slate-10" />
             <div class="flex-1 min-w-[220px]">
-              <p class="text-xs font-bold text-n-slate-12">Avaliações por hora em cada unidade</p>
-              <p class="text-[11px] text-n-slate-10">Os robôs nunca marcam mais que isso e espalham os horários ao longo do dia. A equipe pode encaixar, confirmando. Exame, retorno e pós-operatório não contam.</p>
+              <p class="text-xs font-bold text-n-slate-12">
+                Avaliações por hora em cada unidade
+              </p>
+              <p class="text-[11px] text-n-slate-10">
+                Os robôs nunca marcam mais que isso e espalham os horários ao
+                longo do dia. A equipe pode encaixar, confirmando. Exame,
+                retorno e pós-operatório não contam.
+              </p>
             </div>
-            <input v-model.number="hourly" type="number" min="1" max="20" class="text-center" style="width: 4.5rem; flex: none" :disabled="!canEdit('agenda.configuracao')">
-            <button v-if="canEdit('agenda.configuracao')" class="cv-btn cv-btn-sm" :disabled="busy === 'hourly' || Number(hourly) === (settings?.agenda_hourly_evaluations || 4)" @click="saveHourly">Salvar</button>
+            <input
+              v-model.number="hourly"
+              type="number"
+              min="1"
+              max="20"
+              class="text-center"
+              style="width: 4.5rem; flex: none"
+              :disabled="!canEdit('agenda.configuracao')"
+            />
+            <button
+              v-if="canEdit('agenda.configuracao')"
+              class="cv-btn cv-btn-sm"
+              :disabled="
+                busy === 'hourly' ||
+                Number(hourly) === (settings?.agenda_hourly_evaluations || 4)
+              "
+              @click="saveHourly"
+            >
+              Salvar
+            </button>
           </section>
           <p class="text-[11px] text-n-slate-10 leading-relaxed">
-            Cada faixa diz quando o médico atende e <b>para que ela serve</b>. Faixa "Tudo" aceita qualquer atendimento.
-            Faixa reservada (ex.: só Pós-operatório) fica marcada na grade, a equipe é avisada ao marcar outro tipo ali e
+            Cada faixa diz quando o médico atende e <b>para que ela serve</b>.
+            Faixa "Tudo" aceita qualquer atendimento. Faixa reservada (ex.: só
+            Pós-operatório) fica marcada na grade, a equipe é avisada ao marcar
+            outro tipo ali e
             <b>a IA só oferece consulta nova nas faixas que aceitam Avaliação</b>.
           </p>
-          <section v-for="dow in [1, 2, 3, 4, 5]" :key="dow" class="space-y-1.5">
+          <section
+            v-for="dow in [1, 2, 3, 4, 5]"
+            :key="dow"
+            class="space-y-1.5"
+          >
             <div class="flex items-center gap-2">
               <p class="cv-ag-block-title flex-1">{{ WEEKDAY_FULL[dow] }}</p>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addWindow(dow)"><span class="i-lucide-plus text-xs" /> Faixa</button>
+              <button
+                v-if="isAdmin"
+                class="cv-btn cv-btn-ghost cv-btn-sm"
+                @click="addWindow(dow)"
+              >
+                <span class="i-lucide-plus text-xs" /> Faixa
+              </button>
             </div>
-            <div v-for="w in byDow(dow)" :key="w.uid" class="cv-sub p-3 space-y-2" :style="{ '--cv-rgb': hexToRgbSpaced(doctorColor(w.doctor)) }">
+            <div
+              v-for="w in byDow(dow)"
+              :key="w.uid"
+              class="cv-sub p-3 space-y-2"
+              :class="isExpired(w) ? 'opacity-50' : ''"
+              :style="{ '--cv-rgb': hexToRgbSpaced(doctorColor(w.doctor)) }"
+            >
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" :style="{ backgroundColor: doctorColor(w.doctor) }" />
+                <span
+                  class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  :style="{ backgroundColor: doctorColor(w.doctor) }"
+                />
                 <template v-if="isAdmin">
-                  <select v-model="w.doctor" class="cv-input !h-8 text-xs !w-auto">
-                    <option v-for="d in DOCTORS" :key="d.name" :value="d.name">{{ d.name }}</option>
+                  <select
+                    v-model="w.doctor"
+                    class="cv-input !h-8 text-xs !w-auto"
+                  >
+                    <option v-for="d in DOCTORS" :key="d.name" :value="d.name">
+                      {{ d.name }}
+                    </option>
                   </select>
-                  <select v-model="w.unit" class="cv-input !h-8 text-xs !w-auto">
-                    <option v-for="(u, key) in units" :key="key" :value="key">{{ u.label }}</option>
+                  <select
+                    v-model="w.unit"
+                    class="cv-input !h-8 text-xs !w-auto"
+                  >
+                    <option v-for="(u, key) in units" :key="key" :value="key">
+                      {{ u.label }}
+                    </option>
                   </select>
                   <span class="text-xs text-n-slate-10">das</span>
-                  <input v-model="w.start" type="time" class="cv-input !h-8 text-xs !w-auto" />
+                  <input
+                    v-model="w.start"
+                    type="time"
+                    class="cv-input !h-8 text-xs !w-auto"
+                  />
                   <span class="text-xs text-n-slate-10">às</span>
-                  <input v-model="w.end" type="time" class="cv-input !h-8 text-xs !w-auto" />
-                  <select v-model.number="w.block" class="cv-input !h-8 text-xs !w-auto" title="De quanto em quanto tempo entra um paciente">
-                    <option v-for="b in [5, 10, 15, 20, 30]" :key="b" :value="b">a cada {{ b }} min</option>
+                  <input
+                    v-model="w.end"
+                    type="time"
+                    class="cv-input !h-8 text-xs !w-auto"
+                  />
+                  <select
+                    v-model.number="w.block"
+                    class="cv-input !h-8 text-xs !w-auto"
+                    title="De quanto em quanto tempo entra um paciente"
+                  >
+                    <option
+                      v-for="b in [5, 10, 15, 20, 30]"
+                      :key="b"
+                      :value="b"
+                    >
+                      a cada {{ b }} min
+                    </option>
                   </select>
-                  <button class="cv-btn cv-btn-ghost cv-btn-sm ml-auto" title="Dividir esta faixa em duas num horário" @click="startSplit(w)"><span class="i-lucide-scissors text-xs" /> Dividir</button>
-                  <button class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm" title="Remover faixa" @click="removeWindow(w)" />
+                  <button
+                    class="cv-btn cv-btn-ghost cv-btn-sm ml-auto"
+                    title="Dividir esta faixa em duas num horário"
+                    @click="startSplit(w)"
+                  >
+                    <span class="i-lucide-scissors text-xs" /> Dividir
+                  </button>
+                  <button
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    title="Esta faixa vale até a véspera; a partir da data entra uma cópia para você ajustar"
+                    @click="startChange(w)"
+                  >
+                    <span class="i-lucide-calendar-range text-xs" /> Mudar a
+                    partir de…
+                  </button>
+                  <button
+                    class="text-n-slate-9 hover:text-red-500 i-lucide-trash-2 text-sm"
+                    title="Remover faixa"
+                    @click="removeWindow(w)"
+                  />
                 </template>
                 <template v-else>
-                  <span class="text-sm font-medium text-n-slate-12">{{ w.doctor }}</span>
+                  <span class="text-sm font-medium text-n-slate-12">{{
+                    w.doctor
+                  }}</span>
                   <span class="cv-chip cv-slate">{{ unitLabel(w.unit) }}</span>
                   <span class="text-xs text-n-slate-10 ml-auto">{{ w.start }}–{{ w.end }} · a cada {{ w.block }} min</span>
                 </template>
               </div>
-              <div v-if="splitting === w.uid" class="cv-row flex items-center gap-2 flex-wrap px-3 py-2">
+              <!-- 🗓️ item 415: vigência da faixa -->
+              <div v-if="isAdmin" class="flex items-center gap-2 flex-wrap">
+                <span class="cv-label">Vale</span>
+                <span class="text-xs text-n-slate-10">de</span>
+                <input
+                  v-model="w.from"
+                  type="date"
+                  class="cv-input !h-8 text-xs !w-auto"
+                  title="Em branco = desde sempre"
+                />
+                <span class="text-xs text-n-slate-10">até</span>
+                <input
+                  v-model="w.until"
+                  type="date"
+                  class="cv-input !h-8 text-xs !w-auto"
+                  title="Em branco = sem data para acabar"
+                />
+                <span v-if="isExpired(w)"
+class="cv-chip cv-slate"
+                  >encerrada</span>
+                <span
+                  v-else-if="!w.from && !w.until"
+                  class="text-[11px] text-n-slate-9"
+                  >sempre (deixe em branco)</span>
+              </div>
+              <div v-else-if="validityLabel(w)" class="flex items-center gap-2">
+                <span class="cv-chip cv-slate">{{ validityLabel(w) }}</span>
+                <span v-if="isExpired(w)"
+class="cv-chip cv-slate"
+                  >encerrada</span>
+              </div>
+              <div
+                v-if="changing === w.uid"
+                class="cv-row flex items-center gap-2 flex-wrap px-3 py-2"
+              >
+                <span class="text-xs text-n-slate-11">Grade nova a partir de</span>
+                <input
+                  v-model="changeFrom"
+                  type="date"
+                  :min="todayKey()"
+                  class="cv-input !h-8 text-xs !w-auto"
+                />
+                <span class="text-[11px] text-n-slate-10">esta faixa vale até a véspera; a cópia começa na data —
+                  depois ajuste a cópia</span>
+                <button
+                  class="cv-btn cv-btn-sm ml-auto"
+                  @click="confirmChange(w)"
+                >
+                  Criar
+                </button>
+                <button
+                  class="cv-btn cv-btn-ghost cv-btn-sm"
+                  @click="changing = null"
+                >
+                  Cancelar
+                </button>
+              </div>
+              <div
+                v-if="splitting === w.uid"
+                class="cv-row flex items-center gap-2 flex-wrap px-3 py-2"
+              >
                 <span class="text-xs text-n-slate-11">Dividir às</span>
-                <input v-model="splitTime" type="time" :min="w.start" :max="w.end" class="cv-input !h-8 text-xs !w-auto" />
-                <span class="text-[11px] text-n-slate-10">vira {{ w.start }}–{{ splitTime || '…' }} e {{ splitTime || '…' }}–{{ w.end }}</span>
-                <button class="cv-btn cv-btn-sm ml-auto" @click="confirmSplit(w)">Dividir</button>
-                <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="splitting = null">Cancelar</button>
+                <input
+                  v-model="splitTime"
+                  type="time"
+                  :min="w.start"
+                  :max="w.end"
+                  class="cv-input !h-8 text-xs !w-auto"
+                />
+                <span class="text-[11px] text-n-slate-10">vira {{ w.start }}–{{ splitTime || '…' }} e
+                  {{ splitTime || '…' }}–{{ w.end }}</span>
+                <button
+                  class="cv-btn cv-btn-sm ml-auto"
+                  @click="confirmSplit(w)"
+                >
+                  Dividir
+                </button>
+                <button
+                  class="cv-btn cv-btn-ghost cv-btn-sm"
+                  @click="splitting = null"
+                >
+                  Cancelar
+                </button>
               </div>
               <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="cv-label">Serve para</span>
-                <button class="cv-chip cv-chip-lg" :class="acceptsAll(w) ? 'cv-chip-on' : ''" :disabled="!isAdmin" @click="w.only = []">Tudo</button>
+                <button
+                  class="cv-chip cv-chip-lg"
+                  :class="acceptsAll(w) ? 'cv-chip-on' : ''"
+                  :disabled="!isAdmin"
+                  @click="w.only = []"
+                >
+                  Tudo
+                </button>
                 <button
                   v-for="key in RESERVABLE"
                   :key="key"
                   class="cv-chip cv-chip-lg"
-                  :class="!acceptsAll(w) && w.only.includes(key) ? 'cv-chip-on' : ''"
+                  :class="
+                    !acceptsAll(w) && w.only.includes(key) ? 'cv-chip-on' : ''
+                  "
                   :style="typeVars(key)"
                   :disabled="!isAdmin"
                   @click="toggleOnly(w, key)"
                 >
                   só {{ typeLabel(key) }}
                 </button>
-                <span class="text-[11px] ml-auto flex items-center gap-1" :style="{ color: aiOffers(w) ? '#047857' : '#b45309' }">
-                  <span :class="aiOffers(w) ? 'i-lucide-sparkles' : 'i-lucide-ban'" class="text-xs" />
-                  {{ aiOffers(w) ? 'a IA oferece consulta nova aqui' : 'a IA não oferece — só a equipe marca' }}
+                <button
+                  class="cv-chip cv-chip-lg"
+                  :class="w.solo ? 'cv-chip-on' : ''"
+                  :disabled="!isAdmin"
+                  title="Um paciente por horário: retorno e pós-op também ocupam, e a IA não encaixa ninguém em cima"
+                  @click="w.solo = !w.solo"
+                >
+                  <span
+                    :class="w.solo ? 'i-lucide-check' : 'i-lucide-user-round'"
+                    class="text-xs"
+                  />
+                  sem encaixe
+                </button>
+                <span
+                  class="text-[11px] ml-auto flex items-center gap-1"
+                  :style="{ color: aiOffers(w) ? '#047857' : '#b45309' }"
+                >
+                  <span
+                    :class="aiOffers(w) ? 'i-lucide-sparkles' : 'i-lucide-ban'"
+                    class="text-xs"
+                  />
+                  {{
+                    aiOffers(w)
+                      ? 'a IA oferece consulta nova aqui'
+                      : 'a IA não oferece — só a equipe marca'
+                  }}
                 </span>
               </div>
-              <p v-if="rowError(w)" class="text-[11px] font-semibold" style="color: #dc2626">⚠ {{ rowError(w) }}</p>
+              <p
+                v-if="rowError(w)"
+                class="text-[11px] font-semibold"
+                style="color: #dc2626"
+              >
+                ⚠ {{ rowError(w) }}
+              </p>
             </div>
-            <p v-if="!byDow(dow).length" class="text-xs text-n-slate-9 pl-1">— sem atendimento</p>
+            <p v-if="!byDow(dow).length" class="text-xs text-n-slate-9 pl-1">
+              — sem atendimento
+            </p>
           </section>
-          <div class="cv-sub flex items-center gap-2 px-3 py-2 text-xs text-n-slate-10">
-            <span class="i-lucide-lock text-sm" /> Sábado e domingo: sem agenda em nenhuma unidade.
+          <div
+            class="cv-sub flex items-center gap-2 px-3 py-2 text-xs text-n-slate-10"
+          >
+            <span class="i-lucide-lock text-sm" /> Sábado e domingo: sem agenda
+            em nenhuma unidade.
           </div>
           <div class="cv-sub flex items-center gap-2 flex-wrap px-3 py-2.5">
             <span class="text-xs text-n-slate-11 flex-1 min-w-[160px]">Exames e sala cirúrgica têm faixas próprias:</span>
-            <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="emit('openExamWindows')"><span class="i-lucide-scan-eye text-xs" /> Janela de exames</button>
-            <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="emit('openSurgeryWindows')"><span class="i-lucide-slice text-xs" /> Sala cirúrgica</button>
+            <button
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              @click="emit('openExamWindows')"
+            >
+              <span class="i-lucide-scan-eye text-xs" /> Janela de exames
+            </button>
+            <button
+              class="cv-btn cv-btn-ghost cv-btn-sm"
+              @click="emit('openSurgeryWindows')"
+            >
+              <span class="i-lucide-slice text-xs" /> Sala cirúrgica
+            </button>
           </div>
         </template>
 
@@ -711,13 +1416,19 @@ onMounted(() => {
           <section class="space-y-2">
             <p class="cv-ag-block-title">O que a IA segue sozinha</p>
             <p class="text-[11px] text-n-slate-10 leading-relaxed">
-              Os horários que ela oferece saem direto desta agenda: só faixa aberta, que aceita consulta nova, sem paciente marcado
-              e sem cadeado. Fechou um médico, um dia ou reservou uma faixa — ela para de oferecer na mensagem seguinte, sem mexer no roteiro.
+              Os horários que ela oferece saem direto desta agenda: só faixa
+              aberta, que aceita consulta nova, sem paciente marcado e sem
+              cadeado. Fechou um médico, um dia ou reservou uma faixa — ela para
+              de oferecer na mensagem seguinte, sem mexer no roteiro.
             </p>
           </section>
           <section class="space-y-2">
             <p class="cv-ag-block-title">Regras da clínica</p>
-            <p class="text-[11px] text-n-slate-10">Escreva aqui o que a IA precisa saber sobre a agenda e que não cabe nas faixas. Este texto entra num bloco próprio do roteiro dos atendentes, só sobre agenda.</p>
+            <p class="text-[11px] text-n-slate-10">
+              Escreva aqui o que a IA precisa saber sobre a agenda e que não
+              cabe nas faixas. Este texto entra num bloco próprio do roteiro dos
+              atendentes, só sobre agenda.
+            </p>
             <textarea
               v-model="aiRules"
               rows="5"
@@ -728,23 +1439,47 @@ onMounted(() => {
             />
             <div class="flex items-center gap-2">
               <span class="text-[10px] text-n-slate-9 flex-1">{{ aiRules.length }}/2000</span>
-              <button v-if="isAdmin" class="cv-btn" :disabled="!rulesDirty || busy === 'rules'" @click="saveRules">{{ busy === 'rules' ? 'Salvando…' : 'Salvar regras' }}</button>
+              <button
+                v-if="isAdmin"
+                class="cv-btn"
+                :disabled="!rulesDirty || busy === 'rules'"
+                @click="saveRules"
+              >
+                {{ busy === 'rules' ? 'Salvando…' : 'Salvar regras' }}
+              </button>
             </div>
           </section>
           <section class="space-y-2">
             <div class="flex items-center gap-2">
               <p class="cv-ag-block-title flex-1">O que a IA recebe agora</p>
-              <button class="cv-btn cv-btn-ghost cv-btn-sm" @click="loadPreview"><span class="i-lucide-refresh-cw text-xs" /> Atualizar</button>
+              <button
+                class="cv-btn cv-btn-ghost cv-btn-sm"
+                @click="loadPreview"
+              >
+                <span class="i-lucide-refresh-cw text-xs" /> Atualizar
+              </button>
             </div>
-            <p v-if="previewError" class="text-xs text-n-slate-9">{{ previewError }}</p>
+            <p v-if="previewError" class="text-xs text-n-slate-9">
+              {{ previewError }}
+            </p>
             <template v-else-if="preview">
               <div class="cv-sub p-3">
                 <p class="cv-label mb-1">Regras da agenda</p>
-                <pre class="text-[11px] text-n-slate-12 whitespace-pre-wrap font-sans leading-relaxed">{{ preview.rules || 'Nenhuma regra — a IA segue só os horários livres abaixo.' }}</pre>
+                <pre
+                  class="text-[11px] text-n-slate-12 whitespace-pre-wrap font-sans leading-relaxed"
+                  >{{
+                    preview.rules ||
+                    'Nenhuma regra — a IA segue só os horários livres abaixo.'
+                  }}</pre>
               </div>
               <div class="cv-sub p-3">
-                <p class="cv-label mb-1">Horários que ela pode oferecer (próximas 2 semanas, até 3 por faixa)</p>
-                <pre class="text-[11px] text-n-slate-12 whitespace-pre-wrap font-sans leading-relaxed">{{ preview.slots }}</pre>
+                <p class="cv-label mb-1">
+                  Horários que ela pode oferecer (próximas 2 semanas, até 3 por
+                  faixa)
+                </p>
+                <pre
+                  class="text-[11px] text-n-slate-12 whitespace-pre-wrap font-sans leading-relaxed"
+                  >{{ preview.slots }}</pre>
               </div>
             </template>
             <p v-else class="text-xs text-n-slate-9">Carregando…</p>
@@ -756,71 +1491,230 @@ onMounted(() => {
           <section class="space-y-2">
             <p class="cv-ag-block-title">Por tipo de atendimento</p>
             <p class="text-[11px] text-n-slate-10 leading-relaxed">
-              É o valor que vai na mensagem de confirmação quando ninguém lançou um valor à mão no card do agendamento. Pode ser um número
-              (150,00) ou um texto (sem custo). Em branco: a avaliação usa o valor padrão do lembrete; retorno e pós-operatório saem "sem custo".
+              É o valor que vai na mensagem de confirmação quando ninguém lançou
+              um valor à mão no card do agendamento. Pode ser um número (150,00)
+              ou um texto (sem custo). Em branco: a avaliação usa o valor padrão
+              do lembrete; retorno e pós-operatório saem "sem custo".
             </p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div v-for="(label, key) in PRICE_TYPE_LABELS" :key="key" class="cv-sub p-3">
+              <div
+                v-for="(label, key) in PRICE_TYPE_LABELS"
+                :key="key"
+                class="cv-sub p-3"
+              >
                 <span class="cv-label block mb-1">{{ label }}</span>
-                <input v-model="prices[key]" class="cv-input w-full" maxlength="30" :disabled="!isAdmin" :placeholder="key === 'avaliacao' ? '150,00' : key === 'teleconsulta' ? 'igual à avaliação' : 'sem custo'" />
+                <input
+                  v-model="prices[key]"
+                  class="cv-input w-full"
+                  maxlength="30"
+                  :disabled="!isAdmin"
+                  :placeholder="
+                    key === 'avaliacao'
+                      ? '150,00'
+                      : key === 'teleconsulta'
+                        ? 'igual à avaliação'
+                        : 'sem custo'
+                  "
+                />
               </div>
             </div>
           </section>
           <section class="space-y-2">
             <p class="cv-ag-block-title">Consulta particular, por médico</p>
-            <p class="text-[11px] text-n-slate-10">Vale quando o card do agendamento está marcado como "Particular". Médico sem valor aqui usa o valor do tipo.</p>
+            <p class="text-[11px] text-n-slate-10">
+              Vale quando o card do agendamento está marcado como "Particular".
+              Médico sem valor aqui usa o valor do tipo.
+            </p>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div v-for="d in DOCTORS" :key="d.name" class="cv-sub p-3" :style="{ borderColor: d.color }">
+              <div
+                v-for="d in DOCTORS"
+                :key="d.name"
+                class="cv-sub p-3"
+                :style="{ borderColor: d.color }"
+              >
                 <span class="cv-label block mb-1">{{ d.name }}</span>
-                <input v-model="prices.particular[d.name]" class="cv-input w-full" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
+                <input
+                  v-model="prices.particular[d.name]"
+                  class="cv-input w-full"
+                  maxlength="30"
+                  :disabled="!isAdmin"
+                  placeholder="R$ 0,00"
+                />
               </div>
             </div>
           </section>
           <section class="space-y-2">
             <div class="flex items-center gap-2">
-              <p class="cv-ag-block-title flex-1">Avaliação com especialista, pelo problema</p>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addSpecialPrice"><span class="i-lucide-plus text-xs" /> Problema</button>
+              <p class="cv-ag-block-title flex-1">
+                Avaliação com especialista, pelo problema
+              </p>
+              <button
+                v-if="isAdmin"
+                class="cv-btn cv-btn-ghost cv-btn-sm"
+                @click="addSpecialPrice"
+              >
+                <span class="i-lucide-plus text-xs" /> Problema
+              </button>
             </div>
-            <p class="text-[11px] text-n-slate-10">Quando o problema escrito no agendamento cita uma destas palavras (ex.: "avaliação retina", "glaucoma"), a avaliação vale este valor em vez do valor da avaliação. Retorno e pós-operatório não mudam.</p>
-            <p v-if="!prices.especiais.length" class="text-xs text-n-slate-9">Nenhum problema com valor próprio.</p>
-            <div v-for="(e, idx) in prices.especiais" :key="'sp' + idx" class="cv-row flex items-center gap-2 px-3 py-2">
-              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" placeholder="Problema (glaucoma, retina, ceratocone…)" />
-              <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
-              <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removeSpecialPrice(idx)"><span class="i-lucide-x" /></button>
+            <p class="text-[11px] text-n-slate-10">
+              Quando o problema escrito no agendamento cita uma destas palavras
+              (ex.: "avaliação retina", "glaucoma"), a avaliação vale este valor
+              em vez do valor da avaliação. Retorno e pós-operatório não mudam.
+            </p>
+            <p v-if="!prices.especiais.length" class="text-xs text-n-slate-9">
+              Nenhum problema com valor próprio.
+            </p>
+            <div
+              v-for="(e, idx) in prices.especiais"
+              :key="'sp' + idx"
+              class="cv-row flex items-center gap-2 px-3 py-2"
+            >
+              <input
+                v-model="e.name"
+                class="cv-input flex-1 min-w-0"
+                maxlength="60"
+                :disabled="!isAdmin"
+                placeholder="Problema (glaucoma, retina, ceratocone…)"
+              />
+              <input
+                v-model="e.price"
+                class="cv-input w-32 text-right"
+                maxlength="30"
+                :disabled="!isAdmin"
+                placeholder="R$ 0,00"
+              />
+              <span
+                class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline"
+                >{{ e.price ? priceLabel(e.price) : '' }}</span>
+              <button
+                v-if="isAdmin"
+                class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn"
+                title="Tirar"
+                @click="removeSpecialPrice(idx)"
+              >
+                <span class="i-lucide-x" />
+              </button>
             </div>
           </section>
           <section class="space-y-2">
             <div class="flex items-center gap-2">
-              <p class="cv-ag-block-title flex-1">Parceiros do Oftalmofácil, valor combinado</p>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addPartnerPrice"><span class="i-lucide-plus text-xs" /> Parceiro</button>
+              <p class="cv-ag-block-title flex-1">
+                Parceiros do Oftalmofácil, valor combinado
+              </p>
+              <button
+                v-if="isAdmin"
+                class="cv-btn cv-btn-ghost cv-btn-sm"
+                @click="addPartnerPrice"
+              >
+                <span class="i-lucide-plus text-xs" /> Parceiro
+              </button>
             </div>
-            <p class="text-[11px] text-n-slate-10">Consulta ou exame ligado ao Oftalmofácil de um destes parceiros (inclusive a que a recepção já tinha marcado e o hub casou) vai na confirmação com este valor (0,00 = sai zerado), em vez do valor do hub ou do pré-configurado. Só o valor lançado à mão no card passa na frente; cirurgia fica fora. Escreva um número (0,00 = zerado): texto como "sem custo" não cabe no modelo da Meta e a consulta fica nas puladas. O nome é comparado sem acento nem espaço: "Amor Saúde Tatuapé" encontra "AMORSAUDE TATUAPE"; com dois nomes casando, vale o mais completo.</p>
-            <p v-if="!prices.parceiros.length" class="text-xs text-n-slate-9">Nenhum parceiro com valor combinado.</p>
-            <div v-for="(e, idx) in prices.parceiros" :key="'pt' + idx" class="cv-row flex items-center gap-2 px-3 py-2">
-              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" placeholder="Parceiro (Amor Saúde Tatuapé…)" />
-              <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="0,00" />
-              <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removePartnerPrice(idx)"><span class="i-lucide-x" /></button>
+            <p class="text-[11px] text-n-slate-10">
+              Consulta ou exame ligado ao Oftalmofácil de um destes parceiros
+              (inclusive a que a recepção já tinha marcado e o hub casou) vai na
+              confirmação com este valor (0,00 = sai zerado), em vez do valor do
+              hub ou do pré-configurado. Só o valor lançado à mão no card passa
+              na frente; cirurgia fica fora. Escreva um número (0,00 = zerado):
+              texto como "sem custo" não cabe no modelo da Meta e a consulta
+              fica nas puladas. O nome é comparado sem acento nem espaço: "Amor
+              Saúde Tatuapé" encontra "AMORSAUDE TATUAPE"; com dois nomes
+              casando, vale o mais completo.
+            </p>
+            <p v-if="!prices.parceiros.length" class="text-xs text-n-slate-9">
+              Nenhum parceiro com valor combinado.
+            </p>
+            <div
+              v-for="(e, idx) in prices.parceiros"
+              :key="'pt' + idx"
+              class="cv-row flex items-center gap-2 px-3 py-2"
+            >
+              <input
+                v-model="e.name"
+                class="cv-input flex-1 min-w-0"
+                maxlength="60"
+                :disabled="!isAdmin"
+                placeholder="Parceiro (Amor Saúde Tatuapé…)"
+              />
+              <input
+                v-model="e.price"
+                class="cv-input w-32 text-right"
+                maxlength="30"
+                :disabled="!isAdmin"
+                placeholder="0,00"
+              />
+              <span
+                class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline"
+                >{{ e.price ? priceLabel(e.price) : '' }}</span>
+              <button
+                v-if="isAdmin"
+                class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn"
+                title="Tirar"
+                @click="removePartnerPrice(idx)"
+              >
+                <span class="i-lucide-x" />
+              </button>
             </div>
           </section>
           <section class="space-y-2">
             <div class="flex items-center gap-2">
               <p class="cv-ag-block-title flex-1">Exames</p>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm" @click="addExamPrice"><span class="i-lucide-plus text-xs" /> Exame</button>
+              <button
+                v-if="isAdmin"
+                class="cv-btn cv-btn-ghost cv-btn-sm"
+                @click="addExamPrice"
+              >
+                <span class="i-lucide-plus text-xs" /> Exame
+              </button>
             </div>
-            <p class="text-[11px] text-n-slate-10">Cada exame com o seu valor. No agendamento de exame, o sistema soma os que estiverem escritos no campo "Exame" (ex.: Pentacam + Topografia).</p>
-            <p v-if="!prices.exames.length" class="text-xs text-n-slate-9">Nenhum exame com valor ainda.</p>
-            <div v-for="(e, idx) in prices.exames" :key="'ex' + idx" class="cv-row flex items-center gap-2 px-3 py-2">
-              <input v-model="e.name" class="cv-input flex-1 min-w-0" maxlength="60" :disabled="!isAdmin" placeholder="Nome do exame (Pentacam, OCT…)" />
-              <input v-model="e.price" class="cv-input w-32 text-right" maxlength="30" :disabled="!isAdmin" placeholder="R$ 0,00" />
-              <span class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline">{{ e.price ? priceLabel(e.price) : '' }}</span>
-              <button v-if="isAdmin" class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn" title="Tirar" @click="removeExamPrice(idx)"><span class="i-lucide-x" /></button>
+            <p class="text-[11px] text-n-slate-10">
+              Cada exame com o seu valor. No agendamento de exame, o sistema
+              soma os que estiverem escritos no campo "Exame" (ex.: Pentacam +
+              Topografia).
+            </p>
+            <p v-if="!prices.exames.length" class="text-xs text-n-slate-9">
+              Nenhum exame com valor ainda.
+            </p>
+            <div
+              v-for="(e, idx) in prices.exames"
+              :key="'ex' + idx"
+              class="cv-row flex items-center gap-2 px-3 py-2"
+            >
+              <input
+                v-model="e.name"
+                class="cv-input flex-1 min-w-0"
+                maxlength="60"
+                :disabled="!isAdmin"
+                placeholder="Nome do exame (Pentacam, OCT…)"
+              />
+              <input
+                v-model="e.price"
+                class="cv-input w-32 text-right"
+                maxlength="30"
+                :disabled="!isAdmin"
+                placeholder="R$ 0,00"
+              />
+              <span
+                class="text-[11px] text-n-slate-10 w-24 text-right hidden sm:inline"
+                >{{ e.price ? priceLabel(e.price) : '' }}</span>
+              <button
+                v-if="isAdmin"
+                class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn"
+                title="Tirar"
+                @click="removeExamPrice(idx)"
+              >
+                <span class="i-lucide-x" />
+              </button>
             </div>
           </section>
           <section class="cv-sub p-3">
             <p class="cv-label mb-1">Como o valor é escolhido</p>
-            <p class="text-[11px] text-n-slate-11 leading-relaxed">1º o valor lançado à mão no card (fica registrado quem lançou) · 2º "Valor: X" escrito na observação · 3º o pré-configurado desta tela · 4º o valor padrão do lembrete. Cirurgia usa só o valor lançado à mão (a tabela de preços das cirurgias continua em Preços).</p>
+            <p class="text-[11px] text-n-slate-11 leading-relaxed">
+              1º o valor lançado à mão no card (fica registrado quem lançou) ·
+              2º "Valor: X" escrito na observação · 3º o pré-configurado desta
+              tela · 4º o valor padrão do lembrete. Cirurgia usa só o valor
+              lançado à mão (a tabela de preços das cirurgias continua em
+              Preços).
+            </p>
           </section>
         </template>
 
@@ -831,15 +1725,47 @@ onMounted(() => {
       </div>
 
       <!-- barra de salvar dos valores -->
-      <div v-if="tab === 'valores' && isAdmin" class="px-4 sm:px-5 py-3 border-t border-n-weak flex items-center gap-2">
-        <span class="text-[11px] flex-1" :class="pricesDirty ? 'text-n-slate-12 font-semibold' : 'text-n-slate-9'">{{ pricesDirty ? 'Mudanças ainda não salvas' : 'Tudo salvo' }}</span>
-        <button class="cv-btn" :disabled="!pricesDirty || busy === 'prices'" @click="savePrices">{{ busy === 'prices' ? 'Salvando…' : 'Salvar valores' }}</button>
+      <div
+        v-if="tab === 'valores' && isAdmin"
+        class="px-4 sm:px-5 py-3 border-t border-n-weak flex items-center gap-2"
+      >
+        <span
+          class="text-[11px] flex-1"
+          :class="
+            pricesDirty ? 'text-n-slate-12 font-semibold' : 'text-n-slate-9'
+          "
+          >{{ pricesDirty ? 'Mudanças ainda não salvas' : 'Tudo salvo' }}</span>
+        <button
+          class="cv-btn"
+          :disabled="!pricesDirty || busy === 'prices'"
+          @click="savePrices"
+        >
+          {{ busy === 'prices' ? 'Salvando…' : 'Salvar valores' }}
+        </button>
       </div>
       <!-- barra de salvar das faixas -->
-      <div v-if="tab === 'faixas' && isAdmin" class="px-4 sm:px-5 py-3 border-t border-n-weak flex items-center gap-2">
-        <span class="text-[11px] flex-1" :class="isDirty ? 'text-n-slate-12 font-semibold' : 'text-n-slate-9'">{{ isDirty ? 'Mudanças ainda não salvas' : 'Tudo salvo' }}</span>
-        <button class="cv-btn cv-btn-ghost" :disabled="!isDirty" @click="resetDraft">Desfazer</button>
-        <button class="cv-btn" :disabled="!isDirty || busy === 'windows'" @click="saveWindows">{{ busy === 'windows' ? 'Salvando…' : 'Salvar faixas' }}</button>
+      <div
+        v-if="tab === 'faixas' && isAdmin"
+        class="px-4 sm:px-5 py-3 border-t border-n-weak flex items-center gap-2"
+      >
+        <span
+          class="text-[11px] flex-1"
+          :class="isDirty ? 'text-n-slate-12 font-semibold' : 'text-n-slate-9'"
+          >{{ isDirty ? 'Mudanças ainda não salvas' : 'Tudo salvo' }}</span>
+        <button
+          class="cv-btn cv-btn-ghost"
+          :disabled="!isDirty"
+          @click="resetDraft"
+        >
+          Desfazer
+        </button>
+        <button
+          class="cv-btn"
+          :disabled="!isDirty || busy === 'windows'"
+          @click="saveWindows"
+        >
+          {{ busy === 'windows' ? 'Salvando…' : 'Salvar faixas' }}
+        </button>
       </div>
     </div>
   </div>

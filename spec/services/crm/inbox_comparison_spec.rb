@@ -131,7 +131,7 @@ RSpec.describe Crm::InboxComparison do
     expect(ia2).to include(conversas: 1, atendidas: 1, humano: 1, custo_usd: 0.03, custo_por_conversa_usd: 0.03)
     expect(ia2[:roteiros]).to eq([{ id: 'v2', nome: 'Roteiro 2', conversas: 1 }])
     expect(box(payload, insta)[:config]).to eq([{ agente: 'atendente_agendamento', nome: 'Agendamento', modo: nil, motor: 'GPT-6 Luna',
-                                                  motores_por_coluna: [], teste: nil }])
+                                                  motores_por_coluna: [], teste: nil, caixa: nil }])
     expect(box(payload, insta2)[:config].first[:teste]).to eq(nome: 'Prompt novo', modo: 'b', roteiro_b: 'v2', motor_b: nil)
   end
 

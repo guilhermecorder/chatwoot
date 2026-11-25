@@ -180,6 +180,9 @@ namespace :crm do
     # 🧭 23/11: motor por coluna do CRM (um modelo de IA para cada coluna que o atendente lê)
     get :ai_stage_models
     post :save_ai_stage_models
+    # 🧑‍🏫 item 414: consultor superior (segunda opinião de um motor mais forte nos gatilhos do sistema)
+    get :ai_consultant
+    post :save_ai_consultant
     # Estúdio do Copywriter: conteúdo multi-formato (carrossel, reels...)
     post :copywriter_content
     post :update_google_ads

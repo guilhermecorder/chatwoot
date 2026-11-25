@@ -406,6 +406,13 @@ const fatia = (n, c) => rate(n, c.funil.chegaram) || 0;
 
 // ── QUEM ATENDE ───────────────────────────────────────────────────────────
 const MODO = { a: 'variante A', b: 'variante B', split: 'sorteio A × B' };
+const ESFORCO = {
+  low: 'baixo',
+  medium: 'médio',
+  high: 'alto',
+  xhigh: 'muito alto',
+  max: 'máximo',
+};
 const configTexto = c => {
   if (!c.config?.length) return ['Nenhum atendente de IA lê nesta caixa.'];
   return c.config.map(a => {
@@ -417,6 +424,22 @@ const configTexto = c => {
           a.teste.roteiro_b === 'v2' ? 'Roteiro 2' : 'Roteiro 1'
         }${a.teste.motor_b ? ` + ${a.teste.motor_b}` : ''}`
       : ' · Roteiro 1';
+    // 📥 item 416: caixa com motor/esforço/Roteiro próprio vence o resto
+    const caixa = a.caixa;
+    if (caixa) {
+      const partes = [
+        caixa.motor,
+        caixa.esforco
+          ? `esforço ${ESFORCO[caixa.esforco] || caixa.esforco}`
+          : null,
+        caixa.roteiro
+          ? caixa.roteiro === 'v2'
+            ? 'Roteiro 2'
+            : 'Roteiro 1'
+          : null,
+      ].filter(Boolean);
+      return `${a.nome}: motor próprio desta caixa (${partes.join(', ')})`;
+    }
     return `${a.nome}: ${motor}${teste}`;
   });
 };
@@ -909,11 +932,12 @@ const semRegistro = c => Math.max(0, c.ia.conversas - c.ia.com_registro);
           <p class="text-xs text-n-slate-10 mt-1 mb-5">
             <template v-if="data.meta?.total">
               O Meta gastou {{ brl(data.meta.total) }} no período. Cada real vai
-              para a caixa onde o anúncio dele abriu conversa
+              para a caixa onde o anúncio dele abriu
               <template v-if="data.meta.metodo === 'conversas'">
-                (os números por anúncio de hoje ainda não chegaram; a divisão
-                está pela proporção das conversas vindas de anúncio) </template
-              >.
+                conversa (os números por anúncio de hoje ainda não chegaram; a
+                divisão está pela proporção das conversas vindas de anúncio).
+              </template>
+              <template v-else>conversa.</template>
               <template v-if="data.meta.sem_caixa > 0">
                 {{ brl(data.meta.sem_caixa) }} não abriram conversa em caixa
                 nenhuma (campanha que leva para o site, por exemplo) e ficam
@@ -1054,7 +1078,9 @@ const semRegistro = c => Math.max(0, c.ia.conversas - c.ia.com_registro);
     text-align: right;
     font-weight: 700;
     padding: 0.5rem 0.75rem;
-    white-space: nowrap;
+    max-width: 150px;
+    line-height: 1.25;
+    vertical-align: bottom;
     color: rgb(var(--slate-12));
     border-bottom: 1px solid rgb(var(--slate-6) / 0.6);
   }

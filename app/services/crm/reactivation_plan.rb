@@ -300,8 +300,8 @@ module Crm::ReactivationPlan # rubocop:disable Metrics/ModuleLength
     sender = Crm::SendTemplateService.new(source: source, contact: contact)
     conversation = sender.perform
     meta = { 'plan_id' => child.parent_id, 'slice' => slice, 'frente' => frente, 'template' => tpl.dig('template_params', 'name') }
-    attrs = (sender.message&.additional_attributes || {}).merge('cevico_reactivation' => meta)
-    sender.message&.update_columns(additional_attributes: attrs) # rubocop:disable Rails/SkipsModelValidations
+    message = sender.message
+    Cevico::AttributeMerge.merge!(message) { |attrs| attrs.merge('cevico_reactivation' => meta) } if message # 🔒 item 417: merge atômico
     conversation
   end
 

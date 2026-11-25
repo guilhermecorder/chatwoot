@@ -66,6 +66,12 @@ module Crm::StageEngine
     agents = ai_config.is_a?(Hash) ? ai_config['agents'] : nil
     return nil unless agents.is_a?(Hash)
 
+    # 📥 item 416: caixa com motor próprio vence a coluna
+    Crm::LlmEngines::OPENAI_AGENT_KEYS.each do |key|
+      own = Crm::InboxEngine.entry_for(conversation, agents[key])&.dig('model').to_s.strip
+      return own if own.present?
+    end
+
     slot = slot_for(conversation)
     Crm::LlmEngines::OPENAI_AGENT_KEYS.each do |key|
       chosen = config(agents[key])[slot].to_s.strip

@@ -31,6 +31,8 @@ import NpsSurveyCard from './NpsSurveyCard.vue';
 import FollowupSmartCard from './FollowupSmartCard.vue';
 import AgentEngineExperiment from './AgentEngineExperiment.vue';
 import AgentStageEngines from './AgentStageEngines.vue';
+import AgentInboxEngines from './AgentInboxEngines.vue';
+import AgentConsultant from './AgentConsultant.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import {
   PERIOD_PRESETS,
@@ -4134,9 +4136,7 @@ onUnmounted(() => {
             </div>
 
             <div v-if="usageRows.length" class="space-y-1.5">
-              <p class="cv-label mb-1">
-                Por agente ({{ usagePeriodLabel }})
-              </p>
+              <p class="cv-label mb-1">Por agente ({{ usagePeriodLabel }})</p>
               <div
                 v-for="row in usageRows"
                 :key="row.key"
@@ -4876,11 +4876,34 @@ onUnmounted(() => {
                       :claude-models="AGENT_MODELS"
                       :openai-models="openaiModels"
                       :llm-catalog="llmCatalog"
-                      :refresh-key="
-                        `${(settings?.ai?.agents?.[key]?.stage_ids || []).join(',')}|${
-                          settings?.ai?.agents?.[key]?.no_card ? 1 : 0
-                        }|${settings?.ai?.agents?.[key]?.model || ''}`
+                      :refresh-key="`${(settings?.ai?.agents?.[key]?.stage_ids || []).join(',')}|${
+                        settings?.ai?.agents?.[key]?.no_card ? 1 : 0
+                      }|${settings?.ai?.agents?.[key]?.model || ''}`"
+                    />
+
+                    <!-- 📥 item 416: motor por caixa (uma caixa com motor, esforço e Roteiro próprios) -->
+                    <AgentInboxEngines
+                      v-if="openaiAllowed(key)"
+                      :agent-key="key"
+                      :llm-catalog="llmCatalog"
+                      :refresh-key="`${(settings?.ai?.agents?.[key]?.inbox_ids || []).join(',')}|${
+                        settings?.ai?.agents?.[key]?.effort || ''
+                      }`"
+                    />
+
+                    <!-- 🧑‍🏫 item 414: consultor superior (segunda opinião de um motor mais forte nos gatilhos do sistema) -->
+                    <AgentConsultant
+                      v-if="openaiAllowed(key)"
+                      :agent-key="key"
+                      :claude-models="AGENT_MODELS"
+                      :openai-models="openaiModels"
+                      :llm-catalog="llmCatalog"
+                      :inboxes="
+                        whatsappInboxes.filter(ib =>
+                          (agent.inbox_ids || []).includes(ib.id)
+                        )
                       "
+                      :refresh-key="settings?.ai?.agents?.[key]?.model || ''"
                     />
 
                     <!-- 🗣️ Config específica do Atendente de Agendamento (rodada 188): sombra × ao vivo, caixas, colunas -->
@@ -5269,10 +5292,10 @@ onUnmounted(() => {
                                 ? 'cirurgia'
                                 : 'consulta'
                             }}.
-                            <template v-if="key !== 'atendente_pos_op'"
-                              >Paciente de retorno vai sempre para a Equipe dos
-                              retornos (Agenda → Conferência do dia).</template
-                            >
+                            <template v-if="key !== 'atendente_pos_op'">
+                              Paciente de retorno vai sempre para a Equipe dos
+                              retornos (Agenda → Conferência do dia).
+                            </template>
                             Urgência também acende o aviso no painel.
                           </p>
                         </div>
@@ -5480,7 +5503,8 @@ onUnmounted(() => {
                             }}</span>
                             · #{{ ev.conversation_id }} {{ ev.contact }} —
                             {{ ATENDENTE_EVENT_LABELS[ev.type] || ev.type }}
-                            <span v-if="ev.note" class="text-n-slate-9"
+                            <span
+v-if="ev.note" class="text-n-slate-9"
                               >({{ ev.note }})</span
                             >
                           </p>
@@ -6046,10 +6070,12 @@ onUnmounted(() => {
                             >
                             —
                             {{ VOICE_EVENT_LABELS[ev.type] || ev.type }}
-                            <span v-if="ev.count" class="text-n-slate-9"
+                            <span
+v-if="ev.count" class="text-n-slate-9"
                               >({{ ev.count }})</span
                             >
-                            <span v-if="ev.note" class="text-n-slate-9"
+                            <span
+v-if="ev.note" class="text-n-slate-9"
                               >({{ ev.note }})</span
                             >
                           </p>
@@ -6189,7 +6215,8 @@ onUnmounted(() => {
                             }}</span>
                             · #{{ ev.conversation_id }} {{ ev.contact }} —
                             {{ INSTAGRAM_EVENT_LABELS[ev.type] || ev.type }}
-                            <span v-if="ev.note" class="text-n-slate-9"
+                            <span
+v-if="ev.note" class="text-n-slate-9"
                               >({{ ev.note }})</span
                             >
                           </p>
@@ -7135,7 +7162,8 @@ onUnmounted(() => {
                               class="font-medium text-n-slate-12 truncate max-w-[160px]"
                               >{{ entry.name }}</span
                             >
-                            <span v-if="entry.when" class="text-n-slate-10"
+                            <span
+v-if="entry.when" class="text-n-slate-10"
                               >→ consulta {{ fmtLogDate(entry.when) }}</span
                             >
                             <span
@@ -7843,7 +7871,8 @@ onUnmounted(() => {
                             }}</template
                           >
                         </span>
-                        <span v-else class="text-[11px] text-n-slate-10"
+                        <span
+v-else class="text-[11px] text-n-slate-10"
                           >nenhuma auditoria ainda — o primeiro ranking sai
                           depois da primeira rodada</span
                         >
@@ -7859,7 +7888,11 @@ onUnmounted(() => {
 
                       <!-- período da análise: a régua padrão do sistema (item 321) -->
                       <div class="flex items-center gap-1.5 flex-wrap">
-                        <PeriodRuler v-model="auditorPeriod" glass class="min-w-0" />
+                        <PeriodRuler
+                          v-model="auditorPeriod"
+                          glass
+                          class="min-w-0"
+                        />
                         <span
                           class="text-[10px] text-n-slate-9"
                           title="O Auditor guarda a nota de cada dia por 100 dias (antes de 03/10/2026 guardava 30)."
@@ -8781,7 +8814,8 @@ onUnmounted(() => {
                       {{ ACTION_LABELS[a.action_type] || a.action_type }}</span
                     >
                     <span>· {{ a.contacts }} paciente(s)</span>
-                    <span v-if="a.failed" class="text-red-500 font-medium"
+                    <span
+v-if="a.failed" class="text-red-500 font-medium"
                       >· {{ a.failed }} falha(s)</span
                     >
                     <span class="ml-auto"

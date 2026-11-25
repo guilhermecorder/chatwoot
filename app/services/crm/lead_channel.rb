@@ -49,11 +49,22 @@ module Crm::LeadChannel
   def stamp!(contact, key, user: nil, at: Time.current)
     return false if contact.blank? || !valid?(key)
 
-    attrs = contact.additional_attributes.to_h
-    return false if attrs[ATTR].is_a?(Hash) && attrs[ATTR]['key'].present?
+    return false if stamped?(contact.additional_attributes.to_h)
 
-    contact.update!(additional_attributes: attrs.merge(ATTR => { 'key' => key.to_s, 'por' => user&.name, 'em' => at.iso8601 }))
-    true
+    # 🔒 item 417: gravação pelo merge atômico (regra da casa). O "primeiro toque"
+    # é reconferido DENTRO da trava, com os dados frescos do banco.
+    stamped = false
+    Cevico::AttributeMerge.merge!(contact) do |attrs|
+      next attrs if stamped?(attrs)
+
+      stamped = true
+      attrs.merge(ATTR => { 'key' => key.to_s, 'por' => user&.name, 'em' => at.iso8601 })
+    end
+    stamped
+  end
+
+  def stamped?(attrs)
+    attrs[ATTR].is_a?(Hash) && attrs[ATTR]['key'].present?
   end
 
   # o que a equipe informou (hash) ou nil

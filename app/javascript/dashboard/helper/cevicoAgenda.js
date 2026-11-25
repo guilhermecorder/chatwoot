@@ -276,13 +276,24 @@ const hmToMin = hm => {
     .map(Number);
   return h * 60 + (m || 0);
 };
+// 🗓️ item 415 (24/11, a Dra. Roberta atrasava e 3 pacientes desistiram):
+// VIGÊNCIA da faixa — `from`/`until` (AAAA-MM-DD, inclusivos, opcionais).
+// A grade nova entra numa data certa sem mexer nas semanas já marcadas.
+// Espelho de Crm::AgendaSlots.in_force?
+export const windowInForce = (win, key) =>
+  (!win.from || key >= win.from) && (!win.until || key <= win.until);
+// item 415: faixa SEM ENCAIXE — um paciente por horário, de qualquer tipo
+export const isSoloWindow = win => win?.solo === true || win?.solo === 'true';
+
 // a faixa do médico que cobre aquele horário (mesmo dia da semana e unidade;
 // item 375: abertura pontual só na data dela — quem passa `date` enxerga as duas)
 export const windowAt = (windows, { dow, unit, minutes, doctor, date }) =>
   windows.find(
     w =>
       w.doctor &&
-      (w.date ? w.date === date : w.dow === dow) &&
+      (w.date
+        ? w.date === date
+        : w.dow === dow && (!date || windowInForce(w, date))) &&
       w.unit === unit &&
       (!doctor || w.doctor === doctor) &&
       minutes >= hmToMin(w.start) &&
@@ -369,9 +380,11 @@ export const dateKey = d => {
 };
 
 // item 375: a faixa vale neste dia? abertura pontual = só na data dela;
-// faixa da semana = no dia da semana dela
+// faixa da semana = no dia da semana dela (e dentro da vigência — item 415)
 export const windowOnDay = (win, day) =>
-  win.date ? win.date === dateKey(day) : win.dow === day.getDay();
+  win.date
+    ? win.date === dateKey(day)
+    : win.dow === day.getDay() && windowInForce(win, dateKey(day));
 
 export const blockKey = (dateStr, time, unit) => `${dateStr}|${time}|${unit}`;
 
@@ -718,7 +731,8 @@ export const GENERAL_TYPE = mkType({
 // Na Agenda a consulta continua com a cor do TIPO (avaliação × retorno muda valor e
 // lembrete) e ganha o contorno + o ↻ azul-piscina.
 export const RESCHEDULED_COLOR = '#0891B2';
-export const isRescheduled = task => Number(task?.rescheduled_count) > 0 && !task?.canceled_at;
+export const isRescheduled = task =>
+  Number(task?.rescheduled_count) > 0 && !task?.canceled_at;
 export const rescheduledTitle = task => {
   const n = Number(task?.rescheduled_count) || 0;
   return n > 1 ? `Reagendada ${n} vezes` : 'Reagendada';
@@ -779,7 +793,8 @@ export const scanAgenda = ({
     day.setDate(day.getDate() + i);
     const dow = day.getDay();
     // fim de semana bloqueado — salvo abertura pontual naquela data (item 375)
-    if ((dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day))) continue;
+    if ((dow === 0 || dow === 6) && !windows.some(w => w.date === dateKey(day)))
+      continue;
     if (blockedDays.has(dateKey(day))) continue; // dia fechado inteiro
 
     windows

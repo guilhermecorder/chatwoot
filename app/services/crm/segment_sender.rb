@@ -265,8 +265,8 @@ module Crm::SegmentSender # rubocop:disable Metrics/ModuleLength
     sender = Crm::SendTemplateService.new(source: source, contact: contact)
     conversation = sender.perform
     meta = { 'segment_id' => segment.id, 'variant' => variant['key'], 'kind' => segment.kind, 'template' => variant.dig('template_params', 'name') }
-    attrs = (sender.message&.additional_attributes || {}).merge('cevico_segment' => meta)
-    sender.message&.update_columns(additional_attributes: attrs) # rubocop:disable Rails/SkipsModelValidations
+    message = sender.message
+    Cevico::AttributeMerge.merge!(message) { |attrs| attrs.merge('cevico_segment' => meta) } if message # 🔒 item 417: merge atômico
     conversation
   end
 

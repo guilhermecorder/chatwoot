@@ -45,6 +45,11 @@ const { cvVars, blockVars } = useCevicoPalette({
     { id: 'decisao', label: 'Conta da decisão', icon: 'i-lucide-calculator' },
     { id: 'prompt', label: 'O que muda', icon: 'i-lucide-file-diff' },
     { id: 'historico', label: 'Testes anteriores', icon: 'i-lucide-history' },
+    {
+      id: 'consultor',
+      label: 'Consultor superior',
+      icon: 'i-lucide-graduation-cap',
+    },
     { id: 'marco', label: 'Antes × depois', icon: 'i-lucide-flag' },
     { id: 'volta', label: 'Ponto de volta', icon: 'i-lucide-undo-2' },
   ],
@@ -168,6 +173,38 @@ const money = (usd, digits = null) => {
   })}`;
 };
 const num = v => Number(v || 0).toLocaleString('pt-BR');
+
+// 🧑‍🏫 item 414: contador do consultor superior deste atendente (7 dias)
+const consultor = computed(() => data.value?.consultor || null);
+const consultorTotal = computed(() => consultor.value?.stats?.total || {});
+const consultorAnswered = computed(
+  () =>
+    (consultorTotal.value.consultas || 0) +
+    (consultorTotal.value.testes || 0) -
+    (consultorTotal.value.falhas || 0)
+);
+const consultorShown = computed(
+  () =>
+    !!consultor.value &&
+    (consultor.value.enabled ||
+      (consultorTotal.value.consultas || 0) +
+        (consultorTotal.value.testes || 0) >
+        0)
+);
+const consultorHeadline = computed(() => {
+  const total = consultorTotal.value;
+  const asked = (total.consultas || 0) + (total.testes || 0);
+  if (!asked)
+    return 'O consultor superior está ligado e ainda não foi chamado.';
+  const changed = total.mudou || 0;
+  const verb =
+    consultor.value.mode === 'ativo' ? 'mudou' : 'mudaria (está em sombra)';
+  return `O consultor superior foi chamado ${num(asked)} ${asked === 1 ? 'vez' : 'vezes'} em ${consultor.value.stats.span} dias e ${verb} ${num(changed)} ${changed === 1 ? 'resposta' : 'respostas'}.`;
+});
+const consultorRows = (bag, labels) =>
+  Object.entries(bag || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => ({ key, count, label: labels?.[key] || key }));
 const pct = v =>
   v === null || v === undefined
     ? '—'
@@ -1177,6 +1214,96 @@ const decisionLabel = entry => {
           </div>
         </div>
       </template>
+
+      <!-- ══ 🧑‍🏫 CONSULTOR SUPERIOR (item 414) ══ -->
+      <div
+        v-if="consultorShown"
+        class="cv-block p-6 sm:p-9 mb-6"
+        :style="blockVars('consultor')"
+      >
+        <p
+          class="text-[11px] font-semibold uppercase tracking-wide text-n-slate-9"
+        >
+          Consultor superior ·
+          {{ consultor.mode === 'ativo' ? 'ativo' : 'em sombra' }} ·
+          {{ modelName(consultor.model) }}
+        </p>
+        <h2
+          class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12 mt-1"
+        >
+          {{ consultorHeadline }}
+        </h2>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
+          <div class="cv-sub p-4">
+            <p class="text-xs text-n-slate-10">Hoje</p>
+            <p class="text-lg font-bold text-n-slate-12 mt-1">
+              {{ num(consultor.stats.today.consultas) }} de
+              {{ num(consultor.stats.cap) }}
+            </p>
+            <p class="text-[11px] text-n-slate-10">consultas do teto do dia</p>
+          </div>
+          <div class="cv-sub p-4">
+            <p class="text-xs text-n-slate-10">Em pacientes</p>
+            <p class="text-lg font-bold text-n-slate-12 mt-1">
+              {{ num(consultorTotal.consultas) }}
+            </p>
+            <p class="text-[11px] text-n-slate-10">
+              + {{ num(consultorTotal.testes) }} no teste
+            </p>
+          </div>
+          <div class="cv-sub p-4">
+            <p class="text-xs text-n-slate-10">Mudou a resposta</p>
+            <p class="text-lg font-bold text-n-slate-12 mt-1">
+              {{ num(consultorTotal.mudou) }} de {{ num(consultorAnswered) }}
+            </p>
+            <p class="text-[11px] text-n-slate-10">
+              {{ num(consultorTotal.aplicadas) }} valeram ·
+              {{ num(consultorTotal.falhas) }} falhas
+            </p>
+          </div>
+          <div class="cv-sub p-4">
+            <p class="text-xs text-n-slate-10">Custo do consultor</p>
+            <p class="text-lg font-bold text-n-slate-12 mt-1">
+              {{ money(consultorTotal.custo_usd || 0) }}
+            </p>
+            <p class="text-[11px] text-n-slate-10">
+              {{
+                consultorAnswered
+                  ? `${money((consultorTotal.custo_usd || 0) / consultorAnswered)} por consulta`
+                  : 'sem consulta ainda'
+              }}
+            </p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-1.5 mt-4">
+          <span
+            v-for="row in consultorRows(
+              consultorTotal.gatilhos,
+              consultor.trigger_labels
+            )"
+            :key="`g-${row.key}`"
+            class="cv-chip cv-chip-wrap"
+            >{{ num(row.count) }}× {{ row.label }}</span
+          >
+          <span
+            v-for="row in consultorRows(
+              consultorTotal.efeitos,
+              consultor.effect_labels
+            )"
+            :key="`e-${row.key}`"
+            class="cv-chip cv-chip-wrap cv-green"
+            >{{ num(row.count) }}× {{ row.label }}</span
+          >
+        </div>
+        <p class="text-[11px] text-n-slate-10 mt-4">
+          Cada consulta, com o que o principal ia responder e o que o consultor
+          devolveu, está no cartão do atendente (Consultor superior → últimas
+          consultas).
+          <button class="underline" @click="emit('openAgent')">
+            Abrir o cartão
+          </button>
+        </p>
+      </div>
 
       <!-- ══ 📍 ANTES × DEPOIS DO MARCO ══ -->
       <div class="cv-block p-6 sm:p-9 mb-6" :style="blockVars('marco')">

@@ -36,8 +36,16 @@ const scriptVersion = ref(props.scriptVersion === 'v2' ? 'v2' : 'v1');
 const isV2 = computed(() => scriptVersion.value === 'v2');
 const SCRIPT_VERSIONS = [
   // nomes claros (pedido 22/09: "melhorar a nomenclatura para poder testar")
-  { key: 'v1', label: 'Roteiro 1 · Fiel ao N8N', hint: 'estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem' },
-  { key: 'v2', label: 'Roteiro 2 · Otimizado pela análise', hint: 'análise do banco de 22/09 + regras de 22/09; só existe aqui no teste' },
+  {
+    key: 'v1',
+    label: 'Roteiro 1 · Fiel ao N8N',
+    hint: 'estrutura do robô do N8N + regras de 22/09; é o que os atendentes leem',
+  },
+  {
+    key: 'v2',
+    label: 'Roteiro 2 · Otimizado pela análise',
+    hint: 'análise do banco de 22/09 + regras de 22/09; só existe aqui no teste',
+  },
 ];
 const OBJECTIVE_PLACEHOLDER = 'orçamento enviado, sem resposta há 2 dias';
 
@@ -61,6 +69,65 @@ const modelLabel = id =>
   id;
 // etiqueta verde quando a resposta NÃO veio do Claude
 const isOpenaiModel = id => !!id && !/^claude/i.test(String(id));
+
+// 🧑‍🏫 item 414: CONSULTOR SUPERIOR DESTE TESTE. '' = o que o cartão do agente
+// tem (desligado, na maioria). Escolhendo um modelo aqui, o consultor entra só
+// nesta conversa de teste, em sombra (só mostra o que faria) ou ativo (vale a
+// resposta dele). Nada é gravado no agente.
+const consultantModel = ref('');
+const consultantMode = ref('ativo');
+// fechado por padrão: a janela do teste é baixa e a conversa precisa do espaço
+const consultantOpen = ref(false);
+const CONSULTANT_EFFECT = {
+  evitou_equipe: 'não precisava chamar a equipe',
+  confirmou_equipe: 'confirmou: é caso para a equipe',
+  corrigiu_vaga: 'corrigiu para um horário livre',
+  ofereceu_outro_horario: 'ofereceu outro horário',
+  vaga_ainda_invalida: 'também ficou sem horário válido',
+  completou: 'completou a resposta',
+  manteve: 'manteve a resposta do principal',
+  respondeu: 'respondeu no lugar do principal',
+  orientou: 'orientou o principal',
+};
+const CONSULTANT_TRIGGER = {
+  chamar_humano: 'chamou a equipe sem urgência',
+  vaga_invalida: 'horário que não validou',
+  sem_pergunta: 'resposta vazia ou sem pergunta',
+  ferramenta: 'o principal pediu orientação',
+};
+const consultantChip = c => {
+  if (!c) return '';
+  const who = `🧑‍🏫 consultor (${modelLabel(c.modelo)})`;
+  if (c.status === 'teto') return `${who}: teto do dia atingido, não consultou`;
+  if (c.status === 'pulou') return `${who}: não consultou (${c.erro})`;
+  if (c.status === 'falhou')
+    return `${who}: falhou, valeu a resposta do principal`;
+  const effect = CONSULTANT_EFFECT[c.efeito] || c.efeito || '';
+  if (c.gatilho === 'ferramenta') return `${who}: ${effect}`;
+  if (c.aplicado) return `${who}: ${effect} · valeu a dele`;
+  if (c.mudou && c.modo === 'sombra') return `${who}, em sombra: ${effect}`;
+  return `${who}: ${effect}`;
+};
+const consultantTone = c => {
+  if (!c || c.status !== 'ok') return 'cv-slate';
+  if (c.aplicado) return 'cv-green';
+  return c.mudou ? 'cv-amber' : 'cv-slate';
+};
+const snapText = snap => {
+  if (!snap) return '';
+  if (snap.erro) return `(${snap.erro})`;
+  const flags = [];
+  if (snap.agendar)
+    flags.push(
+      `agendaria ${snap.agendamento?.dia || ''} ${snap.agendamento?.hora || ''}`.trim()
+    );
+  if (snap.chamar_humano) flags.push('chamaria a equipe');
+  if (snap.cancelar) flags.push('cancelaria');
+  if (snap.pausar) flags.push('encerraria');
+  const text = (snap.mensagens || []).join('\n') || '(sem mensagem)';
+  return flags.length ? `${text}\n[${flags.join(' · ')}]` : text;
+};
+const openConsult = ref(null);
 
 const pal = useCevicoPalette({
   scope: 'report:agentes',
@@ -128,7 +195,10 @@ const start = async () => {
   isStarting.value = true;
   errorText.value = '';
   try {
-    const payload = { agent: props.agentKey, script_version: scriptVersion.value };
+    const payload = {
+      agent: props.agentKey,
+      script_version: scriptVersion.value,
+    };
     // 🎙️ voz: o motivo só viaja quando preenchido (o servidor tem o padrão)
     if (isVoice.value && objective.value.trim())
       payload.objective = objective.value.trim();
@@ -161,11 +231,45 @@ const pickVersion = async key => {
   await start();
 };
 
+// ⏱️ item 414: a resposta roda em SEGUNDO PLANO no servidor (a chamada da tela
+// morria em 15 s quando o agente usava várias ferramentas ou consultava o
+// superior). A tela manda a fala e pergunta de tempos em tempos se já chegou.
+const POLL_MS = 1500;
+const POLL_MAX_MS = 240000;
+const wait = ms =>
+  new Promise(resolve => {
+    setTimeout(resolve, ms);
+  });
+const waitForReply = async () => {
+  const started = Date.now();
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (Date.now() - started > POLL_MAX_MS) {
+      errorText.value =
+        'A resposta demorou mais de 4 minutos. Confira se a fila do servidor está rodando e tente de novo.';
+      return;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await wait(POLL_MS);
+    // eslint-disable-next-line no-await-in-loop
+    const { data } = await CrmAPI.simulateAgent({
+      agent: props.agentKey,
+      conversation_id: conversationId.value,
+    });
+    if (!data.pending) {
+      turns.value = data.turns || [];
+      if (data.error) errorText.value = data.error;
+      return;
+    }
+  }
+};
+
 const send = async text => {
   const content = (text ?? draft.value).trim();
   if (!content || isSending.value) return;
   draft.value = '';
   errorText.value = '';
+  consultantOpen.value = false; // devolve o espaço para a conversa
   // otimista: o balão do paciente aparece na hora, o agente "digita"
   turns.value.push({
     role: 'patient',
@@ -181,11 +285,16 @@ const send = async text => {
       conversation_id: conversationId.value,
       script_version: scriptVersion.value,
       model: engineModel.value || undefined,
+      consultant: consultantModel.value
+        ? { model: consultantModel.value, mode: consultantMode.value }
+        : undefined,
+      async: true,
       text: content,
     });
     conversationId.value = data.conversation_id;
     turns.value = data.turns || [];
     if (data.error) errorText.value = data.error;
+    if (data.pending) await waitForReply();
   } catch {
     errorText.value = 'Falha ao falar com a IA. Tente de novo.';
   } finally {
@@ -278,8 +387,12 @@ const guide = turn => {
             </p>
             <p v-else class="text-[11px] opacity-80">
               Você é o paciente. O agente responde com a IA de verdade e o
-              {{ isV2 ? 'Roteiro 2 · Otimizado pela análise (só existe neste teste)' : 'Roteiro 1 · Fiel ao N8N (o que os atendentes leem)' }}.
-              Caixa interna, sem canal de envio: nada vai para telefone nenhum.
+              {{
+                isV2
+                  ? 'Roteiro 2 · Otimizado pela análise (só existe neste teste)'
+                  : 'Roteiro 1 · Fiel ao N8N (o que os atendentes leem)'
+              }}. Caixa interna, sem canal de envio: nada vai para telefone
+              nenhum.
             </p>
           </div>
           <!-- 🧪 22/09: Roteiro atual × v2 paralelo (trocar recomeça a conversa) -->
@@ -365,6 +478,78 @@ const guide = turn => {
           </p>
         </div>
 
+        <!-- 🧑‍🏫 item 414: consultor superior deste teste (fechado por padrão, para não roubar espaço da conversa) -->
+        <div
+          v-if="!isVoice"
+          class="px-4 sm:px-6 py-2 border-b"
+          style="border-color: rgb(var(--cv-rgb) / 0.15)"
+        >
+          <button
+            type="button"
+            class="flex items-center gap-2 w-full text-left"
+            data-test="consultor-do-teste"
+            @click="consultantOpen = !consultantOpen"
+          >
+            <span class="cv-label flex-shrink-0">Consultor deste teste</span>
+            <span class="text-xs text-n-slate-11 min-w-0 flex-1 truncate">
+              {{
+                consultantModel
+                  ? `${modelLabel(consultantModel)} · ${
+                      consultantMode === 'ativo' ? 'ativo' : 'sombra'
+                    }`
+                  : 'o do cartão do agente'
+              }}
+            </span>
+            <span
+              class="text-sm text-n-slate-10 flex-shrink-0"
+              :class="
+                consultantOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'
+              "
+            />
+          </button>
+          <div
+            v-if="consultantOpen"
+            class="flex flex-wrap items-center gap-x-3 gap-y-2 mt-2"
+          >
+            <LlmModelPicker
+              v-model="consultantModel"
+              class="min-w-0 flex-1 basis-56"
+              :catalog="llmCatalog"
+              :disabled="isSending"
+              :engine-note="false"
+              select-class="cv-input text-sm min-w-0 w-full"
+              empty-label="O do cartão do agente"
+            />
+            <div
+              v-if="consultantModel"
+              class="cv-seg cv-seg-sm flex-shrink-0"
+              title="Sombra: só mostra o que o consultor faria. Ativo: vale a resposta dele."
+            >
+              <button
+                class="cv-seg-item"
+                :class="{ 'cv-seg-on': consultantMode === 'sombra' }"
+                :disabled="isSending"
+                @click="consultantMode = 'sombra'"
+              >
+                Sombra
+              </button>
+              <button
+                class="cv-seg-item"
+                :class="{ 'cv-seg-on': consultantMode === 'ativo' }"
+                :disabled="isSending"
+                @click="consultantMode = 'ativo'"
+              >
+                Ativo
+              </button>
+            </div>
+            <p class="text-[11px] text-n-slate-10 w-full">
+              Um motor mais forte confere a resposta quando o principal chama a
+              equipe sem urgência, agenda em horário inválido ou responde sem
+              pergunta. Vale só aqui.
+            </p>
+          </div>
+        </div>
+
         <!-- corpo do bate-papo -->
         <div
           ref="bodyEl"
@@ -375,8 +560,11 @@ const guide = turn => {
               displayId
             }}
             · {{ isVoice ? 'lead de teste' : 'paciente de teste' }} ·
-            {{ new Date().toLocaleDateString('pt-BR') }}<template v-if="!isVoice">
-              · {{ isV2 ? 'Roteiro 2 · Otimizado' : 'Roteiro 1 · Fiel ao N8N' }}</template>
+            {{ new Date().toLocaleDateString('pt-BR')
+            }}<template v-if="!isVoice">
+              ·
+              {{ isV2 ? 'Roteiro 2 · Otimizado' : 'Roteiro 1 · Fiel ao N8N' }}
+            </template>
           </p>
 
           <template v-for="t in turns" :key="t.id">
@@ -449,6 +637,15 @@ class="cv-chip cv-slate"
                   {{ toolChip(a) }}
                 </span>
                 <button
+                  v-if="t.meta?.consultor"
+                  class="cv-chip cv-chip-wrap"
+                  :class="consultantTone(t.meta.consultor)"
+                  :title="`Motivo: ${CONSULTANT_TRIGGER[t.meta.consultor.gatilho] || t.meta.consultor.gatilho}. Toque para ver o que o principal ia responder.`"
+                  @click="openConsult = openConsult === t.id ? null : t.id"
+                >
+                  {{ consultantChip(t.meta.consultor) }}
+                </button>
+                <button
                   class="cv-btn cv-btn-sm cv-btn-ghost cv-amber"
                   title="Escreva como o agente deveria ter respondido — vira uma orientação para aplicar no Roteiro"
                   @click="guide(t)"
@@ -462,6 +659,48 @@ class="cv-chip cv-slate"
               >
                 💭 {{ t.meta.leitura }}
               </p>
+              <!-- 🧑‍🏫 item 414: o que o principal ia responder × o que o consultor devolveu -->
+              <div
+                v-if="t.meta?.consultor && openConsult === t.id"
+                class="cv-strip text-[11px] max-w-[95%] space-y-1"
+              >
+                <p class="font-semibold">
+                  Motivo:
+                  {{
+                    CONSULTANT_TRIGGER[t.meta.consultor.gatilho] ||
+                    t.meta.consultor.gatilho
+                  }}
+                </p>
+                <template v-if="t.meta.consultor.duvida">
+                  <p class="whitespace-pre-wrap">
+                    Dúvida do principal: {{ t.meta.consultor.duvida }}
+                  </p>
+                  <p class="whitespace-pre-wrap">
+                    Orientação:
+                    {{
+                      t.meta.consultor.orientacao ||
+                      t.meta.consultor.erro ||
+                      '—'
+                    }}
+                  </p>
+                </template>
+                <template v-else>
+                  <p class="whitespace-pre-wrap">
+                    O principal ({{ modelLabel(t.meta.consultor.principal) }})
+                    ia responder: {{ snapText(t.meta.consultor.antes) }}
+                  </p>
+                  <p v-if="t.meta.consultor.depois" class="whitespace-pre-wrap">
+                    O consultor
+                    {{
+                      t.meta.consultor.aplicado ? 'respondeu' : 'responderia'
+                    }}:
+                    {{ snapText(t.meta.consultor.depois) }}
+                  </p>
+                  <p v-if="t.meta.consultor.erro">
+                    {{ t.meta.consultor.erro }}
+                  </p>
+                </template>
+              </div>
             </div>
           </template>
 

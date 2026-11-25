@@ -1471,6 +1471,17 @@ class CrmAPI extends ApiClient {
     return axios.post(`${this.url}/settings/save_ai_stage_models`, payload);
   }
 
+  // 🧑‍🏫 item 414: consultor superior do atendente (segunda opinião de um motor mais forte)
+  getAiConsultant(agent) {
+    return axios.get(`${this.url}/settings/ai_consultant`, {
+      params: { agent },
+    });
+  }
+
+  saveAiConsultant(payload) {
+    return axios.post(`${this.url}/settings/save_ai_consultant`, payload);
+  }
+
   // popup de prioridade máxima do Radar + pausa manual (com registro)
   radarPing() {
     return axios.get(`${this.url}/home/radar_ping`);

@@ -81,6 +81,32 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     open_days(account).select { |w| w['date'] >= today }.sort_by { |w| [w['date'], w['start'].to_s] }
   end
 
+  # 🗓️ item 415 (24/11, ele: "aumentar o espaçamento das consultas da Roberta…
+  # a primeira hora para os particulares dela, das 14 às 16 para a CEVICO"):
+  # VIGÊNCIA da faixa. `from`/`until` (AAAA-MM-DD, os dois inclusivos e
+  # opcionais) dizem a partir de quando e até quando a faixa vale — assim a
+  # grade nova entra numa data certa sem mexer nas semanas já marcadas.
+  # Sem `from`/`until` a faixa vale sempre, como antes.
+  def in_force?(win, day)
+    day = day.to_s
+    from = iso_date(win['from'])&.to_s
+    till = iso_date(win['until'])&.to_s
+    (from.nil? || day >= from) && (till.nil? || day <= till)
+  end
+
+  # faixa que já acabou (o `until` ficou para trás) — some do prompt
+  def expired?(win)
+    till = iso_date(win['until'])
+    till.present? && till < TZ.now.to_date
+  end
+
+  # 🚫 item 415: faixa SEM ENCAIXE (`solo`) — um paciente por horário, de
+  # qualquer tipo. Retorno e pós-op também travam o horário (o item 330b deixava
+  # a IA pôr uma avaliação em cima deles, e o atraso do médico vinha daí).
+  def solo?(win)
+    ActiveModel::Type::Boolean.new.cast(win['solo']) == true
+  end
+
   def reserved_for(win)
     Array(win['only']).map(&:to_s) & RESERVABLE
   end
@@ -258,6 +284,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       # item 367: só a CONSULTA NOVA respeita o teto por hora (retorno e pós-op seguem as faixas deles)
       per_hour: evaluations_per_hour(account, from_date, to_date),
       cap: modality.to_s == AI_MODALITY ? hourly_cap(account) : nil,
+      # item 415: retorno e pós-op marcados — só pesam nas faixas SEM ENCAIXE
+      soft: soft_booked(account, from_date, to_date),
       occupied: account.tasks
                        .where(task_type: 'consulta', canceled_at: nil)
                        .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', ['exames'] + SOFT_MODALITIES)
@@ -267,10 +295,19 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     }
   end
 
+  # item 415: horários com retorno / pós-op marcados ("AAAA-MM-DD|HH:MM|unidade")
+  def soft_booked(account, from_date, to_date)
+    account.tasks
+           .where(task_type: 'consulta', canceled_at: nil, modality: SOFT_MODALITIES)
+           .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
+           .pluck(:due_at, :unit)
+           .to_set { |due, unit| "#{due.in_time_zone(TZ).strftime('%Y-%m-%d|%H:%M')}|#{unit}" }
+  end
+
   # faixas em vigor NESTE dia: as da semana (nunca no fim de semana) + as
   # aberturas pontuais com esta data (item 375 — um sábado aberto de propósito vale)
   def windows_on(ctx, day)
-    weekly = day.saturday? || day.sunday? ? [] : ctx[:wins].select { |w| w['dow'] == day.wday }
+    weekly = day.saturday? || day.sunday? ? [] : ctx[:wins].select { |w| w['dow'] == day.wday && in_force?(w, day) }
     weekly + Array(ctx[:open]).select { |w| w['date'] == day.to_s }
   end
 
@@ -287,10 +324,17 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   def slot_free?(ctx, day, win, hhmm)
     return false if TZ.parse("#{day} #{hhmm}") <= ctx[:now]
     return false if ctx[:blocked].include?("#{day}|#{hhmm}|#{win['unit']}")
-    return false if ctx[:occupied].include?("#{day}|#{hhmm}|#{win['unit']}") || ctx[:occupied].include?("#{day}|#{hhmm}|")
-    return false if hub_overlap?(ctx, day, hhmm, win)
+    return false if taken?(ctx, day, hhmm, win) || hub_overlap?(ctx, day, hhmm, win)
 
     ctx[:cap].nil? || ctx[:per_hour][hour_key(day, hhmm, win['unit'])] < ctx[:cap]
+  end
+
+  # já tem consulta neste horário? Na faixa SEM ENCAIXE (item 415) retorno e pós-op também contam
+  def taken?(ctx, day, hhmm, win)
+    key = "#{day}|#{hhmm}|#{win['unit']}"
+    return true if ctx[:occupied].include?(key) || ctx[:occupied].include?("#{day}|#{hhmm}|")
+
+    solo?(win) && Array(ctx[:soft]).include?(key)
   end
 
   # item 367: em vez dos N primeiros horários do dia (que enchiam a manhã),
@@ -370,7 +414,7 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
 
   # faixas desta unidade neste dia: as da semana + a abertura pontual com a data (item 375)
   def unit_windows_on(account, date, unit, modality)
-    windows_for(account, modality).select { |w| w['dow'] == date.wday && w['unit'] == unit } +
+    windows_for(account, modality).select { |w| w['dow'] == date.wday && w['unit'] == unit && in_force?(w, date) } +
       open_windows_for(account, modality).select { |w| w['date'] == date.to_s && w['unit'] == unit }
   end
 
@@ -395,12 +439,22 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   end
 
   def reserved_rules(account)
-    windows(account).reject { |w| accepts?(w, AI_MODALITY) }.map do |w|
+    windows(account).reject { |w| accepts?(w, AI_MODALITY) || expired?(w) }.map do |w|
       kinds = reserved_for(w).map { |k| MODALITY_LABELS[k] }.join(' e ')
-      "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
+      "- #{WEEKDAYS[w['dow']]} #{w['start']}–#{w['end']}#{validity_text(w)} · #{UNIT_LABELS[w['unit']] || w['unit']} · #{w['doctor']}: " \
         "faixa reservada para #{kinds}. NÃO ofereça nem marque consulta nova nesta faixa " \
         "(ela só serve para remarcar #{kinds})."
     end
+  end
+
+  # item 415: " (a partir de 22/12)" / " (até 21/12)" — só quando a faixa tem vigência
+  def validity_text(win)
+    from = iso_date(win['from'])
+    till = iso_date(win['until'])
+    parts = []
+    parts << "a partir de #{from.strftime('%d/%m')}" if from
+    parts << "até #{till.strftime('%d/%m')}" if till
+    parts.any? ? " (#{parts.join(', ')})" : ''
   end
 
   # ⏱️ item 367 (23/10, ele pediu também no prompt): a lista de vagas e a conferência

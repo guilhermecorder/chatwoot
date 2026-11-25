@@ -419,7 +419,7 @@ class Crm::OverviewService # rubocop:disable Metrics/ClassLength
       (from..to).each do |day|
         next if day.saturday? || day.sunday? || blocked_days.include?(day.to_s)
 
-        wins.select { |w| w['dow'] == day.wday }.each do |win|
+        wins.select { |w| w['dow'] == day.wday && Crm::AgendaSlots.in_force?(w, day) }.each do |win|
           doc = Crm::DoctorNames.canonical(win['doctor']) || win['doctor'].to_s
           Crm::AgendaSlots.each_slot(win) do |hm|
             next if blocked.include?("#{day}|#{hm}|#{win['unit']}")

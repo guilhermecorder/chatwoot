@@ -150,26 +150,56 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   def self.write_shadow_note!(conversation, agent_key, result, trigger_message_id) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     account = conversation.account
     slot_valid = result[:agendar] ? new.send(:slot_valid?, account, result[:agendamento]) : nil
+    shadow = {
+      'agent' => agent_key, 'etapa' => result[:etapa], 'mensagens' => Array(result[:mensagens]).first(3),
+      'agendar' => result[:agendar] == true, 'agendamento' => (result[:agendamento] || {}),
+      'slot_valid' => slot_valid, 'chamar_humano' => result[:chamar_humano] == true,
+      'cancelar' => result[:cancelar] == true,
+      'pausar' => result[:pausar] == true, 'leitura' => result[:leitura].to_s.truncate(300),
+      # 🔧 rodada 192: o que as ferramentas fizeram/simulariam [{ferramenta, ok, resumo}]
+      'acoes' => Array(result[:acoes]).first(10),
+      # 🧠 item 399: qual modelo respondeu (Claude × ChatGPT), para comparar
+      'modelo' => result[:modelo],
+      'reserva' => result[:reserva], # ChatGPT falhou e o Claude respondeu no lugar
+      'trigger_message_id' => trigger_message_id
+    }
+    attributes = { 'cevico_ia_shadow' => shadow }
+    # 🧑‍🏫 item 414: houve consulta ao superior → o registro (o que o principal ia
+    # fazer × o que saiu) vai na nota e na raiz (a tela do consultor lista por ela)
+    if result[:consultor].present?
+      shadow['consultor'] = result[:consultor]
+      attributes[Crm::ConsultantConfig::NOTE_KEY] = result[:consultor]
+    end
     conversation.messages.create!(
       account_id: account.id, inbox_id: conversation.inbox_id,
       message_type: :activity, private: true, content: new.send(:shadow_note, agent_key, result, slot_valid),
-      additional_attributes: {
-        'cevico_ia_shadow' => {
-          'agent' => agent_key, 'etapa' => result[:etapa], 'mensagens' => Array(result[:mensagens]).first(3),
-          'agendar' => result[:agendar] == true, 'agendamento' => (result[:agendamento] || {}),
-          'slot_valid' => slot_valid, 'chamar_humano' => result[:chamar_humano] == true,
-          'cancelar' => result[:cancelar] == true,
-          'pausar' => result[:pausar] == true, 'leitura' => result[:leitura].to_s.truncate(300),
-          # 🔧 rodada 192: o que as ferramentas fizeram/simulariam [{ferramenta, ok, resumo}]
-          'acoes' => Array(result[:acoes]).first(10),
-          # 🧠 item 399: qual modelo respondeu (Claude × ChatGPT), para comparar
-          'modelo' => result[:modelo],
-          'reserva' => result[:reserva], # ChatGPT falhou e o Claude respondeu no lugar
-          'trigger_message_id' => trigger_message_id
-        }
-      }
+      additional_attributes: attributes
     )
     slot_valid
+  end
+
+  # 🚨 a passagem para humano é por urgência clínica? (tarefa alta aberta pela
+  # IA, ou os balões/leitura falam de pronto atendimento, dor forte, perda de
+  # visão). Também é o que impede o consultor superior de segurar a resposta.
+  def self.clinical_urgency?(result)
+    return true if Array(result[:acoes]).any? { |a| a['ferramenta'] == 'abrir_tarefa' && a['ok'] && a['resumo'].to_s.include?('(alta)') }
+
+    [*Array(result[:mensagens]), result[:leitura]].join(' ').match?(URGENCY_RE)
+  end
+
+  # 🧑‍🏫 item 414 (ao vivo): a consulta ao superior fica numa nota interna da
+  # conversa, com o registro estruturado (a tela do consultor lista por ele).
+  # Teto atingido e consulta pulada não viram nota (só o contador).
+  def self.write_consultant_note!(conversation, record)
+    return if record.blank? || %w[ok falhou].exclude?(record['status'])
+
+    conversation.messages.create!(
+      account_id: conversation.account_id, inbox_id: conversation.inbox_id, message_type: :activity, private: true,
+      content: (Crm::ConsultantConfig.note_lines(record) + ['(nota interna: o paciente não vê isto)']).join("\n"),
+      additional_attributes: { Crm::ConsultantConfig::NOTE_KEY => record }
+    )
+  rescue StandardError => e
+    Rails.logger.warn "[Crm::ResponderAgentJob] nota do consultor: #{e.message}"
   end
 
   private
@@ -242,6 +272,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     track_experiment_call(conversation, agent_key, cfg, service, result)
     if result[:error]
       log_event(account, agent_key, conversation, 'erro', result[:error].to_s.truncate(120))
+      # 🧑‍🏫 item 414: o principal veio vazio e o consultor (em sombra) teria respondido: fica o registro
+      record_consultant(account, agent_key, conversation, result[:consultor])
       return
     end
     # a IA demorou e o paciente mandou mais coisa? o job da mensagem nova cuida
@@ -262,6 +294,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     detail += " · 🔧 #{acoes_text(result)}" if Array(result[:acoes]).any?
     detail += " · 🛟 #{result[:reserva]}" if result[:reserva].present? # item 399
     log_event(account, agent_key, conversation, 'sombra', detail.truncate(220))
+    log_consultant(account, agent_key, conversation, result[:consultor]) # 🧑‍🏫 item 414
     urgent_outside_window!(account, conversation, cfg, agent_key, result)
   end
 
@@ -287,6 +320,7 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     lines << "Decisões: #{flags.join(' · ')}" if flags.any?
     lines << "🔧 #{acoes_text(result)}" if Array(result[:acoes]).any?
     lines << "Leitura: #{result[:leitura]}" if result[:leitura].present?
+    lines.concat(Crm::ConsultantConfig.note_lines(result[:consultor])) # 🧑‍🏫 item 414
     lines << '(nota interna: nada foi enviado ao paciente)'
     lines.join("\n")
   end
@@ -356,6 +390,8 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     service = Crm::ResponderAgentService.new(conversation: conversation, agent_key: agent_key, live: true)
     result = service.call
     track_experiment_call(conversation, agent_key, cfg, service, result)
+    # 🧑‍🏫 item 414: houve consulta ao superior → nota interna + registro do card
+    record_consultant(account, agent_key, conversation, result[:consultor])
     if result[:error]
       # erro do motor = o resgate pode tentar de novo esta mensagem; erro de
       # configuração (sem chave, agente desligado) não adianta repetir
@@ -428,14 +464,33 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
     track_experiment(conversation, agent_key, cfg, service, 'reply' => true, 'booked' => booked == true, 'handoff' => result[:chamar_humano])
   end
 
+  # ── 🧑‍🏫 item 414: registro da consulta ao superior ──────────────────────
+  # nota interna (o que o principal ia fazer × o que saiu) + linha no registro do card
+  def record_consultant(account, agent_key, conversation, record)
+    return if record.blank?
+
+    self.class.write_consultant_note!(conversation, record)
+    log_consultant(account, agent_key, conversation, record)
+  end
+
+  # teto do dia: uma linha por dia (senão o registro do card enche de aviso igual)
+  def log_consultant(account, agent_key, conversation, record)
+    return if record.blank? || record['status'] == 'pulou'
+
+    capped = record['status'] == 'teto'
+    log_event(account, agent_key, conversation, capped ? 'consultor_teto' : 'consultor',
+              Crm::ConsultantConfig.headline(record).truncate(220), once_per_day: capped)
+  end
+
   # ── 🧪 item 400: placar do teste A/B de motor (Crm::EngineExperiment) ─────
   # toda chamada entra com o custo e o modelo, mesmo a que deu erro ou a que o
   # paciente atropelou com outra mensagem (o dinheiro foi gasto do mesmo jeito)
   # 🧾 item 413: com ou SEM teste, a conversa guarda quem a atendeu (motor,
   # Roteiro, custo): é o que alimenta o Comparativo de caixas (Crm::AttendanceUsage)
   def track_experiment_call(conversation, agent_key, cfg, service, result)
-    call = { 'cost_usd' => service.spent_usd, 'model' => result[:modelo], 'error' => result[:error].present?,
-             'fallback' => result[:reserva].present? }
+    # 🧑‍🏫 item 414: no placar, o motor da variante é o PRINCIPAL (o consultor só deu a segunda opinião)
+    call = { 'cost_usd' => service.spent_usd, 'model' => result.dig(:consultor, 'principal').presence || result[:modelo],
+             'error' => result[:error].present?, 'fallback' => result[:reserva].present? }
     Crm::AttendanceUsage.track!(conversation, agent_key, call.merge('script' => service.script_version))
     track_arm(conversation, agent_key, cfg, service, call)
   end
@@ -524,12 +579,9 @@ class Crm::ResponderAgentJob < ApplicationJob # rubocop:disable Metrics/ClassLen
   URGENT_WAIT_TEXT = 'Se estiver piorando, não espere por aqui: procure um pronto atendimento oftalmológico agora. ' \
                      'Sua mensagem fica registrada e a clínica responde no próximo horário de atendimento.'.freeze
 
-  # a passagem para humano foi por urgência clínica? (tarefa alta aberta pela
-  # IA, ou os balões/leitura falam de pronto atendimento, dor forte, perda de visão)
+  # a passagem para humano foi por urgência clínica? (regra em self.clinical_urgency?)
   def clinical_urgency?(result)
-    return true if Array(result[:acoes]).any? { |a| a['ferramenta'] == 'abrir_tarefa' && a['ok'] && a['resumo'].to_s.include?('(alta)') }
-
-    [*Array(result[:mensagens]), result[:leitura]].join(' ').match?(URGENCY_RE)
+    self.class.clinical_urgency?(result)
   end
 
   # pausado por urgência: orientação fixa (sem IA), no máximo uma a cada hora,

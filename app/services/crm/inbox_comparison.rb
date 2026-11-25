@@ -276,8 +276,18 @@ class Crm::InboxComparison # rubocop:disable Metrics/ClassLength
       staged = Crm::StageEngine.config(agent).values.map { |model| model.to_s.strip }.compact_blank
       { agente: key, nome: AGENT_LABELS[key], modo: agent['mode'].presence,
         motor: Crm::LlmCatalog.label(card), motores_por_coluna: (staged - [card]).uniq.map { |model| Crm::LlmCatalog.label(model) },
-        teste: experiment && mode != 'a' ? test_json(experiment, mode) : nil }
+        teste: experiment && mode != 'a' ? test_json(experiment, mode) : nil,
+        caixa: own_engine_json(agent, inbox_id) }
     end
+  end
+
+  # 📥 item 416: a caixa tem motor/esforço/Roteiro próprio neste atendente?
+  def own_engine_json(agent, inbox_id)
+    entry = Crm::InboxEngine.config(agent)[inbox_id.to_s]
+    return nil unless entry.is_a?(Hash) && entry.values.any?(&:present?)
+
+    { motor: entry['model'].present? ? Crm::LlmCatalog.label(entry['model']) : nil,
+      esforco: entry['effort'].presence, roteiro: entry['script'].presence }
   end
 
   def test_json(experiment, mode)
