@@ -20,7 +20,8 @@ class Crm::PeriodComparison
   MESES = %w[janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro].freeze
   PREVIOUS_LABELS = { 'today' => 'ontem', 'yesterday' => 'anteontem', 'last2' => '2 dias anteriores',
                       'last7' => '7 dias anteriores',
-                      'last_week' => 'semana anterior', 'last90' => '90 dias anteriores' }.freeze
+                      'last_week' => 'semana anterior', 'last90' => '90 dias anteriores',
+                      'mark' => 'mesmo tempo antes do marco' }.freeze
 
   attr_reader :since, :until_at, :mode
 
@@ -36,11 +37,13 @@ class Crm::PeriodComparison
     @months_back = months_back(month)
     # mês escolhido inválido ou igual ao do período: volta para o padrão
     @mode = 'previous' if @mode == 'pick' && @months_back.zero?
+    @mode = 'previous' if @preset == 'mark'
     @since, @until_at = range
   end
 
   # "ontem", "setembro", "mesmo período de outubro" — entra depois de "vs "
   def label
+    return PREVIOUS_LABELS['mark'] if @preset == 'mark'
     return previous_label if mode == 'previous'
 
     return month_name(since) if full_month?
@@ -70,11 +73,18 @@ class Crm::PeriodComparison
   private
 
   def range
+    # 📍 item 419: desde um marco, a base é SEMPRE o mesmo tempo logo antes dele
+    # (segundo a segundo: marco à meia-noite não vira "dias inteiros")
+    return exact_previous if @preset == 'mark'
     return shifted(@months_back) unless mode == 'previous'
     return shifted(1) if full_month?
 
     return previous_days if @cur_since == @cur_since.beginning_of_day
 
+    exact_previous
+  end
+
+  def exact_previous
     prev_until = @cur_since - 1.second
     [prev_until - (@cur_until - @cur_since), prev_until]
   end

@@ -26,6 +26,9 @@ const props = defineProps({
   // compacto: sem eixo nem datas (a linha sozinha, dentro de outro cartão)
   compact: { type: Boolean, default: false },
   emptyText: { type: String, default: 'ainda sem gente suficiente' },
+  // 📍 item 419: marcos de teste — [{ pos: índice do ponto, label }] vira uma
+  // linha em pé com o alfinete no topo (o "antes" fica à esquerda dela)
+  marks: { type: Array, default: () => [] },
 });
 
 const wrap = ref(null);
@@ -96,6 +99,11 @@ const grid = computed(() =>
   }))
 );
 const gradId = `cvMini${Math.random().toString(36).slice(2, 9)}`;
+const pins = computed(() =>
+  props.marks
+    .filter(m => m && m.pos >= 0 && m.pos < props.values.length)
+    .map(m => ({ x: xAt(m.pos), label: m.label || 'marco', pos: m.pos }))
+);
 
 const active = ref(null);
 const onMove = ev => {
@@ -118,6 +126,7 @@ const tip = computed(() => {
     label: props.labels[i] || '',
     value: v === null || v === undefined ? 'pouca gente' : props.format(v),
     note: props.notes[i] || '',
+    marks: pins.value.filter(m => m.pos === i).map(m => m.label),
   };
 });
 </script>
@@ -181,6 +190,11 @@ const tip = computed(() => {
         :y2="baseY"
       />
       <path v-if="area" :d="area" :fill="`url(#${gradId})`" />
+      <g v-for="(m, k) in pins" :key="`m${k}`" class="cv-mini-marco">
+        <title>{{ m.label }}</title>
+        <line :x1="m.x" :x2="m.x" :y1="TOP - 2" :y2="TOP + plotH" />
+        <circle :cx="m.x" :cy="TOP - 2" r="3" />
+      </g>
       <line
         v-for="(b, k) in dashed"
         :key="`b${k}`"
@@ -259,6 +273,9 @@ const tip = computed(() => {
     <div v-if="tip" class="cv-mini-balao" :style="{ left: `${tip.left}%` }">
       <b>{{ tip.label }} · {{ tip.value }}</b>
       <span v-if="tip.note">{{ tip.note }}</span>
+      <span v-for="m in tip.marks" :key="m" class="cv-mini-balao-marco">
+        📍 {{ m }}
+      </span>
       <span v-if="base !== null && baseLabel">
         {{ baseLabel }}: {{ format(base) }}
       </span>
@@ -305,6 +322,23 @@ const tip = computed(() => {
   fill: var(--ml);
   stroke: rgb(var(--slate-1));
   stroke-width: 1.5;
+}
+.cv-mini-marco {
+  line {
+    stroke: rgb(var(--slate-12));
+    stroke-width: 1.3;
+    stroke-dasharray: 3 3;
+    opacity: 0.75;
+  }
+  circle {
+    fill: rgb(var(--slate-12));
+    stroke: rgb(var(--slate-1));
+    stroke-width: 1.2;
+  }
+}
+.cv-mini-balao-marco {
+  color: rgb(var(--slate-12)) !important;
+  font-weight: 600;
 }
 .cv-mini-guia {
   stroke: rgb(var(--slate-8));

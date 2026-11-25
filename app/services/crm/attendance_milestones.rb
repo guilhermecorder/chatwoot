@@ -17,10 +17,21 @@ module Crm::AttendanceMilestones
     all.find { |m| m['id'] == id.to_s } || all.first
   end
 
-  def add!(account, title:, note: nil, at: nil, by: nil) # rubocop:disable Metrics/AbcSize
+  # só o marco com ESTE id (find devolve o mais novo quando não acha)
+  def find_exact(account, id)
+    return nil if id.blank?
+
+    list(account).find { |m| m['id'] == id.to_s }
+  end
+
+  # 📍 item 419: `inbox_ids` = as caixas em que a mudança valeu (vazio = todas);
+  # o Comparativo de caixas desenha o marco só nos gráficos delas
+  def add!(account, title:, note: nil, at: nil, by: nil, inbox_ids: nil) # rubocop:disable Metrics/AbcSize, Metrics/ParameterLists
     moment = (at.presence && parse(at)) || Time.current
+    boxes = Array(inbox_ids).map(&:to_i).select(&:positive?).uniq.first(30)
     entry = { 'id' => SecureRandom.hex(4), 'at' => moment.iso8601, 'title' => title.to_s.strip.first(120),
-              'note' => note.to_s.strip.first(600).presence, 'by' => by.to_s.presence, 'created_at' => Time.current.iso8601 }.compact
+              'note' => note.to_s.strip.first(600).presence, 'by' => by.to_s.presence, 'created_at' => Time.current.iso8601,
+              'inbox_ids' => boxes.presence }.compact
     Cevico::SettingMerge.merge!(account, :ai_config) do |cfg|
       cfg[KEY] = ([entry] + Array(cfg[KEY])).sort_by { |m| m['at'].to_s }.reverse.first(CAP)
       cfg

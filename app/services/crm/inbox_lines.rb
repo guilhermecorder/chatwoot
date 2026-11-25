@@ -33,8 +33,11 @@ class Crm::InboxLines < Crm::InboxComparison
     semana: { janela: 4, texto: 'média móvel de 4 semanas', passo: 'semana a semana' }
   }.freeze
 
-  def initialize(account:, since:, until_at:, compare:, now: Time.current)
+  # marks = os marcos de teste da conta (Crm::AttendanceMilestones.list): os que
+  # caem dentro da linha voltam com a posição do ponto, para a tela desenhar 📍
+  def initialize(account:, since:, until_at:, compare:, now: Time.current, marks: []) # rubocop:disable Metrics/ParameterLists
     super(account: account, since: since, until_at: until_at, compare: compare, invest: nil, now: now)
+    @marks = Array(marks)
     days = ((until_at - since) / 86_400).ceil
     @regime = if days <= 2
                 :hora
@@ -55,6 +58,7 @@ class Crm::InboxLines < Crm::InboxComparison
       comparacao: @compare.to_h,
       regime: REGIMES[@regime].merge(balde: @regime.to_s, minimo: MIN_BASE),
       rotulos: @starts.drop(@lead).map { |start| start_label(start) },
+      marcos: marks_json,
       caixas: inbox_rows(tally[:inboxes], before[:inboxes]),
       **campaign_rows(tally[:campaigns], before[:campaigns])
     }
@@ -93,6 +97,21 @@ class Crm::InboxLines < Crm::InboxComparison
 
   def start_label(start)
     @regime == :hora ? start.strftime('%d/%m %Hh') : start.strftime('%d/%m')
+  end
+
+  # 📍 item 419: os marcos que caem dentro da linha, com o ponto em que ficam
+  # (pos = índice do ponto visível cujo balde contém o instante do marco)
+  def marks_json
+    visible = @starts.drop(@lead)
+    @marks.filter_map { |mark| mark_json(mark, visible) }
+  end
+
+  def mark_json(mark, visible)
+    at = Crm::AttendanceMilestones.parse(mark['at'])&.in_time_zone(TZ)
+    pos = at && visible.rindex { |start| start <= at }
+    return if pos.nil? || at >= step(visible.last, 1)
+
+    { id: mark['id'], titulo: mark['title'], quando: at.strftime('%d/%m %Hh%M'), pos: pos, inbox_ids: Array(mark['inbox_ids']).map(&:to_i) }
   end
 
   # ── a turma de agora (com a folga), em cada recorte ──────────────────────

@@ -37,6 +37,7 @@ const pal = useCevicoPalette({
   blocks: [
     { id: 'placar', label: 'Placar', icon: 'i-lucide-trophy' },
     { id: 'linhas', label: 'Linhas', icon: 'i-lucide-activity' },
+    { id: 'marcos', label: 'Marcos de teste', icon: 'i-lucide-map-pin' },
     { id: 'tabela', label: 'Lado a lado', icon: 'i-lucide-table-2' },
     { id: 'tempo', label: 'Dia a dia', icon: 'i-lucide-trending-up' },
     { id: 'duelo', label: 'Frente a frente', icon: 'i-lucide-swords' },
@@ -60,6 +61,12 @@ const linesLoading = ref(false);
 const lineView = ref('taxa');
 const openCampaign = ref(null); // a campanha com a sanfona de criativos aberta
 const allCampaigns = ref(false);
+// 📍 item 419: marcos de teste (a caixa comparada com ela mesma)
+const marks = ref([]);
+const canMark = ref(false);
+const markForm = ref({ title: '', at: '', inbox_ids: [], note: '' });
+const markBusy = ref(false);
+const markErasing = ref(null);
 let seq = 0;
 let primed = false; // as operacionais só são escondidas sozinhas na primeira carga
 
@@ -94,13 +101,18 @@ const load = async () => {
   seq += 1;
   const mine = seq;
   loading.value = true;
-  const params = {
-    preset: period.value.preset,
-    ...(period.value.preset === 'custom'
-      ? { from: period.value.from, to: period.value.to }
-      : {}),
-    ...compareParams(compare.value),
-  };
+  // 📍 desde um marco: o período é "do marco até agora" e a base é sempre o
+  // mesmo tempo logo antes dele (a régua de comparação não entra)
+  const params =
+    period.value.preset === 'mark'
+      ? { preset: 'mark', mark: period.value.mark, compare: 'previous' }
+      : {
+          preset: period.value.preset,
+          ...(period.value.preset === 'custom'
+            ? { from: period.value.from, to: period.value.to }
+            : {}),
+          ...compareParams(compare.value),
+        };
   loadLines(params, mine);
   try {
     const { data: payload } = await CrmAPI.getInboxComparison(params);
@@ -115,7 +127,20 @@ watch(
   () => [JSON.stringify(period.value), JSON.stringify(compare.value)],
   load
 );
-onMounted(load);
+const loadMarks = async () => {
+  try {
+    const { data: payload } = await CrmAPI.getInboxMarks();
+    marks.value = payload.marcos || [];
+    canMark.value = payload.pode_marcar === true;
+  } catch {
+    // os marcos são um complemento: sem eles a tela segue igual
+    marks.value = [];
+  }
+};
+onMounted(() => {
+  load();
+  loadMarks();
+});
 
 // ── as caixas, já com as taxas calculadas ─────────────────────────────────
 const todas = computed(() =>
@@ -566,6 +591,75 @@ const linhasFrase = computed(() => {
     : `Quantas pessoas novas chegaram, ${r.passo}, em cada cartão.`;
 });
 
+// ── 📍 MARCOS DE TESTE (item 419): a caixa comparada com ela mesma ───────────
+const markMode = computed(() => period.value.preset === 'mark');
+const activeMark = computed(() =>
+  markMode.value
+    ? marks.value.find(m => m.id === period.value.mark) || null
+    : null
+);
+// os alfinetes de um gráfico: os marcos que caem na linha e valem para a caixa
+const marksFor = inboxId =>
+  (lines.value?.marcos || [])
+    .filter(m => !m.inbox_ids.length || m.inbox_ids.includes(inboxId))
+    .map(m => ({ pos: m.pos, label: `${m.titulo} (${m.quando})` }));
+const haQuanto = m => {
+  const h = Number(m.horas || 0);
+  if (h < 1) return 'há menos de 1 hora';
+  if (h < 48)
+    return `há ${Math.round(h)} ${Math.round(h) === 1 ? 'hora' : 'horas'}`;
+  return `há ${Math.round(h / 24)} dias`;
+};
+const cedo = computed(() => !!activeMark.value && activeMark.value.horas < 72);
+const compararMarco = m => {
+  period.value = { preset: 'mark', mark: m.id, from: '', to: '' };
+};
+const sairDoMarco = () => {
+  period.value = { preset: 'last7', from: '', to: '' };
+};
+const marcarCaixa = id => {
+  const ids = markForm.value.inbox_ids;
+  markForm.value.inbox_ids = ids.includes(id)
+    ? ids.filter(x => x !== id)
+    : [...ids, id];
+};
+const anotarMarco = async () => {
+  if (!markForm.value.title.trim() || markBusy.value) return;
+  markBusy.value = true;
+  try {
+    const { data: payload } = await CrmAPI.addInboxMark({
+      title: markForm.value.title,
+      // datetime-local vem na hora do computador da pessoa: vai com o fuso junto
+      at: markForm.value.at ? new Date(markForm.value.at).toISOString() : '',
+      inbox_ids: markForm.value.inbox_ids,
+      note: markForm.value.note,
+    });
+    marks.value = payload.marcos || [];
+    markForm.value = { title: '', at: '', inbox_ids: [], note: '' };
+    useAlert('Marco anotado.');
+    load();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui anotar o marco.');
+  } finally {
+    markBusy.value = false;
+  }
+};
+const apagarMarco = async m => {
+  if (markErasing.value !== m.id) {
+    markErasing.value = m.id; // primeiro toque arma, o segundo apaga
+    return;
+  }
+  try {
+    const { data: payload } = await CrmAPI.removeInboxMark(m.id);
+    marks.value = payload.marcos || [];
+    markErasing.value = null;
+    if (period.value.mark === m.id) sairDoMarco();
+    else load();
+  } catch (e) {
+    useAlert(e?.response?.data?.error || 'Não consegui apagar o marco.');
+  }
+};
+
 // ── SANFONA DOS BLOCOS: o que a pessoa fechou fica fechado na próxima visita ──
 const DOBRAS_KEY = 'cevico_inbox_compare_dobras';
 const lerDobras = () => {
@@ -604,6 +698,7 @@ const dobrar = id => {
         class="max-w-full"
       />
       <CompareRuler
+        v-if="!markMode"
         :model-value="compare"
         :resolved="data?.comparacao"
         glass
@@ -616,6 +711,39 @@ const dobrar = id => {
       >
         <span class="i-lucide-refresh-cw text-xs" />
         Atualizar
+      </button>
+    </div>
+
+    <!-- ══ 📍 vendo "desde um marco" (item 419) ══ -->
+    <div v-if="markMode" class="cvx-marco-faixa mb-5">
+      <span class="i-lucide-map-pin flex-shrink-0 mt-0.5" aria-hidden="true" />
+      <div class="flex-1 min-w-[220px]">
+        <p class="font-semibold text-n-slate-12">
+          Cada caixa com ela mesma, desde o marco
+          <template v-if="activeMark">
+            “{{ activeMark.titulo }}” ({{ activeMark.quando }})
+          </template>
+        </p>
+        <p class="text-xs text-n-slate-11 mt-1">
+          Os números da tela são de quem chegou DEPOIS do marco. As setas ▲▼ e a
+          linha tracejada comparam com quem chegou no mesmo tempo logo ANTES
+          dele, com o mesmo prazo para agendar dos dois lados.
+          <template v-if="data?.comparacao?.datas">
+            Antes = {{ data.comparacao.datas }}.
+          </template>
+        </p>
+        <p v-if="cedo" class="text-xs text-n-slate-11 mt-1">
+          <b>Ainda é cedo para concluir:</b> o marco foi
+          {{ haQuanto(activeMark) }}. Volte a olhar com 7 dias ou mais; com
+          pouca gente, a taxa pula muito.
+        </p>
+      </div>
+      <button
+        type="button"
+        class="cv-btn cv-btn-ghost cv-btn-sm flex-shrink-0"
+        @click="sairDoMarco"
+      >
+        Voltar à régua
       </button>
     </div>
 
@@ -767,6 +895,7 @@ const dobrar = id => {
                     :base="c.antes"
                     :base-label="rotuloBase"
                     :format="lineFormat"
+                    :marks="marksFor(c.inbox_id)"
                   />
                 </div>
               </div>
@@ -809,6 +938,7 @@ const dobrar = id => {
                       :base="c.antes"
                       :base-label="rotuloBase"
                       :format="lineFormat"
+                      :marks="marksFor(c.caixa_id)"
                     />
                     <div class="cvx-linha-pe">
                       <span class="cvx-linha-caixa" :title="c.caixaNome">
@@ -887,6 +1017,7 @@ const dobrar = id => {
                           :base="ad.antes"
                           :base-label="rotuloBase"
                           :format="lineFormat"
+                          :marks="marksFor(c.caixa_id)"
                         />
                       </div>
                     </div>
@@ -913,6 +1044,140 @@ const dobrar = id => {
                 lista.
               </p>
             </template>
+          </template>
+        </div>
+
+        <!-- ══ 📍 MARCOS DE TESTE: a caixa com ela mesma (item 419) ══ -->
+        <div class="cv-block p-6 sm:p-9 mb-6" :style="blockVars('marcos')">
+          <button
+            type="button"
+            class="cvx-dobra"
+            :aria-expanded="!fechado('marcos')"
+            @click="dobrar('marcos')"
+          >
+            <h2
+              class="text-xl sm:text-2xl font-bold tracking-tight text-n-slate-12"
+            >
+              Marcos de teste: cada caixa com ela mesma
+            </h2>
+            <span class="i-lucide-chevron-down cvx-dobra-seta" />
+          </button>
+          <template v-if="!fechado('marcos')">
+            <p class="text-xs text-n-slate-10 mt-2 mb-5 max-w-3xl">
+              Anote o dia e a hora em que algo mudou numa caixa (roteiro, motor,
+              campanha). O marco vira uma linha em pé nos gráficos dela, e
+              “Comparar antes × depois” mostra a mesma caixa com o mesmo tempo
+              dos dois lados do marco.
+            </p>
+            <div v-if="marks.length" class="cvx-marcos">
+              <div
+                v-for="m in marks"
+                :key="m.id"
+                class="cv-sub p-4 cvx-marco"
+                :class="{ 'cvx-marco--ativo': activeMark?.id === m.id }"
+              >
+                <p class="text-sm font-semibold text-n-slate-12">
+                  <span class="i-lucide-map-pin text-xs" aria-hidden="true" />
+                  {{ m.titulo }}
+                </p>
+                <p class="text-[11px] text-n-slate-10 mt-1">
+                  {{ m.quando }} · {{ haQuanto(m) }} ·
+                  {{
+                    m.caixas.length ? m.caixas.join(', ') : 'todas as caixas'
+                  }}
+                </p>
+                <p v-if="m.nota" class="text-xs text-n-slate-11 mt-2">
+                  {{ m.nota }}
+                </p>
+                <div class="flex items-center gap-2 flex-wrap mt-3">
+                  <button
+                    type="button"
+                    class="cv-btn cv-btn-sm"
+                    @click="compararMarco(m)"
+                  >
+                    <span class="i-lucide-git-compare-arrows text-xs" />
+                    Comparar antes × depois
+                  </button>
+                  <button
+                    v-if="canMark"
+                    type="button"
+                    class="cv-btn cv-btn-ghost cv-btn-sm"
+                    @click="apagarMarco(m)"
+                    @blur="markErasing = null"
+                  >
+                    {{
+                      markErasing === m.id
+                        ? 'Toque de novo para apagar'
+                        : 'Apagar'
+                    }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <p v-else class="text-xs text-n-slate-10">
+              Nenhum marco anotado ainda.
+            </p>
+
+            <form
+              v-if="canMark"
+              class="cvx-marco-form"
+              @submit.prevent="anotarMarco"
+            >
+              <p class="cvx-rotulo mb-2">Anotar um marco</p>
+              <div class="cvx-marco-campos">
+                <input
+                  v-model="markForm.title"
+                  class="cv-input"
+                  maxlength="120"
+                  placeholder="O que mudou? Ex.: INSTAGRAM passou ao Roteiro 2"
+                  aria-label="O que mudou"
+                />
+                <input
+                  v-model="markForm.at"
+                  type="datetime-local"
+                  class="cv-input"
+                  aria-label="Dia e hora do marco (em branco = agora)"
+                  title="Dia e hora em que mudou. Em branco = agora."
+                />
+              </div>
+              <p class="text-[11px] text-n-slate-10 mt-3 mb-2">
+                Em quais caixas valeu? Sem escolher, o marco aparece em todas.
+              </p>
+              <div class="flex items-center gap-2 flex-wrap">
+                <button
+                  v-for="c in todas"
+                  :key="c.inbox_id"
+                  type="button"
+                  class="cvx-caixa"
+                  :class="{
+                    'cvx-caixa--off': !markForm.inbox_ids.includes(c.inbox_id),
+                  }"
+                  :style="{ '--cx': c.cor }"
+                  :aria-pressed="markForm.inbox_ids.includes(c.inbox_id)"
+                  @click="marcarCaixa(c.inbox_id)"
+                >
+                  <span class="cvx-ponto" />
+                  {{ c.nome }}
+                </button>
+              </div>
+              <div class="cvx-marco-campos mt-3">
+                <input
+                  v-model="markForm.note"
+                  class="cv-input"
+                  maxlength="600"
+                  placeholder="Observação (opcional)"
+                  aria-label="Observação"
+                />
+                <button
+                  type="submit"
+                  class="cv-btn cv-btn-sm"
+                  :disabled="markBusy || !markForm.title.trim()"
+                >
+                  <span class="i-lucide-map-pin text-xs" />
+                  Anotar marco
+                </button>
+              </div>
+            </form>
           </template>
         </div>
 
@@ -1132,6 +1397,7 @@ const dobrar = id => {
                     :base-label="rotuloBase"
                     :format="lineFormat"
                     :height="92"
+                    :marks="marksFor(c.inbox_id)"
                   />
                 </div>
 
@@ -1640,6 +1906,40 @@ const dobrar = id => {
   .cvx-dobra-seta {
     margin-top: 0;
     font-size: 0.8rem;
+  }
+}
+.cvx-marco-faixa {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.1rem;
+  border-radius: 1rem;
+  font-size: 0.875rem;
+  background: rgb(var(--slate-12) / 0.05);
+  border: 1px dashed rgb(var(--slate-9) / 0.6);
+}
+.cvx-marcos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+.cvx-marco--ativo {
+  outline: 2px solid rgb(var(--slate-12) / 0.55);
+  outline-offset: 1px;
+}
+.cvx-marco-form {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid rgb(var(--slate-6) / 0.6);
+}
+.cvx-marco-campos {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+  @media (max-width: 640px) {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 .cvx-sanfona {

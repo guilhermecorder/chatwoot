@@ -11,6 +11,8 @@
 #   stage_ids               colunas do CRM de onde a base sai
 #   procedure               'todas' | 'refrativa' | 'lentes' | 'catarata' (pelo procedimento do card)
 #   min_age_days            só quem chegou há pelo menos N dias (padrão 3)
+#   stage_days_min / _max   📅 item 419: só quem ESTÁ NA COLUNA há entre N e M dias (0 = sem limite);
+#                           ex.: Envio de Orçamento, de 30 a 40 dias = "recebeu o orçamento há um mês"
 #   quiet_hours             fora quem conversou nas últimas N horas (padrão 24)
 #   skip_future_appointment fora quem tem consulta/cirurgia marcada (padrão true)
 #   exclude_campaign_days   fora quem recebeu QUALQUER campanha há menos de N dias (padrão 30)
@@ -29,21 +31,26 @@ module Crm::SegmentBuilder # rubocop:disable Metrics/ModuleLength
   LENTES_SQL = 'artisan|f[aá]cic|trifocal|faco|lente|presbi|\yicl\y|multifocal'.freeze
   DEFAULTS = {
     'stage_ids' => [], 'procedure' => 'todas', 'min_age_days' => 3, 'quiet_hours' => 24,
-    'skip_future_appointment' => true, 'exclude_campaign_days' => 30, 'size' => 100, 'order' => 'random', 'seed' => ''
+    'skip_future_appointment' => true, 'exclude_campaign_days' => 30, 'size' => 100, 'order' => 'random', 'seed' => '',
+    'stage_days_min' => 0, 'stage_days_max' => 0
   }.freeze
-  LIMITS = { 'min_age_days' => 0..365, 'quiet_hours' => 0..720, 'exclude_campaign_days' => 0..365, 'size' => 0..50_000 }.freeze
+  LIMITS = { 'min_age_days' => 0..365, 'quiet_hours' => 0..720, 'exclude_campaign_days' => 0..365, 'size' => 0..50_000,
+             'stage_days_min' => 0..730, 'stage_days_max' => 0..730 }.freeze
+  # 📅 item 419: desde quando o card está na coluna (card antigo sem a data de mudança: vale a criação dele)
+  STAGE_SINCE_SQL = 'COALESCE(crm_contacts.stage_moved_at, crm_contacts.created_at)'.freeze
   # as etapas da peneira, na ordem, com o nome que a tela mostra
   STEPS = {
     'protegidos' => 'não perturbe / paciente de parceiro',
     'conversando' => 'conversou nas últimas horas',
     'consulta_marcada' => 'tem consulta ou cirurgia marcada',
     'muito_novos' => 'chegou há poucos dias',
+    'fora_da_janela' => 'fora da janela de dias na coluna',
     'em_segmento' => 'já está em outro segmento',
     'campanha_recente' => 'recebeu campanha há pouco'
   }.freeze
 
   # ── configuração ─────────────────────────────────────────────────────────
-  def normalize_source(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  def normalize_source(raw) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     raw = raw.is_a?(Hash) ? raw.deep_stringify_keys : {}
     cfg = {}
     cfg['stage_ids'] = Array(raw['stage_ids']).map(&:to_i).select(&:positive?).uniq.first(30)
@@ -52,6 +59,8 @@ module Crm::SegmentBuilder # rubocop:disable Metrics/ModuleLength
     cfg['skip_future_appointment'] = raw.key?('skip_future_appointment') ? truthy?(raw['skip_future_appointment']) : true
     LIMITS.each_key { |k| cfg[k] = clamp(raw[k], DEFAULTS[k], LIMITS[k]) }
     cfg['seed'] = raw['seed'].to_s.first(40)
+    # janela ao contrário (mínimo maior que o máximo): vale só o mínimo
+    cfg['stage_days_max'] = 0 if cfg['stage_days_max'].positive? && cfg['stage_days_max'] < cfg['stage_days_min']
     cfg
   end
 
@@ -126,7 +135,15 @@ module Crm::SegmentBuilder # rubocop:disable Metrics/ModuleLength
     scope = base_scope(account, src)
     (exclusions || exclusions(account, src, now)).each_value { |ids| scope = scope.where.not(contact_id: ids) if ids.any? }
     scope = scope.where('contacts.created_at <= ?', now - src['min_age_days'].days) if src['min_age_days'].positive?
-    scope.reorder(Arel.sql(order_sql(src)))
+    stage_window(scope, src, now).reorder(Arel.sql(order_sql(src)))
+  end
+
+  # 📅 item 419: "está na coluna há entre N e M dias" (dias corridos, os dois lados contam:
+  # 30 a 40 = quem entrou na coluna de 40 dias atrás até 30 dias atrás)
+  def stage_window(scope, src, now)
+    scope = scope.where("#{STAGE_SINCE_SQL} <= ?", now - src['stage_days_min'].days) if src['stage_days_min'].positive?
+    scope = scope.where("#{STAGE_SINCE_SQL} > ?", now - (src['stage_days_max'] + 1).days) if src['stage_days_max'].positive?
+    scope
   end
 
   def order_sql(src)
@@ -145,7 +162,7 @@ module Crm::SegmentBuilder # rubocop:disable Metrics/ModuleLength
     removed = {}
     scope = base
     STEPS.each_key do |key|
-      next if key == 'muito_novos'
+      next if %w[muito_novos fora_da_janela].include?(key)
 
       before = scope.count
       scope = scope.where.not(contact_id: ex[key]) if ex[key].any?
@@ -154,6 +171,9 @@ module Crm::SegmentBuilder # rubocop:disable Metrics/ModuleLength
     before = scope.count
     scope = scope.where('contacts.created_at <= ?', now - src['min_age_days'].days) if src['min_age_days'].positive?
     removed['muito_novos'] = before - scope.count
+    before = scope.count
+    scope = stage_window(scope, src, now)
+    removed['fora_da_janela'] = before - scope.count
     eligible = scope.count
     will_take = src['size'].positive? ? [src['size'], eligible].min : eligible
     by_stage = stage_rows(account, src, base, scope)

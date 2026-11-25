@@ -23,6 +23,15 @@ RSpec.describe Crm::PeriodComparison do
     expect(cmp.range_label).to eq('29/10–04/11')
   end
 
+  # 📍 item 419: desde um marco, a base é o mesmo tempo logo antes (mesmo com o marco à meia-noite)
+  it 'desde um marco, compara com o mesmo tempo logo antes dele', :aggregate_failures do
+    cmp = described_class.new(at('2026-11-24 00:00'), at('2026-11-25 15:00'), preset: 'mark', mode: 'month')
+    expect(cmp.mode).to eq('previous')
+    expect(cmp.label).to eq('mesmo tempo antes do marco')
+    expect(cmp.until_at).to eq(at('2026-11-24 00:00') - 1.second)
+    expect(cmp.until_at - cmp.since).to eq(39.hours)
+  end
+
   it 'hoje compara com ontem' do
     cmp = described_class.new(at('2026-11-11 00:00'), at('2026-11-11 23:59:59'), preset: 'today')
 

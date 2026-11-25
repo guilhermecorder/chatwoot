@@ -54,7 +54,7 @@ const clone = v => JSON.parse(JSON.stringify(v));
 const name = ref('');
 const kind = ref('teste');
 const source = ref({ stage_ids: [], procedure: 'todas', size: 100, order: 'random', min_age_days: 3, quiet_hours: 24,
-  skip_future_appointment: true, exclude_campaign_days: 30 });
+  skip_future_appointment: true, exclude_campaign_days: 30, stage_days_min: 0, stage_days_max: 0 });
 const pace = ref({ per_hour: 150, step_minutes: 60, hour_from: 9, hour_to: 18, weekdays_only: true, daily_cap: 1000,
   inbox_daily_cap: 300, default_inbox_id: 0, route_by_origin: true });
 // uma vaga por mensagem: { data: variante montada (ou null) }
@@ -166,6 +166,12 @@ const baseSentence = computed(() => {
   const bits = [`pessoas de ${s.stage_ids.map(stageName).join(', ')}`];
   if (s.procedure !== 'todas') bits.push(`só ${PROCEDURES.find(p => p.key === s.procedure)?.label.toLowerCase()}`);
   if (Number(s.min_age_days) > 0) bits.push(`que chegaram há ${s.min_age_days}+ dias`);
+  // 📅 item 419: a janela de dias na coluna ("recebeu o orçamento há um mês")
+  const de = Number(s.stage_days_min) || 0;
+  const ate = Number(s.stage_days_max) || 0;
+  if (de > 0 && ate >= de) bits.push(`que estão na coluna há entre ${de} e ${ate} dias`);
+  else if (de > 0) bits.push(`que estão na coluna há ${de}+ dias`);
+  else if (ate > 0) bits.push(`que estão na coluna há no máximo ${ate} dias`);
   if (Number(s.quiet_hours) > 0) bits.push(`sem conversa nas últimas ${s.quiet_hours} h`);
   if (s.skip_future_appointment) bits.push('sem consulta marcada');
   if (Number(s.exclude_campaign_days) > 0) bits.push(`sem campanha nos últimos ${s.exclude_campaign_days} dias`);
@@ -267,6 +273,13 @@ const reserve = async () => {
               chegou há
               <input v-model.number="source.min_age_days" type="number" min="0" max="365" class="cv-input !h-8 w-16 text-right" :disabled="!canEdit" @input="touch" />
               + dias
+            </label>
+            <label class="flex items-center gap-1.5" title="Conta desde o dia em que o card entrou na coluna. Ex.: Envio de Orçamento, de 30 a 40 dias = recebeu o orçamento há cerca de um mês. Zero = sem limite.">
+              está na coluna há de
+              <input v-model.number="source.stage_days_min" type="number" min="0" max="730" class="cv-input !h-8 w-16 text-right" :disabled="!canEdit" @input="touch" />
+              a
+              <input v-model.number="source.stage_days_max" type="number" min="0" max="730" class="cv-input !h-8 w-16 text-right" :disabled="!canEdit" @input="touch" />
+              dias
             </label>
             <label class="flex items-center gap-1.5">
               conversou nas últimas

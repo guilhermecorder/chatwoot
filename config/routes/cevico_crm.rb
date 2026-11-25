@@ -438,6 +438,10 @@ namespace :crm do
   resource :inbox_comparison, only: [:show], controller: 'inbox_comparisons' do
     # 📈 item 418: mini gráficos de linha por caixa, campanha e criativo
     get :lines
+    # 📍 item 419: marcos de teste (a caixa comparada com ela mesma)
+    get :marks
+    post :mark
+    post :unmark
   end
   # 🧪 Laboratório de atendimento (item 403, só admin): comparação dos testes A/B dos atendentes
   resource :attendance_lab, only: [:show], controller: 'attendance_labs' do

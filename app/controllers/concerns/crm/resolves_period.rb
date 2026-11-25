@@ -27,7 +27,23 @@ module Crm
       when 'last90'    then [(now - 89.days).beginning_of_day, now.end_of_day]
       when 'year'      then [now.beginning_of_year, now.end_of_day]
       when 'custom'    then custom_period_range(now)
+      # 📍 item 419: "desde o marco" (?mark=id) — do instante do marco até agora
+      when 'mark'      then mark_period_range(now)
       end
+    end
+
+    # 📍 item 419 (marcos de teste): a caixa comparada COM ELA MESMA. O período
+    # vai do instante do marco até agora (agora arredondado de 5 em 5 minutos,
+    # para o cache valer); a base de comparação é o MESMO tempo logo antes do
+    # marco (Crm::PeriodComparison). Marco que não existe ou no futuro: nil
+    # (a tela cai na régua de sempre).
+    def mark_period_range(now = PERIOD_TZ.now)
+      mark = Crm::AttendanceMilestones.find_exact(Current.account, params[:mark])
+      at = mark && Crm::AttendanceMilestones.parse(mark['at'])
+      return nil if at.nil? || at >= now
+
+      upto = now.change(min: now.min - (now.min % 5))
+      [at.in_time_zone(PERIOD_TZ), upto > at ? upto : now]
     end
 
     # 📐 item 394: a BASE DE COMPARAÇÃO do período (?compare=previous|month|pick

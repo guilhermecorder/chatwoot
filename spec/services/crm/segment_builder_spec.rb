@@ -88,6 +88,32 @@ RSpec.describe Crm::SegmentBuilder do
       .to raise_error(ArgumentError, /UMA mensagem/)
   end
 
+  # 📅 item 419: "recebeu o orçamento há um mês" = está na coluna há entre 30 e 40 dias
+  it 'janela de dias na coluna: só entra quem está na coluna há entre N e M dias' do
+    dias = { 'Hoje' => 2, 'Trinta' => 30, 'Trinta e cinco' => 35, 'Quarenta' => 40, 'Quarenta e um' => 41, 'Antiga' => 90 }
+    dias.each_with_index do |(nome, quantos), i|
+      contact = card!(nome, "+551198888000#{i}")
+      Crm::Contact.find_by(contact: contact).update_columns(stage_moved_at: quantos.days.ago - 1.hour) # rubocop:disable Rails/SkipsModelValidations
+    end
+    # card antigo sem a data de mudança: vale a criação do card
+    sem_data = card!('Sem data', '+5511988880009')
+    Crm::Contact.find_by(contact: sem_data).update_columns(stage_moved_at: nil, created_at: 33.days.ago) # rubocop:disable Rails/SkipsModelValidations
+
+    janela = described_class.normalize_source(source.merge('size' => 0, 'stage_days_min' => 30, 'stage_days_max' => 40))
+    nomes = described_class.pool(account, janela).map { |card| card.contact.name }
+    expect(nomes).to contain_exactly('Trinta', 'Trinta e cinco', 'Quarenta', 'Sem data')
+
+    preview = described_class.preview(account, janela)
+    expect(preview[:eligible]).to eq(4)
+    expect(preview[:removed].find { |row| row[:key] == 'fora_da_janela' }[:count]).to eq(3)
+
+    so_minimo = described_class.normalize_source(source.merge('size' => 0, 'stage_days_min' => 41))
+    expect(described_class.pool(account, so_minimo).map { |card| card.contact.name }).to contain_exactly('Quarenta e um', 'Antiga')
+    # sem janela nada muda; janela ao contrário vale só o mínimo
+    expect(described_class.preview(account, described_class.normalize_source(source.merge('size' => 0)))[:eligible]).to eq(7)
+    expect(described_class.normalize_source('stage_days_min' => 40, 'stage_days_max' => 30)['stage_days_max']).to eq(0)
+  end
+
   it 'manda no ritmo (leva = por hora × minutos/60), registra por pessoa e campanha-filha, e conclui quando acabar' do
     fake_sender
     (1..4).each { |i| card!("Pessoa #{i}", "+551199999000#{i}") }

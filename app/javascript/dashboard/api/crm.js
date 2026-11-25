@@ -1439,6 +1439,19 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/inbox_comparison/lines`, { params });
   }
 
+  // 📍 item 419: marcos de teste do Comparativo (a caixa comparada com ela mesma)
+  getInboxMarks() {
+    return axios.get(`${this.url}/inbox_comparison/marks`);
+  }
+
+  addInboxMark(payload) {
+    return axios.post(`${this.url}/inbox_comparison/mark`, payload);
+  }
+
+  removeInboxMark(id) {
+    return axios.post(`${this.url}/inbox_comparison/unmark`, { id });
+  }
+
   // 🧪 item 403: Laboratório de atendimento (comparação dos testes A/B)
   getAttendanceLab(params) {
     return axios.get(`${this.url}/attendance_lab`, { params });
