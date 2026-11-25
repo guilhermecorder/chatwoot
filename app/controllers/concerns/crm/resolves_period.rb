@@ -18,6 +18,8 @@ module Crm
       case params[:preset].presence
       when 'today'     then [now.beginning_of_day, now.end_of_day]
       when 'yesterday' then [now.yesterday.beginning_of_day, now.yesterday.end_of_day]
+      # 📈 item 418: "Hoje + ontem" (os dois dias somados; só as telas que pedem mostram a pílula)
+      when 'last2'     then [now.yesterday.beginning_of_day, now.end_of_day]
       when 'last7'     then [(now - 6.days).beginning_of_day, now.end_of_day]
       when 'last_week' then [now.last_week.beginning_of_week, now.last_week.end_of_week]
       when 'month'     then [now.beginning_of_month, now.end_of_day]

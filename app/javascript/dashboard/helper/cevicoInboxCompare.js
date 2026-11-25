@@ -100,3 +100,74 @@ export const humanMinutes = minutes => {
   const days = Math.round((m / 1440) * 10) / 10;
   return `${String(days).replace('.', ',')} dias`;
 };
+
+// ── 📈 item 418 (25/11): as contas dos MINI GRÁFICOS DE LINHA ──────────────
+// As mesmas 10 cores do servidor (Crm::InboxComparison::PALETTE): campanhas e
+// criativos ganham uma cor cada, na ordem em que aparecem.
+export const LINE_PALETTE = [
+  '#2563EB',
+  '#EA580C',
+  '#059669',
+  '#7C3AED',
+  '#DB2777',
+  '#0D9488',
+  '#B8860B',
+  '#DC2626',
+  '#475569',
+  '#0891B2',
+];
+
+// teto e marcas do eixo, redondos, para um grupo de mini gráficos usar a MESMA
+// escala (aí dá para comparar um cartão com o outro só de olhar).
+//   percent: 10 · 20 · 30 · 40 · 60 · 80 · 100
+//   número:  2 · 4 · 6 · 10 · 20 · 40 · 60 · 100 · 200 …
+const PERCENT_SCALES = [
+  [10, 5],
+  [20, 10],
+  [30, 10],
+  [40, 20],
+  [60, 20],
+  [80, 40],
+  [100, 50],
+];
+export const scaleFor = (values, { percent = false } = {}) => {
+  const max = Math.max(
+    0,
+    ...(values || []).filter(v => v !== null && v !== undefined).map(Number)
+  );
+  if (percent) {
+    const [top, step] =
+      PERCENT_SCALES.find(([limit]) => max <= limit) || PERCENT_SCALES.at(-1);
+    const ticks = [];
+    for (let v = 0; v <= top; v += step) ticks.push(v);
+    return { top, ticks };
+  }
+  let top = 2;
+  for (let pow = 1; pow <= 1e9; pow *= 10) {
+    const hit = [2, 4, 6, 10].map(b => b * pow).find(c => c >= max);
+    if (hit) {
+      top = hit;
+      break;
+    }
+  }
+  return { top, ticks: [0, top / 2, top] };
+};
+
+// uma série com buracos (null) vira: trechos CHEIOS (pontos vizinhos com dado)
+// e PONTES (ligam um trecho ao seguinte por cima do buraco; a tela desenha
+// pontilhado — nunca zero falso). Cada ponto = [índice, valor].
+export const lineRuns = values => {
+  const runs = [];
+  let current = [];
+  (values || []).forEach((v, i) => {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) {
+      if (current.length) runs.push(current);
+      current = [];
+    } else current.push([i, Number(v)]);
+  });
+  if (current.length) runs.push(current);
+  const bridges = [];
+  for (let k = 0; k < runs.length - 1; k += 1)
+    bridges.push([runs[k].at(-1), runs[k + 1][0]]);
+  return { runs, bridges, last: runs.length ? runs.at(-1).at(-1) : null };
+};

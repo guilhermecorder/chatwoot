@@ -246,11 +246,8 @@ class Crm::InboxComparison # rubocop:disable Metrics/ClassLength
 
   # ── DE QUAIS CAMPANHAS A TURMA VEIO (anúncio do Meta carimbado no contato) ──
   # { inbox_id => [{ nome:, chegaram:, agendaram: }] } — as 6 maiores
-  def campaigns_of(cohort, booked) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-    ads = cohort.keys.each_slice(SLICE).with_object({}) do |slice, map|
-      account.contacts.where(id: slice).where("contacts.additional_attributes -> 'meta_ads' ->> 'source_id' IS NOT NULL")
-             .pluck(:id, Arel.sql("contacts.additional_attributes -> 'meta_ads' ->> 'source_id'")).each { |id, ad_id| map[id] = ad_id.to_s }
-    end
+  def campaigns_of(cohort, booked) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+    ads = ad_ids_of(cohort.keys)
     names = Crm::AdCreative.where(account_id: account.id, ad_id: ads.values.uniq).pluck(:ad_id, :campaign_name).to_h
     tally = Hash.new { |hash, key| hash[key] = Hash.new { |inner, name| inner[name] = { chegaram: 0, agendaram: 0 } } }
     cohort.each do |contact_id, (inbox_id, _)|
@@ -262,6 +259,14 @@ class Crm::InboxComparison # rubocop:disable Metrics/ClassLength
     end
     tally.transform_values do |list|
       list.map { |name, stat| stat.merge(nome: name) }.sort_by { |row| [-row[:chegaram], -row[:agendaram], row[:nome]] }.first(6)
+    end
+  end
+
+  # { contact_id => id do anúncio do Meta carimbado no contato }
+  def ad_ids_of(contact_ids)
+    contact_ids.each_slice(SLICE).with_object({}) do |slice, map|
+      account.contacts.where(id: slice).where("contacts.additional_attributes -> 'meta_ads' ->> 'source_id' IS NOT NULL")
+             .pluck(:id, Arel.sql("contacts.additional_attributes -> 'meta_ads' ->> 'source_id'")).each { |id, ad_id| map[id] = ad_id.to_s }
     end
   end
 

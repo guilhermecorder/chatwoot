@@ -9,7 +9,7 @@
 // migrados usam o preset direto (concern Crm::ResolvesPeriod).
 import { ref, computed, watch } from 'vue';
 import {
-  PERIOD_PRESETS,
+  periodPresetsWith,
   periodDateStr,
   periodRangeFor,
 } from 'dashboard/helper/cevicoPeriod';
@@ -21,6 +21,9 @@ const props = defineProps({
   },
   // esconde pílulas específicas quando uma tela não suporta (evitar!)
   hiddenPresets: { type: Array, default: () => [] },
+  // 📈 item 418: pílulas extras que só esta tela mostra (ex.: ['last2'] =
+  // "Hoje + ontem"); o servidor da tela precisa entender a chave
+  extraPresets: { type: Array, default: () => [] },
   // 🍎 formato novo (rodada 161): a régua veste o segmentado de vidro do
   // kit .cv-* (cor do dia). Só o Meu Painel liga; os relatórios seguem iguais.
   glass: { type: Boolean, default: false },
@@ -30,7 +33,9 @@ const emit = defineEmits(['update:modelValue']);
 
 // item 321: a lista é UMA só para o sistema inteiro (helper/cevicoPeriod.js)
 const presets = computed(() =>
-  PERIOD_PRESETS.filter(p => !props.hiddenPresets.includes(p.key))
+  periodPresetsWith(props.extraPresets).filter(
+    p => !props.hiddenPresets.includes(p.key)
+  )
 );
 
 const dateStr = periodDateStr;

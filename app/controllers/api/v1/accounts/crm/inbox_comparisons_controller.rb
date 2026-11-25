@@ -3,6 +3,8 @@
 # do Dashboard CRM (nó relatorios.crm); dinheiro (gasto de anúncio, custo por
 # lead, custo da IA) só para administrador, como lá.
 #   GET crm/inbox_comparison?preset=…&compare=previous|month|pick&compare_month=AAAA-MM
+#   GET crm/inbox_comparison/lines?…  📈 item 418: as linhas por caixa, campanha e criativo
+#     (Crm::InboxLines; pedido à parte para não pesar o comparativo; sem dinheiro)
 class Api::V1::Accounts::Crm::InboxComparisonsController < Api::V1::Accounts::BaseController
   include Crm::AccessControl
   include Crm::ResolvesPeriod
@@ -17,6 +19,16 @@ class Api::V1::Accounts::Crm::InboxComparisonsController < Api::V1::Accounts::Ba
     payload = Rails.cache.fetch(key, expires_in: CACHE_TTL) do
       Crm::InboxComparison.new(account: Current.account, since: since, until_at: until_at, compare: compare,
                                invest: admin ? invest_for(since, until_at) : nil).call
+    end
+    render json: payload
+  end
+
+  def lines
+    since, until_at = standard_period_range || custom_period_range
+    compare = period_comparison(since, until_at)
+    key = ['cevico_inbox_lines', Current.account.id, since.to_i, until_at.to_i, compare.cache_key]
+    payload = Rails.cache.fetch(key, expires_in: CACHE_TTL) do
+      Crm::InboxLines.new(account: Current.account, since: since, until_at: until_at, compare: compare).call
     end
     render json: payload
   end

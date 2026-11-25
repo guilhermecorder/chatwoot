@@ -18,7 +18,8 @@ class Crm::PeriodComparison
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   MODES = %w[previous month pick].freeze
   MESES = %w[janeiro fevereiro março abril maio junho julho agosto setembro outubro novembro dezembro].freeze
-  PREVIOUS_LABELS = { 'today' => 'ontem', 'yesterday' => 'anteontem', 'last7' => '7 dias anteriores',
+  PREVIOUS_LABELS = { 'today' => 'ontem', 'yesterday' => 'anteontem', 'last2' => '2 dias anteriores',
+                      'last7' => '7 dias anteriores',
                       'last_week' => 'semana anterior', 'last90' => '90 dias anteriores' }.freeze
 
   attr_reader :since, :until_at, :mode

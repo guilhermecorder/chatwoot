@@ -16,6 +16,26 @@ export const PERIOD_PRESETS = [
   { key: 'year', label: 'Este ano' },
 ];
 
+// 📈 item 418 (25/11): pílulas EXTRAS, que só aparecem na tela que pede
+// (PeriodRuler :extra-presets="['last2']"). "Hoje + ontem" soma os dois dias,
+// para o dia que está começando não ficar com número pequeno demais.
+export const PERIOD_EXTRAS = [
+  { key: 'last2', label: 'Hoje + ontem', after: 'yesterday' },
+];
+
+// a lista da régua com as extras pedidas, cada uma no seu lugar
+export const periodPresetsWith = (extraKeys = []) => {
+  const list = [...PERIOD_PRESETS];
+  PERIOD_EXTRAS.filter(p => extraKeys.includes(p.key)).forEach(extra => {
+    const at = list.findIndex(p => p.key === extra.after);
+    list.splice(at < 0 ? list.length : at + 1, 0, {
+      key: extra.key,
+      label: extra.label,
+    });
+  });
+  return list;
+};
+
 const pad = n => String(n).padStart(2, '0');
 export const periodDateStr = d =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -30,6 +50,7 @@ export const periodRangeFor = (key, now = new Date()) => {
     return periodDateStr(d);
   };
   if (key === 'yesterday') return { from: daysAgo(1), to: daysAgo(1) };
+  if (key === 'last2') return { from: daysAgo(1), to: today };
   if (key === 'last7') return { from: daysAgo(6), to: today };
   if (key === 'last_week') {
     // semana passada = segunda a domingo ANTERIORES

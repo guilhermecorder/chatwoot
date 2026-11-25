@@ -1,5 +1,6 @@
 import {
   PERIOD_PRESETS,
+  periodPresetsWith,
   periodRangeFor,
   periodParams,
 } from '../cevicoPeriod';
@@ -31,6 +32,19 @@ describe('cevicoPeriod', () => {
     expect(r('last_month')).toEqual({ from: '2026-09-01', to: '2026-09-30' });
     expect(r('last90')).toEqual({ from: '2026-07-06', to: '2026-10-03' });
     expect(r('year')).toEqual({ from: '2026-01-01', to: '2026-10-03' });
+  });
+
+  it('item 418: "Hoje + ontem" só entra na régua da tela que pede, logo depois de Ontem', () => {
+    expect(periodPresetsWith().map(p => p.key)).toEqual(
+      PERIOD_PRESETS.map(p => p.key)
+    );
+    const keys = periodPresetsWith(['last2']).map(p => p.key);
+    expect(keys.slice(0, 4)).toEqual(['today', 'yesterday', 'last2', 'last7']);
+    expect(keys).toHaveLength(9);
+    expect(periodRangeFor('last2', sat)).toEqual({
+      from: '2026-10-02',
+      to: '2026-10-03',
+    });
   });
 
   it('manda só o preset; De/Até apenas no Personalizado', () => {

@@ -171,7 +171,7 @@ module Cevico::AccessCatalog # rubocop:disable Metrics/ModuleLength
     'crm/people' => { node: 'pessoas', view: %w[show] },
     # ── Relatórios ──
     'crm/dashboards' => { node: 'relatorios.crm', view: %w[show pro_series loss_contacts] },
-    'crm/inbox_comparisons' => { node: 'relatorios.crm', view: %w[show] }, # 🆚 item 413
+    'crm/inbox_comparisons' => { node: 'relatorios.crm', view: %w[show lines] }, # 🆚 itens 413 e 418
     'crm/traffic_reports' => { node: 'relatorios.funil_trafego', view: %w[show] },
     'crm/doctors_dashboards' => { node: 'relatorios.medicos', view: %w[show] },
     'crm/agents_dashboards' => { node: 'relatorios.agentes', view: %w[show] },

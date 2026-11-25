@@ -435,7 +435,10 @@ namespace :crm do
   # Dashboard dos AGENTES DE IA (item 85, só admin)
   resource :ai_dashboard, only: [:show], controller: 'ai_dashboards'
   # 🆚 Comparativo de caixas de entrada (item 413): a turma de cada caixa lado a lado
-  resource :inbox_comparison, only: [:show], controller: 'inbox_comparisons'
+  resource :inbox_comparison, only: [:show], controller: 'inbox_comparisons' do
+    # 📈 item 418: mini gráficos de linha por caixa, campanha e criativo
+    get :lines
+  end
   # 🧪 Laboratório de atendimento (item 403, só admin): comparação dos testes A/B dos atendentes
   resource :attendance_lab, only: [:show], controller: 'attendance_labs' do
     post :finish
