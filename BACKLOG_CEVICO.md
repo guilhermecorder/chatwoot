@@ -10088,3 +10088,9 @@ Nasceu do experimento da caixa **CONFIRMAÇÃO DE CONSULTA (+55 11 91873-9220)**
 - **Servidor** (`settings_controller.rb`): aceita os nomes novos das paletas (senão a cor "para todo mundo" voltava ao padrão).
 
 **Testado (26/11):** 54 testes de tela + 25 do servidor na sessão das cores (um novo mede contraste e confusão em cada tipo de daltonismo); conferido na tela no computador e no celular, com filtro que imita a visão dele. Junto com o item 422 no mesmo pacote: junção sem conflito. Sem migration. "Pode subir" dele em 26/11 à noite.
+
+## 424. 📱 MEU PAINEL DESENQUADRADO NO CELULAR: a barra de dias da Jornada alargava a página (26/11; "ele tá desenquadrado no mobile… deixa ajustadinho o meu painel como estava antes")
+- Causa: a barra "Todos os dias / Dias úteis / Fim de semana / Úteis × fim de semana" (item 421) ficava no cabeçalho do bloco, que não encolhia (`.cvg-bloco-acoes` sem `min-width: 0`); num celular de 375 px a página ia a 469 px e tudo deslizava para o lado.
+- Conserto: `.cvg-bloco-acoes { min-width: 0; max-width: 100% }` (vale para todo bloco do kit) e, no celular (≤ 720 px), as 4 escolhas em 2 × 2 inteiras. Computador sem mudança.
+- Conferido: 375 px → página 375 (antes 469); computador → barra numa linha, igual.
+- Ideia dele para depois: tela de análise própria para dias úteis × fim de semana.

@@ -456,6 +456,23 @@ const vazio = computed(
   color: #fff;
   background: var(--cv);
 }
+/* celular: as 4 escolhas em 2 × 2, inteiras na tela (a barra de uma linha
+   passava da largura e empurrava o Meu Painel para o lado) */
+@media (max-width: 720px) {
+  .cv-page .cvj-dias {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    border-radius: 16px;
+    overflow: visible;
+  }
+  .cv-page .cvj-dias-item {
+    min-width: 0;
+    padding: 0 4px;
+    font-size: 11.5px;
+    text-align: center;
+  }
+}
 .cv-page .cvj-traco--contexto {
   border-top-width: 2px;
   opacity: 0.5;

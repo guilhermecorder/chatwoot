@@ -167,7 +167,7 @@
   gap: 12px 24px;
 }
 .cv-page .cvg-bloco-head .cvg-subtitulo { margin-top: 4px; }
-.cv-page .cvg-bloco-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cv-page .cvg-bloco-acoes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
 /* o 1º bloco da tela leva a cor do dia no título; o 2º, o apoio */
 .cv-page .cvg-bloco--dia .cvg-titulo-bloco { color: var(--g-dia-texto); }
 .cv-page .cvg-bloco--apoio .cvg-titulo-bloco { color: var(--ga); }
