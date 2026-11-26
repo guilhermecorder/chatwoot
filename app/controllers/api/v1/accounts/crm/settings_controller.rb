@@ -6,8 +6,13 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
 
   # 🍎🍊 paletas do Meu Painel (rodada 162): iMac G3 + frutas da Apple; e os
   # blocos da tela que aceitam paleta própria — só chaves conhecidas entram
-  PALETTE_KEYS = %w[bondi blueberry strawberry lime tangerine grape graphite
-                    laranja limao melancia uva kiwi coco pessego cereja abacate mirtilo].freeze
+  # ♿ item 423 (26/11, daltonismo do Dr. Henrique): as 6 cores do círculo +
+  # as antigas (escolha já salva continua valendo; a tela leva para a cor nova
+  # mais parecida) e as 3 MISTURAS (modo 'mix')
+  PALETTE_KEYS = %w[amarelo azul vermelho verde laranja roxo
+                    bondi blueberry strawberry lime tangerine grape graphite
+                    limao melancia uva kiwi coco pessego cereja abacate mirtilo].freeze
+  PALETTE_MIX_KEYS = %w[primarias secundarias todas].freeze
   # escopos de paleta dos Relatórios/Dashboards (rodada 163) — além dos painéis
   REPORT_PALETTE_SCOPES = %w[report:crm report:campanhas report:funil report:medicos report:agentes
                              report:agenda report:meta report:google report:whatsapp report:etiquetas
@@ -3377,7 +3382,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # dia; "cor do dia" sem bloco próprio = nada a guardar (nil)
   def sanitize_panel_palette(raw)
     h = (raw || {}).to_h
-    key = PALETTE_KEYS.include?(h['key'].to_s) ? h['key'].to_s : ''
+    key = palette_key(h['mode'], h['key'])
     mode = palette_mode(h['mode'], key)
     blocks = sanitize_palette_blocks(h['blocks'])
     return nil if mode == 'day' && blocks.empty?
@@ -3388,8 +3393,17 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
   # modo fixo sem chave válida vira cor do dia; 'random' (item 387) = uma
   # paleta sorteada cada vez que a tela abre
   def palette_mode(raw_mode, key)
-    mode = %w[day fixed salad random].include?(raw_mode.to_s) ? raw_mode.to_s : 'day'
+    mode = %w[day fixed salad random mix].include?(raw_mode.to_s) ? raw_mode.to_s : 'day'
     mode == 'fixed' && key.blank? ? 'day' : mode
+  end
+
+  # ♿ item 423: na mistura a chave é qual mistura (sem chave válida = todas as 6)
+  def palette_key(raw_mode, raw_key)
+    if raw_mode.to_s == 'mix'
+      PALETTE_MIX_KEYS.include?(raw_key.to_s) ? raw_key.to_s : 'todas'
+    else
+      PALETTE_KEYS.include?(raw_key.to_s) ? raw_key.to_s : ''
+    end
   end
 
   # blocos: id curto da seção (cada tela tem os seus) → chave de paleta

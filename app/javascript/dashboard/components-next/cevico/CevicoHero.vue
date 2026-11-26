@@ -28,7 +28,6 @@ const {
   flavorPreview,
   openPalettePicker,
   paletteLabel,
-  pageMode,
 } = props.pal;
 // :src dinâmico de propósito: src fixo em /brand-assets vira import no Vite
 const HERO_EYE = '/brand-assets/cevico-eye.svg';
@@ -87,11 +86,8 @@ const onPaletteChip = () => openPalettePicker('panel');
               v-if="flavorPreview !== null && pagePalette === dayFlavor"
               class="opacity-75 font-normal"
             >
-              · prévia</span><span
-              v-else-if="pageMode === 'random'"
-              class="opacity-75 font-normal"
+              · prévia</span
             >
-              · aleatória</span>
             <span class="i-lucide-palette text-[10px] opacity-80" />
           </button>
           <slot name="chips" />

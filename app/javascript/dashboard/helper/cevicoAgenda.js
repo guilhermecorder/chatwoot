@@ -1,10 +1,13 @@
 // Dados e helpers da agenda da CEVICO — usados pela Agenda, pelo painel de
 // Agendamentos e pelos indicadores do Meu Painel.
 
+// ♿ item 423 (26/11, Dr. Henrique é daltônico — vermelho × verde): cores
+// conferidas no simulador de daltonismo e com letra branca legível (contraste
+// 4,5 ou mais). Henrique = ouro mais escuro; Roberta = roxo que não some no azul.
 export const DOCTORS = [
   { name: 'Dr. Gustavo Bittar', short: 'Gustavo', color: '#0F5FA6' },
-  { name: 'Dr. Henrique Gemelli', short: 'Henrique', color: '#B8860B' },
-  { name: 'Dra. Roberta Negri', short: 'Roberta', color: '#7C3AED' },
+  { name: 'Dr. Henrique Gemelli', short: 'Henrique', color: '#8A6A00' },
+  { name: 'Dra. Roberta Negri', short: 'Roberta', color: '#7E22CE' },
 ];
 
 // ── 📅 item 210 (23/09): os 4 TIPOS da agenda — cada um com a sua cor ──
@@ -23,12 +26,12 @@ export const KINDS = [
     plural: 'consultas',
     article: 'a',
     icon: 'i-lucide-stethoscope',
-    color: '#2563EB',
-    deep: '#1E40AF',
-    grad: 'linear-gradient(135deg, #1D4ED8, #3B82F6)',
-    grad2: 'linear-gradient(135deg, #2563EB, #60A5FA)',
-    grad3: 'linear-gradient(135deg, #3B82F6, #93C5FD)',
-    hero: 'linear-gradient(135deg, #152C61 0%, #1D4ED8 55%, #60A5FA 100%)',
+    color: '#1D4ED8',
+    deep: '#1E3A8A',
+    grad: 'linear-gradient(135deg, #1E3A8A, #1D4ED8)',
+    grad2: 'linear-gradient(135deg, #1D4ED8, #60A5FA)',
+    grad3: 'linear-gradient(135deg, #60A5FA, #BFDBFE)',
+    hero: 'linear-gradient(135deg, #172554 0%, #1E3A8A 55%, #60A5FA 100%)',
     hint: 'avaliação e retorno nas unidades',
   },
   {
@@ -38,12 +41,12 @@ export const KINDS = [
     plural: 'teleconsultas',
     article: 'a',
     icon: 'i-lucide-video',
-    color: '#7C3AED',
-    deep: '#5B21B6',
-    grad: 'linear-gradient(135deg, #6D28D9, #A78BFA)',
-    grad2: 'linear-gradient(135deg, #7C3AED, #C4B5FD)',
-    grad3: 'linear-gradient(135deg, #8B5CF6, #DDD6FE)',
-    hero: 'linear-gradient(135deg, #3B0764 0%, #6D28D9 55%, #A78BFA 100%)',
+    color: '#4C1D95',
+    deep: '#3B0F7A',
+    grad: 'linear-gradient(135deg, #3B0F7A, #4C1D95)',
+    grad2: 'linear-gradient(135deg, #4C1D95, #7C4DD6)',
+    grad3: 'linear-gradient(135deg, #7C4DD6, #DDD6FE)',
+    hero: 'linear-gradient(135deg, #2E1065 0%, #3B0F7A 55%, #7C4DD6 100%)',
     hint: 'consulta por vídeo, sem unidade',
   },
   {
@@ -53,12 +56,12 @@ export const KINDS = [
     plural: 'exames',
     article: 'o',
     icon: 'i-lucide-scan-eye',
-    color: '#0D9488',
-    deep: '#0F766E',
-    grad: 'linear-gradient(135deg, #0F766E, #2DD4BF)',
-    grad2: 'linear-gradient(135deg, #14B8A6, #5EEAD4)',
-    grad3: 'linear-gradient(135deg, #2DD4BF, #99F6E4)',
-    hero: 'linear-gradient(135deg, #134E4A 0%, #0F766E 55%, #2DD4BF 100%)',
+    color: '#0E7F6A',
+    deep: '#0B5E4F',
+    grad: 'linear-gradient(135deg, #0B5E4F, #0E7F6A)',
+    grad2: 'linear-gradient(135deg, #0E7F6A, #2FB89C)',
+    grad3: 'linear-gradient(135deg, #2FB89C, #A7EBDD)',
+    hero: 'linear-gradient(135deg, #063B32 0%, #0B5E4F 55%, #2FB89C 100%)',
     hint: 'pentacam, OCT, topografia… nas unidades',
   },
   {
@@ -68,12 +71,12 @@ export const KINDS = [
     plural: 'cirurgias',
     article: 'a',
     icon: 'i-lucide-slice',
-    color: '#0284C7',
-    deep: '#075985',
-    grad: 'linear-gradient(135deg, #0369A1, #38BDF8)',
-    grad2: 'linear-gradient(135deg, #0EA5E9, #7DD3FC)',
-    grad3: 'linear-gradient(135deg, #38BDF8, #BAE6FD)',
-    hero: 'linear-gradient(135deg, #0C4A6E 0%, #0284C7 55%, #7DD3FC 100%)',
+    color: '#C2410C',
+    deep: '#8A2C06',
+    grad: 'linear-gradient(135deg, #8A2C06, #C2410C)',
+    grad2: 'linear-gradient(135deg, #C2410C, #F08A4B)',
+    grad3: 'linear-gradient(135deg, #F08A4B, #FED7AA)',
+    hero: 'linear-gradient(135deg, #431407 0%, #8A2C06 55%, #F08A4B 100%)',
     hint: 'sala cirúrgica das clínicas parceiras',
   },
 ];
@@ -120,17 +123,20 @@ export const hexToRgbSpaced = hex => {
 };
 export const kindVars = kind => {
   const k = typeof kind === 'string' ? kindFor(kind) : kind || KINDS[0];
+  // ♿ item 423: a cor "forte" (letra e botão) quando a cor do tipo é clara
+  // demais para texto (retorno amarelo, pós-op rosa)
+  const tone = k.strong || k.color;
   return {
-    '--cv': k.color,
-    '--cv-rgb': hexToRgbSpaced(k.color),
+    '--cv': tone,
+    '--cv-rgb': hexToRgbSpaced(tone),
     '--cv-deep': k.deep,
     '--cv-deep-rgb': hexToRgbSpaced(k.deep),
     '--cv-grad': k.grad,
     '--cv-grad-2': k.grad2,
     '--cv-grad-3': k.grad3,
     '--cv-hero': k.hero,
-    '--cv-alt': k.color,
-    '--cv-alt-rgb': hexToRgbSpaced(k.color),
+    '--cv-alt': tone,
+    '--cv-alt-rgb': hexToRgbSpaced(tone),
     '--cv-alt-grad': k.grad,
     '--cv-alt-ink': '#ffffff',
   };
@@ -424,11 +430,11 @@ export const occupiesSlot = ({
 // modalidades de consulta — alimentam a ocupação por tipo e o formulário.
 // item 210: entra 'teleconsulta' (trilho próprio na Agenda, cor violeta).
 export const MODALITIES = [
-  { key: 'avaliacao', label: 'Avaliação', color: '#2563EB' },
-  { key: 'retorno', label: 'Retorno', color: '#D4A017' },
-  { key: 'pos_op', label: 'Pós-operatório', color: '#DB2777' }, // item 234
-  { key: 'exames', label: 'Exames', color: '#0D9488' },
-  { key: 'teleconsulta', label: 'Teleconsulta', color: '#7C3AED' },
+  { key: 'avaliacao', label: 'Avaliação', color: '#1D4ED8' },
+  { key: 'retorno', label: 'Retorno', color: '#E8BE16' },
+  { key: 'pos_op', label: 'Pós-operatório', color: '#E879F9' }, // item 234
+  { key: 'exames', label: 'Exames', color: '#0E7F6A' },
+  { key: 'teleconsulta', label: 'Teleconsulta', color: '#4C1D95' },
 ];
 
 // 🎨 item 234 (25/09, pedido dele: "cada coisa precisa ter a sua própria cor"
@@ -437,9 +443,13 @@ export const MODALITIES = [
 // do TIPO (a unidade virou uma etiqueta pequena). `kind` = trilho antigo que
 // o backend e o painel de Agendamentos ainda usam; `resource` = o que o tipo
 // ocupa (janela do médico, janela de exames, sala cirúrgica ou nada/online).
+// ♿ item 423 (26/11, Dr. Henrique é daltônico): as 6 cores foram escolhidas
+// no simulador (normal, deuteranopia, protanopia e tritanopia) para nenhum par
+// se confundir — hoje Avaliação × Teleconsulta ficavam IGUAIS para ele. Cor
+// clara (retorno, pós-op) leva `strong` = o tom escuro para letra e botão.
 const mkType = t => ({
   ...t,
-  grad: `linear-gradient(135deg, ${t.deep}, ${t.color})`,
+  grad: `linear-gradient(135deg, ${t.deep}, ${t.strong || t.color})`,
   grad2: `linear-gradient(135deg, ${t.color}, ${t.light})`,
   grad3: `linear-gradient(135deg, ${t.light}, ${t.pale})`,
   hero: `linear-gradient(135deg, ${t.dark} 0%, ${t.deep} 55%, ${t.light} 100%)`,
@@ -452,8 +462,8 @@ export const TYPES = [
     plural: 'avaliações',
     article: 'a',
     icon: 'i-lucide-stethoscope',
-    color: '#2563EB',
-    deep: '#1E40AF',
+    color: '#1D4ED8',
+    deep: '#1E3A8A',
     light: '#60A5FA',
     pale: '#BFDBFE',
     dark: '#172554',
@@ -469,11 +479,12 @@ export const TYPES = [
     plural: 'retornos',
     article: 'o',
     icon: 'i-lucide-rotate-ccw',
-    color: '#D4A017',
-    deep: '#A16207',
-    light: '#FACC15',
-    pale: '#FEF08A',
-    dark: '#713F12',
+    color: '#E8BE16',
+    strong: '#8A6A00',
+    deep: '#8A6A00',
+    light: '#F5D74A',
+    pale: '#FDF0B0',
+    dark: '#4A3A00',
     kind: 'consultas',
     modality: 'retorno',
     resource: 'doctor',
@@ -486,11 +497,12 @@ export const TYPES = [
     plural: 'pós-operatórios',
     article: 'o',
     icon: 'i-lucide-heart-pulse',
-    color: '#DB2777',
-    deep: '#9D174D',
-    light: '#F472B6',
-    pale: '#FBCFE8',
-    dark: '#500724',
+    color: '#E879F9',
+    strong: '#A21CAF',
+    deep: '#86198F',
+    light: '#F0ABFC',
+    pale: '#FAE8FF',
+    dark: '#4A044E',
     kind: 'consultas',
     modality: 'pos_op',
     resource: 'doctor',
@@ -503,11 +515,11 @@ export const TYPES = [
     plural: 'exames',
     article: 'o',
     icon: 'i-lucide-scan-eye',
-    color: '#0D9488',
-    deep: '#0F766E',
-    light: '#2DD4BF',
-    pale: '#99F6E4',
-    dark: '#134E4A',
+    color: '#0E7F6A',
+    deep: '#0B5E4F',
+    light: '#2FB89C',
+    pale: '#A7EBDD',
+    dark: '#063B32',
     kind: 'exames',
     modality: 'exames',
     resource: 'exam',
@@ -520,11 +532,11 @@ export const TYPES = [
     plural: 'teleconsultas',
     article: 'a',
     icon: 'i-lucide-video',
-    color: '#7C3AED',
-    deep: '#5B21B6',
-    light: '#A78BFA',
+    color: '#4C1D95',
+    deep: '#3B0F7A',
+    light: '#7C4DD6',
     pale: '#DDD6FE',
-    dark: '#3B0764',
+    dark: '#2E1065',
     kind: 'teleconsultas',
     modality: 'teleconsulta',
     resource: 'online',
@@ -537,9 +549,9 @@ export const TYPES = [
     plural: 'cirurgias',
     article: 'a',
     icon: 'i-lucide-slice',
-    color: '#EA580C',
-    deep: '#9A3412',
-    light: '#FB923C',
+    color: '#C2410C',
+    deep: '#8A2C06',
+    light: '#F08A4B',
     pale: '#FED7AA',
     dark: '#431407',
     kind: 'cirurgias',
@@ -743,6 +755,8 @@ export const GENERAL_TYPE = mkType({
 // azul-piscina, em toda tela. O âmbar do "Remarcada" era quase o dourado do Retorno.
 // Na Agenda a consulta continua com a cor do TIPO (avaliação × retorno muda valor e
 // lembrete) e ganha o contorno + o ↻ azul-piscina.
+// ♿ item 423: na Agenda o contorno virou TRACEJADO escuro (o azul-piscina sumia
+// nos balões azuis para quem é daltônico); a cor fica para os selos de texto
 export const RESCHEDULED_COLOR = '#0891B2';
 export const isRescheduled = task =>
   Number(task?.rescheduled_count) > 0 && !task?.canceled_at;

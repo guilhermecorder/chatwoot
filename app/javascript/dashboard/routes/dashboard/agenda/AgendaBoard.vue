@@ -419,10 +419,10 @@ const VIEW_MODES = [
 
 // Unidades da clínica (+ "online" da teleconsulta)
 const UNITS = {
-  tatuape: { label: 'Tatuapé', short: 'TAT', color: '#2563EB' },
-  paulista: { label: 'Av. Paulista', short: 'PAU', color: '#EA580C' },
+  tatuape: { label: 'Tatuapé', short: 'TAT', color: '#1D4ED8' },
+  paulista: { label: 'Av. Paulista', short: 'PAU', color: '#C2410C' },
 };
-const ONLINE = { label: 'Online', short: 'ON', color: '#7C3AED' };
+const ONLINE = { label: 'Online', short: 'ON', color: '#4C1D95' };
 
 const PROBLEMAS = [
   'Catarata',
@@ -1314,7 +1314,9 @@ const unitOf = task => {
 // tele, cirurgia); a unidade/local vira uma etiqueta pequena no balão
 // item 290: a cor que a equipe deu ao agendamento vence a cor do tipo (balão
 // e cartão); o selo do TIPO continua sempre na cor do tipo
-const typeColorOf = task => TYPE_BY_KEY[typeOf(task)]?.color || '#2563EB';
+const typeColorOf = task => TYPE_BY_KEY[typeOf(task)]?.color || '#1D4ED8';
+// ♿ item 423: o ÍCONE do tipo vai dentro do balão (não só a cor)
+const typeIconOf = task => TYPE_BY_KEY[typeOf(task)]?.icon || '';
 const accentOf = task => taskColorOf(task) || typeColorOf(task);
 const tagOf = task => {
   const u = unitOf(task);
@@ -1410,10 +1412,13 @@ const occRows = computed(() => [
     scan: occMonth.value,
   },
 ]);
+// ♿ item 423: sem o semáforo verde/vermelho (o Dr. Henrique não separa os
+// dois) — azul (folga) → ouro escuro → laranja escuro (cheia); o número vai
+// sempre junto, e todas aceitam letra branca
 const occColor = pct => {
-  if (pct >= 80) return '#EF4444';
-  if (pct >= 50) return '#D4A017';
-  return '#22C55E';
+  if (pct >= 80) return '#C2410C';
+  if (pct >= 50) return '#8A6A00';
+  return '#1D4ED8';
 };
 const OCC_MODALITIES = MODALITIES.filter(m => m.key !== 'teleconsulta');
 const occSegments = scan => {
@@ -3558,8 +3563,8 @@ const pendingCount = computed(
                     class="text-[11px] text-n-slate-10 mt-1.5 flex items-center gap-1"
                   >
                     <span class="cv-ag-resched i-lucide-refresh-cw" /> contorno
-                    azul-piscina = consulta reagendada (a cor de dentro continua
-                    sendo o tipo)
+                    tracejado + ↻ = consulta reagendada (a cor de dentro
+                    continua sendo o tipo)
                   </p>
                 </div>
               </div>
@@ -3994,7 +3999,13 @@ class="text-xs"/></span>
                     :title="`${chipTime(task)} · ${displayName(task)}${unitOf(task) ? ' · ' + unitOf(task).label : ''}`"
                     @click.stop="openEdit(task)"
                   >
-                    <span class="cv-ag-ev-time">{{ chipTime(task) }}</span>
+                    <span class="cv-ag-ev-time">
+                      <span
+                        class="cv-ag-ev-type"
+                        :class="typeIconOf(task)"
+                        aria-hidden="true"
+                      />{{ chipTime(task) }}
+                    </span>
                     <span class="cv-ag-ev-name"><span
                         v-if="isConfirmed(task)"
                         class="cv-ag-conf i-lucide-badge-check"
@@ -4477,7 +4488,7 @@ class="text-xs"/></span>
                       class="cv-chip"
                       :class="
                         hourLoad(cursor, win, hh) >= hourlyCap
-                          ? 'cv-red'
+                          ? 'cv-ag-full'
                           : 'cv-slate'
                       "
                       :title="
@@ -4512,6 +4523,11 @@ class="text-xs"/></span>
                             :title="`${slot} · ${displayName(st)}${softTitle(st, win)}`"
                             @click="openEdit(st)"
                           >
+                            <span
+                              class="cv-ag-ev-type"
+                              :class="typeIconOf(st)"
+                              aria-hidden="true"
+                            />
                             <span class="tabular-nums opacity-90">{{
                               slot
                             }}</span>
@@ -4603,6 +4619,11 @@ class="text-xs"/></span>
                         :title="`${hmOf(ot)} · ${displayName(ot)} — fora da faixa ${win.start}–${win.end}${softTitle(ot, win)}`"
                         @click="openEdit(ot)"
                       >
+                        <span
+                          class="cv-ag-ev-type"
+                          :class="typeIconOf(ot)"
+                          aria-hidden="true"
+                        />
                         <span class="tabular-nums opacity-90">{{
                           hmOf(ot)
                         }}</span>
@@ -4886,7 +4907,7 @@ class="cv-chip cv-amber"
                     >
                       <button
                         class="cv-ag-act cv-ag-act-sm"
-                        style="--a: #059669"
+                        style="--a: #1d4ed8"
                         :class="
                           task.attendance === 'attended' ? 'cv-ag-act-on' : ''
                         "
@@ -4904,7 +4925,7 @@ class="cv-chip cv-amber"
                       </button>
                       <button
                         class="cv-ag-act cv-ag-act-sm"
-                        style="--a: #dc2626"
+                        style="--a: #991b1b"
                         :class="
                           task.attendance === 'missed' ? 'cv-ag-act-on' : ''
                         "
@@ -4928,7 +4949,7 @@ class="cv-chip cv-amber"
                     >
                       <button
                         class="cv-ag-act"
-                        style="--a: #059669"
+                        style="--a: #1d4ed8"
                         :class="
                           task.attendance === 'attended' ? 'cv-ag-act-on' : ''
                         "
@@ -4942,7 +4963,7 @@ class="cv-chip cv-amber"
                       <button
                         v-if="isSurgeryTask(task)"
                         class="cv-ag-act"
-                        style="--a: #d97706"
+                        style="--a: #8a6a00"
                         :class="
                           task.attendance === 'attended_not_done'
                             ? 'cv-ag-act-on'
@@ -4956,7 +4977,7 @@ class="cv-chip cv-amber"
                       </button>
                       <button
                         class="cv-ag-act"
-                        style="--a: #dc2626"
+                        style="--a: #991b1b"
                         :class="
                           task.attendance === 'missed' ? 'cv-ag-act-on' : ''
                         "
@@ -5762,8 +5783,8 @@ class="cv-ag-head-pill"
                             : ''
                         "
                         style="
-                          --cv-grad: linear-gradient(135deg, #047857, #10b981);
-                          --cv-deep-rgb: 6 95 70;
+                          --cv-grad: linear-gradient(135deg, #1e3a8a, #1d4ed8);
+                          --cv-deep-rgb: 30 58 138;
                         "
                         @click="
                           form.status = 'done';

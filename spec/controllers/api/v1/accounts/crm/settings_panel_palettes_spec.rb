@@ -28,6 +28,16 @@ RSpec.describe 'CRM settings — paletas por tela', type: :request do
     expect(saved).not_to have_key('report:x') # fixo sem paleta válida = cor do dia sem bloco = nada a guardar
   end
 
+  # ♿ item 423 (26/11): as 6 cores do círculo e as 3 misturas
+  it 'guarda as cores novas e as misturas; mistura desconhecida vira todas as 6', :aggregate_failures do
+    saved = save('agendamento' => { mode: 'fixed', key: 'azul', blocks: { 'funil' => 'laranja', 'x' => 'inventada' } },
+                 '*' => { mode: 'mix', key: 'primarias' },
+                 'report:crm' => { mode: 'mix', key: 'inventada' })
+    expect(saved['agendamento']).to eq('mode' => 'fixed', 'key' => 'azul', 'blocks' => { 'funil' => 'laranja' })
+    expect(saved['*']).to eq('mode' => 'mix', 'key' => 'primarias', 'blocks' => {})
+    expect(saved['report:crm']).to eq('mode' => 'mix', 'key' => 'todas', 'blocks' => {})
+  end
+
   it 'mescla tela a tela e null apaga só aquela tela', :aggregate_failures do
     save('report:segmentacao' => { mode: 'fixed', key: 'lime' }, '*' => { mode: 'salad' })
     saved = save('report:segmentacao' => nil)

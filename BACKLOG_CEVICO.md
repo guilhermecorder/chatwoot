@@ -10076,3 +10076,15 @@ Nasceu do experimento da caixa **CONFIRMAÇÃO DE CONSULTA (+55 11 91873-9220)**
 **Arquivos:** `app/services/crm/agenda_slots.rb`, `responder_tools.rb` (`horarios_do_dia`), `appointment_applier.rb`, `settings_controller.rb`, `helper/cevicoAgenda.js` (`scanAgenda countStacked`), `agenda/AgendaBoard.vue`, `agenda/AgendaSettings.vue`, `api/crm.js`; testes `spec/services/crm/agenda_slots_load_balance_spec.rb` e `helper/specs/cevicoAgendaStacked.spec.js`.
 
 **Testado (26/11):** `agenda_slots_load_balance_spec` + vizinhos (agenda, robôs, Secretário, gravação, configurações, ligação) = 186 de 186; vitest 16 de 16. Conferido na prévia 3020 (computador e celular): campos da régua salvam e voltam; regra no prompt; lista de vagas filtrada; aviso na tela ao marcar ao lado de um horário com 2 ("O horário das 09:00 fica colado num horário que já tem 2 pacientes… Horários folgados por perto: 09:15, 09:30, 09:45"). Dados de teste locais apagados. "Pode subir" dele em 26/11 à noite.
+
+## 423. 🎨 CORES PARA DALTÔNICO: Agenda, paletas reduzidas a 6 cores + 3 misturas e menu com uma cor por grupo (26/11; "o Henrique é daltônico… reduzir para 5… cores primárias… sempre alto contraste nas nossas telas… no meu painel, na agenda, e nos ícones do painel da esquerda")
+
+**Decisões dele (sessão das cores, 26/11):** primárias = as do círculo cromático (amarelo, azul, vermelho); secundárias = verde, laranja, roxo; o Dr. Henrique confunde vermelho com verde → regra nova: diferenciar por azul × laranja e sempre com um sinal junto da cor (ícone, forma, palavra). Prévia aprovada por ele (artefato 4D4iXrKyhLgmDP8epUJmJQ), incluindo a cor de cada grupo do menu.
+
+**O que mudou**
+- **Agenda:** as 6 cores dos tipos de consulta trocadas (antes Avaliação e Teleconsulta ficavam iguais na visão dele); ícone do tipo dentro do balão; presença ✓ azul redondo, ✕ vermelho escuro quadrado, ! amarelo triângulo; ocupação azul → ouro escuro → laranja escuro com o número junto; hora cheia laranja listrada com "cheia"; reagendada com contorno tracejado; cores dos médicos (Henrique ouro escuro, Roberta roxo distinto do azul do Gustavo).
+- **Paletas** (`cevicoPalettes.js`, `useCevicoPalette.js`, `CevicoPalettePicker.vue`): só 6 cores + Primárias, Secundárias, Todas as 6; padrão Azul; quem tinha cor antiga cai na nova mais parecida; "salada de frutas" vira "Todas as 6"; amarelo em ouro escuro para o número branco ler.
+- **Menu lateral** (`Sidebar.vue`): topo amarelo; Atendimento, CRM, Tarefas azul; Automações roxo; Marketing laranja; Análises verde; Gestão vermelho; Configurações cinza.
+- **Servidor** (`settings_controller.rb`): aceita os nomes novos das paletas (senão a cor "para todo mundo" voltava ao padrão).
+
+**Testado (26/11):** 54 testes de tela + 25 do servidor na sessão das cores (um novo mede contraste e confusão em cada tipo de daltonismo); conferido na tela no computador e no celular, com filtro que imita a visão dele. Junto com o item 422 no mesmo pacote: junção sem conflito. Sem migration. "Pode subir" dele em 26/11 à noite.

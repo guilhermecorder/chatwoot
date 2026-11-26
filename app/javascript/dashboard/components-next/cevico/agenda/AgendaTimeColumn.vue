@@ -13,8 +13,13 @@ import {
   confirmationTitle,
   isRescheduled,
   rescheduledTitle,
+  typeOf,
+  TYPE_BY_KEY,
 } from 'dashboard/helper/cevicoAgenda';
 import { vCvMenu } from 'dashboard/composables/useCevicoContextMenu';
+
+// ♿ item 423: o ÍCONE do tipo vai dentro do balão (não só a cor)
+const typeIconOf = task => TYPE_BY_KEY[typeOf(task)]?.icon || '';
 
 const props = defineProps({
   day: { type: Date, required: true },
@@ -226,7 +231,13 @@ const evClass = ev => ({
       @dragstart="emit('dragstart', ev.task)"
       @click.stop="emit('open', ev.task)"
     >
-      <span class="cv-ag-ev-time">{{ ev.time }}</span>
+      <span class="cv-ag-ev-time">
+        <span
+          class="cv-ag-ev-type"
+          :class="typeIconOf(ev.task)"
+          aria-hidden="true"
+        />{{ ev.time }}
+      </span>
       <span class="cv-ag-ev-name">
         <span v-if="isRescheduled(ev.task)" class="cv-ag-resched i-lucide-refresh-cw" :title="rescheduledTitle(ev.task)" />
         <span v-if="isConfirmed(ev.task)" class="cv-ag-conf i-lucide-badge-check" :title="confirmationTitle(ev.task)" />

@@ -28,7 +28,11 @@ import PatientNoteForm from 'dashboard/components-next/cevico/PatientNoteForm.vu
 import { useCevicoGoals } from 'dashboard/composables/useCevicoGoals';
 import { paletteByKey } from 'dashboard/helper/cevicoBuilderCatalog';
 import { ALL_THEMES } from 'dashboard/helper/cevicoThemes';
-import { IMAC_PALETTES, FRUIT_PALETTES } from 'dashboard/helper/cevicoPalettes';
+import {
+  PRIMARY_PALETTES,
+  SECONDARY_PALETTES,
+  paletteFor,
+} from 'dashboard/helper/cevicoPalettes';
 // 🧭 item 336: vitrine giratória do guia arejado (frase do dia + equipe)
 import CvVitrine from 'dashboard/components-next/cevico/guia/CvVitrine.vue';
 import VisaoGeral from 'dashboard/components-next/cevico/guia/VisaoGeral.vue';
@@ -2396,11 +2400,11 @@ const insertKpiVar = key => {
   kpiBuilder.value.expr =
     cur && !/[\s(+\-*/]$/.test(cur) ? `${cur} ${key}` : `${cur}${key}`;
 };
-// item 239: as NOSSAS paletas também nos cards — iMac G3, frutas da Apple
-// (tom principal, degrau claro e a complementar) e a marca CEVICO
+// item 239: as NOSSAS paletas também nos cards (tom principal, degrau claro e
+// a complementar) e a marca CEVICO — ♿ item 423: as 6 cores do círculo
 const OUR_PALETTE_GROUPS = [
-  { title: 'iMac G3', list: IMAC_PALETTES },
-  { title: 'Frutas da Apple', list: FRUIT_PALETTES },
+  { title: 'Primárias', list: PRIMARY_PALETTES },
+  { title: 'Secundárias', list: SECONDARY_PALETTES },
 ];
 const BRAND_COLORS = [
   {
@@ -3409,9 +3413,8 @@ const applyPreset = async preset => {
 };
 const restorePreset = () => applyPreset(currentPreset.value);
 const presetSwatch = t => {
-  const [key, step] = t.color || ['bondi', 1];
-  const pal = [...IMAC_PALETTES, ...FRUIT_PALETTES].find(p => p.key === key);
-  return pal?.family?.[step] || '#94a3b8';
+  const [key, step] = t.color || ['azul', 1];
+  return paletteFor(key)?.family?.[step] || '#94a3b8';
 };
 // excluir de vez um card do "+" (os fixos só ocultam — voltam pelos chips)
 const deleteTileKpi = tile => {
@@ -5272,8 +5275,8 @@ onUnmounted(() => {
                 class="cevico-hero-chip cevico-hero-chip-btn"
                 :title="
                   isAdmin
-                    ? 'Paleta do painel: cor do dia, iMac G3, frutas da Apple ou salada de frutas — e a cor de cada bloco'
-                    : 'Cada dia da semana tem a sua cor, inspirada nos iMac G3 (1998–99). Clique para experimentar as outras — só nesta tela.'
+                    ? 'Cor do painel: uma das 6 cores ou uma mistura — e a cor de cada bloco'
+                    : 'Clique para experimentar as 6 cores — só nesta tela.'
                 "
                 @click="openPalettePicker('panel')"
               >
@@ -5471,7 +5474,7 @@ onUnmounted(() => {
           </button>
           <button
             class="cv-btn cv-btn-ghost cv-btn-sm"
-            title="Cores do painel: cor do dia, uma paleta fixa (iMac G3 ou frutas da Apple) ou salada de frutas — e a paleta de cada bloco"
+            title="Cores do painel: uma das 6 cores ou uma mistura delas — e a cor de cada bloco"
             @click="openPalettePicker('panel')"
           >
             <span class="i-lucide-palette text-xs" />
@@ -5837,9 +5840,9 @@ onUnmounted(() => {
               <p class="text-sm text-n-slate-11 mt-2 leading-relaxed max-w-2xl">
                 Novidade fofa: agora cada pessoa escolhe a paleta do próprio
                 painel. Toque na bolinha colorida ali em cima, no cabeçalho, e
-                experimente as cores dos iMac G3, as frutas da Apple ou a salada
-                de frutas. É só seu, ninguém mais vê — e dá pra trocar quantas
-                vezes quiser. Cor boa é dopamina de graça. 💜🍊🍋
+                experimente as 6 cores ou uma mistura delas (todas fáceis de
+                separar, inclusive para quem é daltônico). É só seu, ninguém
+                mais vê — e dá pra trocar quantas vezes quiser.
               </p>
               <div class="flex items-center gap-2 flex-wrap mt-4">
                 <button

@@ -16,21 +16,26 @@
 // (uma das 17 paletas sorteada cada vez que a tela abre). Quem vence:
 //   minha cor desta tela > minha cor de todas as telas >
 //   cor da clínica desta tela > cor da clínica de todas as telas > cor do dia
+//
+// ♿ item 423 (26/11, daltonismo do Dr. Henrique): ficaram SÓ as 6 cores do
+// círculo (amarelo, azul, vermelho, verde, laranja, roxo) e 3 misturas
+// ({ mode: 'mix', key: 'primarias' | 'secundarias' | 'todas' }). Escolhas
+// antigas continuam lendo: 'salad' → Todas as 6; 'day' e 'random' → o padrão
+// (Azul); paleta antiga → a cor nova mais parecida (LEGACY_KEYS).
 import { ref, computed, unref, provide, getCurrentInstance } from 'vue';
 import { useStore, useMapGetter } from 'dashboard/composables/store';
 import CrmAPI from 'dashboard/api/crm';
 import {
   paletteFor,
   paletteVars,
-  DAY_KEYS,
-  SALAD,
-  SALAD_ORDER,
+  mixFor,
+  mixPaletteAt,
   PALETTES,
+  DEFAULT_PALETTE,
 } from 'dashboard/helper/cevicoPalettes';
 import { useUISettings } from 'dashboard/composables/useUISettings';
 import { useAdmin } from 'dashboard/composables/useAdmin';
 
-const FLAVOR_ORDER = [1, 2, 3, 4, 5, 6, 0];
 // 🎨 item 387: escopo que vale para TODAS as telas
 export const ALL_SCREENS = '*';
 const hasMode = entry => !!(entry && typeof entry === 'object' && entry.mode);
@@ -93,29 +98,21 @@ export function useCevicoPalette({
   const paletteAudience = ref('me');
   const blockDefs = computed(() => unref(blocks) || []);
 
-  // ── cor do dia + prévia só nesta tela (quem não é admin passeia pelas 7) ──
+  // ── a cor PADRÃO (♿ item 423: Azul, no lugar da cor do dia) + prévia só
+  //    nesta tela (o botão do banner passeia pelas 6 cores) ──
   const flavorPreview = ref(null);
-  const dayFlavor = computed(
-    () =>
-      paletteFor(DAY_KEYS[flavorPreview.value ?? new Date().getDay()]) ||
-      paletteFor('bondi')
+  const dayFlavor = computed(() =>
+    flavorPreview.value === null
+      ? DEFAULT_PALETTE
+      : PALETTES[flavorPreview.value % PALETTES.length]
   );
   const cycleFlavor = () => {
-    const current = flavorPreview.value ?? new Date().getDay();
-    const i = FLAVOR_ORDER.indexOf(current);
-    flavorPreview.value = FLAVOR_ORDER[(i + 1) % FLAVOR_ORDER.length];
+    const i = PALETTES.indexOf(dayFlavor.value);
+    flavorPreview.value = (i + 1) % PALETTES.length;
   };
-  // 🎲 item 387: ALEATÓRIA — uma das 17 paletas, sorteada quando a tela abre
-  // (fica a mesma enquanto a tela está aberta; o dado do popup sorteia outra)
-  const randomPick = () =>
-    PALETTES[Math.floor(Math.random() * PALETTES.length)];
-  const randomFlavor = ref(randomPick());
-  const reroll = () => {
-    const before = randomFlavor.value?.key;
-    let next = randomPick();
-    for (let i = 0; i < 5 && next.key === before; i += 1) next = randomPick();
-    randomFlavor.value = next;
-  };
+  // 🎲 item 387: a ALEATÓRIA saiu no item 423; quem a tinha salva fica no padrão
+  const randomFlavor = dayFlavor;
+  const reroll = () => {};
 
   // ── a escolha salva deste escopo ──
   const savedPalettes = computed(() => crmSettings.value?.panel_palettes || {});
@@ -141,13 +138,14 @@ export function useCevicoPalette({
     return hasMode(g) ? { ...g, blocks: p.blocks || {} } : p;
   });
   const fromMode = entry => {
-    if (entry.mode === 'salad') return SALAD;
+    const mix = mixFor(entry);
+    if (mix) return mix;
     if (entry.mode === 'fixed' && paletteFor(entry.key))
       return paletteFor(entry.key);
-    if (entry.mode === 'random') return randomFlavor.value;
+    if (entry.mode === 'random') return dayFlavor.value;
     return null;
   };
-  // modo que está valendo na página ('day' | 'fixed' | 'salad' | 'random')
+  // modo que está valendo na página ('day' | 'fixed' | 'mix'; antigos: 'salad', 'random')
   const pageMode = computed(
     () => effUser.value?.mode || effClinic.value.mode || 'day'
   );
@@ -161,29 +159,24 @@ export function useCevicoPalette({
     }
     return fromMode(effClinic.value) || unref(themePalette) || dayFlavor.value;
   });
-  // a paleta de UM BLOCO: própria > salada (uma fruta por posição) > página
+  // a paleta de UM BLOCO: própria > mistura (uma cor por posição) > página
+  const blockIndex = blockId =>
+    Math.max(
+      0,
+      blockDefs.value.findIndex(b => b.id === blockId)
+    );
   const blockPalette = blockId => {
     const u = effUser.value;
     if (u) {
-      if (u.mode === 'salad') {
-        const i = Math.max(
-          0,
-          blockDefs.value.findIndex(b => b.id === blockId)
-        );
-        return paletteFor(SALAD_ORDER[i % SALAD_ORDER.length]);
-      }
+      const mix = mixFor(u);
+      if (mix) return mixPaletteAt(mix, blockIndex(blockId));
       return pagePalette.value;
     }
     const p = effClinic.value;
     const own = p.blocks?.[blockId];
     if (own && paletteFor(own)) return paletteFor(own);
-    if (p.mode === 'salad') {
-      const i = Math.max(
-        0,
-        blockDefs.value.findIndex(b => b.id === blockId)
-      );
-      return paletteFor(SALAD_ORDER[i % SALAD_ORDER.length]);
-    }
+    const mix = mixFor(p);
+    if (mix) return mixPaletteAt(mix, blockIndex(blockId));
     return pagePalette.value;
   };
   const blockVars = blockId => paletteVars(blockPalette(blockId));
@@ -196,16 +189,14 @@ export function useCevicoPalette({
   // tinta do texto sobre a complementar ('dark' só em cores claras)
   const blockAltInk = blockId => blockPalette(blockId).altInk || 'light';
   const cvVars = computed(() => paletteVars(pagePalette.value));
-  // cards de uma fileira: na salada (sem paleta própria no bloco) alternam
-  // as frutas; senão, os 4 degraus da família do bloco
+  // cards de uma fileira: na mistura (sem paleta própria no bloco) alternam
+  // as cores dela; senão, os 4 degraus da família do bloco
   const tileGradAt = (i, blockId = 'indicadores') => {
     const u = effUser.value;
     const p = effClinic.value;
-    const salad = u
-      ? u.mode === 'salad'
-      : p.mode === 'salad' && !p.blocks?.[blockId];
-    if (salad) {
-      return paletteFor(SALAD_ORDER[i % SALAD_ORDER.length]).family[2];
+    const mix = u ? mixFor(u) : !p.blocks?.[blockId] && mixFor(p);
+    if (mix) {
+      return mixPaletteAt(mix, i).family[2];
     }
     const fam = blockFamily(blockId);
     return fam[i % fam.length];
@@ -293,10 +284,13 @@ export function useCevicoPalette({
       paletteReach.value === 'all' ? ALL_SCREENS : scopeKey.value
     );
   // o que está marcado no popup para o alvo atual
+  // escolhas do popup: '' | 'day' (padrão) | uma das 6 | 'mix:<chave>'
   const choiceOf = entry => {
     if (!hasMode(entry)) return '';
-    if (['salad', 'day', 'random'].includes(entry.mode)) return entry.mode;
-    return entry.key || '';
+    const mix = mixFor(entry);
+    if (mix) return mix.key;
+    if (['day', 'random'].includes(entry.mode)) return 'day';
+    return paletteFor(entry.key)?.key || '';
   };
   const paletteChoice = computed(() => {
     const t = palettePicker.value?.target;
@@ -308,7 +302,7 @@ export function useCevicoPalette({
     if (all) return choiceOf(clinicGlobalPalette.value);
     const p = panelPalette.value;
     if (t === 'panel') return choiceOf(p) || 'day';
-    return p.blocks?.[t] || '';
+    return paletteFor(p.blocks?.[t])?.key || '';
   });
   // a escolha que está no alvo atual do popup (para o botão "voltar")
   const hasChoiceHere = computed(() => {
@@ -319,22 +313,23 @@ export function useCevicoPalette({
       ? hasMode(clinicGlobalPalette.value)
       : Object.keys(panelPalette.value).length > 0;
   });
+  const isMixKey = key => String(key).startsWith('mix:');
   const pickPalette = key => {
     const t = palettePicker.value?.target;
     if (!t) return;
     if (paletteAudience.value === 'me') {
       if (key === '') saveUserPalette(null);
-      else if (['day', 'salad', 'random'].includes(key))
-        saveUserPalette({ mode: key });
+      else if (key === 'day') saveUserPalette({ mode: 'day' });
+      else if (isMixKey(key))
+        saveUserPalette({ mode: 'mix', key: key.slice(4) });
       else saveUserPalette({ mode: 'fixed', key });
-      if (key === 'random') reroll();
       return;
     }
     if (t === 'panel') {
-      if (['day', 'salad', 'random'].includes(key)) setPanelPalette(key);
+      if (key === 'day') setPanelPalette('day');
+      else if (isMixKey(key)) setPanelPalette('mix', key.slice(4));
       else setPanelPalette('fixed', key);
-      if (key === 'random') reroll();
-    } else {
+    } else if (!isMixKey(key)) {
       setBlockPalette(t, key);
     }
   };

@@ -855,6 +855,40 @@ const TILE_COLORS = {
   'Automations Treatment': '#64d2ff',
 };
 const tileColor = name => TILE_COLORS[name] || '#8e8e93';
+// ♿ item 423 (26/11, o Dr. Henrique é daltônico): UMA cor por GRUPO do menu,
+// das 6 cores do círculo, em tons que se leem no tema claro e no escuro e que
+// o daltônico separa (simulador: o par mais parecido ainda se distingue). O
+// nome do item continua ao lado — a cor só ajuda a achar o grupo.
+const MENU_TONES = {
+  amarelo: '#A98A04',
+  azul: '#2966BE',
+  vermelho: '#F3425B',
+  verde: '#24A16C',
+  laranja: '#9E5215',
+  roxo: '#9F1DF0',
+  cinza: '#6B7280',
+};
+const MENU_CATEGORY = {
+  Business: 'amarelo',
+  Negocios: 'amarelo',
+  Inicio: 'amarelo',
+  'group:atendimento': 'azul',
+  CRM: 'azul',
+  Tasks: 'azul',
+  'group:automacoes': 'roxo',
+  'group:marketing': 'laranja',
+  'group:analises': 'verde',
+  'group:gestao': 'vermelho',
+  'group:config': 'cinza',
+  'group:mais': 'cinza',
+};
+const paintMenu = (entry, color) => ({
+  ...entry,
+  iconColor: color,
+  ...(entry.children
+    ? { children: entry.children.map(c => paintMenu(c, color)) }
+    : {}),
+});
 // filhos de subgrupo (Configurações, Automações, Relatórios…): cada um com a
 // sua cor — sem isso o azulejo herdava a cor do texto e saía cinza
 const NESTED_CYCLE = [
@@ -985,7 +1019,9 @@ const groupedMenuItems = computed(() => {
       iconColor: '#8e8e93',
       children: rest,
     });
-  return out;
+  return out.map(e =>
+    paintMenu(e, MENU_TONES[MENU_CATEGORY[e.name] || 'cinza'])
+  );
 });
 
 const visibleMenuItems = computed(() => {

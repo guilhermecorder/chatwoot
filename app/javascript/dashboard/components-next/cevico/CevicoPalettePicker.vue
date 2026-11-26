@@ -4,10 +4,13 @@
 // paletas (iMac G3 + frutas da Apple) ou a salada de frutas. Recebe o
 // objeto do composable useCevicoPalette e salva sozinho.
 // 🎨 item 387: "Vale para" esta tela × TODAS as telas + modo ALEATÓRIA.
+// ♿ item 423 (26/11): só as 6 cores do círculo + 3 misturas, todas
+// conferidas para quem é daltônico (o Dr. Henrique confunde vermelho × verde).
 import {
-  SALAD,
-  IMAC_PALETTES,
-  FRUIT_PALETTES,
+  MIXES,
+  PRIMARY_PALETTES,
+  SECONDARY_PALETTES,
+  DEFAULT_PALETTE,
 } from 'dashboard/helper/cevicoPalettes';
 
 const props = defineProps({
@@ -21,7 +24,6 @@ const {
   closePalettePicker,
   cvVars,
   pagePalette,
-  dayFlavor,
   blockPalette,
   paletteChoice,
   pickPalette,
@@ -42,8 +44,6 @@ const {
   clinicOwnScopes,
   clearClinicOwnPalettes,
   hasChoiceHere,
-  randomFlavor,
-  reroll,
   isAdmin,
 } = props.pal;
 </script>
@@ -67,8 +67,8 @@ const {
           <div class="flex-1 min-w-0">
             <h2 class="text-base font-bold leading-tight">{{ title }}</h2>
             <p class="text-[11px] opacity-85 mt-0.5">
-              iMac G3, frutas da Apple, salada de frutas ou aleatória — para
-              esta tela ou para todas
+              6 cores fáceis de separar (inclusive para daltônicos) ou uma
+              mistura delas — para esta tela ou para todas
             </p>
           </div>
           <span
@@ -245,56 +245,44 @@ const {
               >
                 <span
                   class="cv-icon cv-icon-lg flex-shrink-0"
-                  :style="{ background: dayFlavor.hero }"
-                  ><span class="i-lucide-calendar-days text-base"/></span>
-                <span class="min-w-0">
-                  <b class="text-xs text-n-slate-12 block">Cor do dia (iMac G3)</b>
-                  <span class="text-[11px] text-n-slate-10 leading-snug block">hoje é {{ dayFlavor.label }} — cada dia da semana muda
-                    sozinho</span>
-                </span>
-              </button>
-              <button
-                class="cv-sub cv-sub-hover p-3 text-left flex items-center gap-3"
-                :class="paletteChoice === 'salad' ? 'cv-sub-on' : ''"
-                @click="pickPalette('salad')"
-              >
-                <span
-                  class="cv-icon cv-icon-lg flex-shrink-0"
-                  :style="{ background: SALAD.swatch }"
-                  ><span class="i-lucide-citrus text-base"/></span>
-                <span class="min-w-0">
-                  <b class="text-xs text-n-slate-12 block">Salada de frutas</b>
-                  <span class="text-[11px] text-n-slate-10 leading-snug block">cada bloco com uma fruta e os cards alternando — dá pra
-                    trocar a fruta de qualquer bloco depois</span>
-                </span>
-              </button>
-              <!-- 🎲 item 387: aleatória -->
-              <div
-                class="cv-sub cv-sub-hover p-3 text-left flex items-center gap-3 cursor-pointer"
-                :class="paletteChoice === 'random' ? 'cv-sub-on' : ''"
-                role="button"
-                tabindex="0"
-                @click="pickPalette('random')"
-                @keydown.enter="pickPalette('random')"
-              >
-                <span
-                  class="cv-icon cv-icon-lg flex-shrink-0"
-                  :style="{ background: randomFlavor.hero }"
-                  ><span class="i-lucide-dices text-base"/></span>
-                <span class="min-w-0 flex-1">
-                  <b class="text-xs text-n-slate-12 block">Aleatória</b>
-                  <span class="text-[11px] text-n-slate-10 leading-snug block">uma cor diferente a cada vez que a tela abre — agora:
-                    {{ randomFlavor.label }}</span>
-                </span>
-                <button
-                  v-if="paletteChoice === 'random'"
-                  class="cv-btn cv-btn-ghost cv-btn-sm cv-iconbtn flex-shrink-0"
-                  title="Sortear outra agora"
-                  @click.stop="reroll"
+                  :style="{ background: DEFAULT_PALETTE.hero }"
                 >
-                  <span class="i-lucide-refresh-cw text-xs" />
-                </button>
-              </div>
+                  <span class="i-lucide-circle-check text-base" />
+                </span>
+                <span class="min-w-0">
+                  <b class="text-xs text-n-slate-12 block">
+                    Padrão ({{ DEFAULT_PALETTE.label }})
+                  </b>
+                  <span class="text-[11px] text-n-slate-10 leading-snug block">
+                    a cor da CEVICO para quem não escolheu outra
+                  </span>
+                </span>
+              </button>
+              <!-- ♿ item 423: as 3 misturas (no lugar da salada de frutas) -->
+              <button
+                v-for="m in MIXES"
+                :key="m.key"
+                class="cv-sub cv-sub-hover p-3 text-left flex items-center gap-3"
+                :class="paletteChoice === m.key ? 'cv-sub-on' : ''"
+                @click="pickPalette(m.key)"
+              >
+                <span
+                  class="cv-icon cv-icon-lg flex-shrink-0"
+                  :style="{ background: m.swatch }"
+                >
+                  <span class="i-lucide-blend text-base" />
+                </span>
+                <span class="min-w-0">
+                  <b class="text-xs text-n-slate-12 block">
+                    Mistura: {{ m.label }}
+                  </b>
+                  <span class="text-[11px] text-n-slate-10 leading-snug block">
+                    cada bloco com uma cor e os cards alternando ({{
+                      m.order.join(' · ')
+                    }})
+                  </span>
+                </span>
+              </button>
             </div>
           </div>
           <!-- um bloco: pode voltar a seguir a página -->
@@ -307,46 +295,42 @@ const {
               <span class="i-lucide-link text-xs" />
               Igual à página
             </button>
-            <span class="text-[11px] text-n-slate-9">ou escolha uma paleta só para este bloco:</span>
+            <span class="text-[11px] text-n-slate-9">
+              ou escolha uma cor só para este bloco:
+            </span>
           </div>
 
-          <!-- as 17 paletas -->
+          <!-- as 6 cores -->
           <div>
             <p class="cv-label mb-1.5">
               {{
                 palettePicker.target === 'panel'
-                  ? 'Ou uma paleta fixa'
-                  : 'Paleta deste bloco'
+                  ? 'Ou uma cor só'
+                  : 'Cor deste bloco'
               }}
             </p>
-            <p class="text-[10px] text-n-slate-9 mb-1">iMac G3 (1998–99)</p>
-            <div class="flex flex-wrap gap-1.5 mb-3">
-              <button
-                v-for="p in IMAC_PALETTES"
-                :key="p.key"
-                class="cv-swatch text-n-slate-12"
-                :class="paletteChoice === p.key ? 'cv-swatch-on' : ''"
-                :title="p.label"
-                @click="pickPalette(p.key)"
-              >
-                <span class="cv-swatch-dot" :style="{ background: p.hero }" />
-                {{ p.label }}
-              </button>
-            </div>
-            <p class="text-[10px] text-n-slate-9 mb-1">Frutas da Apple</p>
-            <div class="flex flex-wrap gap-1.5">
-              <button
-                v-for="p in FRUIT_PALETTES"
-                :key="p.key"
-                class="cv-swatch text-n-slate-12"
-                :class="paletteChoice === p.key ? 'cv-swatch-on' : ''"
-                :title="p.label"
-                @click="pickPalette(p.key)"
-              >
-                <span class="cv-swatch-dot" :style="{ background: p.hero }" />
-                {{ p.emoji }} {{ p.label }}
-              </button>
-            </div>
+            <template
+              v-for="grp in [
+                { title: 'Primárias', list: PRIMARY_PALETTES },
+                { title: 'Secundárias', list: SECONDARY_PALETTES },
+              ]"
+              :key="grp.title"
+            >
+              <p class="text-[10px] text-n-slate-9 mb-1">{{ grp.title }}</p>
+              <div class="flex flex-wrap gap-1.5 mb-3">
+                <button
+                  v-for="p in grp.list"
+                  :key="p.key"
+                  class="cv-swatch text-n-slate-12"
+                  :class="paletteChoice === p.key ? 'cv-swatch-on' : ''"
+                  :title="p.label"
+                  @click="pickPalette(p.key)"
+                >
+                  <span class="cv-swatch-dot" :style="{ background: p.hero }" />
+                  {{ p.label }}
+                </button>
+              </div>
+            </template>
           </div>
 
           <!-- resumo dos blocos com paleta própria -->

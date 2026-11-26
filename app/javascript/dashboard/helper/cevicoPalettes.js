@@ -1,6 +1,13 @@
-// 🍎🍊 PALETAS do Meu Painel (rodada 162): as 7 cores dos iMac G3 (uma por
-// dia da semana, item 160) + as 10 frutas da Apple + a "salada de frutas".
-// O admin escolhe, por painel, o painel inteiro e cada bloco (InicioPage).
+// 🎨 PALETAS do Meu Painel e das telas do kit .cv-*.
+// ♿ item 423 (26/11, pedido dele — o Dr. Henrique é daltônico, vermelho ×
+// verde): as 17 paletas (iMac G3 + frutas da Apple) e os modos cor do dia /
+// salada de frutas / aleatória viraram SÓ as 6 cores do círculo cromático —
+// primárias amarelo, azul e vermelho; secundárias verde, laranja e roxo — e 3
+// misturas (primárias, secundárias e todas as 6). Os tons foram escolhidos no
+// simulador de daltonismo (normal, deuteranopia, protanopia e tritanopia: o par
+// mais parecido ainda se distingue) e todo degradê aceita número BRANCO com
+// contraste 4,5 ou mais. Escolha antiga salva cai na cor mais parecida
+// (LEGACY_KEYS) — nada some.
 //
 // Cada paleta:
 //   key/label/emoji/group  · dot = tom principal (hex) · swatch = o que a
@@ -52,6 +59,13 @@ const altInkOf = tone => (luminance(tone) > 0.45 ? 'dark' : 'light');
 // amarelo puro), sem escurecer para o marrom. Com texto branco a família
 // não sobe até o tom claro (branco sobre azul-claro não lê); com texto
 // escuro ela vai do tom ao claro.
+// escurece até a letra branca ter contraste 4,5 (♿ item 423)
+const contrastWhite = hex => 1.05 / (luminance(hex) + 0.05);
+const whiteSafe = hex => {
+  let h = hex;
+  for (let i = 0; i < 20 && contrastWhite(h) < 4.5; i += 1) h = shade(h, 0.06);
+  return h;
+};
 const altFamilyOf = ([tone, light]) =>
   altInkOf(tone) === 'dark'
     ? familyOf([
@@ -61,19 +75,27 @@ const altFamilyOf = ([tone, light]) =>
         mix(tone, light, 0.7),
         light,
       ])
-    : familyOf([
-        shade(tone, 0.35),
-        shade(tone, 0.18),
-        tone,
-        mix(tone, light, 0.25),
-        mix(tone, light, 0.45),
-      ]);
-const P = (key, group, label, emoji, dot, hero, fam, alt) => ({
+    : familyOf(
+        [
+          shade(tone, 0.35),
+          shade(tone, 0.18),
+          tone,
+          mix(tone, light, 0.25),
+          mix(tone, light, 0.45),
+        ].map(whiteSafe)
+      );
+// key/group/label · dot = a cor pura (bolinha, barras, preenchimento) ·
+// accent = o tom para LETRA e ícone sobre fundo claro (contraste 4,5+; no
+// amarelo e no laranja é bem mais escuro que a bolinha) · hero = banner ·
+// fam = 5 paradas escuras (cards com número branco) · alt = complementar que
+// o daltônico também separa (nunca vermelho × verde)
+const P = (key, group, label, dot, accent, hero, fam, alt) => ({
   key,
   group,
   label,
-  emoji,
+  emoji: '',
   dot,
+  accent,
   alt: alt[0],
   altLight: alt[1],
   altInk: altInkOf(alt[0]),
@@ -83,234 +105,159 @@ const P = (key, group, label, emoji, dot, hero, fam, alt) => ({
 });
 
 export const PALETTES = [
-  // ── iMac G3 (1998–99): segunda abre com o original, depois a ordem da
-  //    foto dele; domingo = Graphite, a edição especial ──
+  // ── primárias ──
   P(
-    'bondi',
-    'imac',
-    'Bondi Blue',
-    '',
-    '#1099BC',
-    ['#0B4F63', '#1099BC', '#4FD3EA'],
-    ['#0B4F63', '#0F7A93', '#0E8FAC', '#1099BC', '#17AACB'],
-    ['#FF9F1C', '#FFE600']
+    'amarelo',
+    'primaria',
+    'Amarelo',
+    '#F5D000',
+    '#8A6A00',
+    ['#3F3100', '#8A6A00', '#F5D000'],
+    ['#3F3100', '#5C4700', '#6F5600', '#7D6100', '#8A6A00'],
+    ['#7E22CE', '#C4B5FD']
   ),
   P(
-    'blueberry',
-    'imac',
-    'Blueberry',
-    '',
-    '#3060E0',
-    ['#1B2F8A', '#3060E0', '#7CB0FF'],
-    ['#1B2F8A', '#2447C4', '#2C55D6', '#3060E0', '#3F72EA'],
-    ['#FFB000', '#FFF200']
+    'azul',
+    'primaria',
+    'Azul',
+    '#1E4FA0',
+    '#1E4FA0',
+    ['#0E2A5C', '#1E4FA0', '#6F9BE3'],
+    ['#0E2A5C', '#163C7E', '#1A4590', '#1E4FA0', '#2A5DB4'],
+    ['#B4530F', '#FDBA74']
   ),
   P(
-    'strawberry',
-    'imac',
-    'Strawberry',
-    '',
-    '#D42040',
-    ['#7A0B23', '#D42040', '#FF7A93'],
-    ['#7A0B23', '#B01432', '#C21A3A', '#D42040', '#E22F50'],
-    ['#00C2A8', '#7CF5DC']
+    'vermelho',
+    'primaria',
+    'Vermelho',
+    '#A3161A',
+    '#A3161A',
+    ['#4D0A0C', '#A3161A', '#E2575B'],
+    ['#4D0A0C', '#6E0F12', '#851216', '#941418', '#A3161A'],
+    ['#1E4FA0', '#93B4F0']
   ),
+  // ── secundárias ──
   P(
-    'lime',
-    'imac',
-    'Lime',
-    '',
-    '#4CAF2A',
-    ['#1F5A15', '#3E9E1F', '#9FE84D'],
-    ['#1F5A15', '#2F7D1E', '#388F1F', '#3E9E1F', '#4CAF2A'],
-    ['#F0148C', '#FF7AC8']
+    'verde',
+    'secundaria',
+    'Verde',
+    '#0E9466',
+    '#0B7A55',
+    ['#053D2A', '#0B7A55', '#3CC48F'],
+    ['#053D2A', '#075A3E', '#096A49', '#0A7350', '#0B7A55'],
+    ['#7E22CE', '#D8B4FE']
   ),
-  P(
-    'tangerine',
-    'imac',
-    'Tangerine',
-    '',
-    '#F26A1B',
-    ['#7F3208', '#E0600F', '#FFB35C'],
-    ['#7F3208', '#B84A0E', '#CC540F', '#E0600F', '#EE6E14'],
-    ['#2F5BFF', '#7DB8FF']
-  ),
-  P(
-    'grape',
-    'imac',
-    'Grape',
-    '',
-    '#6B3AC9',
-    ['#2A1055', '#5E2FB5', '#B48CFF'],
-    ['#2A1055', '#4A2390', '#54299F', '#5E2FB5', '#6B3AC9'],
-    ['#FFBA00', '#FFF200']
-  ),
-  P(
-    'graphite',
-    'imac',
-    'Graphite',
-    '',
-    '#6B7280',
-    ['#111827', '#4B5563', '#B0B7C3'],
-    ['#111827', '#374151', '#4B5563', '#5B6472', '#6B7280'],
-    ['#FFC300', '#FFF176']
-  ),
-  // ── frutas da Apple (ideia dele, 13/09): cada fruta é um tema e uma cor ──
   P(
     'laranja',
-    'fruta',
+    'secundaria',
     'Laranja',
-    '🍊',
-    '#F97316',
-    ['#7C2D12', '#F97316', '#FDBA74'],
-    ['#7C2D12', '#B44A10', '#D45A11', '#EA6A14', '#F97316'],
-    ['#3D5AFE', '#8AB4FF']
+    '#E0701A',
+    '#A84F0A',
+    ['#4A2204', '#A84F0A', '#F29A52'],
+    ['#4A2204', '#6B3206', '#843D08', '#964509', '#A84F0A'],
+    ['#1E4FA0', '#93B4F0']
   ),
   P(
-    'limao',
-    'fruta',
-    'Limão',
-    '🍋',
-    '#D4A70A',
-    ['#5C3D07', '#D4A70A', '#FDE68A'],
-    ['#5C3D07', '#8A5E0A', '#A6750B', '#BF8A0A', '#D4A70A'],
-    ['#8B3DF0', '#C4B5FD']
-  ),
-  P(
-    'melancia',
-    'fruta',
-    'Melancia',
-    '🍉',
-    '#E5395B',
-    ['#7A1230', '#E5395B', '#FDA4AF'],
-    ['#7A1230', '#A31A44', '#BE2450', '#D22E56', '#E5395B'],
-    ['#00B894', '#6EF3C9']
-  ),
-  P(
-    'uva',
-    'fruta',
-    'Uva',
-    '🍇',
-    '#7C3AED',
-    ['#3B0764', '#7C3AED', '#C4B5FD'],
-    ['#3B0764', '#581C87', '#6B21A8', '#7E22CE', '#8B3DF0'],
-    ['#FFB300', '#FFEE33']
-  ),
-  P(
-    'kiwi',
-    'fruta',
-    'Kiwi',
-    '🥝',
-    '#7CB518',
-    ['#365314', '#7CB518', '#D9F99D'],
-    ['#365314', '#4D7C0F', '#5C8F0F', '#6BA312', '#7CB518'],
-    ['#F5127A', '#FF8AC4']
-  ),
-  P(
-    'coco',
-    'fruta',
-    'Coco',
-    '🥥',
-    '#8B5E3C',
-    ['#3F2A1D', '#8B5E3C', '#F3E6D3'],
-    ['#3F2A1D', '#5C3D2E', '#704A36', '#7D5439', '#8B5E3C'],
-    ['#00A3C4', '#67E8F9']
-  ),
-  P(
-    'pessego',
-    'fruta',
-    'Pêssego',
-    '🍑',
-    '#F4845F',
-    ['#8A3A1B', '#F4845F', '#FED7AA'],
-    ['#8A3A1B', '#B24B25', '#CC5A30', '#E26F45', '#F4845F'],
-    ['#2F6BFF', '#8EC5FF']
-  ),
-  P(
-    'cereja',
-    'fruta',
-    'Cereja',
-    '🍒',
-    '#C41E3A',
-    ['#4A0A14', '#C41E3A', '#FCA5A5'],
-    ['#4A0A14', '#7A1223', '#96182D', '#AD1B33', '#C41E3A'],
-    ['#00C48C', '#7BF1C6']
-  ),
-  P(
-    'abacate',
-    'fruta',
-    'Abacate',
-    '🥑',
-    '#3E8E41',
-    ['#1B3D1E', '#3E8E41', '#C6E9B0'],
-    ['#1B3D1E', '#2A5A2D', '#326B35', '#387B3B', '#3E8E41'],
-    ['#F0148C', '#FF9AD5']
-  ),
-  P(
-    'mirtilo',
-    'fruta',
-    'Mirtilo',
-    '🫐',
-    '#4F46E5',
-    ['#1E1B4B', '#4F46E5', '#A5B4FC'],
-    ['#1E1B4B', '#312E81', '#3730A3', '#4338CA', '#4F46E5'],
-    ['#FFC400', '#FFF59D']
+    'roxo',
+    'secundaria',
+    'Roxo',
+    '#9131E6',
+    '#7E22CE',
+    ['#3A0A66', '#7E22CE', '#B57BF2'],
+    ['#3A0A66', '#561395', '#681AAF', '#7320BF', '#7E22CE'],
+    ['#F5D000', '#FFF2A6']
   ),
 ];
 
+// a cor de quem não escolheu nada (antes: a cor do dia do iMac G3)
+export const DEFAULT_PALETTE_KEY = 'azul';
+// ♿ item 423: escolha antiga salva (crm settings / ui_settings) → a cor nova
+// mais parecida
+export const LEGACY_KEYS = {
+  bondi: 'azul',
+  blueberry: 'azul',
+  mirtilo: 'azul',
+  graphite: 'azul',
+  coco: 'laranja',
+  strawberry: 'vermelho',
+  melancia: 'vermelho',
+  cereja: 'vermelho',
+  lime: 'verde',
+  kiwi: 'verde',
+  abacate: 'verde',
+  tangerine: 'laranja',
+  laranja: 'laranja',
+  pessego: 'laranja',
+  limao: 'amarelo',
+  grape: 'roxo',
+  uva: 'roxo',
+};
 export const PALETTE_BY_KEY = Object.fromEntries(PALETTES.map(p => [p.key, p]));
-export const IMAC_PALETTES = PALETTES.filter(p => p.group === 'imac');
-export const FRUIT_PALETTES = PALETTES.filter(p => p.group === 'fruta');
+Object.entries(LEGACY_KEYS).forEach(([old, now]) => {
+  if (!PALETTE_BY_KEY[old]) PALETTE_BY_KEY[old] = PALETTE_BY_KEY[now];
+});
+export const PRIMARY_PALETTES = PALETTES.filter(p => p.group === 'primaria');
+export const SECONDARY_PALETTES = PALETTES.filter(
+  p => p.group === 'secundaria'
+);
 export const paletteFor = key => PALETTE_BY_KEY[key] || null;
+export const DEFAULT_PALETTE = PALETTE_BY_KEY[DEFAULT_PALETTE_KEY];
 
-// dia da semana (getDay) → cor do dia
-export const DAY_KEYS = {
-  0: 'graphite',
-  1: 'bondi',
-  2: 'blueberry',
-  3: 'strawberry',
-  4: 'lime',
-  5: 'tangerine',
-  6: 'grape',
+// 🎨 as 3 MISTURAS (no lugar da salada de frutas): cada bloco da tela leva
+// uma cor (nesta ordem, pela posição padrão do bloco) e os cards da fileira
+// alternam. A ordem de "Todas as 6" põe lado a lado só cores que o daltônico
+// separa bem (azul · vermelho · amarelo · verde · roxo · laranja).
+const mkMix = (key, label, order) => {
+  const pals = order.map(k => PALETTE_BY_KEY[k]);
+  const dots = pals.map(p => p.dot);
+  return {
+    key: `mix:${key}`,
+    mixKey: key,
+    group: 'mistura',
+    label,
+    emoji: '',
+    order,
+    dot: pals[0].dot,
+    accent: pals[0].accent,
+    harmonyKey: pals[0].key,
+    swatch: `conic-gradient(from 90deg, ${[...dots, dots[0]].join(', ')})`,
+    // banner com os tons ESCUROS (letra branca legível em qualquer ponto)
+    hero: `linear-gradient(120deg, ${pals
+      .map(
+        (p, i) =>
+          `${p.accent} ${Math.round((i / Math.max(1, pals.length - 1)) * 100)}%`
+      )
+      .join(', ')})`,
+    family: pals[0].family,
+    alt: pals[1].dot,
+    altLight: pals[1].altLight,
+    altInk: 'light',
+    altFamily: pals[1].family,
+  };
 };
-
-// 🥗 SALADA DE FRUTAS: cada bloco da tela leva uma fruta (nesta ordem, pela
-// posição padrão do bloco — reordenar não troca a fruta) e os cards da
-// fileira alternam as frutas. O banner mistura as quatro primeiras.
-export const SALAD_ORDER = [
-  'laranja',
-  'uva',
-  'kiwi',
-  'cereja',
-  'mirtilo',
-  'pessego',
-  'limao',
-  'melancia',
-  'abacate',
-  'coco',
+export const MIXES = [
+  mkMix('primarias', 'Primárias', ['azul', 'amarelo', 'vermelho']),
+  mkMix('secundarias', 'Secundárias', ['verde', 'laranja', 'roxo']),
+  mkMix('todas', 'Todas as 6', [
+    'azul',
+    'vermelho',
+    'amarelo',
+    'verde',
+    'roxo',
+    'laranja',
+  ]),
 ];
-export const SALAD = {
-  key: 'salada',
-  group: 'salada',
-  label: 'Salada de frutas',
-  emoji: '🥗',
-  dot: '#F97316',
-  swatch:
-    'conic-gradient(from 90deg, #F97316, #E5395B, #7C3AED, #7CB518, #F4845F, #F97316)',
-  // item 284 (29/09): base AZUL → VERDE com brilho AMARELO ("o azul deixa mais
-  // suave e agradável"); rosa e roxo só como toque de contraste nos cantos
-  hero: [
-    'radial-gradient(circle at 96% 0%, rgba(250, 204, 21, 0.9) 0%, rgba(250, 204, 21, 0) 34%)',
-    'radial-gradient(circle at 72% 125%, rgba(236, 72, 153, 0.55) 0%, rgba(236, 72, 153, 0) 36%)',
-    'radial-gradient(circle at 0% 115%, rgba(124, 58, 237, 0.55) 0%, rgba(124, 58, 237, 0) 40%)',
-    'linear-gradient(120deg, #1E3A8A 0%, #2563EB 36%, #0EA5A4 66%, #22C55E 100%)',
-  ].join(', '),
-  family: PALETTE_BY_KEY.laranja.family,
-  alt: PALETTE_BY_KEY.uva.dot,
-  altLight: '#C4B5FD',
-  altInk: 'light',
-  altFamily: PALETTE_BY_KEY.uva.family,
+export const MIX_BY_KEY = Object.fromEntries(MIXES.map(m => [m.mixKey, m]));
+// a mistura de uma escolha salva ({ mode: 'mix', key } ou a antiga 'salad')
+export const mixFor = entry => {
+  if (!entry) return null;
+  if (entry.mode === 'salad') return MIX_BY_KEY.todas;
+  if (entry.mode === 'mix') return MIX_BY_KEY[entry.key] || MIX_BY_KEY.todas;
+  return null;
 };
+// a cor da posição i numa mistura
+export const mixPaletteAt = (mixPal, i) =>
+  PALETTE_BY_KEY[mixPal.order[i % mixPal.order.length]];
 
 // ── utilidades de cor do kit .cv-* (InicioPage) ──
 export const hexFromGrad = grad =>
@@ -330,89 +277,83 @@ export const hexToRgb = hex => {
 //    manda). As 7 cores do dia têm os tons escolhidos à mão no guia
 //    (claude.ai/artifact/M7af1huY3VB8XEbt5gr7Jt); as frutas são calculadas.
 // (cada uma com os tons do modo CLARO e, em `escuro`, os do modo escuro)
+// ── 🧭 GUIA AREJADO (item 336): 3 cores por ambiente em 60-30-10. 60% = a
+//    cor da paleta (--cv); 30% = apoio (texto escuro sobre fundo claro); 10% =
+//    destaque (botão principal e número que manda — vira LETRA grande sobre
+//    fundo claro, por isso sempre escuro no modo claro). ♿ item 423: para cada uma
+//    das 6 cores, apoio e destaque escolhidos à mão para o daltônico separar
+//    (azul ↔ laranja/amarelo, roxo ↔ amarelo/laranja; nunca vermelho × verde).
+// (cada uma com os tons do modo CLARO e, em `escuro`, os do modo escuro)
 const HARMONY = {
-  bondi: {
-    apoio: '#c2410c',
-    apoioFundo: '#ffefe6',
-    destaque: '#c9a200',
-    destaqueInk: '#111827',
+  azul: {
+    apoio: '#8a6a00',
+    apoioFundo: '#fff8d6',
+    destaque: '#b4530f',
+    destaqueInk: '#ffffff',
     escuro: {
-      apoio: '#fb923c',
+      apoio: '#fdba74',
       apoioFundo: '#3a1d10',
       destaque: '#ffd60a',
       destaqueInk: '#111827',
     },
   },
-  blueberry: {
-    apoio: '#8a5e0a',
-    apoioFundo: '#fff4d6',
-    destaque: '#f26a1b',
-    destaqueInk: '#111827',
-    escuro: {
-      apoio: '#fbbf24',
-      apoioFundo: '#3b2a08',
-      destaque: '#ff8a4c',
-      destaqueInk: '#111827',
-    },
-  },
-  strawberry: {
-    apoio: '#0b6b80',
-    apoioFundo: '#e3f6fa',
-    destaque: '#16a34a',
+  amarelo: {
+    apoio: '#5b21b6',
+    apoioFundo: '#f1ebff',
+    destaque: '#1e4fa0',
     destaqueInk: '#ffffff',
     escuro: {
-      apoio: '#5ad4ec',
-      apoioFundo: '#0e2f38',
-      destaque: '#4ade80',
+      apoio: '#c4b5fd',
+      apoioFundo: '#231a45',
+      destaque: '#7aa2ff',
       destaqueInk: '#111827',
     },
   },
-  lime: {
-    apoio: '#4338ca',
-    apoioFundo: '#ecebff',
-    destaque: '#e0218a',
+  vermelho: {
+    apoio: '#5b21b6',
+    apoioFundo: '#f1ebff',
+    destaque: '#1e4fa0',
     destaqueInk: '#ffffff',
     escuro: {
-      apoio: '#a5b4fc',
-      apoioFundo: '#1f1b4a',
-      destaque: '#ff6fbd',
+      apoio: '#93b4f0',
+      apoioFundo: '#14254a',
+      destaque: '#ffd60a',
       destaqueInk: '#111827',
     },
   },
-  tangerine: {
-    apoio: '#0f766e',
-    apoioFundo: '#dff7f3',
-    destaque: '#2f5bff',
+  verde: {
+    apoio: '#6b21a8',
+    apoioFundo: '#f4ebff',
+    destaque: '#1e4fa0',
     destaqueInk: '#ffffff',
     escuro: {
-      apoio: '#5eead4',
-      apoioFundo: '#0d3330',
-      destaque: '#7a9bff',
+      apoio: '#d8b4fe',
+      apoioFundo: '#2a1645',
+      destaque: '#ffd60a',
       destaqueInk: '#111827',
     },
   },
-  grape: {
-    apoio: '#3f6212',
-    apoioFundo: '#eef9d6',
-    destaque: '#e0a800',
-    destaqueInk: '#111827',
+  laranja: {
+    apoio: '#1e4fa0',
+    apoioFundo: '#e8f0fc',
+    destaque: '#7e22ce',
+    destaqueInk: '#ffffff',
     escuro: {
-      apoio: '#bef264',
-      apoioFundo: '#233308',
-      destaque: '#ffcc33',
+      apoio: '#93b4f0',
+      apoioFundo: '#14254a',
+      destaque: '#c4a1ff',
       destaqueInk: '#111827',
     },
   },
-  // domingo: a única tela em que o navy e o ouro da marca entram
-  graphite: {
-    apoio: '#152c61',
-    apoioFundo: '#e8edf8',
-    destaque: '#d4af37',
-    destaqueInk: '#111827',
+  roxo: {
+    apoio: '#8a6a00',
+    apoioFundo: '#fff8d6',
+    destaque: '#b4530f',
+    destaqueInk: '#ffffff',
     escuro: {
-      apoio: '#9db4ff',
-      apoioFundo: '#15213f',
-      destaque: '#e6c65a',
+      apoio: '#fde68a',
+      apoioFundo: '#3b2f06',
+      destaque: '#ff9a4d',
       destaqueInk: '#111827',
     },
   },
@@ -448,6 +389,7 @@ const hslToHex = (h, s, l) => {
 // complementar dividida calculada: apoio a +150°, destaque a +210°
 const harmonyOf = pal => {
   if (HARMONY[pal.key]) return HARMONY[pal.key];
+  if (HARMONY[pal.harmonyKey]) return HARMONY[pal.harmonyKey];
   const [h, s] = hexToHsl(pal.dot);
   const sat = Math.max(0.55, Math.min(s, 0.9));
   const destaque = hslToHex((h + 210) % 360, sat, 0.5);
@@ -469,7 +411,8 @@ export const paletteHarmony = harmonyOf;
 
 // as variáveis --cv* que o kit lê (na página inteira ou num bloco só)
 export const paletteVars = pal => {
-  const accent = pal.dot;
+  // ♿ item 423: --cv vira letra e ícone sobre fundo claro → o tom de contraste
+  const accent = pal.accent || pal.dot;
   const deep = hexFromGrad(pal.family[0]) || accent;
   const harmony = harmonyOf(pal);
   return {
