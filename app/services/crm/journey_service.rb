@@ -65,27 +65,47 @@ class Crm::JourneyService # rubocop:disable Metrics/ClassLength
   ].freeze
   RESCHEDULED_SQL = Api::V1::Accounts::Crm::AppointmentsController::RESCHEDULED_IN_PERIOD_SQL
 
-  def initialize(account:, since:, until_at:, lens: nil, compare: nil)
+  # 📅 item 421 (26/11, ele: "uma pré-seleção especial, tipo dias de semana e
+  # finais de semana, para poder comparar"): QUAIS DIAS entram na conta.
+  #   all      = todos (como sempre foi)
+  #   weekdays = só segunda a sexta        weekends = só sábado e domingo
+  #   versus   = dias úteis × fim de semana do MESMO período, em MÉDIA POR DIA
+  #              (5 dias contra 2 não se comparam pelo total)
+  DAY_MODES = %w[all weekdays weekends versus].freeze
+  # 📈 item 421 (ele: "o Hoje aponta só um pontinho… um histórico de pelo menos
+  # 7 dias, já carregado junto, para entender a progressão"): período curto
+  # ganha os dias ANTERIORES como contexto, até a linha ter este tanto de dias.
+  # O número grande continua sendo só do período.
+  LEAD_TOTAL = 7
+  LEAD_LOOKBACK = 21
+
+  def initialize(account:, since:, until_at:, lens: nil, compare: nil, days: nil) # rubocop:disable Metrics/ParameterLists
     @account = account
     @since = since
     @until_at = until_at
     @lens = lens || Crm::SourceLens.for(account, nil)
     @compare = compare || Crm::PeriodComparison.new(since, until_at)
     @by_month = ((until_at - since) / 86_400).ceil > MONTH_AFTER_DAYS
+    @days = DAY_MODES.include?(days.to_s) ? days.to_s : 'all'
   end
 
-  def call
+  def call # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     keys = bucket_keys(@since, @until_at)
     prev_keys = bucket_keys(@compare.since, @compare.until_at)
     {
       periodo: { de: @since.iso8601, ate: @until_at.iso8601, datas: range_label(@since, @until_at) },
-      comparacao: @compare.to_h,
+      comparacao: versus? ? versus_comparison : @compare.to_h,
       balde: by_month? ? 'mes' : 'dia',
+      dias: @days,
+      # o último dia ainda não acabou (hoje): a tela desenha o trecho final pontilhado
+      parcial: !by_month? && @until_at > Time.current && keys.last == bucket_of(Time.current),
       rotulos: keys.map { |k| bucket_label(k) },
       rotulos_anterior: aligned(prev_keys, keys.size).map { |k| k && bucket_label(k) },
+      fins_de_semana: by_month? ? [] : keys.map { |k| weekend?(Date.iso8601(k)) },
+      contexto: lead_json,
       etapas: STEPS.map { |step| step_json(step, keys, prev_keys) },
       orcamento_consulta: { agora: budget_to_booking(@since, @until_at),
-                            antes: budget_to_booking(@compare.since, @compare.until_at) },
+                            antes: versus? ? nil : budget_to_booking(@compare.since, @compare.until_at) },
       desvios: DETOURS.map { |detour| detour_json(detour, keys, prev_keys) }
     }
   end
@@ -94,18 +114,106 @@ class Crm::JourneyService # rubocop:disable Metrics/ClassLength
 
   attr_reader :account, :lens
 
-  def step_json(step, keys, prev_keys)
+  def step_json(step, keys, prev_keys) # rubocop:disable Metrics/AbcSize
     key, label, medida, icon, base, formula = step
-    cur = tally(times_for(key, @since, @until_at))
-    prev = tally(times_for(key, @compare.since, @compare.until_at))
-    {
-      key: key, label: label, medida: medida, icon: icon, base: base, formula: formula,
+    times = kept(times_for(key, @since, @until_at))
+    cur = tally(times)
+    json = { key: key, label: label, medida: medida, icon: icon, base: base, formula: formula, serie: keys.map { |k| cur[k].to_i } }
+    json[:contexto] = lead_series(key) if lead
+    return json.merge(versus_numbers(times, keys)) if versus?
+
+    prev = tally(kept(times_for(key, @compare.since, @compare.until_at)))
+    json.merge(
       valor: cur.values.sum, anterior: prev.values.sum,
-      serie: keys.map { |k| cur[k].to_i },
       # alinhada balde a balde com o período de agora (1º dia com 1º dia);
       # balde que não existe na base de comparação vai vazio (nil)
       serie_anterior: aligned(prev_keys, keys.size).map { |k| k && prev[k].to_i }
+    )
+  end
+
+  # ── 📅 item 421: quais dias entram ──────────────────────────────────────
+  def versus? = @days == 'versus'
+
+  def weekend?(date) = date.saturday? || date.sunday?
+
+  def keep_day?(date)
+    case @days
+    when 'weekdays' then !weekend?(date)
+    when 'weekends' then weekend?(date)
+    else true
+    end
+  end
+
+  def kept(times)
+    return times.compact if %w[all versus].include?(@days)
+
+    times.compact.select { |time| keep_day?(time.in_time_zone(TZ).to_date) }
+  end
+
+  # dias úteis × fim de semana do MESMO período: os dois em média por dia
+  def versus_numbers(times, keys)
+    weekend, weekday = times.partition { |time| weekend?(time.in_time_zone(TZ).to_date) }.map(&:size)
+    days = versus_days
+    {
+      valor: per_day(weekday, days[:uteis]), anterior: per_day(weekend, days[:fds]),
+      total: weekday + weekend, total_uteis: weekday, total_fds: weekend,
+      serie_anterior: Array.new(keys.size)
     }
+  end
+
+  def per_day(total, days)
+    days.positive? ? (total.to_f / days).round(1) : 0
+  end
+
+  # quantos dias úteis e quantos de fim de semana o período tem (até hoje)
+  def versus_days
+    @versus_days ||= begin
+      last = [@until_at, Time.current].min.in_time_zone(TZ).to_date
+      all = (@since.in_time_zone(TZ).to_date..last).to_a
+      { uteis: all.count { |day| !weekend?(day) }, fds: all.count { |day| weekend?(day) } }
+    end
+  end
+
+  def versus_comparison
+    days = versus_days
+    { modo: 'versus', rotulo: 'fim de semana', datas: nil, media_por_dia: true,
+      dias_uteis: days[:uteis], dias_fds: days[:fds] }
+  end
+
+  # ── 📈 item 421: os dias ANTERIORES ao período, como contexto da linha ──
+  # [de, até] ou nil. Só no balde por dia, com menos de LEAD_TOTAL dias na
+  # tela, e fora do "úteis × fim de semana" (lá a linha é o próprio período).
+  def lead # rubocop:disable Metrics/CyclomaticComplexity
+    return @lead if defined?(@lead)
+
+    @lead = nil
+    return @lead if by_month? || versus?
+
+    missing = LEAD_TOTAL - bucket_keys(@since, @until_at).size
+    return @lead unless missing.positive?
+
+    first = @since.in_time_zone(TZ).to_date
+    days = (1..LEAD_LOOKBACK).map { |back| first - back }.select { |day| keep_day?(day) }.first(missing)
+    return @lead if days.empty?
+
+    @lead = [days.last.in_time_zone(TZ).beginning_of_day, @since - 1.second]
+  end
+
+  def lead_keys
+    @lead_keys ||= lead ? bucket_keys(*lead) : []
+  end
+
+  def lead_series(key)
+    counts = tally(kept(times_for(key, *lead)))
+    lead_keys.map { |k| counts[k].to_i }
+  end
+
+  def lead_json
+    return nil unless lead
+
+    { de: lead.first.iso8601, ate: lead.last.iso8601, dias: lead_keys.size,
+      rotulos: lead_keys.map { |k| bucket_label(k) },
+      fins_de_semana: lead_keys.map { |k| weekend?(Date.iso8601(k)) } }
   end
 
   def detour_json(detour, keys, prev_keys)
@@ -241,7 +349,8 @@ class Crm::JourneyService # rubocop:disable Metrics/ClassLength
     last = until_at.in_time_zone(TZ).to_date
     keys = []
     while day <= last
-      keys << bucket_of(day.in_time_zone(TZ))
+      # 📅 item 421: no balde por dia, só os dias que entram na conta (úteis ou fim de semana)
+      keys << bucket_of(day.in_time_zone(TZ)) if by_month? || keep_day?(day)
       day = by_month? ? day.next_month.beginning_of_month : day + 1
     end
     keys.uniq

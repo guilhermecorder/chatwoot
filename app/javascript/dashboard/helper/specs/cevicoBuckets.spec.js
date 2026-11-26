@@ -1,4 +1,9 @@
-import { bucketize, granularityOf, smoothPath } from '../cevicoBuckets';
+import {
+  bucketize,
+  granularityOf,
+  smoothPath,
+  smoothSegments,
+} from '../cevicoBuckets';
 
 describe('cevicoBuckets', () => {
   it('escolhe hora, dia ou semana pelo tamanho do período', () => {
@@ -44,5 +49,45 @@ describe('cevicoBuckets', () => {
     ]);
     const ys = [...d.matchAll(/,(-?\d+\.\d)/g)].map(m => Number(m[1]));
     expect(Math.max(...ys)).toBeLessThanOrEqual(100);
+  });
+});
+
+// 📈 item 421: `smooth` = quanto a linha arredonda (0 reta … 1 a curva de sempre)
+describe('smoothSegments', () => {
+  const pts = [
+    [0, 100],
+    [50, 40],
+    [100, 80],
+    [150, 10],
+  ];
+  const nums = seg => [...seg.matchAll(/-?\d+\.\d/g)].map(m => Number(m[0]));
+
+  it('um trecho por intervalo, cada um terminando exatamente no ponto', () => {
+    [0, 0.3, 1].forEach(smooth => {
+      const segs = smoothSegments(pts, smooth);
+      expect(segs).toHaveLength(3);
+      segs.forEach((seg, i) => {
+        expect(nums(seg).slice(-2)).toEqual(pts[i + 1]);
+      });
+    });
+  });
+
+  it('smooth 0 = reta de ponto a ponto (controles em cima da corda)', () => {
+    const [c1x, c1y, c2x, c2y] = nums(smoothSegments(pts, 0)[0]);
+    expect([c1x, c2x]).toEqual([16.7, 33.3]);
+    expect(c1y).toBeCloseTo(80, 0);
+    expect(c2y).toBeCloseTo(60, 0);
+  });
+
+  it('smooth 1 = a mesma curva que o smoothPath sempre desenhou', () => {
+    expect(smoothPath(pts)).toBe(
+      ['M0.0,100.0', ...smoothSegments(pts, 1)].join(' ')
+    );
+    expect(smoothPath(pts, 0.3)).not.toBe(smoothPath(pts));
+  });
+
+  it('menos de dois pontos não tem trecho', () => {
+    expect(smoothSegments([[0, 1]])).toEqual([]);
+    expect(smoothSegments([])).toEqual([]);
   });
 });

@@ -11,8 +11,18 @@
 // uma base de comparação".
 //
 // `dados` = payload de Crm::JourneyService (composable useCevicoJourney).
+//
+// 📈 item 421 (26/11): período curto (Hoje, Ontem, Hoje + ontem) traz os dias
+// ANTERIORES na mesma linha, como contexto; chavinha de QUAIS DIAS entram
+// (todos | dias úteis | fim de semana | úteis × fim de semana, em média por
+// dia); a linha passa exatamente em cada número, com bolinha em cada dia.
 import { ref, computed, watch } from 'vue';
 import { variation, variationText } from 'dashboard/helper/cevicoComparison';
+import {
+  JOURNEY_DAY_MODES,
+  journeyDays,
+  setJourneyDays,
+} from 'dashboard/composables/useCevicoCompare';
 import CompareLine from 'dashboard/components-next/cevico/CompareLine.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import CvBloco from './CvBloco.vue';
@@ -28,7 +38,8 @@ const props = defineProps({
 });
 const emit = defineEmits(['alternar']);
 
-const n = v => Number(v || 0).toLocaleString('pt-BR');
+const n = v =>
+  Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 });
 const pct = v =>
   `${Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
 
@@ -39,6 +50,39 @@ const rotuloBase = computed(() => base.value.rotulo || 'período anterior');
 const balde = computed(() =>
   props.dados?.balde === 'mes' ? 'mês a mês' : 'dia a dia'
 );
+
+// 📅 item 421: quais dias entram + os dias anteriores que vêm de contexto
+const versus = computed(() => props.dados?.dias === 'versus');
+const contexto = computed(() => props.dados?.contexto || null);
+const linhaExtras = etapa => ({
+  leadValues: etapa?.contexto || [],
+  leadLabels: contexto.value?.rotulos || [],
+  leadWeekends: contexto.value?.fins_de_semana || [],
+  weekends: props.dados?.fins_de_semana || [],
+  partial: !!props.dados?.parcial,
+});
+// no "úteis × fim de semana" os números são MÉDIA POR DIA
+const antesRotulo = computed(() => (versus.value ? 'fim de semana' : 'antes'));
+const versusNota = computed(() => {
+  if (!versus.value) return '';
+  const c = base.value;
+  if (!c.dias_uteis || !c.dias_fds)
+    return 'Este período não tem os dois tipos de dia. Escolha um período maior (7 dias ou mais) para comparar dias úteis com fim de semana.';
+  return `Média POR DIA: ${c.dias_uteis} ${c.dias_uteis === 1 ? 'dia útil' : 'dias úteis'} contra ${c.dias_fds} ${c.dias_fds === 1 ? 'dia' : 'dias'} de fim de semana do mesmo período. O número grande é a média de um dia útil; "fim de semana" é a média de um sábado ou domingo.`;
+});
+const diasNota = computed(() => {
+  // período sem nenhum dia do tipo escolhido (ex.: "Hoje" numa quinta + fim de semana)
+  const semDia = !(props.dados?.rotulos || []).length;
+  if (props.dados?.dias === 'weekdays')
+    return semDia
+      ? 'Este período não tem dia útil: os números ficam zerados. A linha mostra os últimos dias úteis; escolha um período maior para contar.'
+      : 'Só segunda a sexta entram na conta (no período e na base de comparação).';
+  if (props.dados?.dias === 'weekends')
+    return semDia
+      ? 'Este período não tem sábado nem domingo: os números ficam zerados. A linha mostra os últimos fins de semana; escolha um período maior para contar.'
+      : 'Só sábados e domingos entram na conta (no período e na base de comparação).';
+  return '';
+});
 
 // rendimento sobre a etapa-base (ex.: agendaram ÷ chegaram), agora e antes
 const rendimento = etapa => {
@@ -127,8 +171,27 @@ const vazio = computed(
     icon="i-lucide-route"
     class="cvj"
   >
-    <template v-if="recolhivel" #acoes>
+    <template #acoes>
+      <div
+        v-if="!recolhida"
+        class="cvj-dias"
+        role="group"
+        aria-label="Quais dias entram na conta"
+      >
+        <button
+          v-for="m in JOURNEY_DAY_MODES"
+          :key="m.key"
+          type="button"
+          class="cvj-dias-item"
+          :class="{ 'cvj-dias-item--on': journeyDays === m.key }"
+          :aria-pressed="journeyDays === m.key"
+          @click="setJourneyDays(m.key)"
+        >
+          {{ m.label }}
+        </button>
+      </div>
       <button
+        v-if="recolhivel"
         type="button"
         class="cvj-recolher"
         :aria-expanded="!recolhida"
@@ -150,14 +213,27 @@ const vazio = computed(
     </p>
     <template v-else-if="!recolhida">
       <p class="cvj-legenda">
-        <span><i class="cvj-traco" /> {{ dados.periodo?.datas }}</span>
         <span>
+          <i class="cvj-traco" /> {{ dados.periodo?.datas }}
+          <template v-if="versus"> · dias úteis</template>
+        </span>
+        <span v-if="contexto">
+          <i class="cvj-traco cvj-traco--contexto" />
+          {{ contexto.dias }}
+          {{ contexto.dias === 1 ? 'dia anterior' : 'dias anteriores' }}, para
+          ver a progressão
+        </span>
+        <span v-else-if="!versus">
           <i class="cvj-traco cvj-traco--antes" /> {{ rotuloBase }}
           <template v-if="base.datas"> ({{ base.datas }})</template>
         </span>
+        <span v-if="dados.parcial">pontilhado = hoje, ainda em andamento</span>
         <span class="cvj-legenda-fim">
           {{ balde }} · toque numa etapa para abrir
         </span>
+      </p>
+      <p v-if="versusNota || diasNota" class="cvj-nota cvj-nota--dias">
+        {{ versusNota || diasNota }}
       </p>
 
       <!-- ══ a trilha: uma etapa por cartão ══ -->
@@ -180,13 +256,14 @@ const vazio = computed(
           </span>
           <span class="cvj-rotulo">{{ e.label }}</span>
           <span class="cvj-valor">{{ n(e.valor) }}</span>
-          <span class="cvj-antes">antes {{ n(e.anterior) }}</span>
+          <span class="cvj-antes">{{ antesRotulo }} {{ n(e.anterior) }}</span>
           <CompareLine
             class="cvj-linha"
             :values="e.serie"
             :prev-values="e.serie_anterior"
             :labels="dados.rotulos"
             :prev-labels="dados.rotulos_anterior"
+            v-bind="linhaExtras(e)"
             :height="44"
             :legend="false"
             :color="aberta === e.key ? '#ffffff' : ''"
@@ -209,25 +286,40 @@ const vazio = computed(
         <div class="cvj-detalhe-graf">
           <span class="cvj-detalhe-titulo">
             <span>{{ detalhe.label }} · {{ balde }}</span>
-            <span>agora × {{ rotuloBase }}</span>
+            <span v-if="versus">
+              dias úteis × fim de semana (média por dia)
+            </span>
+            <span v-else-if="contexto && !(dados.rotulos || []).length">
+              os últimos {{ contexto.dias }} dias que entram na conta
+            </span>
+            <span v-else-if="contexto">
+              o período em destaque, depois de {{ contexto.dias }}
+              {{ contexto.dias === 1 ? 'dia' : 'dias' }}
+            </span>
+            <span v-else>agora × {{ rotuloBase }}</span>
           </span>
           <CompareLine
             :values="detalhe.serie"
             :prev-values="detalhe.serie_anterior"
             :labels="dados.rotulos"
             :prev-labels="dados.rotulos_anterior"
+            v-bind="linhaExtras(detalhe)"
+            :base-note="versus ? '' : undefined"
             :current-label="dados.periodo?.datas || 'agora'"
             :previous-label="rotuloBase"
             :unit="detalhe.medida"
             :good-when-up="detalhe.bom"
-            :height="220"
+            :height="240"
           />
         </div>
         <div class="cvj-detalhe-texto">
           <span class="cvj-rotulo">{{ detalhe.label }}</span>
           <span class="cvj-detalhe-valor">
             {{ n(detalhe.valor) }}
-            <small>{{ detalhe.medida }}</small>
+            <small>
+              {{ detalhe.medida
+              }}<template v-if="versus"> por dia útil</template>
+            </small>
           </span>
           <span
             v-if="detalheCmp"
@@ -256,6 +348,12 @@ const vazio = computed(
           >
             <b>Do orçamento para a consulta:</b> {{ orcConsFrase }}
           </p>
+          <p v-if="versus" class="cvj-detalhe-p">
+            <b>No período todo:</b> {{ n(detalhe.total) }} ({{
+              n(detalhe.total_uteis)
+            }}
+            em dias úteis e {{ n(detalhe.total_fds) }} em fim de semana).
+          </p>
           <p class="cvj-detalhe-p"><b>O que conta:</b> {{ detalhe.formula }}</p>
         </div>
       </div>
@@ -283,13 +381,14 @@ const vazio = computed(
             </span>
             <span class="cvj-rotulo">{{ e.label }}</span>
             <span class="cvj-valor">{{ n(e.valor) }}</span>
-            <span class="cvj-antes">antes {{ n(e.anterior) }}</span>
+            <span class="cvj-antes">{{ antesRotulo }} {{ n(e.anterior) }}</span>
             <CompareLine
               class="cvj-linha"
               :values="e.serie"
               :prev-values="e.serie_anterior"
               :labels="dados.rotulos"
               :prev-labels="dados.rotulos_anterior"
+              v-bind="linhaExtras(e)"
               :height="44"
               :legend="false"
               :color="aberta === e.key ? '#ffffff' : ''"
@@ -326,6 +425,43 @@ const vazio = computed(
 }
 .cv-page .cvj-recolher:hover {
   background: rgb(var(--cv-rgb) / 0.18);
+}
+.cv-page .cvj-dias {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 2px;
+  overflow-x: auto;
+  border-radius: 999px;
+  background: rgb(var(--cv-rgb) / 0.08);
+  border: 1px solid rgb(var(--cv-rgb) / 0.18);
+}
+.cv-page .cvj-dias-item {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--g-texto-2, #4b5563);
+  cursor: pointer;
+}
+.cv-page .cvj-dias-item:hover {
+  background: rgb(var(--cv-rgb) / 0.12);
+}
+.cv-page .cvj-dias-item--on,
+.cv-page .cvj-dias-item--on:hover {
+  color: #fff;
+  background: var(--cv);
+}
+.cv-page .cvj-traco--contexto {
+  border-top-width: 2px;
+  opacity: 0.5;
+}
+.cv-page .cvj-nota--dias {
+  margin: 0 0 12px;
 }
 .cv-page .cvj-legenda {
   display: flex;

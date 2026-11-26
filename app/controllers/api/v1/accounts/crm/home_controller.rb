@@ -300,9 +300,11 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
   def journey
     since, until_at = resolve_range
     compare = period_comparison(since, until_at)
-    key = ['cevico:journey:v394', account.id, lens.key, since.to_i, until_at.to_i, compare.cache_key]
+    # 📅 item 421: quais dias entram (todos | úteis | fim de semana | úteis × fim de semana)
+    days = Crm::JourneyService::DAY_MODES.include?(params[:days].to_s) ? params[:days].to_s : 'all'
+    key = ['cevico:journey:v421', account.id, lens.key, since.to_i, until_at.to_i, compare.cache_key, days]
     payload = Rails.cache.fetch(key, expires_in: heavy_ttl) do
-      Crm::JourneyService.new(account: account, since: since, until_at: until_at, lens: lens, compare: compare).call
+      Crm::JourneyService.new(account: account, since: since, until_at: until_at, lens: lens, compare: compare, days: days).call
     end
     render json: payload
   end

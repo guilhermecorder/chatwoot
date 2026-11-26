@@ -55,11 +55,16 @@ export const bucketize = (items, since, until, at, key = () => 'total') => {
 };
 
 // curva suave que passa pelos pontos sem "barriga" abaixo de zero
-// (monótona: cada trecho vira uma Bézier cúbica)
-export const smoothPath = pts => {
-  if (!pts.length) return '';
-  if (pts.length === 1) return `M${pts[0][0]},${pts[0][1]}`;
+// (monótona: cada trecho vira uma Bézier cúbica).
+// 📈 item 421: `smooth` (0 a 1) = quanto arredonda. 1 = a curva de sempre;
+// 0 = reta de ponto a ponto; no meio, a linha fica FIEL ao número (quase reta)
+// só com a quina amaciada. A curva passa SEMPRE exatamente em cada ponto.
+// Devolve os trechos separados, para quem desenha pedaços da mesma linha com
+// estilos diferentes (contexto claro + período forte) sem quebrar a curva.
+export const smoothSegments = (pts, smooth = 1) => {
   const n = pts.length;
+  if (n < 2) return [];
+  const k = Math.min(1, Math.max(0, Number(smooth)));
   const dx = [];
   const slope = [];
   for (let i = 0; i < n - 1; i += 1) {
@@ -86,13 +91,28 @@ export const smoothPath = pts => {
     }
   }
   const f = v => v.toFixed(1);
-  let d = `M${f(pts[0][0])},${f(pts[0][1])}`;
+  const out = [];
   for (let i = 0; i < n - 1; i += 1) {
+    // inclinação que vale em cada ponta: entre a reta do trecho e a curva
+    const t1 = slope[i] + (tan[i] - slope[i]) * k;
+    const t2 = slope[i] + (tan[i + 1] - slope[i]) * k;
     const c1x = pts[i][0] + dx[i] / 3;
-    const c1y = pts[i][1] + (tan[i] * dx[i]) / 3;
+    const c1y = pts[i][1] + (t1 * dx[i]) / 3;
     const c2x = pts[i + 1][0] - dx[i] / 3;
-    const c2y = pts[i + 1][1] - (tan[i + 1] * dx[i]) / 3;
-    d += ` C${f(c1x)},${f(c1y)} ${f(c2x)},${f(c2y)} ${f(pts[i + 1][0])},${f(pts[i + 1][1])}`;
+    const c2y = pts[i + 1][1] - (t2 * dx[i]) / 3;
+    out.push(
+      `C${f(c1x)},${f(c1y)} ${f(c2x)},${f(c2y)} ${f(pts[i + 1][0])},${f(pts[i + 1][1])}`
+    );
   }
-  return d;
+  return out;
+};
+
+export const smoothPath = (pts, smooth = 1) => {
+  if (!pts.length) return '';
+  if (pts.length === 1) return `M${pts[0][0]},${pts[0][1]}`;
+  const f = v => v.toFixed(1);
+  return [
+    `M${f(pts[0][0])},${f(pts[0][1])}`,
+    ...smoothSegments(pts, smooth),
+  ].join(' ');
 };

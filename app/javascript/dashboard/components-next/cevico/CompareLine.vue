@@ -8,8 +8,21 @@
 //   prevValues  = [n | null por balde] da base (null = balde que não existe lá)
 //   labels / prevLabels = rótulo de cada balde ("05/11") nos dois períodos
 // Passar o dedo/mouse mostra os dois números do balde e a diferença.
+//
+// 📈 item 421 (26/11, ele: "o Hoje aponta só um pontinho… não mostra como foi
+// nos dias anteriores… estão muito suavizadas as linhas… uma visão clara da
+// realidade"):
+//   leadValues / leadLabels = os dias ANTERIORES ao período (contexto): a
+//       linha começa neles, mais clara, e o período vem forte, numa faixa
+//       destacada. Com contexto, a base tracejada sai (o passado já está ali).
+//   partial   = o último ponto é um dia que ainda não acabou: o trecho final
+//       vai pontilhado e a bolinha vazada.
+//   weekends / leadWeekends = quais baldes são sábado/domingo (faixa cinza).
+//   smooth    = quanto arredonda (0 reta … 1 curva). Padrão 0.3: a linha passa
+//       exatamente em cada número, quase reta, só com a quina macia.
+//   Cada dia ganha a sua bolinha e, havendo espaço, o número em cima.
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
-import { smoothPath } from 'dashboard/helper/cevicoBuckets';
+import { smoothSegments } from 'dashboard/helper/cevicoBuckets';
 import { variation } from 'dashboard/helper/cevicoComparison';
 
 const props = defineProps({
@@ -17,6 +30,14 @@ const props = defineProps({
   prevValues: { type: Array, default: null },
   labels: { type: Array, default: () => [] },
   prevLabels: { type: Array, default: () => [] },
+  leadValues: { type: Array, default: () => [] },
+  leadLabels: { type: Array, default: () => [] },
+  partial: { type: Boolean, default: false },
+  weekends: { type: Array, default: () => [] },
+  leadWeekends: { type: Array, default: () => [] },
+  smooth: { type: Number, default: 0.3 },
+  // o que a legenda diz quando não há base ('' = não diz nada)
+  baseNote: { type: String, default: 'sem base de comparação' },
   // nomes das duas linhas na legenda e no balão
   currentLabel: { type: String, default: 'agora' },
   previousLabel: { type: String, default: 'antes' },
@@ -51,12 +72,28 @@ onMounted(() => {
 });
 onBeforeUnmount(() => observer?.disconnect());
 
-const LEFT = computed(() => (props.bare ? 4 : 34));
-const RIGHT = computed(() => (props.bare ? 4 : 14));
-const TOP = computed(() => (props.bare ? 6 : 12));
+const LEFT = computed(() => (props.bare ? 5 : 34));
+const RIGHT = computed(() => (props.bare ? 5 : 16));
+const TOP = computed(() => (props.bare ? 6 : 20));
 const BOTTOM = computed(() => (props.bare ? 6 : 24));
 
 const cur = computed(() => props.values.map(v => Number(v) || 0));
+const n = computed(() => cur.value.length);
+// contexto: os dias antes do período
+// (período sem nenhum dia — filtro de dias num período curto — mostra só o contexto)
+const lead = computed(() => (props.leadValues || []).map(v => Number(v) || 0));
+const L = computed(() => lead.value.length);
+const all = computed(() => [...lead.value, ...cur.value]);
+const N = computed(() => all.value.length);
+const allLabels = computed(() => [
+  ...lead.value.map((_, i) => props.leadLabels[i] || ''),
+  ...cur.value.map((_, i) => props.labels[i] || ''),
+]);
+const allWeekends = computed(() => [
+  ...lead.value.map((_, i) => !!props.leadWeekends[i]),
+  ...cur.value.map((_, i) => !!props.weekends[i]),
+]);
+
 // a base só entra se tiver algum número; null continua null (buraco na linha)
 const prev = computed(() => {
   const list = props.prevValues;
@@ -66,11 +103,17 @@ const prev = computed(() => {
     list[i] === null || list[i] === undefined ? null : Number(list[i]) || 0
   );
 });
-const n = computed(() => cur.value.length);
+// com contexto na tela a base tracejada não é desenhada (os números seguem no balão)
+const drawPrev = computed(() => !!prev.value && L.value === 0);
+
 const plotW = computed(() => W.value - LEFT.value - RIGHT.value);
 const plotH = computed(() => props.height - TOP.value - BOTTOM.value);
 const max = computed(() =>
-  Math.max(1, ...cur.value, ...(prev.value || []).map(v => v || 0))
+  Math.max(
+    1,
+    ...all.value,
+    ...(drawPrev.value ? prev.value.map(v => v || 0) : [])
+  )
 );
 // teto "redondo" e linhas de grade
 const ceil = computed(() => {
@@ -86,50 +129,117 @@ const ticks = computed(() =>
     y: TOP.value + plotH.value * (1 - f),
   }))
 );
-const xAt = i =>
-  n.value <= 1
-    ? LEFT.value + plotW.value / 2
-    : LEFT.value + (i / (n.value - 1)) * plotW.value;
+const step = computed(() =>
+  N.value <= 1 ? plotW.value : plotW.value / (N.value - 1)
+);
+const xAt = j =>
+  N.value <= 1 ? LEFT.value + plotW.value / 2 : LEFT.value + j * step.value;
 const yAt = v => TOP.value + plotH.value * (1 - v / ceil.value);
 const base = computed(() => TOP.value + plotH.value);
+const f1 = v => v.toFixed(1);
 
-// um balde só (Hoje/Ontem): vira um "morro" para a linha existir
-const pointsOf = values =>
-  n.value === 1
-    ? [0, values[0] || 0, 0].map((v, i) => [
-        LEFT.value + (i / 2) * plotW.value,
-        yAt(v),
-      ])
-    : values.map((v, i) => [xAt(i), yAt(v)]);
+// um ponto só e nenhum contexto: não dá para ter linha — fica o ponto, com
+// uma régua fina na altura dele (nada de "morro" inventado)
+const single = computed(() => N.value === 1);
+const pts = computed(() => all.value.map((v, j) => [xAt(j), yAt(v)]));
+const segs = computed(() => smoothSegments(pts.value, props.smooth));
+// pedaço da MESMA curva, do ponto a até o ponto b
+const pathOf = (a, b) => {
+  if (b <= a || !pts.value[a]) return '';
+  return [
+    `M${f1(pts.value[a][0])},${f1(pts.value[a][1])}`,
+    ...segs.value.slice(a, b),
+  ].join(' ');
+};
+const lastIdx = computed(() => N.value - 1);
+// até onde vai a linha cheia: o dia que ainda não acabou fica de fora
+const solidEnd = computed(() =>
+  props.partial && N.value > 1 ? lastIdx.value - 1 : lastIdx.value
+);
 
-const curShape = computed(() => {
-  if (!n.value) return null;
-  const pts = pointsOf(cur.value);
-  const line = smoothPath(pts);
-  const first = pts[0][0].toFixed(1);
-  const last = pts[pts.length - 1][0].toFixed(1);
-  return {
-    line,
-    area: `${line} L${last},${base.value} L${first},${base.value} Z`,
-    end: n.value === 1 ? pts[1] : pts[pts.length - 1],
-  };
+const shapes = computed(() => {
+  if (!N.value || single.value) return null;
+  const from = L.value; // 1º ponto do período
+  // contexto: do 1º dia anterior até encostar no período
+  const leadLine = L.value ? pathOf(0, Math.min(from, solidEnd.value)) : '';
+  const curLine = pathOf(from, solidEnd.value);
+  const dashed =
+    props.partial && lastIdx.value >= 1
+      ? pathOf(lastIdx.value - 1, lastIdx.value)
+      : '';
+  // área em degradê: o período (e o trecho que chega nele)
+  const areaFrom = L.value ? Math.max(0, from - 1) : 0;
+  const areaLine = pathOf(areaFrom, lastIdx.value);
+  const area = areaLine
+    ? `${areaLine} L${f1(pts.value[lastIdx.value][0])},${base.value} L${f1(pts.value[areaFrom][0])},${base.value} Z`
+    : '';
+  return { leadLine, curLine, dashed, area };
 });
 // a linha de antes para onde a base acaba (mês de 30 × mês de 31 dias)
-const prevShape = computed(() => {
-  if (!prev.value || !n.value) return null;
+const prevLine = computed(() => {
+  if (!drawPrev.value || N.value < 2) return '';
   const upto = prev.value.findIndex(v => v === null);
   const values = upto === -1 ? prev.value : prev.value.slice(0, upto);
-  if (!values.length) return null;
-  if (n.value === 1) return { line: smoothPath(pointsOf(values)) };
-  return { line: smoothPath(values.map((v, i) => [xAt(i), yAt(v)])) };
+  if (values.length < 2) return '';
+  const p = values.map((v, i) => [xAt(i), yAt(v)]);
+  const f = p[0];
+  return [`M${f1(f[0])},${f1(f[1])}`, ...smoothSegments(p, props.smooth)].join(
+    ' '
+  );
+});
+
+// faixa que destaca o PERÍODO quando há contexto antes dele
+const band = computed(() => {
+  if (!L.value || !n.value || single.value) return null;
+  const x = xAt(L.value) - step.value / 2;
+  return { x, w: W.value - RIGHT.value + (props.bare ? 5 : 8) - x };
+});
+// sábados e domingos (só no gráfico grande, dia a dia)
+const weekendBands = computed(() => {
+  if (props.bare || single.value) return [];
+  // só fim de semana na tela (filtro ligado): não há o que destacar
+  if (allWeekends.value.every(Boolean)) return [];
+  const w = Math.min(step.value, 46);
+  return allWeekends.value
+    .map((on, j) => (on ? { j, x: xAt(j) - w / 2, w } : null))
+    .filter(Boolean);
+});
+// uma bolinha por dia (some quando os dias ficam apertados demais)
+const dots = computed(() => {
+  if (single.value) return [];
+  const room = step.value >= (props.bare ? 9 : 11);
+  return pts.value
+    .map(([x, y], j) => ({
+      j,
+      x,
+      y,
+      lead: j < L.value,
+      hollow: props.partial && j === lastIdx.value,
+    }))
+    .filter(d => {
+      if (d.j === lastIdx.value) return true;
+      if (props.bare) return room && L.value > 0 && !d.lead;
+      return room;
+    });
+});
+// o número em cima de cada dia, quando cabe
+const pointLabels = computed(() => {
+  if (props.bare || single.value || step.value < 30) return [];
+  return pts.value.map(([x, y], j) => ({
+    j,
+    x,
+    y: Math.max(TOP.value - 6, y - 9),
+    lead: j < L.value,
+    text: props.format(all.value[j]),
+  }));
 });
 
 // no máximo ~8 rótulos no eixo de baixo
 const xLabels = computed(() => {
-  const every = Math.max(1, Math.ceil(n.value / 8));
-  return props.labels
+  const every = Math.max(1, Math.ceil(N.value / 8));
+  return allLabels.value
     .map((label, i) => ({ label, i, x: xAt(i) }))
-    .filter(l => l.i % every === 0 || l.i === n.value - 1)
+    .filter(l => l.i % every === 0 || l.i === N.value - 1)
     .filter((l, k, arr) => k === 0 || l.x - arr[k - 1].x > 34);
 });
 
@@ -142,30 +252,36 @@ const prevTotal = computed(() =>
 const hover = ref(-1);
 const onMove = event => {
   const rect = wrap.value?.getBoundingClientRect();
-  if (!rect || !n.value) return;
+  if (!rect || !N.value) return;
   const x = (event.touches?.[0]?.clientX ?? event.clientX) - rect.left;
   const ratio = (x - LEFT.value) / Math.max(1, plotW.value);
   hover.value = Math.min(
-    n.value - 1,
-    Math.max(0, Math.round(ratio * (n.value - 1)))
+    N.value - 1,
+    Math.max(0, Math.round(ratio * (N.value - 1)))
   );
 };
 const tip = computed(() => {
   if (hover.value < 0) return null;
-  const i = hover.value;
-  const antes = prev.value ? prev.value[i] : null;
+  const j = hover.value;
+  const isLead = j < L.value;
+  const i = j - L.value;
+  const antes = !isLead && prev.value ? prev.value[i] : null;
   return {
-    i,
-    x: xAt(i),
-    label: props.labels[i],
-    prevLabel: props.prevLabels[i] || '',
-    agora: cur.value[i],
+    j,
+    x: xAt(j),
+    y: yAt(all.value[j]),
+    lead: isLead,
+    label: allLabels.value[j],
+    prevLabel: isLead ? '' : props.prevLabels[i] || '',
+    agora: all.value[j],
     antes,
+    partial: props.partial && j === lastIdx.value,
+    weekend: allWeekends.value[j],
     dif:
       antes === null || antes === undefined
         ? null
         : variation(cur.value[i], antes, { bomQuandoSobe: props.goodWhenUp }),
-    left: xAt(i) > W.value * 0.6,
+    left: xAt(j) > W.value * 0.6,
   };
 });
 const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
@@ -183,7 +299,7 @@ const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
       @mouseleave="hover = -1"
     >
       <svg
-        v-if="curShape"
+        v-if="N"
         :width="W"
         :height="height"
         :viewBox="`0 0 ${W} ${height}`"
@@ -194,10 +310,29 @@ const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
       >
         <defs>
           <linearGradient :id="uid" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--cl)" stop-opacity="0.34" />
+            <stop offset="0%" stop-color="var(--cl)" stop-opacity="0.3" />
             <stop offset="100%" stop-color="var(--cl)" stop-opacity="0.02" />
           </linearGradient>
         </defs>
+        <rect
+          v-for="b in weekendBands"
+          :key="`w${b.j}`"
+          class="cv-cline-weekend"
+          :x="b.x"
+          :y="TOP"
+          :width="b.w"
+          :height="plotH"
+          rx="4"
+        />
+        <rect
+          v-if="band"
+          class="cv-cline-band"
+          :x="band.x"
+          :y="bare ? 0 : TOP - 8"
+          :width="Math.max(0, band.w)"
+          :height="bare ? height : plotH + 8"
+          rx="6"
+        />
         <g v-if="!bare" class="cv-cline-grid">
           <line
             v-for="t in ticks"
@@ -226,17 +361,76 @@ const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
             {{ l.label }}
           </text>
         </g>
-        <path :d="curShape.area" :fill="`url(#${uid})`" />
-        <path v-if="prevShape" class="cv-cline-prev" :d="prevShape.line" />
-        <path class="cv-cline-cur" :d="curShape.line" />
-        <circle
-          v-if="!tip"
-          class="cv-cline-end"
-          :cx="curShape.end[0]"
-          :cy="curShape.end[1]"
-          r="4"
-        />
-        <g v-if="tip">
+
+        <!-- um ponto só, sem contexto: o ponto e uma régua na altura dele -->
+        <template v-if="single">
+          <line
+            class="cv-cline-level"
+            :x1="LEFT"
+            :x2="W - RIGHT"
+            :y1="yAt(all[0])"
+            :y2="yAt(all[0])"
+          />
+          <circle
+            v-if="drawPrev && prev[0] !== null"
+            class="cv-cline-dot-prev"
+            :cx="xAt(0)"
+            :cy="yAt(prev[0])"
+            r="4"
+          />
+          <circle
+            class="cv-cline-end"
+            :class="{ 'cv-cline-hollow': partial }"
+            :cx="xAt(0)"
+            :cy="yAt(all[0])"
+            r="5"
+          />
+        </template>
+
+        <template v-else-if="shapes">
+          <path v-if="shapes.area" :d="shapes.area" :fill="`url(#${uid})`" />
+          <path v-if="prevLine" class="cv-cline-prev" :d="prevLine" />
+          <path
+            v-if="shapes.leadLine"
+            class="cv-cline-lead"
+            :d="shapes.leadLine"
+          />
+          <path
+            v-if="shapes.curLine"
+            class="cv-cline-cur"
+            :d="shapes.curLine"
+          />
+          <path
+            v-if="shapes.dashed"
+            class="cv-cline-cur cv-cline-partial"
+            :d="shapes.dashed"
+          />
+          <circle
+            v-for="d in dots"
+            :key="`d${d.j}`"
+            class="cv-cline-dot"
+            :class="{
+              'cv-cline-dot-lead': d.lead,
+              'cv-cline-hollow': d.hollow,
+            }"
+            :cx="d.x"
+            :cy="d.y"
+            :r="bare ? (d.lead ? 2 : 3) : d.lead ? 3 : 4"
+          />
+          <text
+            v-for="p in pointLabels"
+            :key="`n${p.j}`"
+            class="cv-cline-num"
+            :class="{ 'cv-cline-num-lead': p.lead }"
+            :x="p.x"
+            :y="p.y"
+            text-anchor="middle"
+          >
+            {{ p.text }}
+          </text>
+        </template>
+
+        <g v-if="tip && !single">
           <line
             class="cv-cline-cursor"
             :x1="tip.x"
@@ -245,19 +439,13 @@ const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
             :y2="base"
           />
           <circle
-            v-if="tip.antes !== null && tip.antes !== undefined && n > 1"
+            v-if="tip.antes !== null && tip.antes !== undefined && drawPrev"
             class="cv-cline-dot-prev"
             :cx="tip.x"
             :cy="yAt(tip.antes)"
             r="3.5"
           />
-          <circle
-            v-if="n > 1"
-            class="cv-cline-end"
-            :cx="tip.x"
-            :cy="yAt(tip.agora)"
-            r="4.5"
-          />
+          <circle class="cv-cline-end" :cx="tip.x" :cy="tip.y" r="4.5" />
         </g>
       </svg>
       <div
@@ -267,10 +455,18 @@ const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
         :style="{ left: `${tip.x}px` }"
       >
         <p class="cv-cline-tip-row">
-          <span class="cv-cline-key cv-cline-key-cur" />
+          <span
+            class="cv-cline-key"
+            :class="tip.lead ? 'cv-cline-key-lead' : 'cv-cline-key-cur'"
+          />
           <span>{{ tip.label }}</span>
           <b>{{ format(tip.agora) }}</b>
         </p>
+        <p v-if="tip.lead" class="cv-cline-tip-note">antes do período</p>
+        <p v-else-if="tip.partial" class="cv-cline-tip-note">
+          o dia ainda não acabou
+        </p>
+        <p v-if="tip.weekend" class="cv-cline-tip-note">fim de semana</p>
         <p
           v-if="tip.antes !== null && tip.antes !== undefined"
           class="cv-cline-tip-row"
@@ -294,11 +490,24 @@ const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
         <i class="cv-cline-key cv-cline-key-cur" />
         {{ currentLabel }} <b>{{ format(total) }}</b>
       </span>
+      <span v-if="L">
+        <i class="cv-cline-key cv-cline-key-lead" />
+        {{ L }} {{ L === 1 ? 'dia anterior' : 'dias anteriores' }}
+      </span>
       <span v-if="prevTotal !== null">
-        <i class="cv-cline-key cv-cline-key-prev" />
+        <!-- com contexto na tela a base não é desenhada: fica só o número -->
+        <i v-if="drawPrev" class="cv-cline-key cv-cline-key-prev" />
         {{ previousLabel }} <b>{{ format(prevTotal) }}</b>
       </span>
-      <span v-else class="cv-cline-nobase">sem base de comparação</span>
+      <span v-else-if="!L && baseNote" class="cv-cline-nobase">
+        {{ baseNote }}
+      </span>
+      <span v-if="weekendBands.length" class="cv-cline-nobase">
+        faixa cinza = sábado e domingo
+      </span>
+      <span v-if="partial" class="cv-cline-nobase">
+        pontilhado = dia em andamento
+      </span>
     </div>
   </div>
 </template>
@@ -444,6 +653,75 @@ const stroke = computed(() => props.color || 'var(--cv, #2563eb)');
   color: rgb(243 244 246);
 }
 .cv-cline-nobase {
+  opacity: 0.7;
+}
+/* 📈 item 421: contexto (dias anteriores), período em destaque, fim de semana */
+.cv-cline-lead {
+  fill: none;
+  stroke: var(--cl);
+  stroke-opacity: 0.5;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.cv-cline-partial {
+  stroke-dasharray: 2 6;
+}
+.cv-cline-band {
+  fill: var(--cl);
+  fill-opacity: 0.08;
+}
+.cv-cline-weekend {
+  fill: rgb(100 116 139 / 0.07);
+}
+.cv-cline-level {
+  stroke: var(--cl);
+  stroke-opacity: 0.35;
+  stroke-width: 1.5;
+  stroke-dasharray: 2 5;
+}
+.cv-cline-dot {
+  fill: var(--cl);
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+.cv-cline-dot-lead {
+  fill: #fff;
+  stroke: var(--cl);
+  stroke-opacity: 0.6;
+}
+.cv-cline-hollow {
+  fill: #fff;
+  stroke: var(--cl);
+  stroke-width: 2;
+}
+.cv-cline-num {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  fill: rgb(15 23 42);
+  paint-order: stroke;
+  stroke: rgb(255 255 255 / 0.85);
+  stroke-width: 3px;
+}
+.cv-cline-num-lead {
+  font-weight: 500;
+  fill: rgb(100 116 139);
+}
+.dark .cv-cline-num {
+  fill: rgb(241 245 249);
+  stroke: rgb(23 25 28 / 0.85);
+}
+.dark .cv-cline-num-lead {
+  fill: rgb(148 163 184);
+}
+.cv-cline-key-lead {
+  border-top: 2px solid var(--cl);
+  opacity: 0.5;
+}
+.cv-cline-tip-note {
+  margin: 0 0 0 22px;
+  font-size: 11px;
   opacity: 0.7;
 }
 </style>

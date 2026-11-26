@@ -28,7 +28,44 @@ export function useCevicoCompare(settingKey = 'cevico_compare') {
   return { compare, setCompare };
 }
 
-export function useCevicoJourney({ period, compare, source, enabled = true }) {
+// 📅 item 421: QUAIS DIAS entram na Jornada — todos, só dias úteis, só fim de
+// semana ou "úteis × fim de semana" (média por dia). A escolha é uma só para o
+// Meu Painel novo e o clássico e fica guardada no navegador.
+export const JOURNEY_DAY_MODES = [
+  { key: 'all', label: 'Todos os dias' },
+  { key: 'weekdays', label: 'Dias úteis' },
+  { key: 'weekends', label: 'Fim de semana' },
+  { key: 'versus', label: 'Úteis × fim de semana' },
+];
+const DAYS_STORE = 'cevico_journey_days';
+const readDays = () => {
+  try {
+    const saved = window.localStorage.getItem(DAYS_STORE);
+    return JOURNEY_DAY_MODES.some(m => m.key === saved) ? saved : 'all';
+  } catch {
+    return 'all';
+  }
+};
+export const journeyDays = ref(readDays());
+export const setJourneyDays = key => {
+  journeyDays.value = JOURNEY_DAY_MODES.some(m => m.key === key) ? key : 'all';
+  try {
+    window.localStorage.setItem(DAYS_STORE, journeyDays.value);
+  } catch {
+    // navegador sem armazenamento: vale só nesta visita
+  }
+};
+
+// `days: false` = jornada SEM o filtro de dias (para os indicadores da tela,
+// que mostram o período inteiro mesmo quando o bloco da Jornada está filtrado)
+export function useCevicoJourney({
+  period,
+  compare,
+  source,
+  enabled = true,
+  days = true,
+}) {
+  const dayMode = () => (days ? journeyDays.value : 'all');
   const journey = ref(null);
   const loading = ref(false);
   let seq = 0;
@@ -45,6 +82,7 @@ export function useCevicoJourney({ period, compare, source, enabled = true }) {
         from: p.from,
         to: p.to,
         source: toValue(source) || undefined,
+        days: dayMode() === 'all' ? undefined : dayMode(),
         ...compareParams(toValue(compare)),
       });
       // resposta de um pedido antigo (trocou o período no meio) não vale
@@ -62,6 +100,7 @@ export function useCevicoJourney({ period, compare, source, enabled = true }) {
       JSON.stringify(toValue(compare) || {}),
       toValue(source),
       toValue(enabled),
+      dayMode(),
     ],
     load,
     { immediate: true }
@@ -80,8 +119,27 @@ export function useCevicoJourney({ period, compare, source, enabled = true }) {
   const stepOf = key => byKey.value[key] || null;
   const lineOf = key => {
     const e = byKey.value[key];
-    return e ? { serie: e.serie, serieAnterior: e.serie_anterior } : {};
+    if (!e) return {};
+    // 📈 item 421: período curto (Hoje, Ontem…) — a mini linha do indicador
+    // começa nos dias anteriores, para mostrar de onde o número vem
+    if (e.contexto?.length)
+      return { serie: [...e.contexto, ...e.serie], serieAnterior: null };
+    return { serie: e.serie, serieAnterior: e.serie_anterior };
+  };
+  // 📈 item 421: o que o CompareLine precisa além das duas séries — os dias
+  // anteriores (contexto), o dia em andamento e os fins de semana
+  const lineExtras = key => {
+    const j = journey.value;
+    const e = byKey.value[key];
+    if (!j || !e) return {};
+    return {
+      leadValues: e.contexto || [],
+      leadLabels: j.contexto?.rotulos || [],
+      leadWeekends: j.contexto?.fins_de_semana || [],
+      weekends: j.fins_de_semana || [],
+      partial: !!j.parcial,
+    };
   };
 
-  return { journey, loading, reload: load, stepOf, lineOf };
+  return { journey, loading, reload: load, stepOf, lineOf, lineExtras };
 }

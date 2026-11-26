@@ -29,6 +29,7 @@ import {
 import {
   useCevicoCompare,
   useCevicoJourney,
+  journeyDays,
 } from 'dashboard/composables/useCevicoCompare';
 import CvBloco from './CvBloco.vue';
 import CvIndicador from './CvIndicador.vue';
@@ -50,16 +51,39 @@ const data = ref(null);
 // 📐 item 394: BASE DE COMPARAÇÃO (período anterior | mês passado | outro mês),
 // salva por pessoa; vale para TODOS os números desta tela e para a jornada
 const { compare, setCompare } = useCevicoCompare('cevico_home_compare');
+// a jornada do bloco (segue a chavinha de dias do próprio bloco)
 const {
   journey,
   loading: journeyLoading,
-  lineOf,
-  stepOf,
+  lineOf: lineOfBloco,
+  stepOf: stepOfBloco,
+  lineExtras: lineExtrasBloco,
 } = useCevicoJourney({
   period: periodo,
   compare,
   source: () => props.source,
 });
+// 📅 item 421: os indicadores da tela mostram o período INTEIRO. Com a
+// chavinha de dias ligada no bloco (úteis, fim de semana…), eles leem uma
+// jornada sem filtro, para a linha bater com o número.
+const jornadaInteira = useCevicoJourney({
+  period: periodo,
+  compare,
+  source: () => props.source,
+  days: false,
+  enabled: () => journeyDays.value !== 'all',
+});
+const filtrada = () => journeyDays.value !== 'all';
+const lineOf = key =>
+  filtrada() ? jornadaInteira.lineOf(key) : lineOfBloco(key);
+const stepOf = key =>
+  filtrada() ? jornadaInteira.stepOf(key) : stepOfBloco(key);
+const lineExtras = key =>
+  filtrada() ? jornadaInteira.lineExtras(key) : lineExtrasBloco(key);
+// rótulos e base da linha do painel lateral: da jornada que os indicadores leem
+const jornadaTela = computed(() =>
+  filtrada() ? jornadaInteira.journey.value : journey.value
+);
 
 const load = async () => {
   isLoading.value = true;
@@ -113,7 +137,7 @@ const dias = v =>
 const rotuloBase = computed(
   () =>
     data.value?.periodo?.comparacao?.rotulo ||
-    journey.value?.comparacao?.rotulo ||
+    jornadaTela.value?.comparacao?.rotulo ||
     'período anterior'
 );
 const cmp = (atual, anterior, { bomQuandoSobe = true, sufixo = '' } = {}) =>
@@ -606,10 +630,11 @@ const pessoaSub = p => {
         </p>
       </div>
       <div class="cvg-visao-reguas">
-        <PeriodRuler v-model="periodo" glass />
+        <!-- 📈 item 421: "Hoje + ontem" também no Meu Painel -->
+        <PeriodRuler v-model="periodo" :extra-presets="['last2']" glass />
         <CompareRuler
           :model-value="compare"
-          :resolved="journey?.comparacao || data?.periodo?.comparacao"
+          :resolved="jornadaTela?.comparacao || data?.periodo?.comparacao"
           glass
           @update:model-value="setCompare"
         />
@@ -636,7 +661,11 @@ const pessoaSub = p => {
               :valor="n(entrada.novos.valor)"
               :comparacao="cmp(entrada.novos.valor, entrada.novos.anterior)"
               :contexto="ctxNovos"
-              :serie="series?.novos || []"
+              :serie="
+                jornadaTela?.contexto
+                  ? lineOf('chegaram').serie || []
+                  : series?.novos || []
+              "
               :serie-anterior="lineOf('chegaram').serieAnterior"
               heroi
               pe="de onde vieram"
@@ -1459,15 +1488,16 @@ const pessoaSub = p => {
         <!-- 📐 item 394: a linha deste número, agora × a base de comparação -->
         <section v-if="linhaPainel" class="cvg-painel-sec">
           <h3>
-            {{ journey?.balde === 'mes' ? 'Mês a mês' : 'Dia a dia' }}: agora ×
-            {{ rotuloBase }}
+            {{ jornadaTela?.balde === 'mes' ? 'Mês a mês' : 'Dia a dia' }}:
+            agora × {{ rotuloBase }}
           </h3>
           <CompareLine
             :values="linhaPainel.serie"
             :prev-values="linhaPainel.serie_anterior"
-            :labels="journey?.rotulos || []"
-            :prev-labels="journey?.rotulos_anterior || []"
-            :current-label="journey?.periodo?.datas || 'agora'"
+            :labels="jornadaTela?.rotulos || []"
+            :prev-labels="jornadaTela?.rotulos_anterior || []"
+            v-bind="lineExtras(linhaPainel.key)"
+            :current-label="jornadaTela?.periodo?.datas || 'agora'"
             :previous-label="rotuloBase"
             :unit="linhaPainel.medida"
             :good-when-up="linhaPainel.bom_quando_sobe !== false"

@@ -7191,11 +7191,22 @@ onUnmounted(() => {
 
         <!-- Régua de período PADRÃO (presets + Personalizado De/Até) -->
         <div class="mb-4 max-w-full flex flex-wrap items-center gap-2">
-          <PeriodRuler v-model="period" glass class="max-w-full" />
+          <!-- 📈 item 421: "Hoje + ontem" também no Meu Painel -->
+          <PeriodRuler
+            v-model="period"
+            :extra-presets="['last2']"
+            glass
+            class="max-w-full"
+          />
           <!-- 📐 item 394: com o que comparar (vale para cards, popups e jornada) -->
           <CompareRuler
             :model-value="compare"
-            :resolved="kpiBag?.comparison || jornada?.comparacao"
+            :resolved="
+              kpiBag?.comparison ||
+              (jornada?.comparacao?.modo === 'versus'
+                ? null
+                : jornada?.comparacao)
+            "
             glass
             @update:model-value="setCompare"
           />

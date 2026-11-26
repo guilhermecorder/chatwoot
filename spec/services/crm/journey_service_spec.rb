@@ -61,8 +61,8 @@ RSpec.describe Crm::JourneyService do
     Task.create!({ account: account, creator: user, title: 'Consulta: Paciente', task_type: 'consulta' }.merge(attrs))
   end
 
-  def journey(compare: nil)
-    described_class.new(account: account, since: since, until_at: until_at, compare: compare).call
+  def journey(compare: nil, days: nil)
+    described_class.new(account: account, since: since, until_at: until_at, compare: compare, days: days).call
   end
 
   def step(payload, key)
@@ -138,6 +138,72 @@ RSpec.describe Crm::JourneyService do
     expect(payload[:comparacao][:modo]).to eq('month')
     expect(step(payload, 'chegaram')[:anterior]).to eq(0)
     expect(step(payload, 'chegaram')[:serie_anterior].size).to eq(7)
+  end
+
+  # 📈 item 421 (26/11): "o Hoje aponta só um pontinho… um histórico de pelo menos 7 dias, já carregado junto"
+  describe 'período curto traz os dias anteriores como contexto' do
+    it 'Hoje vem com os 6 dias de antes na mesma linha; o número grande continua só de hoje', :aggregate_failures do
+      payload = described_class.new(account: account, since: now.beginning_of_day, until_at: now.end_of_day).call
+      chegaram = step(payload, 'chegaram')
+
+      expect(payload[:rotulos]).to eq([now.strftime('%d/%m')])
+      expect(payload[:contexto]).to include(dias: 6, rotulos: (1..6).map { |d| (now - d.days).strftime('%d/%m') }.reverse)
+      expect(payload[:contexto][:fins_de_semana].size).to eq(6)
+      expect([chegaram[:valor], chegaram[:serie]]).to eq([1, [1]]) # só a Ana, que chegou hoje
+      expect(chegaram[:contexto]).to eq([0, 0, 0, 0, 1, 0]) # a Bia, há 2 dias
+      expect(step(payload, 'compareceram')[:contexto].sum).to eq(0) # a do Caio foi há 8 dias: fora do contexto
+      expect(payload[:parcial]).to be(true) # hoje ainda não acabou
+    end
+
+    it 'Hoje + ontem completa com 5 dias; período de 7 dias ou mais não ganha contexto', :aggregate_failures do
+      dois = described_class.new(account: account, since: (now - 1.day).beginning_of_day, until_at: now.end_of_day).call
+      expect([dois[:rotulos].size, dois[:contexto][:dias], step(dois, 'chegaram')[:contexto]]).to eq([2, 5, [0, 0, 0, 0, 1]])
+
+      semana = journey
+      expect(semana[:contexto]).to be_nil
+      expect(step(semana, 'chegaram')).not_to have_key(:contexto)
+      expect(semana[:fins_de_semana].count(true)).to eq(2)
+
+      ontem = described_class.new(account: account, since: (now - 1.day).beginning_of_day, until_at: (now - 1.day).end_of_day).call
+      expect(ontem[:parcial]).to be(false)
+    end
+  end
+
+  # 📅 item 421: "uma pré-seleção especial, tipo dias de semana e finais de semana, para poder comparar"
+  describe 'quais dias entram na conta' do
+    it 'dias úteis + fim de semana somam o período inteiro, e a linha só tem os dias que entram', :aggregate_failures do
+      todos = journey
+      uteis = journey(days: 'weekdays')
+      fds = journey(days: 'weekends')
+
+      %w[chegaram conversaram agendaram compareceram].each do |key|
+        expect(step(uteis, key)[:valor] + step(fds, key)[:valor]).to eq(step(todos, key)[:valor]), "#{key} não fecha"
+        expect(step(uteis, key)[:serie].sum).to eq(step(uteis, key)[:valor])
+      end
+      expect([uteis[:rotulos].size, fds[:rotulos].size]).to eq([5, 2])
+      expect([uteis[:fins_de_semana].uniq, fds[:fins_de_semana].uniq]).to eq([[false], [true]])
+      expect([uteis[:dias], fds[:dias], todos[:dias]]).to eq(%w[weekdays weekends all])
+    end
+
+    it 'úteis × fim de semana compara a MÉDIA POR DIA dentro do mesmo período', :aggregate_failures do
+      todos = journey
+      versus = journey(days: 'versus')
+      chegaram = step(versus, 'chegaram')
+
+      expect(versus[:comparacao]).to include(modo: 'versus', rotulo: 'fim de semana', dias_uteis: 5, dias_fds: 2)
+      expect(chegaram[:total]).to eq(step(todos, 'chegaram')[:valor])
+      expect(chegaram[:total_uteis] + chegaram[:total_fds]).to eq(chegaram[:total])
+      expect(chegaram[:valor]).to eq((chegaram[:total_uteis] / 5.0).round(1))
+      expect(chegaram[:anterior]).to eq((chegaram[:total_fds] / 2.0).round(1))
+      expect(chegaram[:serie]).to eq(step(todos, 'chegaram')[:serie]) # a linha é o período inteiro, dia a dia
+      expect(chegaram[:serie_anterior].compact).to be_empty
+      expect(versus[:contexto]).to be_nil
+      expect(versus[:orcamento_consulta][:antes]).to be_nil
+    end
+
+    it 'valor desconhecido cai em todos os dias' do
+      expect(journey(days: 'feriados')[:dias]).to eq('all')
+    end
   end
 
   it 'período longo vira balde por mês' do
