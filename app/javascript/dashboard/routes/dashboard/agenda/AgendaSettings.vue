@@ -686,6 +686,65 @@ const saveHourly = async () => {
   }
 };
 
+// ⚖️ item 422: régua de carga — alvo do período do médico, teto da lista dos
+// robôs, limite do encaixe e espaçamento (encaixe deixa o vizinho livre)
+const LOAD_DEFAULTS = {
+  enabled: false,
+  target: 85,
+  ceiling: 90,
+  insist: 95,
+  spacing: true,
+  balance_days: 7,
+};
+const loadForm = ref({
+  ...LOAD_DEFAULTS,
+  ...(settings.value?.agenda_load_balance || {}),
+});
+watch(
+  () => settings.value?.agenda_load_balance,
+  v => {
+    if (v) loadForm.value = { ...LOAD_DEFAULTS, ...v };
+  }
+);
+const loadDirty = computed(
+  () =>
+    JSON.stringify({
+      ...LOAD_DEFAULTS,
+      ...(settings.value?.agenda_load_balance || {}),
+    }) !== JSON.stringify(loadForm.value)
+);
+const saveLoadBalance = async () => {
+  const f = loadForm.value;
+  const target = Math.round(Number(f.target));
+  const ceiling = Math.round(Number(f.ceiling));
+  const insist = Math.round(Number(f.insist));
+  if (
+    !(target >= 50 && target <= 100) ||
+    ceiling < target ||
+    insist < ceiling
+  ) {
+    useAlert(
+      'Confira os números: alvo de 50 a 100, teto igual ou acima do alvo e limite do encaixe igual ou acima do teto.'
+    );
+    return;
+  }
+  busy.value = 'load';
+  try {
+    await CrmAPI.updateAgendaLoadBalance({ ...f, target, ceiling, insist });
+    await refresh();
+    await loadPreview();
+    useAlert(
+      f.enabled
+        ? `Pronto: robôs enchendo até ${target}% por período, teto ${ceiling}%.`
+        : 'Régua de carga desligada — os robôs voltam a oferecer como antes.'
+    );
+  } catch {
+    useAlert('Não consegui salvar a régua de carga.');
+  } finally {
+    busy.value = '';
+  }
+};
+
 const saveRules = async () => {
   busy.value = 'rules';
   try {
@@ -1135,6 +1194,107 @@ onMounted(() => {
             >
               Salvar
             </button>
+          </section>
+          <!-- ⚖️ item 422: régua de carga por médico e período -->
+          <section class="cv-sub p-3 space-y-2">
+            <div class="flex items-center gap-3 flex-wrap">
+              <span class="i-lucide-scale text-sm text-n-slate-10" />
+              <div class="flex-1 min-w-[220px]">
+                <p class="text-xs font-bold text-n-slate-12">
+                  Agenda equilibrada (régua de carga)
+                </p>
+                <p class="text-[11px] text-n-slate-10">
+                  Carga = pacientes ÷ horários do período do médico (encaixe
+                  conta 2). Os robôs enchem os períodos em níveis (primeiro até
+                  alvo − 5, depois até o alvo, depois até o teto) e oferecem
+                  primeiro os mais tranquilos. Acima do teto, só se o paciente
+                  disser que só pode naquele dia, até o máximo.
+                </p>
+              </div>
+              <label class="flex items-center gap-1.5 text-xs font-semibold">
+                <input
+                  v-model="loadForm.enabled"
+                  type="checkbox"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+                Ligada
+              </label>
+            </div>
+            <div
+              class="grid gap-2"
+              style="
+                grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+              "
+            >
+              <label class="text-[11px] text-n-slate-11">
+                Alvo por período (%)
+                <input
+                  v-model.number="loadForm.target"
+                  type="number"
+                  min="50"
+                  max="100"
+                  class="w-full"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+              </label>
+              <label class="text-[11px] text-n-slate-11">
+                Teto da lista (%)
+                <input
+                  v-model.number="loadForm.ceiling"
+                  type="number"
+                  min="50"
+                  max="150"
+                  class="w-full"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+              </label>
+              <label class="text-[11px] text-n-slate-11">
+                Máximo se insistir (%)
+                <input
+                  v-model.number="loadForm.insist"
+                  type="number"
+                  min="50"
+                  max="150"
+                  class="w-full"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+              </label>
+              <label class="text-[11px] text-n-slate-11">
+                Equilibrar (dias)
+                <input
+                  v-model.number="loadForm.balance_days"
+                  type="number"
+                  min="1"
+                  max="28"
+                  class="w-full"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+              </label>
+            </div>
+            <div class="flex items-center gap-3 flex-wrap">
+              <label
+                class="flex items-center gap-1.5 text-[11px] text-n-slate-11 flex-1 min-w-[220px]"
+              >
+                <input
+                  v-model="loadForm.spacing"
+                  type="checkbox"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+                <span>
+                  <b>Espaçamento:</b> nunca 3 no mesmo horário; dois só com os
+                  horários vizinhos vazios, e o vizinho de um encaixe fica livre
+                  (a equipe é avisada ao marcar).
+                </span>
+              </label>
+              <button
+                v-if="canEdit('agenda.configuracao')"
+                class="cv-btn cv-btn-sm"
+                :disabled="busy === 'load' || !loadDirty"
+                @click="saveLoadBalance"
+              >
+                Salvar
+              </button>
+            </div>
           </section>
           <p class="text-[11px] text-n-slate-10 leading-relaxed">
             Cada faixa diz quando o médico atende e <b>para que ela serve</b>.

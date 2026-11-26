@@ -1430,6 +1430,11 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       n = params[:hourly_evaluations].to_i
       cfg['hourly_evaluations'] = Crm::AgendaSlots::HOURLY_RANGE.cover?(n) ? n : Crm::AgendaSlots::HOURLY_DEFAULT
     end
+    # ⚖️ item 422: régua de carga (liga/desliga, alvo, teto, limite do encaixe, espaçamento, dias)
+    if params.key?(:load_balance)
+      raw = params.require(:load_balance).permit(:enabled, :target, :ceiling, :insist, :spacing, :balance_days).to_h
+      cfg['load_balance'] = Crm::AgendaSlots.balance_from('load_balance' => raw)
+    end
     # horários fechados com o cadeado (almoço, ausência do médico...)
     if params.key?(:blocked)
       cfg['blocked'] = Array(params[:blocked]).map do |b|
@@ -2660,6 +2665,7 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
       agenda_ai_rules: (s.agenda_config || {})['ai_rules'].to_s, # item 307
       agenda_hourly_evaluations: Crm::AgendaSlots.cap_from(s.agenda_config), # item 367
+      agenda_load_balance: Crm::AgendaSlots.balance_from(s.agenda_config), # item 422
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},
       retorno_team_user_ids: Array((s.agenda_config || {})[Crm::TaskOwner::RETORNO_TEAM_KEY]), # 🔁 item 343

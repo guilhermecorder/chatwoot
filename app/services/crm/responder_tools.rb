@@ -423,7 +423,7 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
 
   # ── vagas de um dia específico (item 200: agendamento futuro liberado) ──
   # Só lê a Agenda: vale igual em sombra e ao vivo.
-  def horarios_do_dia(args)
+  def horarios_do_dia(args) # rubocop:disable Metrics/AbcSize
     date = parse_date(args['dia'])
     return refuse('horarios_do_dia', 'Informe o dia no formato YYYY-MM-DD.') if date.nil?
 
@@ -432,15 +432,30 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     modality = Crm::AgendaSlots.slot_modality(booked)
     slots = Crm::AgendaSlots.free_slots_on(@account, date, unit: args['unidade'].to_s.strip.presence, per_window: 8, modality: modality)
     log_acao('horarios_do_dia', true, "vagas de #{WEEKDAYS_SHORT[date.wday]} #{date.strftime('%d/%m')}: #{slots_count_text(slots)}")
-    result = { dia: date.to_s, dia_semana: Crm::AgendaSlots::WEEKDAYS[date.wday], vagas: group_slots(slots) }
+    result = { dia: date.to_s, dia_semana: Crm::AgendaSlots::WEEKDAYS[date.wday], vagas: group_slots(slots, modality) }
     result[:aviso] = 'Nenhuma vaga nesse dia (sem atendimento, fechado ou lotado). Ofereça o dia de atendimento mais próximo.' if slots.empty?
+    if result[:vagas].any? { |v| v[:dia_cheio] }
+      result[:aviso] = 'Dia CHEIO (marcado com dia_cheio): diga que está bem cheio e pode haver espera e ofereça o dia mais ' \
+                       'tranquilo da lista HORÁRIOS DISPONÍVEIS. Só marque nele se o paciente disser que só pode nesse dia.'
+    end
     result
   end
 
-  def group_slots(slots)
+  # ⚖️ item 422: período do médico acima do teto da régua de carga = dia_cheio
+  def group_slots(slots, modality = nil)
+    ceiling = full_ceiling(modality)
     slots.group_by { |s| [s[:unit], s[:doctor]] }.map do |(unit, doctor), list|
-      { unidade: unit_label(unit), unidade_chave: unit, medico: doctor, horarios: list.map { |s| s[:time] } }
+      group = { unidade: unit_label(unit), unidade_chave: unit, medico: doctor, horarios: list.pluck(:time) }
+      group[:dia_cheio] = true if ceiling && list.map { |s| s[:load].to_i }.max >= ceiling
+      group
     end
+  end
+
+  # teto da régua de carga (só para consulta nova; desligada = nil)
+  def full_ceiling(modality)
+    return nil unless modality.to_s == Crm::AgendaSlots::AI_MODALITY
+
+    Crm::AgendaSlots.balance_config(@account)&.dig('ceiling')
   end
 
   def slots_count_text(slots)

@@ -377,6 +377,13 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // ⚖️ item 422: régua de carga (alvo, teto, limite do encaixe, espaçamento)
+  updateAgendaLoadBalance(loadBalance) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      load_balance: loadBalance,
+    });
+  }
+
   updateAgendaAiRules(aiRules) {
     return axios.post(`${this.url}/settings/update_agenda`, {
       ai_rules: aiRules,

@@ -63,8 +63,15 @@ class Crm::AppointmentApplier
              "Registrada na Agenda. [📆 Ver na agenda](#{agenda_url})"
       effects_text = Crm::BookingSideEffects.summary(effects)
       note += " #{effects_text}" if effects_text.present?
+      # ⚖️ item 422: horário acumulado ou período acima do teto → aviso para quem combinou
+      note += crowding_suffix(account, result, unit)
       private_note(account, conversation, note)
       outcome
+    end
+
+    def crowding_suffix(account, result, unit)
+      crowding = Crm::AgendaSlots.crowding_note(account, result[:starts_at], unit)
+      crowding ? "\n\n#{crowding}" : ''
     end
 
     def apply_confirmation(account, result, contact, conversation, name, default_unit)

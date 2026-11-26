@@ -155,7 +155,8 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   def free_slots(account, days: 10, per_window: 3, modality: AI_MODALITY)
     now = TZ.now
     ctx = slot_context(account, now.to_date, now.to_date + days, modality: modality)
-    (0..days).flat_map { |offset| day_slots(ctx, now.to_date + offset, per_window: per_window) }
+    slots = (0..days).flat_map { |offset| day_slots(ctx, now.to_date + offset, per_window: per_window) }
+    balance(ctx, slots, now.to_date).map { |s| s.except(:load) }
   end
 
   # vagas livres de UM dia (qualquer data futura até MAX_FUTURE_DAYS), opcionalmente
@@ -265,7 +266,7 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   end
 
   # tudo o que a conta de vagas precisa, calculado UMA vez para o intervalo
-  def slot_context(account, from_date, to_date, modality: AI_MODALITY) # rubocop:disable Metrics/AbcSize
+  def slot_context(account, from_date, to_date, modality: AI_MODALITY) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     cfg = agenda_config(account)
     {
       hub_busy: hub_busy(account, from_date, to_date),
@@ -286,6 +287,11 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       cap: modality.to_s == AI_MODALITY ? hourly_cap(account) : nil,
       # item 415: retorno e pós-op marcados — só pesam nas faixas SEM ENCAIXE
       soft: soft_booked(account, from_date, to_date),
+      # ⚖️ item 422: régua de carga (alvo/teto por médico e período) e espaçamento.
+      # O equilíbrio entre dias vale só para CONSULTA NOVA; o espaçamento, para todo robô.
+      balance: modality.to_s == AI_MODALITY ? balance_config(account) : nil,
+      spacing: balance_config(account)&.fetch('spacing', false) || false,
+      patients: patients_by_day(account, from_date, to_date),
       # 🚪 item 420: consulta externa (portal de terceiros) também ocupa o horário
       occupied: account.tasks
                        .where(task_type: Task::AGENDA_CONSULT_TYPES, canceled_at: nil)
@@ -312,20 +318,25 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     weekly + Array(ctx[:open]).select { |w| w['date'] == day.to_s }
   end
 
-  def day_slots(ctx, day, per_window:)
+  def day_slots(ctx, day, per_window:) # rubocop:disable Metrics/CyclomaticComplexity
     return [] if ctx[:blocked_days].include?(day.to_s)
 
     windows_on(ctx, day).reject { |w| window_blocked?(ctx, day, w) }.flat_map do |win|
+      load = window_load(ctx, day, win)
+      # item 422: período do médico no limite de encaixe → nenhum robô marca mais nele
+      next [] if ctx[:balance] && load >= ctx[:balance]['insist']
+
       free = []
       each_slot(win) { |hm| free << hm if slot_free?(ctx, day, win, hm) }
-      spread(ctx, day, win, free, per_window).map { |hm| { date: day, time: hm, unit: win['unit'], doctor: win['doctor'] } }
+      spread(ctx, day, win, free, per_window).map { |hm| { date: day, time: hm, unit: win['unit'], doctor: win['doctor'], load: load } }
     end
   end
 
-  def slot_free?(ctx, day, win, hhmm)
+  def slot_free?(ctx, day, win, hhmm) # rubocop:disable Metrics/CyclomaticComplexity
     return false if TZ.parse("#{day} #{hhmm}") <= ctx[:now]
     return false if ctx[:blocked].include?("#{day}|#{hhmm}|#{win['unit']}")
     return false if taken?(ctx, day, hhmm, win) || hub_overlap?(ctx, day, hhmm, win)
+    return false if ctx[:spacing] && !spaced?(ctx, day, win, hhmm)
 
     ctx[:cap].nil? || ctx[:per_hour][hour_key(day, hhmm, win['unit'])] < ctx[:cap]
   end
@@ -350,6 +361,163 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     rounds = by_hour.values.map(&:size).max
     picked = (0...rounds).flat_map { |i| hours.filter_map { |hh| by_hour[hh][i] } }
     picked.first(limit).sort
+  end
+
+  # ⚖️ item 422 (26/11, ele: "a quinta foi 97%… pacientes chateados com demora,
+  # alguns chegaram juntos no mesmo horário… buscar 85% do dia… primeiro 80, depois
+  # 85, depois 90… se num horário tem duas pessoas, o outro horário tem que estar
+  # liberado"). Medido na produção (23–27/11): na quinta 26/11, 40 pacientes em 26
+  # horários e 14 horários com 2 — retorno/pós-op com avaliação em cima (item 330b),
+  # o Secretário gravando o horário combinado na conversa e a equipe na tela.
+  #
+  # CARGA = pacientes ÷ horários do período do médico (faixa), em %: o encaixe
+  # conta (2 no mesmo horário = 2), por isso pode passar de 100. Entram consulta,
+  # retorno, pós-op, OftalmoFácil e consulta externa; exame e teleconsulta não.
+  # Desligado (padrão) = idêntico a antes.
+  BALANCE_DEFAULTS = { 'enabled' => false, 'target' => 85, 'ceiling' => 90, 'insist' => 95,
+                       'spacing' => true, 'balance_days' => 7 }.freeze
+
+  def balance_config(account)
+    cfg = balance_from(agenda_config(account))
+    cfg['enabled'] ? cfg : nil
+  end
+
+  # configuração saneada (a tela e o prompt leem daqui): alvo 50–100, teto ≥ alvo,
+  # encaixe ≥ teto (até 150), dias para equilibrar 1–28
+  def balance_from(agenda_cfg)
+    raw = agenda_cfg.to_h['load_balance'].to_h
+    num = ->(key) { raw[key].presence&.to_i || BALANCE_DEFAULTS[key] }
+    target = num['target'].between?(50, 100) ? num['target'] : BALANCE_DEFAULTS['target']
+    ceiling = num['ceiling'].clamp(target, 150)
+    days = num['balance_days']
+    {
+      'enabled' => truthy?(raw['enabled']), 'target' => target, 'ceiling' => ceiling,
+      'insist' => num['insist'].clamp(ceiling, 150),
+      'spacing' => raw.key?('spacing') ? truthy?(raw['spacing']) : true,
+      'balance_days' => days.between?(1, 28) ? days : BALANCE_DEFAULTS['balance_days']
+    }
+  end
+
+  def truthy?(value)
+    ActiveModel::Type::Boolean.new.cast(value) == true
+  end
+
+  # minutos de chegada de cada paciente por "AAAA-MM-DD|unidade"
+  def patients_by_day(account, from_date, to_date)
+    account.tasks.where(task_type: Task::AGENDA_CONSULT_TYPES, canceled_at: nil, archived_at: nil)
+           .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', %w[exames teleconsulta])
+           .where.not(unit: [nil, '', 'online'])
+           .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
+           .pluck(:due_at, :unit)
+           .each_with_object({}) do |(due, unit), out|
+             at = due.in_time_zone(TZ)
+             (out["#{at.to_date}|#{unit}"] ||= []) << ((at.hour * 60) + at.min)
+           end
+  end
+
+  # pacientes que chegam neste horário (do início do bloco até o próximo)
+  def slot_count(ctx, day, win, hhmm)
+    start = hm_to_min(hhmm)
+    finish = start + win['block'].to_i
+    Array(ctx[:patients]&.fetch("#{day}|#{win['unit']}", nil)).count { |m| m >= start && m < finish }
+  end
+
+  # carga do período do médico neste dia, em % (horários com cadeado ficam fora da conta)
+  def window_load(ctx, day, win)
+    slots = []
+    each_slot(win) { |hm| slots << hm unless ctx[:blocked].include?("#{day}|#{hm}|#{win['unit']}") }
+    return 0 if slots.empty?
+
+    ((slots.sum { |hm| slot_count(ctx, day, win, hm) } * 100.0) / slots.size).round
+  end
+
+  # ESPAÇAMENTO: nunca 3 no mesmo horário; virar encaixe (2) só com os dois
+  # vizinhos vazios; e o vizinho de um encaixe fica livre
+  def spaced?(ctx, day, win, hhmm)
+    here = slot_count(ctx, day, win, hhmm)
+    return false if here >= 2
+
+    around = neighbor_counts(ctx, day, win, hhmm)
+    return around.all?(&:zero?) if here == 1
+
+    around.all? { |n| n < 2 }
+  end
+
+  def neighbor_counts(ctx, day, win, hhmm)
+    [-1, 1].map { |dir| slot_count(ctx, day, win, min_to_hm(hm_to_min(hhmm) + (dir * win['block'].to_i))) }
+  end
+
+  def min_to_hm(minutes)
+    format('%<h>02d:%<m>02d', h: minutes / 60, m: minutes % 60)
+  end
+
+  # EQUILÍBRIO ENTRE DIAS (só na lista HORÁRIOS DISPONÍVEIS): sai o período no
+  # teto; depois enche em níveis — primeiro tudo até alvo−5, depois até o alvo,
+  # depois até o teto. O nível é decidido pelos próximos `balance_days` dias
+  # (não empurra o paciente para longe só para equilibrar); sem vaga neles,
+  # vale o resto do horizonte.
+  def balance(ctx, slots, today) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    cfg = ctx[:balance]
+    return slots unless cfg
+
+    open = slots.reject { |s| s[:load] >= cfg['ceiling'] }
+    near = open.select { |s| s[:date] < today + cfg['balance_days'] }
+    pool = near.presence || open
+    level = [cfg['target'] - 5, cfg['target'], cfg['ceiling']].find { |l| pool.any? { |s| s[:load] < l } }
+    level ? open.select { |s| s[:load] < level } : open
+  end
+
+  # ⚖️ item 422: o Secretário grava o horário que a EQUIPE combinou na conversa (o
+  # paciente já ouviu o horário — não dá para recusar). Quando o horário fica
+  # acumulado ou o período passa do teto, a nota da conversa avisa quem combinou
+  # e sugere horários mais folgados do mesmo dia. nil = nada a avisar.
+  def crowding_note(account, starts_at, unit)
+    return nil unless balance_config(account) && unit.present?
+
+    at = starts_at.in_time_zone(TZ)
+    ctx = slot_context(account, at.to_date, at.to_date)
+    win = covering_window(ctx, at, unit)
+    issues = win ? crowding_issues(ctx, at, win) : []
+    return nil if issues.empty?
+
+    better = free_slots_on(account, at.to_date, unit: unit, per_window: 3).pluck(:time).first(3)
+    tip = better.any? ? " Se o paciente puder, horários mais folgados nesse dia: #{better.join(', ')}." : ' Se o paciente puder, ofereça outro dia.'
+    "⚠️ Agenda apertada: #{issues.join('; ')}.#{tip}"
+  end
+
+  def covering_window(ctx, at, unit)
+    minute = (at.hour * 60) + at.min
+    windows_on(ctx, at.to_date).find { |w| w['unit'] == unit && minute >= hm_to_min(w['start']) && minute < hm_to_min(w['end']) }
+  end
+
+  def crowding_issues(ctx, at, win)
+    day = at.to_date
+    first = hm_to_min(win['start'])
+    block = win['block'].to_i
+    hhmm = min_to_hm(first + (((at.hour * 60) + at.min - first) / block * block))
+    here = slot_count(ctx, day, win, hhmm)
+    load = window_load(ctx, day, win)
+    ceiling = ctx[:balance]['ceiling']
+    issues = []
+    if crowded?(here, neighbor_counts(ctx, day, win, hhmm))
+      issues << (here >= 2 ? "o horário das #{hhmm} ficou com #{here} pacientes e o vizinho também tem gente" : "o horário das #{hhmm} ficou colado num horário com 2 pacientes")
+    end
+    issues << "o período de #{win['doctor']} nesse dia está com #{load}% (o teto combinado é #{ceiling}%)" if load > ceiling
+    issues
+  end
+
+  def crowded?(here, around)
+    here >= 3 || (here == 2 && around.any?(&:positive?)) || around.any? { |n| n >= 2 }
+  end
+
+  # carga de cada período do médico num dia (para avisos: ferramenta e Secretário)
+  def day_loads(account, date, unit: nil)
+    ctx = slot_context(account, date, date)
+    windows_on(ctx, date.to_date).reject { |w| window_blocked?(ctx, date.to_date, w) }
+                                 .select { |w| unit.blank? || w['unit'] == unit }
+                                 .map do |w|
+                                   { unit: w['unit'], doctor: w['doctor'], start: w['start'], end: w['end'], load: window_load(ctx, date.to_date, w) }
+                                 end
   end
 
   # 🔒 20/10 (ele: "quando alguém fechar o dia na agenda, o agente não agende"):
@@ -424,7 +592,7 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # Agenda → Configurações → Regras para a IA. Vazio = nada entra no prompt.
   def rules_text(account)
     custom = agenda_config(account)['ai_rules'].to_s.strip
-    (reserved_rules(account) + open_day_rules(account) + [hourly_rule(account), custom.presence]).compact.join("\n")
+    (reserved_rules(account) + open_day_rules(account) + [hourly_rule(account), balance_rule(account), custom.presence]).compact.join("\n")
   end
 
   # 📅 item 375: a abertura pontual já entra na lista HORÁRIOS DISPONÍVEIS por
@@ -466,6 +634,19 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     "- Cada unidade recebe no máximo #{cap} avaliações (consultas novas) por hora, para o atendimento fluir " \
       'sem fila. Se a hora que o paciente pedir estiver completa, diga com naturalidade que esse horário já está ' \
       'completo e ofereça os mais próximos da lista HORÁRIOS DISPONÍVEIS — de preferência espalhando ao longo do dia.'
+  end
+
+  # ⚖️ item 422: o robô EXPLICA o dia cheio e oferece o mais tranquilo; a lista
+  # e a conferência do horário já seguram o teto e o espaçamento
+  def balance_rule(account)
+    cfg = balance_config(account)
+    return nil unless cfg
+
+    '- AGENDA EQUILIBRADA: a lista HORÁRIOS DISPONÍVEIS já vem com os dias mais tranquilos de cada médico — ' \
+      'ofereça a partir dela, sempre dois horários. Se o paciente pedir um dia fora da lista, consulte horarios_do_dia: ' \
+      'quando vier "dia_cheio", diga com naturalidade que esse dia está bem cheio e pode haver espera, ofereça o dia ' \
+      'mais tranquilo da lista e, se ele disser que só pode naquele dia, marque num horário que a ferramenta devolveu. ' \
+      'Sem horário devolvido, ofereça o dia de atendimento mais próximo.'
   end
 
   # bloco pronto para colar no contexto do agente ('' quando não há regra)

@@ -781,8 +781,12 @@ export const scanAgenda = ({
   freeLimit = 3,
   futureOnly = false,
   pastOnly = false,
+  // ⚖️ item 422: com a régua de carga ligada o encaixe conta (2 no mesmo
+  // horário = 2) — a mesma conta dos robôs (Crm::AgendaSlots.window_load)
+  countStacked = false,
 }) => {
   const occupied = new Set();
+  const stacked = new Map();
   const modalityByKey = new Map();
   tasks.forEach(t => {
     if (!t.due_at) return;
@@ -792,6 +796,7 @@ export const scanAgenda = ({
     const mod = t.modality || 'avaliacao'; // consulta sem tipo = avaliação
     const key = blockKey(dateKey(d), hm, t.unit || '');
     occupied.add(key);
+    stacked.set(key, (stacked.get(key) || 0) + 1);
     if (!modalityByKey.has(key)) modalityByKey.set(key, mod);
   });
 
@@ -825,7 +830,12 @@ export const scanAgenda = ({
           const noUnitKey = blockKey(dateKey(day), slot, '');
           const isTaken = occupied.has(key) || occupied.has(noUnitKey);
           if (isTaken) {
-            filled += 1;
+            filled += countStacked
+              ? Math.max(
+                  1,
+                  (stacked.get(key) || 0) + (stacked.get(noUnitKey) || 0)
+                )
+              : 1;
             const mod =
               modalityByKey.get(key) ||
               modalityByKey.get(noUnitKey) ||

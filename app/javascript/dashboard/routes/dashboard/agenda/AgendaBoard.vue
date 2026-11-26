@@ -700,6 +700,81 @@ const isEvaluationTask = t =>
   t.unit &&
   t.unit !== ONLINE_UNIT;
 const hourOf = t => String(Math.floor(taskStartMin(t) / 60)).padStart(2, '0');
+// ⚖️ item 422 (26/11, ele: "se num horário tem duas pessoas, no outro horário tem
+// que estar liberado"): RÉGUA DE CARGA. Os robôs já seguem no servidor
+// (Crm::AgendaSlots); aqui a equipe é AVISADA ao marcar ou arrastar para um
+// horário que fica acumulado ou para um período acima do teto — e decide.
+const loadBalance = computed(
+  () => crmSettings.value?.agenda_load_balance || {}
+);
+const NOT_LOAD = ['exames', 'teleconsulta'];
+const countsLoad = t =>
+  ['consulta', 'consulta_externa'].includes(t.task_type) &&
+  !NOT_LOAD.includes(t.modality) &&
+  t.unit &&
+  t.unit !== ONLINE_UNIT;
+const patientsAt = (dayKey, unit, start, block, skipId) =>
+  (liveTasksByDay.value[dayKey] || []).filter(t => {
+    if (t.id === skipId || t.unit !== unit || !countsLoad(t)) return false;
+    const m = taskStartMin(t);
+    return m >= start && m < start + block;
+  }).length;
+const hmOfMin = m =>
+  `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+const crowdingWarning = ({ date, time, unit, doctor, skipId }) => {
+  const lb = loadBalance.value;
+  if (!lb.enabled || !date || !time) return '';
+  const spot = {
+    dow: new Date(`${date}T12:00:00`).getDay(),
+    unit,
+    minutes: toMin(time),
+    date,
+  };
+  const win =
+    windowAt(windows.value, { ...spot, doctor }) ||
+    windowAt(windows.value, spot);
+  if (!win || !win.doctor) return '';
+  const block = Number(win.block) || 15;
+  const first = toMin(win.start);
+  const at = first + Math.floor((toMin(time) - first) / block) * block;
+  const count = m => patientsAt(date, unit, m, block, skipId);
+  const here = count(at) + 1;
+  const around = [at - block, at + block].map(count);
+  const msgs = [];
+  const crowded =
+    here >= 3 ||
+    (here === 2 && around.some(n => n > 0)) ||
+    around.some(n => n >= 2);
+  if (lb.spacing !== false && crowded) {
+    msgs.push(
+      here >= 2
+        ? `Às ${hmOfMin(at)} vão ficar ${here} pacientes no mesmo horário, com gente também no horário vizinho: eles chegam acumulados.`
+        : `O horário das ${hmOfMin(at)} fica colado num horário que já tem 2 pacientes: eles chegam acumulados.`
+    );
+  }
+  const slots = slotsFor(win).map(toMin);
+  const load = Math.round(
+    ((slots.reduce((sum, m) => sum + count(m), 0) + 1) * 100) / slots.length
+  );
+  if (load > lb.ceiling) {
+    msgs.push(
+      `O período de ${win.doctor} nesse dia vai ficar com ${load}% (o teto combinado é ${lb.ceiling}%).`
+    );
+  }
+  if (!msgs.length) return '';
+  const free = slots
+    .filter(
+      m => count(m) === 0 && [m - block, m + block].every(x => count(x) < 2)
+    )
+    .sort((a, b) => Math.abs(a - at) - Math.abs(b - at))
+    .slice(0, 3)
+    .sort((a, b) => a - b)
+    .map(hmOfMin);
+  const tip = free.length
+    ? ` Horários folgados por perto: ${free.join(', ')}.`
+    : '';
+  return `${msgs.join(' ')}${tip}\n\nMarcar mesmo assim?`;
+};
 const evaluationsInHour = (dayKey, hh, unit, skipId) =>
   (liveTasksByDay.value[dayKey] || []).filter(
     t =>
@@ -1294,6 +1369,8 @@ const occScan = (from, days) =>
     from,
     days,
     freeLimit: 0,
+    // ⚖️ item 422: régua ligada = encaixe conta na ocupação (mesma conta dos robôs)
+    countStacked: Boolean(loadBalance.value.enabled),
   });
 const showOccupancy = computed(() => {
   if (isTele.value || isPersonalView.value) return false;
@@ -2006,6 +2083,22 @@ const save = async () => {
       )
     )
       return;
+  }
+  // ⚖️ item 422: horário acumulado ou período acima do teto = só com confirmação
+  if (
+    form.value.kind === 'consultas' &&
+    !NOT_LOAD.includes(modality) &&
+    (timeChanged || typeChanged)
+  ) {
+    const warn = crowdingWarning({
+      date: form.value.date,
+      time: form.value.time || '09:00',
+      unit: form.value.unit,
+      doctor: form.value.doctor,
+      skipId: editingTask.value?.id,
+    });
+    // eslint-disable-next-line no-alert
+    if (warn && !window.confirm(warn)) return;
   }
   isSaving.value = true;
   try {
