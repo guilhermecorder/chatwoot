@@ -287,7 +287,7 @@ class Api::V1::Accounts::Crm::DashboardsController < Api::V1::Accounts::BaseCont
                          .group(:user_id)
                          .average(:value)
 
-    rows = Current.account.users.map do |u|
+    rows = Cevico::ThirdParty.team(Current.account).map do |u| # 🚪 item 420: sem os terceiros
       {
         id: u.id,
         name: u.available_name,

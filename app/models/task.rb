@@ -80,10 +80,27 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   APPOINTMENT_TYPES = %w[consulta cirurgia].freeze
   # 'excluida_tarefas' = card ⚠️ do robô excluído no quadro de Tarefas (fica com rastro)
   # duplicada_hub = cópia vinda do Oftalmofácil unida à consulta da equipe (auditoria 10/2026, #462/#472)
-  CANCEL_REASONS = %w[excluida_agenda cancelada_equipe paciente_desmarcou oftalmofacil excluida_tarefas duplicada_hub].freeze
+  CANCEL_REASONS = %w[excluida_agenda cancelada_equipe paciente_desmarcou oftalmofacil excluida_tarefas duplicada_hub cancelada_terceiro].freeze
 
   def appointment?
     APPOINTMENT_TYPES.include?(task_type)
+  end
+
+  # 🚪 item 420 (26/11): CONSULTA EXTERNA = consulta particular de um médico
+  # marcada pelo PORTAL DE TERCEIROS (a secretária dele). Mora na mesma tabela
+  # e aparece na Agenda da clínica (tem unidade, médico e horário, e trava o
+  # horário para os robôs), mas tem TIPO PRÓPRIO de propósito: todo painel,
+  # funil, lembrete, robô e contagem da clínica lê `task_type = 'consulta'` —
+  # então ela fica fora de tudo isso sem precisar de filtro em cada lugar.
+  # NÃO entra em APPOINTMENT_TYPES (que alimenta carimbos e contagens): o que
+  # a faz "da clínica toda" é ter unidade, como os agendamentos antigos.
+  EXTERNAL_TYPE = 'consulta_externa'.freeze
+  # tipos que a Agenda desenha na grade de consultas
+  AGENDA_CONSULT_TYPES = ['consulta', EXTERNAL_TYPE].freeze
+  scope :external, -> { where(task_type: EXTERNAL_TYPE) }
+
+  def external?
+    task_type == EXTERNAL_TYPE
   end
 
   # ✅ item 305 (01/10): cartões do quadro de Tarefas = tudo que NÃO é
@@ -322,8 +339,11 @@ class Task < ApplicationRecord # rubocop:disable Metrics/ClassLength
   # Toda task nasce (ou muda de telefone) já amarrada ao contato, venha de
   # onde vier: modal da Agenda, Secretário da Agenda, Atendente Instagram,
   # automações. Quem já informou o contato explicitamente vence.
-  def link_contact_by_phone # rubocop:disable Metrics/CyclomaticComplexity
+  def link_contact_by_phone # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return if phone.blank?
+    # 🚪 item 420: consulta externa nunca se liga a um cadastro da clínica (o
+    # paciente é do médico; ligar moveria card, jornada e contagens)
+    return self.contact = nil if external?
     return if contact_id.present? && (new_record? || will_save_change_to_contact_id?)
     return unless new_record? || will_save_change_to_phone?
 

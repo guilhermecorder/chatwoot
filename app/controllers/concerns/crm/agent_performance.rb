@@ -67,7 +67,8 @@ module Crm
       calls_talk = calls.group(:user_id).sum(:duration)
       workdays = workday_stats(range, user_ids: user_ids)
 
-      users_scope = user_ids ? account.users.where(id: user_ids) : account.users
+      team = Cevico::ThirdParty.team(account) # 🚪 item 420: terceiro não entra no desempenho da equipe
+      users_scope = user_ids ? team.where(id: user_ids) : team
       rows = users_scope.map do |user|
         radar = radar_by_responder[user.id] || { responded: 0, total_minutes: 0.0 }
         {

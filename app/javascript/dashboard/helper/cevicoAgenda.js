@@ -89,6 +89,19 @@ export const isAppointmentTask = task =>
     task.task_type === 'cirurgia' ||
     !!task.unit);
 
+// 🚪 item 420 (26/11): CONSULTA EXTERNA = particular de um médico, marcada pelo
+// portal de terceiros (a secretária dele). Tem tipo próprio no banco — é o
+// que a deixa fora de toda contagem da clínica — mas a Agenda desenha como
+// consulta (tem unidade, médico e horário). Ao salvar pela Agenda o tipo
+// NUNCA muda (o servidor também garante).
+export const EXTERNAL_TASK_TYPE = 'consulta_externa';
+export const isExternalTask = task =>
+  !!task && task.task_type === EXTERNAL_TASK_TYPE;
+export const taskTypeForSave = (kind, editing) => {
+  if (isExternalTask(editing)) return EXTERNAL_TASK_TYPE;
+  return kind === 'cirurgias' ? 'cirurgia' : 'consulta';
+};
+
 // a que tipo uma task pertence
 export const kindOf = task => {
   if (!task) return 'consultas';

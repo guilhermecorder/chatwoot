@@ -286,8 +286,9 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       cap: modality.to_s == AI_MODALITY ? hourly_cap(account) : nil,
       # item 415: retorno e pós-op marcados — só pesam nas faixas SEM ENCAIXE
       soft: soft_booked(account, from_date, to_date),
+      # 🚪 item 420: consulta externa (portal de terceiros) também ocupa o horário
       occupied: account.tasks
-                       .where(task_type: 'consulta', canceled_at: nil)
+                       .where(task_type: Task::AGENDA_CONSULT_TYPES, canceled_at: nil)
                        .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', ['exames'] + SOFT_MODALITIES)
                        .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
                        .pluck(:due_at, :unit)

@@ -3,6 +3,9 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   include Crm::ClinicalAccessGate
 
   before_action :task, only: [:update, :destroy]
+  # 🚪 item 420: consulta do portal de terceiros — a equipe edita pela Agenda,
+  # mas nada do que a ligaria aos números da clínica passa
+  before_action :protect_external_task, only: [:update]
   # 🔐 achados #18/#130/#315 + #147: quem pode mexer e a troca de tipo são
   # conferidas ANTES de qualquer ação de editar/apagar
   before_action :authorize_task_change, only: [:update, :destroy]
@@ -104,6 +107,10 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
 
   def create # rubocop:disable Metrics/AbcSize
     return render_unit_denied if params[:unit].present? && !cevico_access.unit_allowed?(params[:unit])
+    # 🚪 item 420: consulta externa nasce só pelo portal de terceiros (Crm::PortalController)
+    if params[:task_type].to_s == Task::EXTERNAL_TYPE
+      return render json: { error: 'Esse tipo de consulta só nasce pelo portal de terceiros.' }, status: :forbidden
+    end
 
     # 🔁 item 343: RETORNO não fica no nome de quem marcou — com a equipe dos
     # retornos configurada, o Task nasce sem dono (Crm::TaskOwner.apply_retorno_team!)
@@ -127,7 +134,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     return render_unit_denied unless cevico_access.unit_allowed?(task.unit) && cevico_access.unit_allowed?(params[:unit])
 
     # consulta com dia/horário alterado = reagendamento (indicador do painel)
-    if task.task_type == 'consulta' && params[:due_at].present? && task.due_at.present? &&
+    if Task::AGENDA_CONSULT_TYPES.include?(task.task_type) && params[:due_at].present? && task.due_at.present? &&
        Time.zone.parse(params[:due_at].to_s) != task.due_at
       task.rescheduled_count += 1
     end
@@ -141,6 +148,9 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
 
     task.assign_charges(charges_param, Current.user) if params.key?(:charges) # 💰 item 324
     task.update!(task_params)
+
+    # 🚪 item 420: consulta externa não mexe em card, funil nem cadastro da clínica
+    return render json: task_json(task) if task.external?
 
     # comparecimento/indicação refletem no CRM (move o card + automações)
     reflect_attendance_in_crm if task.saved_change_to_attendance? || task.saved_change_to_surgery_indication?
@@ -231,6 +241,16 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
     end
   end
 
+  # 🚪 item 420: numa consulta externa a Agenda não troca o tipo nem liga a
+  # consulta a origem, canal, paciente ou "tipo de consulta" da clínica — é o
+  # que a mantém fora das contagens, dos funis e das mensagens automáticas
+  EXTERNAL_LOCKED_PARAMS = %i[task_type origin channel contact_id modality booking_kind surgery_indication indicated_procedure].freeze
+  def protect_external_task
+    return unless task.external?
+
+    EXTERNAL_LOCKED_PARAMS.each { |key| params.delete(key) }
+  end
+
   def render_unit_denied
     render json: { error: 'Essa unidade não está liberada para você. Peça a um administrador.' }, status: :forbidden
   end
@@ -263,12 +283,17 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   # 🔐 achado #147: mudar task_type entre CARD e AGENDAMENTO troca a porta de
   # acesso (tarefas × agenda) e a regra da Lixeira — só o administrador.
   # Entre agendas (consulta ↔ cirurgia) vale a porta de edição do destino.
-  def task_type_switch_denied?
-    return false if Current.account_user.administrator? || !params.key?(:task_type)
+  def task_type_switch_denied? # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+    return false unless params.key?(:task_type)
+    return true if params[:task_type].to_s == Task::EXTERNAL_TYPE && !task.external? # 🚪 item 420: nem o admin
+    return false if Current.account_user.administrator?
 
     new_type = params[:task_type].to_s
     old_type = task.task_type.to_s
     return false if new_type == old_type
+    # 🚪 item 420: nada vira consulta externa pela Agenda (o caminho inverso
+    # nem chega aqui: protect_external_task tira o tipo do pedido)
+    return true if new_type == Task::EXTERNAL_TYPE
     return true if Task::APPOINTMENT_TYPES.include?(new_type) != Task::APPOINTMENT_TYPES.include?(old_type)
 
     node = agenda_node_for(new_type)
@@ -276,6 +301,7 @@ class Api::V1::Accounts::TasksController < Api::V1::Accounts::BaseController # r
   end
 
   def agenda_node_for(type)
+    return 'agenda' if type.to_s == Task::EXTERNAL_TYPE # 🚪 item 420: consulta do portal de terceiros é da Agenda
     return nil unless Task::APPOINTMENT_TYPES.include?(type.to_s)
 
     type.to_s == 'cirurgia' ? 'agenda.cirurgias' : 'agenda'

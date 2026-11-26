@@ -4548,7 +4548,12 @@ const perfTilesFor = col => {
 // ── Saúde da agenda (janelas × consultas, calculada aqui) ───
 const consultaTasks = computed(() =>
   allTasks.value.filter(
-    t => (t.task_type === 'consulta' || t.unit) && t.due_at && !t.canceled_at
+    t =>
+      (t.task_type === 'consulta' || t.unit) &&
+      // 🚪 item 420: consulta do portal de terceiros não entra nos números da clínica
+      t.task_type !== 'consulta_externa' &&
+      t.due_at &&
+      !t.canceled_at
   )
 );
 const scan = opts =>

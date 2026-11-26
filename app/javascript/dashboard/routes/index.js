@@ -6,7 +6,11 @@ import store from 'dashboard/store';
 import { validateLoggedInRoutes } from '../helper/routeHelpers';
 import { isOnOnboardingView } from 'v3/helpers/RouteHelper';
 import AnalyticsHelper from '../helper/AnalyticsHelper';
-import { routeAllowed, routeNodesFor } from '../helper/cevicoAccess';
+import {
+  routeAllowed,
+  routeNodesFor,
+  portalRedirect,
+} from '../helper/cevicoAccess';
 
 const ONBOARDING_STEPS = ['account_details', 'enrichment', 'inbox_setup'];
 const routes = [...dashboard.routes];
@@ -73,6 +77,13 @@ export const validateAuthenticateRoutePermission = async (to, next) => {
     ONBOARDING_STEPS.includes(userAccount?.onboarding_step) &&
     isAdmin &&
     isActive;
+
+  // 🚪 CEVICO item 420 — TERCEIRO (login de fora, só com o portal dele): toda
+  // navegação cai no portal. A trava de verdade é o servidor (403 em tudo que
+  // não for o portal); aqui é só para ele nunca ver uma tela vazia do sistema.
+  const portalStep = portalRedirect(to, userAccount, isAdmin);
+  if (portalStep === 'stay') return next();
+  if (portalStep) return next(frontendURL(portalStep));
 
   if (to.name === 'no_accounts' || !to.name) {
     const target = needsOnboarding

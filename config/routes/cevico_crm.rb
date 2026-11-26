@@ -157,6 +157,16 @@ namespace :crm do
     post :preview
     post :apply
   end
+  # 🚪 item 420: PORTAL DE TERCEIROS (a única porta que um terceiro abre) e a
+  # parte do administrador (criar, ajustar e encerrar acessos)
+  resource :portal, only: [:show], controller: 'portal' do
+    get :me
+    post :appointments, action: :create
+    patch 'appointments/:id', action: :update
+  end
+  resources :third_parties, only: [:index, :create, :update, :destroy] do
+    member { post :invite }
+  end
   resource :settings, only: [:show, :update] do
     post :test_n8n
     post :fetch_workflows

@@ -30,7 +30,7 @@
 module Crm::Stamp
   module_function
 
-  VIAS = %w[paciente equipe robo sync carga integracao].freeze
+  VIAS = %w[paciente equipe robo sync carga integracao terceiro].freeze # 🚪 'terceiro' = portal de terceiros (item 420)
   FRESH = 10.minutes # paciente recém-criado: vale a primeira evidência
 
   # avisa o "como" (e, se souber, a fonte) para tudo o que nascer no bloco

@@ -97,7 +97,7 @@ class Api::V1::Accounts::Crm::PeopleController < Api::V1::Accounts::BaseControll
   private
 
   def visible_users
-    return Current.account.users.order(:name) if Current.account_user.administrator?
+    return Cevico::ThirdParty.team(Current.account).order(:name) if Current.account_user.administrator? # 🚪 item 420
 
     [Current.user]
   end

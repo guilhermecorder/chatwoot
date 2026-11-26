@@ -657,6 +657,45 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🚪 item 420: PORTAL DE TERCEIROS — o que o terceiro abre (a agenda
+  // particular de um médico). `as` = administrador conferindo o portal de alguém.
+  getPortalMe(as) {
+    return axios.get(`${this.url}/portal/me`, { params: { as } });
+  }
+
+  getPortal({ from, to, as } = {}) {
+    return axios.get(`${this.url}/portal`, { params: { from, to, as } });
+  }
+
+  createPortalAppointment(data) {
+    return axios.post(`${this.url}/portal/appointments`, data);
+  }
+
+  updatePortalAppointment(id, data) {
+    return axios.patch(`${this.url}/portal/appointments/${id}`, data);
+  }
+
+  // 🚪 item 420: a parte do administrador (criar, ajustar, encerrar acessos)
+  getThirdParties() {
+    return axios.get(`${this.url}/third_parties`);
+  }
+
+  createThirdParty(data) {
+    return axios.post(`${this.url}/third_parties`, data);
+  }
+
+  updateThirdParty(userId, data) {
+    return axios.patch(`${this.url}/third_parties/${userId}`, data);
+  }
+
+  closeThirdParty(userId) {
+    return axios.delete(`${this.url}/third_parties/${userId}`);
+  }
+
+  inviteThirdParty(userId) {
+    return axios.post(`${this.url}/third_parties/${userId}/invite`);
+  }
+
   // 🔐 rodada 334: acessos em árvore (ver × editar), papéis, unidades, empresa
   getAccessAdmin() {
     return axios.get(`${this.url}/settings/access_admin`);

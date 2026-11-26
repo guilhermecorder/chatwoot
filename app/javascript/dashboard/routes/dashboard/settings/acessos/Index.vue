@@ -19,6 +19,7 @@ import CvCabecalho from 'dashboard/components-next/cevico/guia/CvCabecalho.vue';
 import CvBloco from 'dashboard/components-next/cevico/guia/CvBloco.vue';
 import SkeletonScreen from 'dashboard/components-next/cevico/SkeletonScreen.vue';
 import AccessTreeEditor from 'dashboard/components-next/cevico/access/AccessTreeEditor.vue';
+import ThirdPartyAccess from 'dashboard/components-next/cevico/access/ThirdPartyAccess.vue';
 import { useCevicoPalette } from 'dashboard/composables/useCevicoPalette';
 import { effectiveMap, summarize } from 'dashboard/helper/cevicoAccessTree';
 
@@ -546,6 +547,9 @@ const applyRoleAsOwn = role => {
           </p>
         </div>
       </CvBloco>
+
+      <!-- ══ 🚪 item 420: ACESSOS DE TERCEIROS (gente de fora, uma coisa só) ══ -->
+      <ThirdPartyAccess />
 
       <!-- ══ 3. MAPA DO SISTEMA (neutro) ══ -->
       <CvBloco

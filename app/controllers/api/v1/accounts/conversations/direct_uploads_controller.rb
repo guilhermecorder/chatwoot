@@ -11,6 +11,9 @@ class Api::V1::Accounts::Conversations::DirectUploadsController < ActiveStorage:
   before_action :validate_bot_access_token!, if: :authenticate_by_access_token?
   before_action :authenticate_user!, unless: :authenticate_by_access_token?
   before_action :current_account
+  # 🚪 CEVICO item 420: este controller não herda do BaseController da conta
+  # (é do ActiveStorage), então a trava do terceiro é repetida aqui
+  before_action :cevico_third_party_guard
   before_action :validate_token_api_access, if: :authenticate_by_access_token?
   before_action :conversation
 
@@ -30,6 +33,13 @@ class Api::V1::Accounts::Conversations::DirectUploadsController < ActiveStorage:
     return if Current.account.api_and_webhooks_enabled?
 
     render json: { error: 'API access is not enabled for this account' }, status: :forbidden
+  end
+
+  def cevico_third_party_guard
+    user = current_user || @resource
+    return unless user.is_a?(User) && Cevico::ThirdParty.third_party?(Current.account, user, account_user: Current.account_user)
+
+    render json: { error: 'Este acesso é restrito ao seu portal.', third_party: true }, status: :forbidden
   end
 
   def conversation

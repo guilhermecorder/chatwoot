@@ -72,7 +72,11 @@ class Api::V1::Accounts::AgentsController < Api::V1::Accounts::BaseController
   end
 
   def agents
-    @agents ||= Current.account.users.order_by_full_name.includes(:account_users, { avatar_attachment: [:blob] })
+    # 🚪 CEVICO item 420: terceiro não é da equipe — não aparece na lista de
+    # agentes (nem nos seletores de responsável); o acesso dele é cuidado em
+    # Configurações → Acessos e papéis → Acessos de terceiros
+    @agents ||= Cevico::ThirdParty.team(Current.account)
+                                  .order_by_full_name.includes(:account_users, { avatar_attachment: [:blob] })
   end
 
   def bulk_create_agents(emails)

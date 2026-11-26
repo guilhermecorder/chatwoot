@@ -196,3 +196,20 @@ export const routeAllowed = (routeName, accessMe, isAdmin = false) => {
     node => (LEVEL_RANK[accessMe[node]] ?? 0) >= LEVEL_RANK.view
   );
 };
+
+// 🚪 item 420 — PORTAL DE TERCEIROS. `userAccount` é a conta da rota dentro do
+// perfil (o servidor manda `cevico_third_party` só para quem é terceiro).
+//   'stay'  → já está no portal e pode ficar
+//   string  → caminho para onde mandar (relativo ao frontendURL)
+//   null    → não é assunto do portal: segue a navegação normal
+export const PORTAL_ROUTE = 'cevico_portal';
+export const portalRedirect = (to, userAccount, isAdmin = false) => {
+  const third = userAccount?.cevico_third_party;
+  const accountId = userAccount?.id;
+  if (third && !isAdmin) {
+    return to?.name === PORTAL_ROUTE ? 'stay' : `accounts/${accountId}/portal`;
+  }
+  if (to?.name !== PORTAL_ROUTE) return null;
+  // quem não é terceiro só abre o portal para CONFERIR o de alguém (admin + ?as=)
+  return isAdmin && to?.query?.as ? 'stay' : `accounts/${accountId}/dashboard`;
+};

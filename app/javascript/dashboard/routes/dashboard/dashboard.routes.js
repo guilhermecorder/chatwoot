@@ -25,6 +25,7 @@ import inicioRoutes from './inicio/routes';
 import negociosRoutes from './negocios/routes';
 import cevicoAutomationsRoutes from './cevicoAutomations/routes';
 import AppContainer from './Dashboard.vue';
+import PortalAgenda from './portal/PortalAgenda.vue';
 import Suspended from './suspended/Index.vue';
 import NoAccounts from './noAccounts/Index.vue';
 import OnboardingAccountDetails from './onboarding/Index.vue';
@@ -62,6 +63,17 @@ export default {
         ...negociosRoutes.routes,
         ...cevicoAutomationsRoutes.routes,
       ],
+    },
+    // 🚪 item 420: PORTAL DE TERCEIROS — fora do contêiner do painel (sem menu
+    // lateral e sem carregar nada do sistema). O terceiro só abre esta rota;
+    // o administrador abre com ?as=<id> para conferir como a pessoa vê.
+    {
+      path: frontendURL('accounts/:accountId/portal'),
+      name: 'cevico_portal',
+      meta: {
+        permissions: ['administrator', 'agent', 'custom_role'],
+      },
+      component: PortalAgenda,
     },
     {
       path: frontendURL('accounts/:accountId/onboarding'),

@@ -45,6 +45,17 @@ class Cevico::Access
   def uid = user&.id.to_s
   def admin? = @account_user&.administrator? == true
 
+  # 🚪 item 420: TERCEIRO (login de fora da equipe, com um portal só dele) —
+  # não tem nível em NENHUM nó do catálogo; o que ele abre é a lista de portas
+  # do portal (Cevico::ThirdParty), conferida em Crm::AccessControl
+  def third_party
+    return @third_party if defined?(@third_party)
+
+    @third_party = Cevico::ThirdParty.for(account, user, account_user: @account_user, perms: perms)
+  end
+
+  def third_party? = !third_party.nil?
+
   # nós que existem para o ramo desta empresa
   def visible_keys
     @visible_keys ||= Cevico::AccessCatalog.keys_for(company.segment)
@@ -87,9 +98,10 @@ class Cevico::Access
   end
 
   # ── o nível efetivo ────────────────────────────────────────────────────
-  def level(key)
+  def level(key) # rubocop:disable Metrics/CyclomaticComplexity
     key = key.to_s
     return 'none' unless Cevico::AccessCatalog.exist?(key) && visible?(key)
+    return 'none' if third_party? # 🚪 item 420: terceiro não tem nada do catálogo
     return 'edit' if admin? # admin faz tudo, até nos nós "só ver" (ações de sincronizar etc.)
     return 'none' if Cevico::AccessCatalog.admin_only?(key) || admin_only_ancestor?(key)
 
@@ -137,7 +149,8 @@ class Cevico::Access
       units: units,
       role_id: role_id,
       catalog: Cevico::AccessCatalog.tree_for(company),
-      levels: LEVELS
+      levels: LEVELS,
+      third_party: third_party&.public_json
     }
   end
 
@@ -145,7 +158,7 @@ class Cevico::Access
   def self.admin_payload(account) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
     perms = perms_for(account)
     company = Cevico::Company.for(account)
-    users = account.account_users.includes(:user).map do |au|
+    users = team_account_users(account).map do |au|
       uid = au.user_id.to_s
       access = new(account, au.user, account_user: au)
       {
@@ -169,6 +182,13 @@ class Cevico::Access
       units: company.units,
       levels: LEVELS
     }
+  end
+
+  # 🚪 item 420: terceiros têm o bloco deles na tela (Acessos de terceiros) —
+  # não entram na lista de Pessoas, onde a árvore não vale para eles
+  def self.team_account_users(account)
+    third_ids = Cevico::ThirdParty.user_ids(account)
+    account.account_users.includes(:user).reject { |au| !au.administrator? && third_ids.include?(au.user_id) }
   end
 
   # ── legado (grants / menu / report_keys / lista de bloqueio) ───────────

@@ -23,6 +23,10 @@ module Crm::AccessControl
   DAY_MENU_DEFAULT = Cevico::AccessCatalog::LEGACY_DAY_DEFAULT
 
   included do
+    # 🚪 item 420: a trava do TERCEIRO vem antes de tudo — para ele o sistema
+    # é fechado por padrão (inclusive as portas do core do Chatwoot, que o
+    # catálogo não mapeia: conversas, contatos, caixas, relatórios…)
+    before_action :cevico_third_party_guard
     before_action :cevico_catalog_guard
   end
 
@@ -35,6 +39,18 @@ module Crm::AccessControl
 
   def cevico_company
     @cevico_company ||= cevico_access.company
+  end
+
+  # ── 🚪 item 420: TERCEIRO só abre as portas do portal dele ─────────────
+  # Fechado por padrão: qualquer controller de api/v1/accounts/* que não
+  # esteja na lista do tipo de portal (Cevico::ThirdParty::KINDS) responde 403.
+  def cevico_third_party_guard
+    return if Current.account.nil? || Current.user.nil? || !Current.user.is_a?(User)
+
+    third = cevico_access.third_party
+    return if third.nil? || third.allows?(controller_path, action_name)
+
+    render json: { error: 'Este acesso é restrito ao seu portal.', third_party: true }, status: :forbidden
   end
 
   # ── a trava automática pelo mapa controller → nó ───────────────────────

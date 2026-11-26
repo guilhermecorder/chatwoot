@@ -46,6 +46,8 @@ import {
   kindVars,
   hexToRgbSpaced,
   isAppointmentTask as isAppointment,
+  isExternalTask,
+  taskTypeForSave,
   resolveWindows,
   resolveOpenWindows,
   windowOnDay,
@@ -1487,6 +1489,9 @@ onBeforeUnmount(() => clearInterval(nowTimer));
 // ── Modal criar/editar ──
 const showModal = ref(false);
 const editingTask = ref(null);
+// 🚪 item 420: consulta marcada pelo portal de terceiros — o formulário esconde
+// o que é da clínica (de quem é, como chegou, tipo, "conta como agendamento", valor)
+const editingExternal = computed(() => isExternalTask(editingTask.value));
 const isSaving = ref(false);
 const showDeleteConfirm = ref(false);
 
@@ -1508,6 +1513,7 @@ const trashTasks = computed(() => {
 const REASON_LABELS = {
   excluida_agenda: 'excluído na Agenda',
   cancelada_equipe: 'cancelado pela equipe',
+  cancelada_terceiro: 'cancelado pelo portal de terceiros',
   paciente_desmarcou: 'paciente desmarcou (Secretário da Agenda)',
   oftalmofacil: 'cancelado no Oftalmofácil',
 };
@@ -2005,19 +2011,24 @@ const save = async () => {
   try {
     const fk = form.value.kind;
     const dueAt = new Date(`${form.value.date}T${form.value.time || '09:00'}`);
+    // 🚪 item 420: consulta do portal de terceiros mantém o tipo próprio (é ele
+    // que a deixa fora das contagens da clínica)
+    const external = isExternalTask(editingTask.value);
     const payload = {
       title: form.value.name.trim(),
       phone: form.value.phone.trim(),
       procedure: form.value.procedure.trim(),
       doctor: form.value.doctor.trim(),
       modality:
-        fk === 'cirurgias' ? null : form.value.modality || defaultModality(fk),
+        fk === 'cirurgias' || external
+          ? null
+          : form.value.modality || defaultModality(fk),
       due_at: dueAt.toISOString(),
       unit: fk === 'teleconsultas' ? ONLINE_UNIT : form.value.unit,
       status: form.value.status,
       canceled: form.value.canceled,
       description: form.value.description,
-      task_type: fk === 'cirurgias' ? 'cirurgia' : 'consulta',
+      task_type: taskTypeForSave(fk, editingTask.value),
       priority: 'medium',
       booking_kind: fk === 'cirurgias' ? null : form.value.booking_kind,
       // 💰 item 324: particular + valores lançados à mão (o servidor grava quem lançou)
@@ -5070,6 +5081,18 @@ class="cv-ag-head-pill"
             </div>
           </div>
 
+          <!-- 🚪 item 420: consulta marcada pelo portal de terceiros -->
+          <p
+            v-if="isExternalTask(editingTask)"
+            class="mb-4 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3.5 py-2.5 text-xs leading-snug text-n-slate-12"
+          >
+            <span class="i-lucide-door-open mr-1 align-[-2px] text-violet-600" />
+            <b>Particular do médico, marcada pelo portal de terceiros.</b>
+            Aparece aqui e trava o horário, mas fica fora das contagens da
+            clínica: não entra em consultas agendadas, não cria paciente no CRM
+            e não recebe as mensagens automáticas.
+          </p>
+
           <!-- item 324: no computador o card abre em DUAS colunas (quem/quando · motivo/valor/situação) -->
           <div class="cv-ag-cols">
             <div class="space-y-4 lg:space-y-5 min-w-0">
@@ -5136,7 +5159,7 @@ class="cv-ag-head-pill"
                       class="text-[11px] text-amber-700 mt-1 block"
                       >Com DDD: (11) 98888-7777</span>
                     <span
-                      v-if="phoneOwner"
+                      v-if="phoneOwner && !editingExternal"
                       class="text-[11px] text-amber-800 mt-1 flex items-center gap-1 flex-wrap"
                     >
                       <span class="i-lucide-triangle-alert text-xs" /> Este
@@ -5152,7 +5175,7 @@ class="cv-ag-head-pill"
                   </div>
                 </div>
                 <!-- 🏥 item 300: de quem é o paciente (obrigatório ao criar) -->
-                <div v-if="!originLocked" class="mt-3">
+                <div v-if="!originLocked && !editingExternal" class="mt-3">
                   <span class="cv-label block mb-1.5">Paciente de quem? {{ editingTask ? '' : '*' }}</span>
                   <div
                     class="cv-ag-origin"
@@ -5194,7 +5217,7 @@ class="cv-ag-head-pill"
                   </p>
                 </div>
                 <!-- 🧭 item 362: como o paciente chegou (obrigatório ao criar paciente novo) -->
-                <div v-if="!originLocked" class="mt-3">
+                <div v-if="!originLocked && !editingExternal" class="mt-3">
                   <span class="cv-label block mb-1.5">Como chegou? {{ channelMissing ? '*' : '' }}</span>
                   <div
                     class="cv-ag-origin cv-ag-channel"
@@ -5420,7 +5443,13 @@ class="cv-ag-head-pill"
                   </div>
                 </header>
                 <div class="space-y-3">
-                  <div v-if="editingTask && form.kind === 'consultas'">
+                  <div
+                    v-if="
+                      editingTask &&
+                      form.kind === 'consultas' &&
+                      !editingExternal
+                    "
+                  >
                     <span class="cv-label block mb-1.5">Tipo de consulta</span>
                     <div class="cv-seg cv-seg-sm">
                       <button
@@ -5460,7 +5489,7 @@ class="cv-ag-head-pill"
                     </datalist>
                   </div>
                   <!-- 📅 item 217: o que conta como agendamento -->
-                  <div v-if="form.kind !== 'cirurgias'">
+                  <div v-if="form.kind !== 'cirurgias' && !editingExternal">
                     <span class="cv-label block mb-1.5">Esta {{ formKind.noun }} é</span>
                     <div class="cv-seg cv-seg-sm flex-wrap">
                       <button
@@ -5482,7 +5511,8 @@ class="cv-ag-head-pill"
               </section>
 
               <!-- 4 · valor (item 324): pré-configurado do tipo + valores lançados à mão -->
-              <section class="cv-ag-sec cv-ag-sec-value">
+              <!-- 🚪 item 420: consulta do portal não recebe a confirmação da clínica: sem o bloco de valor -->
+              <section v-if="!editingExternal" class="cv-ag-sec cv-ag-sec-value">
                 <header class="cv-ag-sec-head">
                   <span class="cv-ag-num">4</span>
                   <div>

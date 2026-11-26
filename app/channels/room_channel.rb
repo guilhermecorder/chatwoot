@@ -26,7 +26,12 @@ class RoomChannel < ApplicationCable::Channel
 
   def ensure_stream
     stream_from pubsub_token
-    stream_from "account_#{@current_account.id}" if @current_account.present? && @current_user.is_a?(User)
+    return unless @current_account.present? && @current_user.is_a?(User)
+    # 🚪 CEVICO item 420: terceiro não escuta os avisos da conta (contatos,
+    # conversas, presença) — o portal dele não usa tempo real
+    return if Cevico::ThirdParty.third_party?(@current_account, @current_user)
+
+    stream_from "account_#{@current_account.id}"
   end
 
   def update_subscription

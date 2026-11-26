@@ -38,6 +38,10 @@ json.accounts do
     json.availability_status account_user.availability_status
     json.auto_offline account_user.auto_offline
     json.api_and_webhooks account_user.account.feature_enabled?('api_and_webhooks')
+    # 🚪 CEVICO item 420: terceiro (login de fora, só com o portal dele) — a tela
+    # usa isto para abrir direto no portal, sem menu nem o resto do sistema
+    cevico_third = Cevico::ThirdParty.for(account_user.account, resource, account_user: account_user)
+    json.cevico_third_party cevico_third.public_json if cevico_third
     json.partial! 'api/v1/models/account_user', account_user: account_user if ChatwootApp.enterprise?
   end
 end
