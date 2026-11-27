@@ -91,7 +91,7 @@ RSpec.describe Crm::SalesEconomics do
       Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stages['Orçamento Enviado'], assignee: fernando)
       msg(tz.parse('2026-11-27 08:00'), attrs: { 'cevico_followup_bot_id' => 1 }, content: 'Bom dia! robô')
       msg(tz.parse('2026-11-27 09:00'), type: :incoming)
-      msg(tz.parse('2026-11-27 10:30'))
+      msg(tz.parse('2026-11-27 10:30'), attrs: { 'cevico_wa_billing' => { 'pricing_type' => 'regular' } })
       msg(tz.parse('2026-11-27 14:00'))
 
       team = described_class.new(account, since: tz.parse('2026-11-27 00:00'), until_at: now).call[:team]

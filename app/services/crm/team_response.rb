@@ -3,7 +3,8 @@
 #
 # Só conta mensagem ESCRITA POR GENTE: saída, não privada, enviada por um usuário e SEM carimbo de automação
 # (todo envio automático grava uma chave `cevico_*` em additional_attributes: IA, robôs de follow-up, orçamento
-# automático, conteúdo guardado, retomada…). Os robôs mandam em nome do Fernando; sem esse filtro ele pareceria
+# automático, conteúdo guardado, retomada…). Exceção: `cevico_wa_billing` é a cobrança da Meta, gravada em TODA
+# mensagem que sai pelo WhatsApp oficial, inclusive as escritas pela equipe (achado no ar em 27/11: 358 mensagens). Os robôs mandam em nome do Fernando; sem esse filtro ele pareceria
 # ativo às 8h em ponto todos os dias.
 #
 # Horário comercial da LIFE: seg–sex 8h–18h, sáb 8h–12h, fora feriados nacionais (Crm::BusinessHours).
@@ -18,7 +19,7 @@ class Crm::TeamResponse
   TZ = ActiveSupport::TimeZone['America/Sao_Paulo']
   HUMAN_REQUEST = '%pediu ATENDIMENTO HUMANO%'.freeze
   AUTOMATED_SQL = "EXISTS (SELECT 1 FROM jsonb_object_keys(COALESCE(messages.additional_attributes, '{}'::jsonb)) k " \
-                  "WHERE k LIKE 'cevico%')".freeze
+                  "WHERE k LIKE 'cevico%' AND k NOT IN (#{%w[cevico_wa_billing].map { |k| "'#{k}'" }.join(', ')}))".freeze
   TOP_GAPS = 8
 
   def initialize(account, since:, until_at:)
