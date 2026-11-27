@@ -109,12 +109,12 @@ class Crm::SalesEconomics
   end
 
   # ── custo por etapa ───────────────────────────────────────────────────────
+  # 27/11 (Guilherme): "o custo até toda etapa, inclusive depois do orçamento: forma de pagamento, CPF e crédito…"
+  # → as 10 etapas da Jornada, na ordem; custo = investido no período ÷ quem chegou até ali.
   def per_step(total)
     journey = Crm::QuoteJourney.new(@account, since: @since, until_at: @until).call
-    counts = journey[:steps].to_h { |s| [s[:key], s[:count]] }
-    %w[leads conta enviado fechado].map do |key|
-      step = journey[:steps].find { |s| s[:key] == key }
-      { key: key, label: step[:label], people: counts[key].to_i, cost: ratio_money(total, counts[key]) }
+    journey[:steps].map do |step|
+      { key: step[:key], label: step[:label], people: step[:count].to_i, cost: ratio_money(total, step[:count]) }
     end
   end
 

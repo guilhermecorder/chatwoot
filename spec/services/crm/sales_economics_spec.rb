@@ -122,6 +122,54 @@ RSpec.describe Crm::SalesEconomics do
       expect(req).to include(total: 2, answered: 1, mediana_min: 60, sem_resposta: 1) # 17h30–18h + 8h–8h30
       expect(req[:sem_resposta_lista].first).to include(name: 'Zé', minutes: 120)
     end
+
+    it 'mostra os horários em que trabalhou: blocos, mapa da semana e o dia a dia', :aggregate_failures do
+      ['09:00', '09:10', '09:25', '14:00', '19:30'].each { |h| msg(tz.parse("2026-11-26 #{h}")) }
+      msg(tz.parse('2026-11-26 10:00'), type: :incoming)
+
+      team = described_class.new(account, since: tz.parse('2026-11-23 00:00'), until_at: now).call[:team]
+      person = team[:people].find { |p| p[:name] == 'Fernando Srair' }
+      day = person[:days_detail].find { |d| d[:day] == '2026-11-26' }
+      expect(person[:days_detail].size).to eq(5) # 23 a 27/11
+      expect(day).to include(msgs: 5, in_hours: 4, first: '09:00', last: '19:30')
+      expect(day[:sessions].first).to include(from: '09:00', to: '09:25', n: 3, minutes: 30)
+      expect(day[:active_min]).to eq(30 + 5 + 5)
+      expect(day[:by_hour][9]).to eq(3)
+      expect(day[:max_gap]).to include(from: '09:25', to: '14:00')
+      expect(person[:heat][4][9]).to eq(3) # quinta, 9h
+      expect(person[:reply][:by_hour]).to eq([{ hour: 10, n: 1, mediana_min: 240 }])
+    end
+
+    it 'conta o que sai do celular (eco do app do WhatsApp) à parte' do
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :outgoing, sender: nil,
+                       content: 'respondi pelo celular', created_at: tz.parse('2026-11-27 11:00'),
+                       content_attributes: { external_echo: true })
+        .update_columns(sender_type: nil, sender_id: nil) # rubocop:disable Rails/SkipsModelValidations -- a fábrica sempre põe um remetente; o eco não tem
+      people = described_class.new(account, since: tz.parse('2026-11-27 00:00'), until_at: now).call[:team][:people]
+      expect(people.find { |p| p[:phone] }).to include(name: 'Celular (app do WhatsApp)', messages: 1)
+    end
+
+    it 'diz por que a IA pediu gente: motivo da tarefa, fala do cliente, coluna e assunto', :aggregate_failures do
+      Crm::Contact.create!(contact: contact, pipeline: pipeline, stage: stages['Negociação'])
+      msg(tz.parse('2026-11-27 09:58'), type: :incoming, content: 'Dá para fazer em 48x?')
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :activity, private: true,
+                       content: '🩺 Atendente abriu a tarefa #12 para Fernando Srair: Cliente quer simular financiamento ' \
+                                'em 48x. [Ver tarefas](/app/accounts/1/tasks)', created_at: tz.parse('2026-11-27 10:00'))
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :activity,
+                       content: '🙋 Atendente pediu ATENDIMENTO HUMANO nesta conversa (tarefa aberta no Meu Painel).',
+                       created_at: tz.parse('2026-11-27 10:00:05'))
+
+      req = described_class.new(account, since: tz.parse('2026-11-27 00:00'), until_at: now).call[:team][:human_requests]
+      waiting = req[:sem_resposta_lista].first
+      expect(waiting).to include(motivo: 'Cliente quer simular financiamento em 48x', topic: 'pagamento',
+                                 cliente_disse: 'Dá para fazer em 48x?', etapa: 'Negociação', cliente_esperando: true)
+      expect(req[:motivos]).to eq([{ key: 'pagamento', label: 'Pagamento, financiamento ou crédito', total: 1, sem_resposta: 1 }])
+    end
+  end
+
+  it 'custo por etapa vai até a instalação (as 10 etapas da Jornada)' do
+    steps = described_class.new(account, since: tz.parse('2026-11-01 00:00'), until_at: now).call[:per_step]
+    expect(steps.pluck(:key)).to eq(%w[leads sondagem conta enviado investimento pagamento credito proposta fechado instalado])
   end
 
   it 'minutos comerciais pulam a noite, o domingo e os feriados', :aggregate_failures do
