@@ -10094,3 +10094,21 @@ Nasceu do experimento da caixa **CONFIRMAÇÃO DE CONSULTA (+55 11 91873-9220)**
 - Conserto: `.cvg-bloco-acoes { min-width: 0; max-width: 100% }` (vale para todo bloco do kit) e, no celular (≤ 720 px), as 4 escolhas em 2 × 2 inteiras. Computador sem mudança.
 - Conferido: 375 px → página 375 (antes 469); computador → barra numa linha, igual.
 - Ideia dele para depois: tela de análise própria para dias úteis × fim de semana.
+
+## 426. 🩺 AGENDAMENTO EFICIENTE 1.0: avaliação uma a cada 15 minutos (máx. 4 por hora); retorno, pós-op e exame livres para dividir o horário (27/11; combinado do Guilherme com o Dr. Henrique: "a avaliação demora 3 vezes mais que um retorno ou um pós-operatório tranquilo… no máximo 2 ao mesmo tempo, ou o ideal respeitar os 15 minutos… enquanto um dilata, o médico vê outro". Guilherme: "aquilo de buscar primeiro 85% e depois ir redirecionando segue de pé… essas duas coisas trabalham juntas")
+
+**Por que agora:** o comparecimento subiu muito (os lembretes e confirmações funcionam), então marcar duas avaliações no mesmo minuto, que antes compensava a falta, agora trava o consultório. No print da semana 30/11–04/12: várias avaliações no mesmo minuto (ter 1/12 08:00–08:30 e 09:00; qua 2/12 13:00).
+
+**O que já existia:** item 367 (teto de 4 avaliações por hora por unidade; robôs espalham pelo dia; retorno/pós-op/exame/teleconsulta não contam; tela só avisava), item 330b (robô nunca põe 2 avaliações no mesmo minuto, mas pode pôr avaliação em cima de retorno/pós-op), item 415 (faixa sem encaixe) e item 422 (régua de 85%/90%/95% e espaçamento).
+
+**O que entrou:**
+- **Ritmo da avaliação** (`Crm::AgendaSlots.quarter_cap`, `evaluations_per_quarter`, `slot_free?`): cada quarto de hora do relógio (08:00–08:14, 08:15–08:29…) recebe no máximo N avaliações por unidade (padrão 1; configurável 1–3). Na faixa de 10 em 10 min isso tira 08:10 quando já há 08:00, mas mantém as 4 por hora. Vale para todo robô (lista do prompt, `horarios_do_dia`, conferência antes de gravar, ligação); remarcar retorno/pós-op não segue.
+- **Régua de 85% junto:** a carga do período continua contando todos os pacientes (igual ao item 422). O ESPAÇAMENTO do item 422 passou a olhar só as avaliações (retorno + pós-op no mesmo horário deixou de travar a avaliação e o vizinho; robô remarcando retorno não segue espaçamento). Aviso do Secretário e da tela idem.
+- **Prompt:** a regra "no máximo 4 avaliações por hora, uma a cada 15 minutos… retorno, pós-operatório e exame não entram nessa conta".
+- **Secretário** (`AppointmentApplier#evaluation_suffix`): grava o que a equipe combinou, mas a nota avisa "⚠️ Avaliações acumuladas: entre 08:00 e 08:14 ficaram 2 avaliações…".
+- **Tela da Agenda:** ao salvar (inclusive depois de arrastar) uma avaliação que passa do teto da hora ou junta com outra no mesmo quarto de hora: atendente é BLOQUEADA, com horários espaçados sugeridos (botões no formulário); administrador vê o aviso e encaixa confirmando. Modo configurável ("Só avisar"). No Dia, horário com avaliação nos mesmos 15 min fica apagado com a explicação "ainda cabe retorno, pós-op ou exame".
+- **Configuração** (Agenda → Configurações → Faixas de horário → "Agendamento eficiente"): avaliações por hora (`hourly_evaluations`, 4), a cada 15 minutos (`quarter_evaluations`, 1), na tela acima do limite (`evaluation_screen_mode`, block|warn). `settings_json.agenda_quarter_evaluations` / `agenda_evaluation_screen_mode`.
+
+**Sem migration.** Worktree `~/cevico-wt/agendamento-eficiente` (ramo `feat/agendamento-eficiente`, a partir de `efd0c04`). Reversão: imagem anterior; ou pôr "a cada 15 min" = 3 e "Só avisar" (fica praticamente como antes).
+
+**Arquivos:** `app/services/crm/agenda_slots.rb`, `appointment_applier.rb`, `settings_controller.rb`, `helper/cevicoAgenda.js` (`evaluationLoad`, `spacedEvaluationSlots`), `agenda/AgendaBoard.vue`, `agenda/AgendaSettings.vue`, `api/crm.js`; testes `spec/services/crm/agenda_slots_eficiente_spec.rb`, `helper/specs/cevicoAgendaEvaluations.spec.js` (+ ajustes em `agenda_slots_hourly_spec` e `agenda_slots_load_balance_spec`).

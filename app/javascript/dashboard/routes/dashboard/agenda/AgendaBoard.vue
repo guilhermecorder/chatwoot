@@ -52,6 +52,8 @@ import {
   resolveOpenWindows,
   windowOnDay,
   isSoloWindow,
+  evaluationLoad,
+  spacedEvaluationSlots,
   resolveBlocked,
   resolveBlockedDays,
   resolveExamWindows,
@@ -721,7 +723,13 @@ const patientsAt = (dayKey, unit, start, block, skipId) =>
   }).length;
 const hmOfMin = m =>
   `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-const crowdingWarning = ({ date, time, unit, doctor, skipId }) => {
+// 🩺 Agendamento Eficiente 1.0: o espaçamento olha só as AVALIAÇÕES (retorno,
+// pós-op e exame podem dividir o horário); a carga do período segue contando todos
+const evaluationsAt = (dayKey, unit, start, block, skipId) =>
+  evaluationMinutes(dayKey, unit, skipId).filter(
+    m => m >= start && m < start + block
+  ).length;
+const crowdingWarning = ({ date, time, unit, doctor, skipId, evaluation }) => {
   const lb = loadBalance.value;
   if (!lb.enabled || !date || !time) return '';
   const spot = {
@@ -738,18 +746,19 @@ const crowdingWarning = ({ date, time, unit, doctor, skipId }) => {
   const first = toMin(win.start);
   const at = first + Math.floor((toMin(time) - first) / block) * block;
   const count = m => patientsAt(date, unit, m, block, skipId);
-  const here = count(at) + 1;
-  const around = [at - block, at + block].map(count);
+  const evals = m => evaluationsAt(date, unit, m, block, skipId);
+  const here = evals(at) + 1;
+  const around = [at - block, at + block].map(evals);
   const msgs = [];
   const crowded =
     here >= 3 ||
     (here === 2 && around.some(n => n > 0)) ||
     around.some(n => n >= 2);
-  if (lb.spacing !== false && crowded) {
+  if (evaluation && lb.spacing !== false && crowded) {
     msgs.push(
       here >= 2
-        ? `Às ${hmOfMin(at)} vão ficar ${here} pacientes no mesmo horário, com gente também no horário vizinho: eles chegam acumulados.`
-        : `O horário das ${hmOfMin(at)} fica colado num horário que já tem 2 pacientes: eles chegam acumulados.`
+        ? `Às ${hmOfMin(at)} vão ficar ${here} avaliações no mesmo horário, com avaliação também no horário vizinho: elas chegam acumuladas.`
+        : `O horário das ${hmOfMin(at)} fica colado num horário que já tem 2 avaliações: elas chegam acumuladas.`
     );
   }
   const slots = slotsFor(win).map(toMin);
@@ -789,6 +798,33 @@ const hoursOfWin = win => [...new Set(slotsFor(win).map(s => s.slice(0, 2)))];
 const countsHourly = win => Boolean(win.doctor) && !win.exam;
 const hourFull = (day, win, slot) =>
   countsHourly(win) && hourLoad(day, win, slot.slice(0, 2)) >= hourlyCap.value;
+// 🩺 AGENDAMENTO EFICIENTE 1.0 (27/11, combinado com o Dr. Henrique): além do
+// teto por hora, avaliação UMA A CADA 15 MINUTOS (quarto de hora do relógio).
+// Retorno, pós-op e exame ficam livres (podem dividir o horário). Os robôs
+// seguem no servidor; aqui a atendente é BLOQUEADA (ou só avisada, conforme a
+// configuração) e o administrador encaixa, confirmando.
+const quarterCap = computed(
+  () => crmSettings.value?.agenda_quarter_evaluations || 1
+);
+const evalScreenMode = computed(
+  () => crmSettings.value?.agenda_evaluation_screen_mode || 'block'
+);
+const evaluationMinutes = (dayKey, unit, skipId) =>
+  (liveTasksByDay.value[dayKey] || [])
+    .filter(t => t.id !== skipId && t.unit === unit && isEvaluationTask(t))
+    .map(taskStartMin);
+const quarterFull = (day, win, slot) => {
+  if (!countsHourly(win)) return false;
+  const others = evaluationMinutes(format(day, 'yyyy-MM-dd'), win.unit);
+  return evaluationLoad({
+    others,
+    at: toMin(slot),
+    hourlyCap: hourlyCap.value,
+    quarterCap: quarterCap.value,
+  }).overQuarter;
+};
+const evalSlotFull = (day, win, slot) =>
+  hourFull(day, win, slot) || quarterFull(day, win, slot);
 const taskStartMin = t => {
   const d = new Date(t.due_at);
   return d.getHours() * 60 + d.getMinutes();
@@ -1916,6 +1952,69 @@ const soloClash = computed(() => {
   );
   return taken.length ? { win, taken } : null;
 });
+// 🩺 Agendamento Eficiente 1.0: a avaliação do formulário passa do ritmo combinado?
+const evaluationProblem = computed(() => {
+  const modality = form.value.modality || 'avaliacao';
+  if (
+    !showModal.value ||
+    form.value.kind !== 'consultas' ||
+    NOT_EVALUATION.includes(modality) ||
+    !form.value.date ||
+    !form.value.time ||
+    !form.value.unit ||
+    form.value.unit === ONLINE_UNIT
+  )
+    return null;
+  const at = toMin(form.value.time);
+  const others = evaluationMinutes(
+    form.value.date,
+    form.value.unit,
+    editingTask.value?.id
+  );
+  const caps = { hourlyCap: hourlyCap.value, quarterCap: quarterCap.value };
+  const load = evaluationLoad({ others, at, ...caps });
+  if (!load.overHour && !load.overQuarter) return null;
+  const where = UNITS[form.value.unit]?.label || form.value.unit;
+  const msgs = [];
+  if (load.overHour)
+    msgs.push(
+      `às ${hmOfMin(Math.floor(at / 60) * 60).slice(0, 2)}h ${where} ficaria com ${load.hour} avaliações (o limite é ${hourlyCap.value} por hora)`
+    );
+  if (load.overQuarter) {
+    const q = Math.floor(at / 15) * 15;
+    msgs.push(
+      `entre ${hmOfMin(q)} e ${hmOfMin(q + 14)} ficariam ${load.quarter} avaliações (o combinado é ${quarterCap.value === 1 ? 'uma' : quarterCap.value} a cada 15 minutos)`
+    );
+  }
+  const spot = {
+    dow: new Date(`${form.value.date}T12:00:00`).getDay(),
+    unit: form.value.unit,
+    minutes: at,
+    date: form.value.date,
+  };
+  const win =
+    windowAt(windows.value, { ...spot, doctor: form.value.doctor }) ||
+    windowAt(windows.value, spot);
+  const todayKey = format(new Date(), 'yyyy-MM-dd');
+  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+  // sugestões: horários da faixa ainda por vir e sem cadeado
+  const slots = win
+    ? slotsFor(win)
+        .filter(
+          hm => !blockedSet.value.has(blockKey(form.value.date, hm, win.unit))
+        )
+        .map(toMin)
+        .filter(m => form.value.date !== todayKey || m > nowMin)
+    : [];
+  const tips = spacedEvaluationSlots({ slots, others, at, ...caps }).map(
+    hmOfMin
+  );
+  return { text: msgs.join('; '), tips };
+});
+const canForceEvaluation = computed(
+  () => isAdmin.value || evalScreenMode.value === 'warn'
+);
+
 // do "Precisa reagendar" das Configurações: abre o agendamento já no dia dele
 const rescheduleFromSettings = task => {
   showSettings.value = false;
@@ -2065,29 +2164,25 @@ const save = async () => {
     )
       return;
   }
-  // ⏱️ item 367: hora já com o teto de avaliações = encaixe, só com confirmação
+  // ⏱️ item 367 + 🩺 Agendamento Eficiente 1.0: avaliação acima do teto da hora
+  // ou junto de outra no mesmo quarto de hora. Atendente: bloqueado (configurável);
+  // administrador: encaixa, confirmando.
   const modality = form.value.modality || 'avaliacao';
-  if (
-    form.value.kind === 'consultas' &&
-    !NOT_EVALUATION.includes(modality) &&
-    (timeChanged || typeChanged)
-  ) {
-    const hh = (form.value.time || '09:00').slice(0, 2);
-    const n = evaluationsInHour(
-      form.value.date,
-      hh,
-      form.value.unit,
-      editingTask.value?.id
-    );
-    const where = UNITS[form.value.unit]?.label || form.value.unit;
-    // eslint-disable-next-line no-alert
-    if (
-      n >= hourlyCap.value &&
-      !window.confirm(
-        `Às ${hh}h, ${where} já tem ${n} avaliações (o limite é ${hourlyCap.value} por hora). Marcar mesmo assim, como encaixe?`
-      )
-    )
+  if (evaluationProblem.value && (timeChanged || typeChanged)) {
+    const { text, tips } = evaluationProblem.value;
+    const tip = tips.length
+      ? ` Horários espaçados por perto: ${tips.join(', ')}.`
+      : ' Escolha outro horário ou outro dia.';
+    const msg = `Avaliação acumulada: ${text}.${tip}`;
+    if (!canForceEvaluation.value) {
+      // eslint-disable-next-line no-alert
+      window.alert(
+        `${msg}\n\nSó um administrador pode encaixar uma avaliação acima do limite.`
+      );
       return;
+    }
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`${msg}\n\nMarcar mesmo assim, como encaixe?`)) return;
   }
   // ⚖️ item 422: horário acumulado ou período acima do teto = só com confirmação
   if (
@@ -2101,6 +2196,7 @@ const save = async () => {
       unit: form.value.unit,
       doctor: form.value.doctor,
       skipId: editingTask.value?.id,
+      evaluation: !NOT_EVALUATION.includes(modality),
     });
     // eslint-disable-next-line no-alert
     if (warn && !window.confirm(warn)) return;
@@ -4592,12 +4688,14 @@ class="text-xs"/></span>
                         <button
                           class="cv-ag-slot cv-ag-slot-free tabular-nums"
                           :class="
-                            hourFull(cursor, win, slot) ? 'opacity-50' : ''
+                            evalSlotFull(cursor, win, slot) ? 'opacity-50' : ''
                           "
                           :title="
                             hourFull(cursor, win, slot)
-                              ? `Hora cheia (${hourlyCap} avaliações) — dá para encaixar, confirmando`
-                              : 'Bloco livre — clique para agendar'
+                              ? `Hora cheia (${hourlyCap} avaliações) — ainda cabe retorno, pós-op ou exame`
+                              : quarterFull(cursor, win, slot)
+                                ? 'Já tem avaliação nestes 15 minutos — ainda cabe retorno, pós-op ou exame'
+                                : 'Bloco livre — clique para agendar'
                           "
                           @click="openCreateSlot(cursor, win, slot)"
                         >
@@ -5469,6 +5567,39 @@ class="cv-ag-head-pill"
                   </div>
                 </div>
                 <!-- item 324: avisos de horário saem de cima do botão de salvar — ficam aqui, recolhidos (sanfona) -->
+                <!-- 🩺 Agendamento Eficiente 1.0: avaliação acumulada -->
+                <div
+                  v-if="evaluationProblem"
+                  class="cv-ag-note cv-ag-note-amber mt-3"
+                >
+                  <p class="cv-ag-note-head">
+                    <span class="i-lucide-gauge text-sm shrink-0" />
+                    Avaliação acumulada
+                  </p>
+                  <p class="mt-0.5">
+                    A avaliação é a consulta demorada:
+                    {{ evaluationProblem.text }}.
+                    <template v-if="!canForceEvaluation">
+                      Só um administrador pode encaixar acima do limite.
+                    </template>
+                    Retorno, pós-operatório e exame podem ficar neste horário.
+                  </p>
+                  <p
+                    v-if="evaluationProblem.tips.length"
+                    class="mt-1.5 flex flex-wrap items-center gap-1.5"
+                  >
+                    <span>Horários espaçados:</span>
+                    <button
+                      v-for="tip in evaluationProblem.tips"
+                      :key="tip"
+                      type="button"
+                      class="cv-chip tabular-nums"
+                      @click="form.time = tip"
+                    >
+                      {{ tip }}
+                    </button>
+                  </p>
+                </div>
                 <div v-if="soloClash" class="cv-ag-note cv-ag-note-amber mt-3">
                   <p class="cv-ag-note-head">
                     <span class="i-lucide-triangle-alert text-sm shrink-0" />

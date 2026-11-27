@@ -69,9 +69,11 @@ class Crm::AppointmentApplier
       outcome
     end
 
+    # ⚖️ item 422 + 🩺 Agendamento Eficiente 1.0: o Secretário grava o que a equipe
+    # combinou (o paciente já ouviu o horário), mas avisa acúmulo e avaliações juntas
     def crowding_suffix(account, result, unit)
-      crowding = Crm::AgendaSlots.crowding_note(account, result[:starts_at], unit)
-      crowding ? "\n\n#{crowding}" : ''
+      at = result[:starts_at]
+      [Crm::AgendaSlots.crowding_note(account, at, unit), Crm::AgendaSlots.evaluation_note(account, at, unit)].compact.map { |t| "\n\n#{t}" }.join
     end
 
     def apply_confirmation(account, result, contact, conversation, name, default_unit)

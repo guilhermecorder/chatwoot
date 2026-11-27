@@ -377,6 +377,15 @@ class CrmAPI extends ApiClient {
     });
   }
 
+  // 🩺 Agendamento Eficiente 1.0: avaliações por hora, a cada 15 min e o que a tela faz
+  updateAgendaEvaluations({ hourly, quarter, screenMode }) {
+    return axios.post(`${this.url}/settings/update_agenda`, {
+      hourly_evaluations: hourly,
+      quarter_evaluations: quarter,
+      evaluation_screen_mode: screenMode,
+    });
+  }
+
   // ⚖️ item 422: régua de carga (alvo, teto, limite do encaixe, espaçamento)
   updateAgendaLoadBalance(loadBalance) {
     return axios.post(`${this.url}/settings/update_agenda`, {

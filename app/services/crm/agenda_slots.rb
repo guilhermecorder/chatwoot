@@ -230,15 +230,90 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
 
   # avaliações já marcadas em cada unidade × hora do intervalo
   def evaluations_per_hour(account, from_date, to_date)
+    evaluation_times(account, from_date, to_date).each_with_object(Hash.new(0)) do |(at, unit), out|
+      out[hour_key(at.to_date, at.strftime('%H'), unit)] += 1
+    end
+  end
+
+  # [horário local, unidade] de cada avaliação marcada no intervalo
+  def evaluation_times(account, from_date, to_date)
     account.tasks.where(task_type: 'consulta', canceled_at: nil, archived_at: nil)
            .where.not(unit: [nil, ''])
            .where('tasks.modality IS NULL OR tasks.modality NOT IN (?)', NOT_EVALUATION)
            .where(due_at: TZ.parse(from_date.to_s).beginning_of_day..TZ.parse(to_date.to_s).end_of_day)
            .pluck(:due_at, :unit)
-           .each_with_object(Hash.new(0)) do |(due, unit), out|
-             at = due.in_time_zone(TZ)
-             out[hour_key(at.to_date, at.strftime('%H'), unit)] += 1
-           end
+           .map { |due, unit| [due.in_time_zone(TZ), unit] }
+  end
+
+  # 🩺 AGENDAMENTO EFICIENTE 1.0 (27/11, combinado do Guilherme com o Dr. Henrique):
+  # a avaliação é a consulta demorada (≈ 3× um retorno ou um pós-op tranquilo).
+  # Além do teto por hora, as avaliações vão UMA A CADA 15 MINUTOS: cada quarto
+  # de hora do relógio (08:00–08:14, 08:15–08:29…) recebe no máximo N avaliações
+  # por unidade (padrão 1; o Dr. Henrique tolera até 2 "no mesmo horário").
+  # Retorno, pós-op e exame continuam livres — misturar é bom (enquanto um
+  # dilata, o médico vê outro). Com a faixa de 10 em 10 minutos, isso impede
+  # 08:00 + 08:10 de avaliação, mas mantém as 4 por hora.
+  QUARTER_DEFAULT = 1
+  QUARTER_RANGE = (1..3)
+  # o que a TELA faz quando a equipe passa do limite: 'block' = atendente não marca
+  # (administrador encaixa, confirmando); 'warn' = só avisa e deixa (como no item 367)
+  SCREEN_MODES = %w[block warn].freeze
+
+  def quarter_cap(account)
+    quarter_cap_from(agenda_config(account))
+  end
+
+  def quarter_cap_from(cfg)
+    n = cfg.to_h['quarter_evaluations'].to_i
+    QUARTER_RANGE.cover?(n) ? n : QUARTER_DEFAULT
+  end
+
+  def screen_mode_from(cfg)
+    mode = cfg.to_h['evaluation_screen_mode'].to_s
+    SCREEN_MODES.include?(mode) ? mode : 'block'
+  end
+
+  # "2026-10-27|32|tatuape" — o quarto de hora (minuto do dia ÷ 15) de uma unidade
+  def quarter_key(day, hhmm, unit)
+    "#{day}|#{hm_to_min(hhmm.to_s) / 15}|#{unit}"
+  end
+
+  def evaluations_per_quarter(account, from_date, to_date)
+    evaluation_times(account, from_date, to_date).each_with_object(Hash.new(0)) do |(at, unit), out|
+      out[quarter_key(at.to_date, at.strftime('%H:%M'), unit)] += 1
+    end
+  end
+
+  # o que passa do combinado com a avaliação já gravada neste horário — usado na
+  # nota do Secretário. [] = tudo dentro da regra.
+  def evaluation_excess(account, starts_at, unit)
+    at = starts_at.in_time_zone(TZ)
+    hhmm = at.strftime('%H:%M')
+    hour = evaluations_per_hour(account, at.to_date, at.to_date)[hour_key(at.to_date, hhmm, unit)]
+    quarter = evaluations_per_quarter(account, at.to_date, at.to_date)[quarter_key(at.to_date, hhmm, unit)]
+    [hour_excess(account, at, hour), quarter_excess(account, hhmm, quarter)].compact
+  end
+
+  # nota do Secretário quando as avaliações ficam acumuladas (nil = nada a avisar)
+  def evaluation_note(account, starts_at, unit)
+    return nil if unit.blank? || starts_at.blank?
+
+    issues = evaluation_excess(account, starts_at, unit)
+    "⚠️ Avaliações acumuladas: #{issues.join('; ')}. Se o paciente puder, ofereça um horário mais espaçado." if issues.any?
+  end
+
+  def hour_excess(account, at, count)
+    cap = hourly_cap(account)
+    "às #{at.strftime('%H')}h ficaram #{count} avaliações (o limite é #{cap} por hora)" if count > cap
+  end
+
+  def quarter_excess(account, hhmm, count)
+    cap = quarter_cap(account)
+    return if count <= cap
+
+    first = (hm_to_min(hhmm) / 15) * 15
+    "entre #{min_to_hm(first)} e #{min_to_hm(first + 14)} ficaram #{count} avaliações " \
+      "(o combinado é #{cap == 1 ? 'uma' : cap} a cada 15 minutos)"
   end
 
   # item 297 (30/09): na janela do MÉDICO o agendamento ocupa SÓ o bloco em que
@@ -266,8 +341,10 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   end
 
   # tudo o que a conta de vagas precisa, calculado UMA vez para o intervalo
-  def slot_context(account, from_date, to_date, modality: AI_MODALITY) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
+  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def slot_context(account, from_date, to_date, modality: AI_MODALITY)
     cfg = agenda_config(account)
+    evaluation = modality.to_s == AI_MODALITY
     {
       hub_busy: hub_busy(account, from_date, to_date),
       now: TZ.now,
@@ -284,13 +361,19 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
       # avaliação no mesmo horário (e só uma: a avaliação, sim, trava)
       # item 367: só a CONSULTA NOVA respeita o teto por hora (retorno e pós-op seguem as faixas deles)
       per_hour: evaluations_per_hour(account, from_date, to_date),
-      cap: modality.to_s == AI_MODALITY ? hourly_cap(account) : nil,
+      cap: evaluation ? hourly_cap(account) : nil,
+      # 🩺 Agendamento Eficiente 1.0: avaliação uma a cada 15 min (só para CONSULTA NOVA)
+      per_quarter: evaluations_per_quarter(account, from_date, to_date),
+      quarter_cap: evaluation ? quarter_cap(account) : nil,
       # item 415: retorno e pós-op marcados — só pesam nas faixas SEM ENCAIXE
       soft: soft_booked(account, from_date, to_date),
       # ⚖️ item 422: régua de carga (alvo/teto por médico e período) e espaçamento.
       # O equilíbrio entre dias vale só para CONSULTA NOVA; o espaçamento, para todo robô.
-      balance: modality.to_s == AI_MODALITY ? balance_config(account) : nil,
-      spacing: balance_config(account)&.fetch('spacing', false) || false,
+      balance: evaluation ? balance_config(account) : nil,
+      # 🩺 Agendamento Eficiente 1.0: o espaçamento olha só as AVALIAÇÕES (retorno,
+      # pós-op e exame podem dividir o horário — "enquanto um dilata, o médico vê outro")
+      spacing: evaluation && (balance_config(account)&.fetch('spacing', false) || false),
+      evals: evaluation_minutes_by_day(account, from_date, to_date),
       patients: patients_by_day(account, from_date, to_date),
       # 🚪 item 420: consulta externa (portal de terceiros) também ocupa o horário
       occupied: account.tasks
@@ -301,6 +384,7 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
                        .to_set { |due, unit| "#{due.in_time_zone(TZ).strftime('%Y-%m-%d|%H:%M')}|#{unit}" }
     }
   end
+  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
   # item 415: horários com retorno / pós-op marcados ("AAAA-MM-DD|HH:MM|unidade")
   def soft_booked(account, from_date, to_date)
@@ -332,11 +416,12 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     end
   end
 
-  def slot_free?(ctx, day, win, hhmm) # rubocop:disable Metrics/CyclomaticComplexity
+  def slot_free?(ctx, day, win, hhmm) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return false if TZ.parse("#{day} #{hhmm}") <= ctx[:now]
     return false if ctx[:blocked].include?("#{day}|#{hhmm}|#{win['unit']}")
     return false if taken?(ctx, day, hhmm, win) || hub_overlap?(ctx, day, hhmm, win)
     return false if ctx[:spacing] && !spaced?(ctx, day, win, hhmm)
+    return false if ctx[:quarter_cap] && ctx[:per_quarter][quarter_key(day, hhmm, win['unit'])] >= ctx[:quarter_cap]
 
     ctx[:cap].nil? || ctx[:per_hour][hour_key(day, hhmm, win['unit'])] < ctx[:cap]
   end
@@ -431,20 +516,36 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     ((slots.sum { |hm| slot_count(ctx, day, win, hm) } * 100.0) / slots.size).round
   end
 
-  # ESPAÇAMENTO: nunca 3 no mesmo horário; virar encaixe (2) só com os dois
-  # vizinhos vazios; e o vizinho de um encaixe fica livre
+  # ESPAÇAMENTO (só da AVALIAÇÃO desde o Agendamento Eficiente 1.0): nunca 3
+  # avaliações no mesmo horário; virar encaixe (2) só com os dois vizinhos sem
+  # avaliação; e o vizinho de um encaixe de avaliações fica livre. Retorno,
+  # pós-op e exame não entram (misturar é bom — combinado com o Dr. Henrique).
   def spaced?(ctx, day, win, hhmm)
-    here = slot_count(ctx, day, win, hhmm)
+    here = slot_evals(ctx, day, win, hhmm)
     return false if here >= 2
 
-    around = neighbor_counts(ctx, day, win, hhmm)
+    around = neighbor_evals(ctx, day, win, hhmm)
     return around.all?(&:zero?) if here == 1
 
     around.all? { |n| n < 2 }
   end
 
-  def neighbor_counts(ctx, day, win, hhmm)
-    [-1, 1].map { |dir| slot_count(ctx, day, win, min_to_hm(hm_to_min(hhmm) + (dir * win['block'].to_i))) }
+  def neighbor_evals(ctx, day, win, hhmm)
+    [-1, 1].map { |dir| slot_evals(ctx, day, win, min_to_hm(hm_to_min(hhmm) + (dir * win['block'].to_i))) }
+  end
+
+  # avaliações que chegam neste horário (do início do bloco até o próximo)
+  def slot_evals(ctx, day, win, hhmm)
+    start = hm_to_min(hhmm)
+    finish = start + win['block'].to_i
+    Array(ctx[:evals]&.fetch("#{day}|#{win['unit']}", nil)).count { |m| m >= start && m < finish }
+  end
+
+  # minutos de chegada de cada avaliação por "AAAA-MM-DD|unidade"
+  def evaluation_minutes_by_day(account, from_date, to_date)
+    evaluation_times(account, from_date, to_date).each_with_object({}) do |(at, unit), out|
+      (out["#{at.to_date}|#{unit}"] ||= []) << ((at.hour * 60) + at.min)
+    end
   end
 
   def min_to_hm(minutes)
@@ -495,12 +596,17 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
     first = hm_to_min(win['start'])
     block = win['block'].to_i
     hhmm = min_to_hm(first + (((at.hour * 60) + at.min - first) / block * block))
-    here = slot_count(ctx, day, win, hhmm)
+    here = slot_evals(ctx, day, win, hhmm)
     load = window_load(ctx, day, win)
     ceiling = ctx[:balance]['ceiling']
     issues = []
-    if crowded?(here, neighbor_counts(ctx, day, win, hhmm))
-      issues << (here >= 2 ? "o horário das #{hhmm} ficou com #{here} pacientes e o vizinho também tem gente" : "o horário das #{hhmm} ficou colado num horário com 2 pacientes")
+    # 🩺 Agendamento Eficiente 1.0: o acúmulo que importa é o de AVALIAÇÕES
+    if crowded?(here, neighbor_evals(ctx, day, win, hhmm))
+      issues << if here >= 2
+                  "o horário das #{hhmm} ficou com #{here} avaliações e o vizinho também tem avaliação"
+                else
+                  "o horário das #{hhmm} ficou colado num horário com 2 avaliações"
+                end
     end
     issues << "o período de #{win['doctor']} nesse dia está com #{load}% (o teto combinado é #{ceiling}%)" if load > ceiling
     issues
@@ -631,9 +737,13 @@ module Crm::AgendaSlots # rubocop:disable Metrics/ModuleLength
   # ao paciente e oferecer outra, em vez de só dizer que não está livre
   def hourly_rule(account)
     cap = hourly_cap(account)
-    "- Cada unidade recebe no máximo #{cap} avaliações (consultas novas) por hora, para o atendimento fluir " \
-      'sem fila. Se a hora que o paciente pedir estiver completa, diga com naturalidade que esse horário já está ' \
-      'completo e ofereça os mais próximos da lista HORÁRIOS DISPONÍVEIS — de preferência espalhando ao longo do dia.'
+    q_cap = quarter_cap(account)
+    spacing = q_cap == 1 ? 'uma a cada 15 minutos' : "no máximo #{q_cap} a cada 15 minutos"
+    "- Cada unidade recebe no máximo #{cap} avaliações (consultas novas) por hora, #{spacing} — a avaliação é a " \
+      'consulta mais demorada e precisa chegar espaçada para o atendimento fluir sem fila (retorno, pós-operatório ' \
+      'e exame não entram nessa conta). Se a hora que o paciente pedir estiver completa, diga com naturalidade que ' \
+      'esse horário já está completo e ofereça os mais próximos da lista HORÁRIOS DISPONÍVEIS — de preferência ' \
+      'espalhando ao longo do dia.'
   end
 
   # ⚖️ item 422: o robô EXPLICA o dia cheio e oferece o mais tranquilo; a lista

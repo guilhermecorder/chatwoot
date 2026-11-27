@@ -38,36 +38,33 @@ RSpec.describe Crm::AgendaSlots do
     described_class.free_slots_on(account, day, **).map { |s| s[:time] }
   end
 
+  # 🩺 Agendamento Eficiente 1.0 (27/11): o espaçamento olha só as AVALIAÇÕES —
+  # retorno, pós-op e exame podem dividir o horário ("enquanto um dilata, o médico vê outro")
   describe 'espaçamento' do
-    it 'o vizinho de um encaixe fica livre', :aggregate_failures do
-      book(wed, '09:00', modality: 'retorno')
+    before do
+      setting = CrmSetting.find_by(account: account)
+      setting.update!(agenda_config: setting.agenda_config.merge('quarter_evaluations' => 3))
+    end
+
+    it 'o vizinho de um encaixe de avaliações fica livre', :aggregate_failures do
+      book(wed, '09:00')
       book(wed, '09:00')
       times = free_times(wed)
       expect(times).not_to include('08:45', '09:00', '09:15')
       expect(times).to include('08:30', '09:30')
     end
 
-    it 'encaixe em cima de retorno só com os dois vizinhos vazios', :aggregate_failures do
-      book(wed, '08:30', modality: 'retorno')
-      book(wed, '09:30', modality: 'retorno')
-      book(wed, '09:45')
-      times = free_times(wed)
-      expect(times).to include('08:30') # vizinhos 08:15 e 08:45 vazios
-      expect(times).not_to include('09:30') # 09:45 tem gente
+    it 'avaliação em cima de retorno + pós-op continua livre, e o vizinho também', :aggregate_failures do
+      book(wed, '09:00', modality: 'retorno')
+      book(wed, '09:00', modality: 'pos_op')
+      book(wed, '09:15', modality: 'retorno')
+      expect(free_times(wed)).to include('08:45', '09:00', '09:15', '09:30')
     end
 
-    it 'desligado = como antes (encaixe em cima de retorno e vizinho liberados)' do
-      configure(nil)
-      book(wed, '09:00', modality: 'retorno')
+    it 'remarcar retorno não segue o espaçamento das avaliações' do
       book(wed, '09:00')
-      book(wed, '09:30', modality: 'retorno')
-      expect(free_times(wed)).to include('08:45', '09:15', '09:30')
-    end
-
-    it 'vale também para remarcar retorno' do
-      book(wed, '09:00', modality: 'retorno')
       book(wed, '09:00')
-      expect(free_times(wed, modality: 'retorno')).not_to include('08:45', '09:15')
+      expect(free_times(wed, modality: 'retorno')).to include('08:45', '09:15')
     end
   end
 
@@ -92,8 +89,8 @@ RSpec.describe Crm::AgendaSlots do
       book(wed, '08:00', modality: 'retorno') # 8 de 8 = 100
       expect(free_times(wed)).to eq([])
       expect(described_class.slot_available?(account, date: wed, time: '09:45', unit: 'tatuape')).to be(false)
-      # remarcar retorno/pós-op não segue o limite da consulta nova (só o espaçamento)
-      expect(free_times(wed, modality: 'retorno')).to eq(['09:45'])
+      # remarcar retorno/pós-op não segue o limite da consulta nova (nem o ritmo das avaliações)
+      expect(free_times(wed, modality: 'retorno')).to include('09:45')
     end
   end
 
@@ -159,13 +156,20 @@ RSpec.describe Crm::AgendaSlots do
   end
 
   describe 'aviso do Secretário (horário combinado pela equipe)' do
-    it 'avisa o acúmulo e sugere horários folgados', :aggregate_failures do
+    it 'avisa o acúmulo de avaliações e sugere horários folgados', :aggregate_failures do
+      book(wed, '09:00')
+      book(wed, '09:15')
+      book(wed, '09:15')
+      note = described_class.crowding_note(account, tz.parse("#{wed} 09:15"), 'tatuape')
+      expect(note).to include('09:15', 'ficou com 2 avaliações')
+      expect(note).to include('08:00')
+    end
+
+    it 'retorno junto da avaliação não é acúmulo (Agendamento Eficiente 1.0)' do
       book(wed, '09:00')
       book(wed, '09:15')
       book(wed, '09:15', modality: 'retorno')
-      note = described_class.crowding_note(account, tz.parse("#{wed} 09:15"), 'tatuape')
-      expect(note).to include('09:15', 'ficou com 2')
-      expect(note).to include('08:00')
+      expect(described_class.crowding_note(account, tz.parse("#{wed} 09:15"), 'tatuape')).to be_nil
     end
 
     it 'sem acúmulo e abaixo do teto, nada a avisar' do

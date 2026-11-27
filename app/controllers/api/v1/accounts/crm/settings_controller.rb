@@ -1435,6 +1435,14 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       n = params[:hourly_evaluations].to_i
       cfg['hourly_evaluations'] = Crm::AgendaSlots::HOURLY_RANGE.cover?(n) ? n : Crm::AgendaSlots::HOURLY_DEFAULT
     end
+    # 🩺 Agendamento Eficiente 1.0: avaliações a cada 15 min (1–3) e o que a tela faz acima do limite
+    if params.key?(:quarter_evaluations)
+      n = params[:quarter_evaluations].to_i
+      cfg['quarter_evaluations'] = Crm::AgendaSlots::QUARTER_RANGE.cover?(n) ? n : Crm::AgendaSlots::QUARTER_DEFAULT
+    end
+    if params.key?(:evaluation_screen_mode)
+      cfg['evaluation_screen_mode'] = Crm::AgendaSlots.screen_mode_from('evaluation_screen_mode' => params[:evaluation_screen_mode])
+    end
     # ⚖️ item 422: régua de carga (liga/desliga, alvo, teto, limite do encaixe, espaçamento, dias)
     if params.key?(:load_balance)
       raw = params.require(:load_balance).permit(:enabled, :target, :ceiling, :insist, :spacing, :balance_days).to_h
@@ -2670,6 +2678,8 @@ class Api::V1::Accounts::Crm::SettingsController < Api::V1::Accounts::BaseContro
       agenda_closed_doctors: (s.agenda_config || {})['closed_doctors'] || [],
       agenda_ai_rules: (s.agenda_config || {})['ai_rules'].to_s, # item 307
       agenda_hourly_evaluations: Crm::AgendaSlots.cap_from(s.agenda_config), # item 367
+      agenda_quarter_evaluations: Crm::AgendaSlots.quarter_cap_from(s.agenda_config), # Agendamento Eficiente 1.0
+      agenda_evaluation_screen_mode: Crm::AgendaSlots.screen_mode_from(s.agenda_config),
       agenda_load_balance: Crm::AgendaSlots.balance_from(s.agenda_config), # item 422
       attendance_stages: (s.agenda_config || {})['attendance_stages'] || {},
       attendance_owners: (s.agenda_config || {})['attendance_owners'] || {},

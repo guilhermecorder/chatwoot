@@ -67,7 +67,8 @@ RSpec.describe Crm::AgendaSlots do
     %w[08:00 08:10 08:20].each { |time| book(time) }
     book('09:00')
     # 10h está vazia, 9h tem 1 e 8h tem 3: as duas vagas saem de 10h e 9h
-    expect(free_times(per_window: 2)).to eq(%w[09:10 10:00])
+    # (09:10 está no mesmo quarto de hora da 09:00 — Agendamento Eficiente 1.0)
+    expect(free_times(per_window: 2)).to eq(%w[09:20 10:00])
   end
 
   it 'remarcar retorno não respeita o teto das avaliações' do

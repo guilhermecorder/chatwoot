@@ -1053,3 +1053,43 @@ export const effectiveAppointmentPrice = (prices, appt) => {
     label: 'valor padrão do lembrete de confirmação',
   };
 };
+
+// 🩺 AGENDAMENTO EFICIENTE 1.0 (27/11, combinado do Guilherme com o Dr. Henrique):
+// a avaliação (consulta nova) é a demorada — no máximo N por hora e uma a cada
+// 15 minutos (quarto de hora do relógio: 08:00–08:14, 08:15–08:29…). Retorno,
+// pós-op e exame ficam de fora. Mesma conta do servidor (Crm::AgendaSlots).
+// `others` = minutos do dia (h*60+m) das OUTRAS avaliações da mesma unidade.
+export const evaluationLoad = ({ others = [], at, hourlyCap, quarterCap }) => {
+  const hour = others.filter(
+    m => Math.floor(m / 60) === Math.floor(at / 60)
+  ).length;
+  const quarter = others.filter(
+    m => Math.floor(m / 15) === Math.floor(at / 15)
+  ).length;
+  return {
+    hour: hour + 1,
+    quarter: quarter + 1,
+    overHour: hour + 1 > hourlyCap,
+    overQuarter: quarter + 1 > quarterCap,
+  };
+};
+
+// horários (minutos) da faixa onde mais uma avaliação cabe na regra, do mais
+// perto ao mais longe de `at` (devolvidos na ordem do relógio)
+export const spacedEvaluationSlots = ({
+  slots = [],
+  others = [],
+  at,
+  hourlyCap,
+  quarterCap,
+  limit = 3,
+}) =>
+  slots
+    .filter(m => m !== at && !others.includes(m))
+    .filter(m => {
+      const load = evaluationLoad({ others, at: m, hourlyCap, quarterCap });
+      return !load.overHour && !load.overQuarter;
+    })
+    .sort((a, b) => Math.abs(a - at) - Math.abs(b - at) || a - b)
+    .slice(0, limit)
+    .sort((a, b) => a - b);

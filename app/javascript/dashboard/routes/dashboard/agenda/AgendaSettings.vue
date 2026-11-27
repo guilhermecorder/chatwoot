@@ -661,26 +661,51 @@ const savePrices = async () => {
 };
 
 // ⏱️ item 367: teto de avaliações por hora em cada unidade (padrão 4)
-const hourly = ref(settings.value?.agenda_hourly_evaluations || 4);
+// 🩺 Agendamento Eficiente 1.0 (27/11): + avaliações a cada 15 min (padrão 1)
+// e o que a tela faz quando a equipe passa do limite (bloquear × só avisar)
+const evalForm = ref({ hourly: 4, quarter: 1, screenMode: 'block' });
+const evalSaved = computed(() => ({
+  hourly: settings.value?.agenda_hourly_evaluations || 4,
+  quarter: settings.value?.agenda_quarter_evaluations || 1,
+  screenMode: settings.value?.agenda_evaluation_screen_mode || 'block',
+}));
 watch(
-  () => settings.value?.agenda_hourly_evaluations,
+  evalSaved,
   v => {
-    if (v) hourly.value = v;
-  }
+    evalForm.value = { ...v };
+  },
+  { immediate: true }
+);
+const evalDirty = computed(
+  () =>
+    Number(evalForm.value.hourly) !== evalSaved.value.hourly ||
+    Number(evalForm.value.quarter) !== evalSaved.value.quarter ||
+    evalForm.value.screenMode !== evalSaved.value.screenMode
 );
 const saveHourly = async () => {
-  const n = Math.round(Number(hourly.value));
+  const n = Math.round(Number(evalForm.value.hourly));
+  const q = Math.round(Number(evalForm.value.quarter));
   if (!(n >= 1 && n <= 20)) {
-    useAlert('Use um número de 1 a 20.');
+    useAlert('Avaliações por hora: use um número de 1 a 20.');
+    return;
+  }
+  if (!(q >= 1 && q <= 3)) {
+    useAlert('Avaliações a cada 15 minutos: use 1, 2 ou 3.');
     return;
   }
   busy.value = 'hourly';
   try {
-    await CrmAPI.updateAgendaHourly(n);
+    await CrmAPI.updateAgendaEvaluations({
+      hourly: n,
+      quarter: q,
+      screenMode: evalForm.value.screenMode,
+    });
     await refresh();
-    useAlert(`Pronto: no máximo ${n} avaliações por hora em cada unidade.`);
+    useAlert(
+      `Pronto: no máximo ${n} avaliações por hora e ${q === 1 ? 'uma' : q} a cada 15 minutos.`
+    );
   } catch {
-    useAlert('Não consegui salvar o limite por hora.');
+    useAlert('Não consegui salvar as regras das avaliações.');
   } finally {
     busy.value = '';
   }
@@ -1161,39 +1186,68 @@ onMounted(() => {
 
         <!-- 2. FAIXAS DE HORÁRIO -->
         <template v-else-if="tab === 'faixas'">
-          <!-- ⏱️ item 367: avaliações por hora -->
-          <section class="cv-sub p-3 flex items-center gap-3 flex-wrap">
-            <span class="i-lucide-gauge text-sm text-n-slate-10" />
-            <div class="flex-1 min-w-[220px]">
-              <p class="text-xs font-bold text-n-slate-12">
-                Avaliações por hora em cada unidade
-              </p>
-              <p class="text-[11px] text-n-slate-10">
-                Os robôs nunca marcam mais que isso e espalham os horários ao
-                longo do dia. A equipe pode encaixar, confirmando. Exame,
-                retorno e pós-operatório não contam.
-              </p>
+          <!-- ⏱️ item 367 + 🩺 Agendamento Eficiente 1.0: ritmo das avaliações -->
+          <section class="cv-sub p-3 space-y-2">
+            <div class="flex items-start gap-3">
+              <span class="i-lucide-gauge text-sm text-n-slate-10 mt-0.5" />
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-bold text-n-slate-12">
+                  Agendamento eficiente: ritmo das avaliações
+                </p>
+                <p class="text-[11px] text-n-slate-10">
+                  A avaliação (consulta nova) é a mais demorada, então ela chega
+                  espaçada. Retorno, pós-operatório e exame NÃO entram nesta
+                  conta: podem ficar no mesmo horário. Os robôs seguem sempre; a
+                  régua de 85% (Agenda equilibrada, abaixo) continua valendo
+                  junto.
+                </p>
+              </div>
             </div>
-            <input
-              v-model.number="hourly"
-              type="number"
-              min="1"
-              max="20"
-              class="text-center"
-              style="width: 4.5rem; flex: none"
-              :disabled="!canEdit('agenda.configuracao')"
-            />
-            <button
-              v-if="canEdit('agenda.configuracao')"
-              class="cv-btn cv-btn-sm"
-              :disabled="
-                busy === 'hourly' ||
-                Number(hourly) === (settings?.agenda_hourly_evaluations || 4)
-              "
-              @click="saveHourly"
-            >
-              Salvar
-            </button>
+            <div class="grid gap-2 sm:grid-cols-3">
+              <label class="flex flex-col gap-1 text-[11px] text-n-slate-11">
+                <span class="font-semibold">Avaliações por hora (unidade)</span>
+                <input
+                  v-model.number="evalForm.hourly"
+                  type="number"
+                  min="1"
+                  max="20"
+                  class="text-center"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+              </label>
+              <label class="flex flex-col gap-1 text-[11px] text-n-slate-11">
+                <span class="font-semibold">A cada 15 minutos, no máximo</span>
+                <input
+                  v-model.number="evalForm.quarter"
+                  type="number"
+                  min="1"
+                  max="3"
+                  class="text-center"
+                  :disabled="!canEdit('agenda.configuracao')"
+                />
+              </label>
+              <label class="flex flex-col gap-1 text-[11px] text-n-slate-11">
+                <span class="font-semibold">Na tela, acima do limite</span>
+                <select
+                  v-model="evalForm.screenMode"
+                  :disabled="!canEdit('agenda.configuracao')"
+                >
+                  <option value="block">
+                    Bloquear (só administrador encaixa)
+                  </option>
+                  <option value="warn">Só avisar e deixar marcar</option>
+                </select>
+              </label>
+            </div>
+            <div v-if="canEdit('agenda.configuracao')" class="flex justify-end">
+              <button
+                class="cv-btn cv-btn-sm"
+                :disabled="busy === 'hourly' || !evalDirty"
+                @click="saveHourly"
+              >
+                Salvar
+              </button>
+            </div>
           </section>
           <!-- ⚖️ item 422: régua de carga por médico e período -->
           <section class="cv-sub p-3 space-y-2">
@@ -1281,9 +1335,10 @@ onMounted(() => {
                   :disabled="!canEdit('agenda.configuracao')"
                 />
                 <span>
-                  <b>Espaçamento:</b> nunca 3 no mesmo horário; dois só com os
-                  horários vizinhos vazios, e o vizinho de um encaixe fica livre
-                  (a equipe é avisada ao marcar).
+                  <b>Espaçamento das avaliações:</b> nunca 3 avaliações no mesmo
+                  horário; duas só com os horários vizinhos sem avaliação, e o
+                  vizinho de um encaixe fica livre (a equipe é avisada ao
+                  marcar). Retorno, pós-op e exame podem dividir o horário.
                 </span>
               </label>
               <button
