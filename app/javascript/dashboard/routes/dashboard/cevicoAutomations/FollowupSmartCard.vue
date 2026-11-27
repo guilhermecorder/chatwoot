@@ -8,6 +8,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { useMapGetter } from 'dashboard/composables/store';
 import { useAlert } from 'dashboard/composables';
+import { useCevicoAccess } from 'dashboard/composables/useCevicoAccess';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import TemplatesPicker from 'dashboard/components/widgets/conversation/WhatsappTemplates/TemplatesPicker.vue';
@@ -20,6 +21,9 @@ const props = defineProps({
 });
 
 const inboxes = useMapGetter('inboxes/getInboxes');
+// ☀️ 25/11 (LIFE): fora da clínica, cliente e visita no lugar de paciente e consulta
+const { isClinic } = useCevicoAccess();
+const L = (clinica, empresa) => (isClinic.value ? clinica : empresa);
 const whatsappInboxes = computed(() =>
   (inboxes.value || []).filter(i => i.channel_type === 'Channel::Whatsapp')
 );
@@ -51,13 +55,13 @@ const save = async (patch, message) => {
   }
 };
 
-const RULES = [
+const RULES = computed(() => [
   {
     key: 'leitura',
     icon: 'i-lucide-scan-eye',
     color: '#0F5FA6',
     title: 'Ler a conversa antes de cutucar',
-    sub: 'Antes da 1ª cutucada de cada silêncio a IA lê o fim da conversa. Só cutuca quem ficou com uma pergunta ou proposta sem resposta. Despedida, "obrigado", consulta marcada = não cutuca. "Ainda não / vou pensar" = adiou. "Não tenho interesse" = recusou (etiqueta perda_sem_interesse).',
+    sub: `Antes da 1ª cutucada de cada silêncio a IA lê o fim da conversa. Só cutuca quem ficou com uma pergunta ou proposta sem resposta. Despedida, "obrigado", ${L('consulta marcada', 'visita marcada')} = não cutuca. "Ainda não / vou pensar" = adiou. "Não tenho interesse" = recusou (etiqueta perda_sem_interesse).`,
   },
   {
     key: 'lead_frio',
@@ -71,9 +75,9 @@ const RULES = [
     icon: 'i-lucide-calendar-off',
     color: '#7C3AED',
     title: 'Fim de semana só para quem escreveu no dia',
-    sub: 'Sábado e domingo a cutucada só sai se o paciente escreveu naquele mesmo dia. Senão, espera a segunda na abertura do horário de envio.',
+    sub: `Sábado e domingo a cutucada só sai se o ${L('paciente', 'cliente')} escreveu naquele mesmo dia. Senão, espera a segunda na abertura do horário de envio.`,
   },
-];
+]);
 
 const toggleRule = rule =>
   save(
@@ -230,10 +234,11 @@ onMounted(() => {
         />
       </div>
       <span class="cv-ag-block-sub block mt-1">
-        Paciente que disse "ainda não", "vou pensar", "depois eu vejo" não
-        recebe cutucada agora: recebe <b>UMA</b> mensagem modelo dias depois,
-        pela caixa em que conversou — só em dia útil, no horário de envio, se
-        não voltou a escrever e não tem consulta marcada.
+        {{ L('Paciente', 'Cliente') }} que disse "ainda não", "vou pensar",
+        "depois eu vejo" não recebe cutucada agora: recebe <b>UMA</b> mensagem
+        modelo dias depois, pela caixa em que conversou — só em dia útil, no
+        horário de envio, se não voltou a escrever e não tem
+        {{ L('consulta marcada', 'visita marcada') }}.
       </span>
 
       <div class="mt-4 flex items-center gap-2 flex-wrap">
@@ -275,7 +280,8 @@ onMounted(() => {
           </button>
         </div>
         <p class="text-[11px] text-n-slate-10">
-          Use [nome] nas variáveis para o primeiro nome do paciente.
+          Use [nome] nas variáveis para o primeiro nome do
+          {{ L('paciente', 'cliente') }}.
         </p>
         <WhatsAppTemplateParser
           v-if="pickerTemplate"
@@ -347,7 +353,9 @@ onMounted(() => {
         </p>
         <p class="text-[11px] text-n-slate-10 leading-relaxed">
           Instagram não tem mensagem modelo: quem adiou por lá só volta se
-          escrever de novo. Pacientes de parceiros (Oftalmofácil) ficam fora.
+          escrever de novo.<template v-if="isClinic">
+            Pacientes de parceiros (Oftalmofácil) ficam fora.</template
+          >
         </p>
       </div>
     </div>
@@ -377,7 +385,7 @@ onMounted(() => {
       </div>
       <span class="cv-ag-block-sub block mt-1">
         Por coluna do CRM (a do card na hora da cutucada). Respondeu = o
-        paciente escreveu até 48h depois de uma cutucada.
+        {{ L('paciente', 'cliente') }} escreveu até 48h depois de uma cutucada.
       </span>
       <div class="mt-3">
         <PeriodRuler v-model="period" />

@@ -50,4 +50,12 @@ RSpec.describe Crm::BudgetSideEffects do
     CrmSetting.create!(account: account, agenda_config: { 'booking' => { 'budget_stage_id' => stages[2].id } })
     expect(described_class.stage(account).name).to eq('Agendamento de Consulta')
   end
+
+  # 🚦 25/11 (LIFE): fora da clínica a jornada anda por etiqueta; "por exemplo: R$ 350" não move o cartão
+  it 'não move o cartão fora da clínica (empresa de outro ramo)', :aggregate_failures do
+    CrmSetting.find_or_create_by!(account: account).update!(agenda_config: { 'company' => { 'segment' => 'outro', 'name' => 'Life' } })
+    msg = outgoing('Quanto vem sua conta de luz por mês? Por exemplo: R$ 350.')
+    expect(described_class.apply(account: account, contact: contact, message: msg)).to be_nil
+    expect(card.reload.stage).to eq(stages[0])
+  end
 end

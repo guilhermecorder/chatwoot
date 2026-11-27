@@ -24,6 +24,15 @@ class Crm::Journey::MapService # rubocop:disable Metrics/ClassLength
     'consulta' => %w[consulta agend marcad compare avalia],
     'lead' => %w[lead novo entrada triagem interesse contato prospec]
   }.freeze
+  # ☀️ 25/11 (LIFE): colunas do funil solar → etapa (antes caíam quase todas em "Lead")
+  STEP_HINTS_EMPRESA = {
+    'retorno' => ['nps', 'pos venda', 'pos-venda', 'indica'],
+    'pos_op' => %w[instal homolog],
+    'cirurgia' => %w[contrato assinad fechad],
+    'consulta' => %w[vistoria visita],
+    'orcamento' => %w[orcamento proposta negoci valor],
+    'lead' => %w[novo contato conta solicit lead]
+  }.freeze
   KINDS = {
     'reminder' => { label: 'Lembrete da consulta', icon: 'i-lucide-bell-ring' },
     'followup' => { label: 'Follow-up', icon: 'i-lucide-timer' },
@@ -59,7 +68,7 @@ class Crm::Journey::MapService # rubocop:disable Metrics/ClassLength
     items = collect_items
     {
       steps: ordered_steps,
-      kinds: KINDS,
+      kinds: kinds,
       stages: stages_json,
       stage_steps: effective_stage_steps,
       items: items.reject { |i| hidden.include?(i[:id]) || show[i[:kind]] == false },
@@ -82,10 +91,23 @@ class Crm::Journey::MapService # rubocop:disable Metrics/ClassLength
   end
 
   def ordered_steps
+    base = Crm::JourneyMessage.step_labels(@account)
     order = Array(map_config['step_order']).map(&:to_s).select { |k| STEPS.key?(k) }
-    keys = (order + STEPS.keys).uniq
+    keys = (order + base.keys).uniq
     labels = (map_config['step_labels'] || {}).to_h
-    keys.map { |k| { key: k, label: labels[k].presence || STEPS[k] } }
+    keys.map { |k| { key: k, label: labels[k].presence || base[k] } }
+  end
+
+  def clinic?
+    @clinic = Cevico::Company.new(@account).clinic? if @clinic.nil?
+    @clinic
+  end
+
+  # fora da clínica o lembrete é da visita técnica
+  def kinds
+    return KINDS if clinic?
+
+    KINDS.merge('reminder' => KINDS['reminder'].merge(label: 'Lembrete da visita'))
   end
 
   # coluna do CRM → etapa (configurado, senão pelo nome)
@@ -98,7 +120,8 @@ class Crm::Journey::MapService # rubocop:disable Metrics/ClassLength
 
   def guess_step(name)
     plain = I18n.transliterate(name.to_s).downcase
-    STEP_HINTS.find { |_step, hints| hints.any? { |h| plain.include?(h) } }&.first || 'lead'
+    hints = clinic? ? STEP_HINTS : STEP_HINTS_EMPRESA
+    hints.find { |_step, words| words.any? { |h| plain.include?(h) } }&.first || 'lead'
   end
 
   private
@@ -141,9 +164,11 @@ class Crm::Journey::MapService # rubocop:disable Metrics/ClassLength
   def reminder_items # rubocop:disable Metrics/CyclomaticComplexity, Metrics/AbcSize, Metrics/PerceivedComplexity
     cfg = (CrmSetting.find_by(account: @account)&.agenda_config || {})['appointment_reminders'] || {}
     keys = (Crm::AppointmentReminderSendJob::REGUAS & cfg.keys) | %w[d1 d0]
+    keys = keys.select { |k| cfg.dig(k, 'enabled') == true } unless clinic? # LIFE: lembrete desligado não polui a jornada
     keys.sort_by { |k| -Crm::AppointmentReminderSendJob.days_of(k) }.map do |key|
       days = Crm::AppointmentReminderSendJob.days_of(key)
       name = REMINDER_NAMES[days] || "D-#{days} · #{days} dias antes"
+      name = name.sub('consulta', 'visita') unless clinic?
       rule = (cfg[key] || {}).to_h
       hour = rule['hour'].presence || Crm::AppointmentReminderSendJob.default_hour(key)
       { id: "reminder:#{key}", kind: 'reminder', name: "Lembrete #{name}", step: 'consulta',

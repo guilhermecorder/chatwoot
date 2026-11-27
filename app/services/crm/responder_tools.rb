@@ -653,8 +653,8 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     return refuse(STAGE_TOOL_NAME, 'Esta ferramenta não está disponível para este agente.') unless TASK_TOOL_KEYS.include?(@agent_key)
 
     etapa = args['etapa'].to_s.strip.downcase
-    return refuse(STAGE_TOOL_NAME, 'Etapa fora da lista desta conta.') unless crm_etapas.pluck('etiqueta').include?(etapa)
-    return refuse(STAGE_TOOL_NAME, 'Conversa sem contato.') if @contact.nil?
+    problema = stage_problem(etapa)
+    return refuse(STAGE_TOOL_NAME, problema) if problema
 
     if @contact.label_list.map(&:downcase).include?(etapa)
       log_acao(STAGE_TOOL_NAME, true, "etapa #{etapa} já estava marcada")
@@ -670,6 +670,15 @@ class Crm::ResponderTools # rubocop:disable Metrics/ClassLength
     activity_note!("🏷️ #{agent_name} marcou a etapa: #{etapa}")
     log_acao(STAGE_TOOL_NAME, true, "marcou a etapa #{etapa}")
     { ok: true, etapa: etapa }
+  end
+
+  # por que a etapa não pode ser marcada (nil = pode). 🚦 25/11 (LIFE): link, "erro", saudação ou só a mensagem
+  # pronta do anúncio não fazem o cartão andar (Crm::LeadSignal)
+  def stage_problem(etapa)
+    return 'Etapa fora da lista desta conta.' unless crm_etapas.pluck('etiqueta').include?(etapa)
+    return 'Conversa sem contato.' if @contact.nil?
+
+    Crm::LeadSignal.stage_problem(etapa, @conversation, @contact)
   end
 
   # o que já está na ficha deste cliente, para a IA não anotar de novo

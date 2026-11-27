@@ -59,6 +59,7 @@ import { dueCountdown } from 'dashboard/helper/taskDue';
 import TaskPriorityList from 'dashboard/components-next/cevico/TaskPriorityList.vue';
 import QuoteJourneyStrip from 'dashboard/components-next/cevico/QuoteJourneyStrip.vue';
 import FollowupStrip from 'dashboard/components-next/cevico/FollowupStrip.vue';
+import SalesEconomicsStrip from 'dashboard/components-next/cevico/SalesEconomicsStrip.vue';
 import {
   mergeLayout,
   place as placeBlock,
@@ -133,11 +134,22 @@ const sourceLens = ref(uiSettings.value?.cevico_home_source || 'cevico');
 //              blocos antigos de conteúdo nem Tarefas)
 // Padrão: clássico — ninguém muda de tela sem escolher.
 const estiloPainel = ref(uiSettings.value?.cevico_home_estilo || 'classico');
-const estiloClassico = computed(() => estiloPainel.value !== 'novo');
+// ☀️ 25/11/2026 (LIFE, Guilherme: "remover o modo clássico do Meu Painel da LIFE"): fora da clínica só
+// existe o Novo — a chavinha some e a escolha antiga de quem estava no Clássico vira Novo.
+const estiloClassico = computed(
+  () => isClinic.value && estiloPainel.value !== 'novo'
+);
 const setEstiloPainel = key => {
   estiloPainel.value = key;
   updateUISettings({ cevico_home_estilo: key });
 };
+watch(
+  isClinic,
+  clinic => {
+    if (!clinic && estiloPainel.value !== 'novo') setEstiloPainel('novo');
+  },
+  { immediate: true }
+);
 const sourceParams = () => ({ source: sourceLens.value });
 
 // ── Painéis por pessoa: mesmo layout, indicadores e cores da função ──
@@ -5319,7 +5331,7 @@ onUnmounted(() => {
                 >
               </span>
               <!-- 🧭 item 338: chavinha das DUAS VERSÕES (clássico × novo), por pessoa -->
-              <span class="cevico-hero-chip cevico-hero-chip-seg" title="Duas versões do Meu Painel para comparar: a clássica (colorida, blocos de sempre) e a nova (visão geral com gráficos). Cada pessoa escolhe a sua.">
+              <span v-if="isClinic" class="cevico-hero-chip cevico-hero-chip-seg" title="Duas versões do Meu Painel para comparar: a clássica (colorida, blocos de sempre) e a nova (visão geral com gráficos). Cada pessoa escolhe a sua.">
                 <button
                   type="button"
                   class="cevico-hero-seg-btn"
@@ -5450,8 +5462,32 @@ onUnmounted(() => {
         class="cvg-arejado-jornada"
       >
         <QuoteJourneyStrip />
+        <!-- 📊 27/11 (LIFE): custos, retorno (ROAS), tempos e equipe no horário comercial -->
+        <SalesEconomicsStrip />
         <!-- 📬 22/11 (LIFE): o follow-up da venda logo abaixo da jornada -->
         <FollowupStrip />
+        <!-- 🌡️ 25/11 (LIFE): sem o Clássico, as tarefas por temperatura moram aqui no Novo -->
+        <div v-if="myTasks.length" class="cv-block mb-6">
+          <div class="p-4 sm:p-5">
+            <div class="flex items-center gap-3 mb-3">
+              <span class="cv-icon cv-icon-sm">
+                <span class="i-lucide-list-checks text-sm" />
+              </span>
+              <h2 class="text-base font-semibold text-n-slate-12">
+                Tarefas
+                <span class="tabular-nums opacity-60 text-sm">{{
+                  myTasksCount
+                }}</span>
+              </h2>
+            </div>
+            <TaskPriorityList
+              :tasks="myTasks"
+              :total="myTasksCount"
+              @open-task="openTaskOnBoard"
+              @open-space="openClientSpace"
+            />
+          </div>
+        </div>
       </div>
 
       <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin).

@@ -66,5 +66,19 @@ RSpec.describe 'Mapa da jornada', type: :request do
     expect(body['hidden_items'].map { |h| h['id'] }).to eq(['reminder:d0'])
     expect(body['map']['queue']).to eq('top')
   end
+
+  # ☀️ 25/11 (LIFE): fora da clínica as etapas falam a língua da venda solar e as colunas do funil caem no lugar certo
+  it 'fora da clínica usa os nomes da venda e encaixa as colunas do funil solar', :aggregate_failures do
+    CrmSetting.find_or_create_by!(account: account).update!(agenda_config: { 'company' => { 'segment' => 'outro', 'name' => 'Life' } })
+    pipe = Crm::Pipeline.create!(account: account, name: 'Life - Sistemas Solares', position: 9)
+    nomes = ['Solicitação da Conta', 'Vistoria Técnica Agendada', 'Vistoria Realizada', 'Contrato Assinado', 'Instalação',
+             'NPS - Indicação - Pós venda']
+    cols = nomes.each_with_index.map { |n, i| pipe.stages.create!(name: n, color: '#000', position: i) }
+    out = Crm::Journey::MapService.new(account: account).call
+    expect(out[:steps].pluck(:label)).to eq(['Lead', 'Orçamento', 'Vistoria técnica', 'Contrato fechado', 'Instalação', 'Pós-venda'])
+    expect(cols.map { |c| out[:stage_steps][c.id] }).to eq(%w[lead consulta consulta cirurgia pos_op retorno])
+    expect(out[:kinds]['reminder'][:label]).to eq('Lembrete da visita')
+    expect(out[:items].none? { |i| i[:kind] == 'reminder' }).to be(true)
+  end
 end
 # rubocop:enable RSpec/MultipleExpectations

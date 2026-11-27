@@ -102,7 +102,7 @@ const TABS = [
 
 // 🔐 rodada 334: cada aba pelo seu nó em automacoes.* (ver abre a aba;
 // editar libera criar/editar robô e mexer nos agentes)
-const { canView, canEdit } = useCevicoAccess();
+const { canView, canEdit, isClinic } = useCevicoAccess();
 const visibleTabs = computed(() =>
   TABS.filter(tab => canView(AUTOMATION_TAB_NODES[tab]))
 );
@@ -3511,9 +3511,10 @@ onUnmounted(() => {
         <div v-if="activeTab === 'robos'" class="max-w-3xl">
           <div class="flex items-center justify-between mb-4">
             <p class="text-sm text-n-slate-11">
-              Cutucadas simples para reabrir a conversa quando o paciente some.
-              Ex.: 3h "oi, pode falar?", 10h "[nome], no seu tempo ok?". Para
-              sozinho se o paciente responder.
+              Cutucadas simples para reabrir a conversa quando o
+              {{ isClinic ? 'paciente' : 'cliente' }} some. Ex.: 3h "oi, pode
+              falar?", 10h "[nome], no seu tempo ok?". Para sozinho se o
+              {{ isClinic ? 'paciente' : 'cliente' }} responder.
             </p>
             <button
               v-if="canEditRobos"
@@ -3738,8 +3739,9 @@ onUnmounted(() => {
 
           <!-- 📅 item 253: lembretes e confirmação de consulta agora ficam em
                Agentes de IA → "Confirmação de consulta"; aqui só o atalho -->
+          <!-- ☀️ 25/11 (LIFE): atalho de consulta só na clínica -->
           <div
-            v-if="canEditRobos"
+            v-if="canEditRobos && isClinic"
             class="mb-4 p-4 bg-n-solid-2 border border-n-weak rounded-xl flex items-center gap-3 flex-wrap"
           >
             <span

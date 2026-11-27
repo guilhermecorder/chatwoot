@@ -1318,6 +1318,15 @@ class CrmAPI extends ApiClient {
     return axios.get(`${this.url}/home`, { params });
   }
 
+  // 📊 27/11 (LIFE): custos da venda no Meu Painel (só administrador lança/apaga)
+  createSalesCost(payload) {
+    return axios.post(`${this.url}/home/sales_cost`, payload);
+  }
+
+  deleteSalesCost(id) {
+    return axios.delete(`${this.url}/home/sales_cost`, { params: { id } });
+  }
+
   // 🧭 item 337: visão geral do Meu Painel (14 perguntas)
   getOverview(params = {}) {
     return axios.get(`${this.url}/home/overview`, { params });

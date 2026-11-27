@@ -50,6 +50,19 @@ class Crm::JourneyMessage < ApplicationRecord
     'lead' => 'Lead', 'consulta' => 'Consulta', 'orcamento' => 'Orçamento',
     'cirurgia' => 'Cirurgia agendada', 'pos_op' => 'Pós-operatório', 'retorno' => 'Retorno'
   }.freeze
+  # ☀️ 25/11/2026 (LIFE): fora da clínica as MESMAS chaves (o banco não muda) ganham os nomes da venda
+  # solar — lead → orçamento → vistoria técnica → contrato → instalação → pós-venda — e a ordem da venda.
+  STEPS_EMPRESA = {
+    'lead' => 'Lead', 'orcamento' => 'Orçamento', 'consulta' => 'Vistoria técnica',
+    'cirurgia' => 'Contrato fechado', 'pos_op' => 'Instalação', 'retorno' => 'Pós-venda'
+  }.freeze
+
+  # nomes das etapas para esta conta (clínica = os de sempre)
+  def self.step_labels(account)
+    Cevico::Company.new(account).clinic? ? STEPS : STEPS_EMPRESA
+  rescue StandardError
+    STEPS
+  end
   KINDS = %w[surgery appointment stage label call_missed].freeze
   KIND_LABELS = {
     'surgery' => 'Dia da cirurgia (OftalmoFácil)', 'appointment' => 'Dia da consulta (Agenda)',

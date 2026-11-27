@@ -24,6 +24,8 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
     return render json: { people: quote_journey_people } if params[:only] == 'quote_journey_people'
     # 📬 22/11 (LIFE): só a faixa "Follow-up da venda" (com o período dela)
     return render json: { followup_panel: followup_panel_json } if params[:only] == 'followup_panel'
+    # 📊 27/11 (LIFE): só o bloco "Custos e retorno" (custos, ROAS, tempos e equipe no horário comercial)
+    return render json: { economics: economics_json } if params[:only] == 'economics'
 
     since, until_at = resolve_range
     # ⚡ item 237 (25/09): o MIOLO pesado (painel do período + desempenho +
@@ -994,6 +996,45 @@ class Api::V1::Accounts::Crm::HomeController < Api::V1::Accounts::BaseController
       JSON.parse(Crm::QuoteJourney.new(account, since: since, until_at: until_at).people(params[:step]).to_json)
     end
   end
+
+  # 📊 custos e retorno (Crm::SalesEconomics); 2 min de cache, que cai quando alguém lança ou apaga um custo
+  def economics_json
+    now = Crm::ResolvesPeriod::PERIOD_TZ.now
+    since, until_at = standard_period_range || [now.beginning_of_month, now.end_of_day]
+    Rails.cache.fetch(['cevico:economics:v1', account.id, economics_stamp, since.to_i, until_at.to_i], expires_in: 2.minutes) do
+      JSON.parse(Crm::SalesEconomics.new(account, since: since, until_at: until_at).call.to_json)
+    end
+  end
+
+  def economics_stamp
+    entries = Crm::SalesCosts.new(account).entries
+    "#{entries.maximum(:updated_at).to_i}-#{entries.count}"
+  end
+
+  public
+
+  # POST crm/home/sales_cost { category: trafego|ia|whatsapp, amount: "1.500,00", date: "2026-11-01", span: mes|semana, note: }
+  def sales_cost
+    require_administrator!
+    return if performed?
+
+    entry = Crm::SalesCosts.new(account).create!(category: params[:category], amount: params[:amount], date: params[:date],
+                                                 span: params[:span], note: params[:note], user: Current.user)
+    render json: { entry: Crm::SalesCosts.new(account).json(entry) }
+  rescue ArgumentError, ActiveRecord::RecordInvalid, Date::Error => e
+    render json: { error: "Não deu para lançar: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # DELETE crm/home/sales_cost?id=
+  def destroy_sales_cost
+    require_administrator!
+    return if performed?
+
+    Crm::SalesCosts.new(account).entries.find(params[:id]).destroy!
+    head :no_content
+  end
+
+  private
 
   # 📬 follow-up da venda (Crm::FollowupPanel): envios dos robôs por momento e por mensagem; 2 min de cache.
   def followup_panel_json

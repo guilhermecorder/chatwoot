@@ -37,15 +37,26 @@ RSpec.describe Crm::ResponderTools do
       CrmSetting.find_or_create_by!(account: account).update!(ai_config: {
                                                                 'crm_etapas' => [
                                                                   { 'etiqueta' => 'conta_recebida', 'quando' => 'mandou a conta de luz' },
-                                                                  { 'etiqueta' => 'Quer Visita', 'quando' => 'quer a visita técnica' }
+                                                                  { 'etiqueta' => 'Quer Visita', 'quando' => 'quer a visita técnica' },
+                                                                  { 'etiqueta' => 'em_atendimento', 'quando' => 'contou o caso' }
                                                                 ]
                                                               })
+    end
+
+    # 🚦 25/11: a conta veio (valor anotado na ficha) depois de uma frase de verdade
+    def conta_chegou!
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: 'É pra minha casa')
+      contact.update!(additional_attributes: { Crm::ClientSummary::ATTR_KEY => { 'conta' => { 'valor' => 'R$ 350' } } })
+    end
+
+    def cliente_diz(*textos)
+      textos.each { |t| create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :incoming, content: t) }
     end
 
     it 'só aparece com etapas configuradas e lista as etiquetas normalizadas', :aggregate_failures do
       defs = tools(agent_key: 'atendente_agendamento').definitions
       stage = defs.find { |d| d[:name] == 'marcar_etapa' }
-      expect(stage.dig(:input_schema, :properties, :etapa, :enum)).to eq(%w[conta_recebida quer_visita])
+      expect(stage.dig(:input_schema, :properties, :etapa, :enum)).to eq(%w[conta_recebida quer_visita em_atendimento])
       expect(stage[:description]).to include('conta_recebida = mandou a conta de luz')
       expect(tools(agent_key: 'voice').definitions.pluck(:name)).not_to include('marcar_etapa')
     end
@@ -56,16 +67,53 @@ RSpec.describe Crm::ResponderTools do
     end
 
     it 'em sombra não grava nada' do
+      conta_chegou!
       result = tools(agent_key: 'atendente_agendamento').call('marcar_etapa', { 'etapa' => 'conta_recebida' })
       expect(result).to include(simulado: true, ok: true)
       expect(contact.reload.label_list).to be_empty
     end
 
     it 'ao vivo põe a etiqueta no contato (e cria a etiqueta na conta)', :aggregate_failures do
+      conta_chegou!
       result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'conta_recebida' })
       expect(result).to include(ok: true, etapa: 'conta_recebida')
       expect(contact.reload.label_list).to include('conta_recebida')
       expect(account.labels.pluck(:title)).to include('conta_recebida')
+    end
+
+    it 'recusa link + "Erro" (conversa #144 da LIFE): o cartão não anda', :aggregate_failures do
+      cliente_diz('https://dollaramasurp.com/kenwuC2hhtj/EK9VHjMEJ7IZApN9GUgAa6004c', 'Erro', '👍')
+      result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'em_atendimento' })
+      expect(result[:ok]).to be(false)
+      expect(result[:motivo]).to include('Ainda não')
+      expect(contact.reload.label_list).to be_empty
+    end
+
+    it 'recusa quem só mandou a mensagem pronta do anúncio e um "oi"' do
+      cliente_diz('Oi! Vi o anúncio da Life e quero mandar a foto da minha conta de luz.', 'Oi, td bem?')
+      result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'em_atendimento' })
+      expect(result[:ok]).to be(false)
+    end
+
+    it 'recusa quem só mandou a frase pronta nova do anúncio ("Quero um orçamento das placas solares")' do
+      cliente_diz('Quero um orçamento das placas solares', 'Oi')
+      result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'em_atendimento' })
+      expect(result[:ok]).to be(false)
+    end
+
+    it 'aceita em_atendimento quando o cliente conta o caso', :aggregate_failures do
+      cliente_diz('Oi! Vi o anúncio da Life e quero mandar a foto da minha conta de luz.', 'Bom dia, é pra minha chácara')
+      result = tools(agent_key: 'atendente_agendamento', live: true).call('marcar_etapa', { 'etapa' => 'em_atendimento' })
+      expect(result).to include(ok: true, etapa: 'em_atendimento')
+      expect(contact.reload.label_list).to include('em_atendimento')
+    end
+
+    it 'conta_recebida só com a conta anotada ou foto/PDF, não com conversa', :aggregate_failures do
+      cliente_diz('Quero saber o valor pra instalar na minha casa')
+      t = tools(agent_key: 'atendente_agendamento', live: true)
+      expect(t.call('marcar_etapa', { 'etapa' => 'conta_recebida' })[:motivo]).to include('conta de luz não chegou')
+      contact.update!(additional_attributes: { Crm::ClientSummary::ATTR_KEY => { 'conta' => { 'valor' => 'R$ 400' } } })
+      expect(t.call('marcar_etapa', { 'etapa' => 'conta_recebida' })).to include(ok: true)
     end
 
     it 'recusa etapa fora da lista' do

@@ -442,6 +442,9 @@ namespace :crm do
   # de Tarefas / Meu Painel (a mesma Note do contato)
   resources :patient_notes, only: [:index, :create, :destroy], controller: 'patient_notes'
   resource :home, only: [:show], controller: 'home' do
+    # 📊 27/11 (LIFE): lançar e apagar custos da venda (tráfego, API de IA, WhatsApp API) — só administrador
+    post :sales_cost
+    delete :sales_cost, action: :destroy_sales_cost
     # popup de prioridade máxima do Radar (checagem leve) e
     # pausa manual do radar pela atendente (com registro)
     get :radar_ping

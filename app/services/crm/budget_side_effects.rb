@@ -31,9 +31,19 @@ module Crm::BudgetSideEffects
     pipeline&.stages&.order(:position)&.detect { |s| s.name.match?(/or[çc]amento/i) }
   end
 
+  # 🚦 25/11 (LIFE): só na CLÍNICA. Fora dela a jornada anda por etiqueta (Crm::JourneyLabel) e "R$" numa mensagem
+  # nossa costuma ser o EXEMPLO da pergunta ("quanto vem sua conta? por exemplo: R$ 350"): 42 das 89 entradas em
+  # "Orçamento a fazer" na LIFE vieram daqui, de gente que nem tinha mandado a conta.
+  def enabled?(account)
+    Cevico::Company.new(account).clinic?
+  rescue StandardError
+    true
+  end
+
   # devolve o nome da coluna quando moveu; nil quando não havia o que fazer
-  def apply(account:, contact:, message:) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity
+  def apply(account:, contact:, message:) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     return nil if contact.blank? || !price_message?(message)
+    return nil unless enabled?(account)
 
     target = stage(account)
     return nil if target.blank?

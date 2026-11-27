@@ -11,7 +11,7 @@ class Api::V1::Accounts::Crm::JourneyMessagesController < Api::V1::Accounts::Bas
     messages = Crm::JourneyMessage.where(account: Current.account).ordered
     render json: {
       journey_messages: messages.map { |m| m.to_payload.merge(stats: stats_for(m)) },
-      steps: Crm::JourneyMessage::STEPS, kinds: Crm::JourneyMessage::KIND_LABELS,
+      steps: Crm::JourneyMessage.step_labels(Current.account), kinds: Crm::JourneyMessage::KIND_LABELS,
       tokens: Crm::Journey::Variables::TOKENS, settings: settings.to_h,
       today: today_summary
     }

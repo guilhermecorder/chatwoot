@@ -45,6 +45,12 @@ class Crm::AcquisitionCostService # rubocop:disable Metrics/ClassLength
     spend[:ads]
   end
 
+  # 📊 27/11 (LIFE · Custos e retorno no Meu Painel, Crm::SalesEconomics): o que o sistema mede sozinho, em R$
+  def measured_costs
+    { ads: spend[:ads], ads_configured: google[:configured] || meta[:configured] || meta[:spend].to_f.positive?,
+      ai: ai[:brl], whatsapp: whatsapp[:brl], whatsapp_synced: whatsapp[:synced] }
+  end
+
   private
 
   # ══ GASTOS ══
