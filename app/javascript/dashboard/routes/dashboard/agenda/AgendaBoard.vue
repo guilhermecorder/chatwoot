@@ -3204,10 +3204,16 @@ const pendingCount = computed(
           </section>
 
           <div class="flex flex-col gap-3 min-w-0">
-            <!-- ② PERÍODO (o bloco sobe quando o calendário está aberto: backdrop-filter cria contexto de empilhamento) -->
+            <!-- ② PERÍODO (o bloco sobe quando o calendário OU o menu Fechar/reabrir está aberto:
+                 backdrop-filter cria contexto de empilhamento, e sem subir o bloco Filtros cobre o menu) -->
             <section
               class="cv-ag-block p-5 sm:p-6 flex items-center gap-4 flex-wrap"
-              :class="showDatePicker ? 'relative z-30' : ''"
+              :class="
+                showDatePicker ||
+                (viewMode === 'day' && blockMenu === dateKey(cursor))
+                  ? 'relative z-30'
+                  : ''
+              "
             >
               <div
                 class="cv-icon cv-icon-lg hidden sm:inline-flex"
@@ -3467,7 +3473,8 @@ const pendingCount = computed(
                 </Teleport>
                 <div
                   v-if="blockMenu === dateKey(cursor)"
-                  class="cv-pop cv-ag-pop cv-ag-blockmenu absolute right-0 top-11 z-40 w-64 p-2"
+                  class="cv-pop cv-ag-pop cv-ag-blockmenu absolute left-0 top-11 z-40 w-64 max-w-[calc(100vw-2rem)] p-2"
+                  @click.stop
                 >
                   <p class="cv-ag-blockmenu-title">Fechar / reabrir</p>
                   <button

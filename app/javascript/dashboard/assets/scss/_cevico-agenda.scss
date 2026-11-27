@@ -374,6 +374,9 @@
 .dark .cv-page .cv-ag-daylock-on { background: #dc2626; color: #fff; }
 @media (hover: none) { .cv-page .cv-ag-daylock { opacity: 0.85; } }
 /* item 267: menu fechar/reabrir (dia inteiro · unidade · médico) */
+/* menu Fechar/reabrir: fundo cheio, para os botões de baixo não aparecerem através (27/11) */
+.cv-page .cv-ag-blockmenu { background: #fff; }
+.dark .cv-page .cv-ag-blockmenu { background: #17191c; }
 .cv-page .cv-ag-blockmenu-title { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; padding: 4px 8px 6px; }
 .cv-page .cv-ag-blockmenu-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; color: var(--cv-deep, #0f172a); }
 .cv-page .cv-ag-blockmenu-item:hover { background: rgb(var(--cv-rgb) / 0.08); }
