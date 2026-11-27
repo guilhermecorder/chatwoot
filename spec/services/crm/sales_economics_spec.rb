@@ -32,11 +32,17 @@ RSpec.describe Crm::SalesEconomics do
 
       week = report(since: tz.parse('2026-11-23 00:00'), until_at: tz.parse('2026-11-29 23:59'))[:costs]
       rows = week[:rows].index_by { |r| r[:key] }
-      expect(rows['trafego'][:valor]).to eq(700.0) # 3.000 ÷ 30 dias × 7
+      expect(rows['trafego'][:valor]).to eq(555.56) # mês correndo: 3.000 ÷ 27 dias até hoje × 5 dias (23 a 27/11)
       expect(rows['trafego'][:fonte]).to eq('lancado')
       expect(rows['ia'][:valor]).to eq(700.0)
       expect(rows['ia'][:medido]).to be_positive
       expect(week[:total]).to eq(rows.values.sum { |r| r[:valor].to_f }.round(2))
+    end
+
+    it 'o mês que ainda está correndo conta inteiro em "este mês" (é o gasto até hoje)' do
+      costs.create!(category: 'trafego', amount: '3.014,93', date: '2026-11-01', span: 'mes')
+      row = report[:costs][:rows].find { |r| r[:key] == 'trafego' }
+      expect(row[:valor]).to eq(3014.93)
     end
 
     it 'sem lançamento cobrindo o período, usa o medido' do

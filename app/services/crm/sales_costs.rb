@@ -6,7 +6,8 @@
 # kind 'custo' e uma das 3 categorias abaixo. O lançamento cobre um PERÍODO: a semana (7 dias a partir da data)
 # ou o mês da data. A descrição guarda o período ("semana" | "mes") e uma observação opcional: "mes · obs".
 # Para o painel, o valor é espalhado pelos dias que ele cobre (rateio): R$ 700 da semana = R$ 100 por dia, e o
-# período escolhido no painel soma só os dias que caem dentro dele.
+# período escolhido no painel soma só os dias que caem dentro dele. Período que ainda está correndo: o valor é
+# "o gasto até hoje" e se espalha só pelos dias que já passaram (ver #counted_until).
 class Crm::SalesCosts
   CATEGORIES = {
     'trafego' => 'Tráfego (anúncios)',
@@ -41,10 +42,11 @@ class Crm::SalesCosts
     totals = CATEGORIES.keys.index_with { 0.0 }
     entries.where(entry_date: (from - 31.days)..to).find_each do |entry|
       first, last = coverage(entry)
-      overlap = ([last, to].min - [first, from].max).to_i + 1
+      upto = counted_until(first, last)
+      overlap = ([upto, to].min - [first, from].max).to_i + 1
       next unless overlap.positive?
 
-      totals[entry.category] += entry.amount.to_f * overlap / ((last - first).to_i + 1)
+      totals[entry.category] += entry.amount.to_f * overlap / ((upto - first).to_i + 1)
     end
     totals.transform_values { |v| v.round(2) }
   end
@@ -69,6 +71,14 @@ class Crm::SalesCosts
   end
 
   private
+
+  # 27/11: o lançado do período que AINDA ESTÁ CORRENDO é "o que gastei até hoje" (ex.: R$ 3.014 de 1 a 26/11 lido
+  # no Gerenciador): divide só pelos dias que já passaram, para "este mês" mostrar o valor inteiro. Período fechado
+  # divide pelos dias todos, como antes.
+  def counted_until(first, last)
+    today = Time.find_zone('America/Sao_Paulo').today
+    last >= today && first <= today ? today : last
+  end
 
   def coverage(entry)
     first = entry.entry_date
