@@ -77,7 +77,7 @@ class Crm::SalesCosts
   # divide pelos dias todos, como antes.
   def counted_until(first, last)
     today = Time.find_zone('America/Sao_Paulo').today
-    last >= today && first <= today ? today : last
+    today.between?(first, last) ? today : last
   end
 
   def coverage(entry)

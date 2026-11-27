@@ -182,4 +182,17 @@ RSpec.describe Crm::QuoteJourney do
       expect(described_class.new(account, since: now - 30.days, until_at: now).people('nao_existe')).to eq([])
     end
   end
+
+  # 27/11: o "R$" do exemplo levava o cartão para "Orçamento a fazer" sem conta; a correção devolveu o cartão, mas a
+  # passagem ficou no histórico. Conta e sondagem contam quem ESTÁ na coluna ou tem o dado anotado.
+  it 'passagem falsa pela coluna da conta (cartão devolvido) não conta como conta recebida', :aggregate_failures do
+    voltou = lead('Kelli')
+    card(voltou, 'Novos Contatos', 'Orçamento a fazer', 'Solicitação da Conta')
+    andou = lead('Rui')
+    card(andou, 'Novos Contatos', 'Orçamento a fazer', 'Orçamento Enviado')
+
+    steps = described_class.new(account, since: now - 7.days, until_at: now).call[:steps].to_h { |st| [st[:key], st[:count]] }
+    expect(steps['conta']).to eq(1)    # só o Rui (andou até o orçamento)
+    expect(steps['sondagem']).to eq(2) # a Kelli está em Solicitação da Conta
+  end
 end

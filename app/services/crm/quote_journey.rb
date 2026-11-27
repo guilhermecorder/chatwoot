@@ -199,8 +199,11 @@ class Crm::QuoteJourney # rubocop:disable Metrics/ClassLength
   # até o orçamento enviado
   def quote_signals
     {
-      'sondagem' => in_stage('sondagem') | with_summary_noted,
-      'conta' => in_stage('conta') | with_bill_noted | with_bill_task,
+      # 27/11: sondagem e conta contam quem ESTÁ na coluna (ou tem o dado anotado), não o histórico: o "R$" do exemplo
+      # (bug corrigido em 25/11) e a mensagem pronta deixaram passagens falsas no histórico dessas duas colunas.
+      # Quem andou para a frente continua contando (cada etapa inclui as anteriores).
+      'sondagem' => in_stage('sondagem', history: false) | with_summary_noted,
+      'conta' => in_stage('conta', history: false) | with_bill_noted | with_bill_task,
       'enviado' => in_stage('enviado') | quotes(sent: true) | with_sent_label
     }
   end
@@ -231,12 +234,14 @@ class Crm::QuoteJourney # rubocop:disable Metrics/ClassLength
   end
 
   # o cartão da pessoa entrou (ou está) na coluna desta etapa
-  def in_stage(key)
+  def in_stage(key, history: true)
     ids = stage_ids[key]
     return Set.new if ids.empty? || lead_ids.empty?
 
-    logged = Crm::StageLog.joins(:crm_contact).where(stage_id: ids, crm_contacts: { contact_id: lead_ids }).distinct.pluck('crm_contacts.contact_id')
     now_there = Crm::Contact.where(stage_id: ids, contact_id: lead_ids).pluck(:contact_id)
+    return Set.new(now_there) unless history
+
+    logged = Crm::StageLog.joins(:crm_contact).where(stage_id: ids, crm_contacts: { contact_id: lead_ids }).distinct.pluck('crm_contacts.contact_id')
     Set.new(logged + now_there)
   end
 
