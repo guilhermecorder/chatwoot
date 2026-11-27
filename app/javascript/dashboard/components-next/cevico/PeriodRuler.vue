@@ -13,6 +13,7 @@ import {
   periodDateStr,
   periodRangeFor,
 } from 'dashboard/helper/cevicoPeriod';
+import CvFloatPop from './CvFloatPop.vue';
 
 const props = defineProps({
   modelValue: {
@@ -44,6 +45,7 @@ const rangeFor = periodRangeFor;
 const activePreset = computed(() => props.modelValue?.preset ?? 'month');
 
 const showCustom = ref(false);
+const customBtn = ref(null); // 🎈 27/11: o balão abre ao lado deste botão
 const customFrom = ref(
   props.modelValue?.preset === 'custom' ? props.modelValue.from : ''
 );
@@ -122,6 +124,7 @@ const clearCustom = () => {
 
     <div class="relative flex-shrink-0">
       <button
+        ref="customBtn"
         class="text-xs font-medium transition-colors whitespace-nowrap"
         :class="
           glass
@@ -143,15 +146,11 @@ const clearCustom = () => {
       >
         Personalizado
       </button>
-      <div
-        v-if="showCustom"
-        class="absolute top-9 right-0 z-50 p-3 flex items-center gap-2"
-        :class="
-          glass
-            ? 'cv-pop'
-            : 'bg-white dark:bg-n-solid-2 border border-n-weak rounded-2xl shadow-xl'
-        "
-        @click.stop
+      <!-- 🎈 27/11: balão no <body>, com fundo cheio e sempre na frente -->
+      <CvFloatPop
+        :open="showCustom"
+        :anchor="customBtn"
+        @close="showCustom = false"
       >
         <input
           v-model="customFrom"
@@ -162,7 +161,7 @@ const clearCustom = () => {
               ? 'cv-input !h-8 !rounded-full'
               : 'border border-n-weak rounded-full px-2.5 bg-n-solid-1'
           "
-          style="width: 8.4rem"
+          style="width: min(8.4rem, 35vw)"
           title="De"
           @change="applyCustom"
         />
@@ -176,7 +175,7 @@ const clearCustom = () => {
               ? 'cv-input !h-8 !rounded-full'
               : 'border border-n-weak rounded-full px-2.5 bg-n-solid-1'
           "
-          style="width: 8.4rem"
+          style="width: min(8.4rem, 35vw)"
           title="Até (vazio = hoje)"
           @change="applyCustom"
         />
@@ -187,7 +186,7 @@ const clearCustom = () => {
         >
           <span class="i-lucide-x text-xs" />
         </button>
-      </div>
+      </CvFloatPop>
     </div>
   </div>
 </template>

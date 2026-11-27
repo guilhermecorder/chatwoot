@@ -14,6 +14,7 @@ import ConversationChatModal from './components/ConversationChatModal.vue';
 import ColumnPresetsModal from './components/ColumnPresetsModal.vue';
 import Spinner from 'dashboard/components-next/spinner/Spinner.vue';
 import SkeletonPiece from 'dashboard/components-next/cevico/SkeletonPiece.vue';
+import CvFloatPop from 'dashboard/components-next/cevico/CvFloatPop.vue';
 import ContactAPI from 'dashboard/api/contacts';
 import { copyTextToClipboard } from 'shared/helpers/clipboard';
 import {
@@ -535,6 +536,7 @@ const activeDatePresetLabel = computed(
 );
 // PERSONALIZADO (item 80): De/Até direto na linha das pílulas de período
 const showCustomDate = ref(false);
+const customDateBtn = ref(null); // 🎈 27/11: o balão abre ao lado deste botão
 const customDateActive = computed(
   () => !activeDatePreset.value && Boolean(filters.value.dateFrom || filters.value.dateTo)
 );
@@ -1576,6 +1578,7 @@ const createAndAddContact = async () => {
           <!-- Personalizado (item 80): calendário arredondado no balãozinho -->
           <div class="relative">
             <button
+              ref="customDateBtn"
               class="cv-seg-item"
               :class="customDateActive ? 'cv-seg-on' : ''"
               title="Escolher um intervalo de datas de chegada do lead"
@@ -1583,16 +1586,17 @@ const createAndAddContact = async () => {
             >
               Personalizado
             </button>
-            <div
-              v-if="showCustomDate"
-              class="cv-pop absolute top-9 right-0 z-50 p-3 flex items-center gap-2"
-              @click.stop
+            <!-- 🎈 27/11: balão no <body>, com fundo cheio e sempre na frente -->
+            <CvFloatPop
+              :open="showCustomDate"
+              :anchor="customDateBtn"
+              @close="showCustomDate = false"
             >
               <input
                 v-model="filters.dateFrom"
                 type="date"
                 class="cv-input !h-8 text-xs"
-                style="width: 8.4rem"
+                style="width: min(8.4rem, 35vw)"
                 title="De"
                 @change="onCustomDate"
               />
@@ -1601,7 +1605,7 @@ const createAndAddContact = async () => {
                 v-model="filters.dateTo"
                 type="date"
                 class="cv-input !h-8 text-xs"
-                style="width: 8.4rem"
+                style="width: min(8.4rem, 35vw)"
                 title="Até (vazio = hoje)"
                 @change="onCustomDate"
               />
@@ -1612,7 +1616,7 @@ const createAndAddContact = async () => {
               >
                 <span class="i-lucide-x text-xs" />
               </button>
-            </div>
+            </CvFloatPop>
           </div>
         </div>
 
