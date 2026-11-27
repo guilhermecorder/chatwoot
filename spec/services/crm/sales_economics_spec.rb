@@ -165,6 +165,19 @@ RSpec.describe Crm::SalesEconomics do
                                  cliente_disse: 'Dá para fazer em 48x?', etapa: 'Negociação', cliente_esperando: true)
       expect(req[:motivos]).to eq([{ key: 'pagamento', label: 'Pagamento, financiamento ou crédito', total: 1, sem_resposta: 1 }])
     end
+
+    it 'acha o motivo quando a IA complementa uma tarefa já aberta e separa os assuntos', :aggregate_failures do
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :activity, private: true,
+                       content: '🩺 Atendente complementou a tarefa aberta #136 para Fernando Srair: Objeção no fechamento: ' \
+                                'valor pesou um pouco. [Ver tarefas](/app/accounts/1/tasks)', created_at: tz.parse('2026-11-27 10:00'))
+      create(:message, account: account, inbox: inbox, conversation: conversation, message_type: :activity,
+                       content: '🙋 Atendente pediu ATENDIMENTO HUMANO nesta conversa (tarefa aberta no Meu Painel).',
+                       created_at: tz.parse('2026-11-27 10:00:08'))
+
+      req = described_class.new(account, since: tz.parse('2026-11-27 00:00'), until_at: now).call[:team][:human_requests]
+      expect(req[:sem_resposta_lista].first).to include(motivo: 'Objeção no fechamento: valor pesou um pouco', topic: 'preco')
+      expect(Crm::TeamResponse.topic_for('Cliente quer montar usina solar para vender energia à CPFL').first).to eq('tecnico')
+    end
   end
 
   it 'custo por etapa vai até a instalação (as 10 etapas da Jornada)' do
@@ -173,7 +186,71 @@ RSpec.describe Crm::SalesEconomics do
   end
 
   it 'minutos comerciais pulam a noite, o domingo e os feriados', :aggregate_failures do
-    expect(Crm::TeamResponse.business_minutes(tz.parse('2026-11-28 11:00'), tz.parse('2026-11-30 09:00'))).to eq(120)
+    # 27/11 (2º): sábado saiu do horário comercial → só conta segunda 8h–9h
+    expect(Crm::TeamResponse.business_minutes(tz.parse('2026-11-28 11:00'), tz.parse('2026-11-30 09:00'))).to eq(60)
+    expect(Crm::TeamResponse.window(Date.new(2026, 11, 28))).to be_nil # sábado
     expect(Crm::TeamResponse.window(Date.new(2026, 11, 20))).to be_nil # Consciência Negra
+  end
+
+  describe '27/11 (2º pedido): conversões, equipe comercial e entrada no sistema' do
+    it 'conversões de uma etapa para outra (proposta ÷ contatos, proposta → contrato…)', :aggregate_failures do
+      out = report
+      keys = out[:conversions].map { |c| [c[:from], c[:to]] }
+      expect(keys).to include(%w[leads proposta], %w[enviado proposta], %w[credito proposta], %w[proposta fechado])
+      expect(out[:per_step].first).to include(key: 'leads', of_prev: nil)
+    end
+
+    it 'os donos da conta ficam fora da equipe comercial e a entrada no sistema aparece no dia', :aggregate_failures do
+      dono = create(:user, account: account, role: :administrator, name: 'Guilherme Dono')
+      CrmSetting.find_or_create_by!(account: account).update!(agent_permissions: { 'owner_ids' => [dono.id] })
+      inbox = create(:inbox, account: account)
+      contact = create(:contact, account: account, name: 'Cliente')
+      conv = create(:conversation, account: account, inbox: inbox, contact: contact)
+      [[dono, '2026-11-27 09:00'], [fernando, '2026-11-27 10:00'], [fernando, '2026-11-27 15:00']].each do |user, at|
+        create(:message, account: account, inbox: inbox, conversation: conv, message_type: :outgoing, sender: user,
+                         content: 'oi', created_at: tz.parse(at))
+      end
+      Crm::PresenceTracker.touch!(account, fernando, at: tz.parse('2026-11-27 08:47'))
+      Rails.cache.clear
+      Crm::PresenceTracker.touch!(account, fernando, at: tz.parse('2026-11-27 16:10'))
+
+      team = described_class.new(account, since: tz.parse('2026-11-27 00:00'), until_at: now).call[:team]
+      expect(team[:people].pluck(:name)).to eq(['Fernando Srair'])
+      person = team[:people].first
+      expect(person[:login_median]).to eq('08:47')
+      expect(person[:first_reply_median]).to eq('10:00')
+      expect(person[:avg_max_gap_24h]).to eq(300)
+      dia = person[:days_detail].find { |d| d[:day] == '2026-11-27' }
+      expect(dia).to include(entrou: '08:47', saiu: '16:10')
+      expect(Crm::UserDay.find_by(user_id: fernando.id).hits).to eq(2)
+    end
+  end
+
+  describe '27/11 (3º): com quem conversou, em que etapa e quem andou depois' do
+    it 'etapa na hora da resposta, cartão que andou até 48 h depois e a 1ª conversa do dia', :aggregate_failures do
+      inbox = create(:inbox, account: account)
+      ana = create(:contact, account: account, name: 'Ana')
+      bia = create(:contact, account: account, name: 'Bia')
+      conv_ana = create(:conversation, account: account, inbox: inbox, contact: ana)
+      conv_bia = create(:conversation, account: account, inbox: inbox, contact: bia)
+      travel_to(tz.parse('2026-11-26 08:00')) do
+        Crm::Contact.create!(contact: ana, pipeline: pipeline, stage: stages['Orçamento Enviado'], assignee: fernando)
+        Crm::Contact.create!(contact: bia, pipeline: pipeline, stage: stages['Novos Contatos'])
+      end
+      { conv_ana => '2026-11-27 09:00', conv_bia => '2026-11-27 11:00' }.each do |conv, at|
+        create(:message, account: account, inbox: inbox, conversation: conv, message_type: :outgoing, sender: fernando,
+                         content: 'oi', created_at: tz.parse(at))
+      end
+      travel_to(tz.parse('2026-11-27 10:00')) { Crm::Contact.find_by(contact: ana).update!(stage: stages['Negociação']) }
+
+      person = described_class.new(account, since: tz.parse('2026-11-27 00:00'), until_at: now).call[:team][:people].first
+      expect(person[:moved_count]).to eq(1)
+      expect(person[:moves].first[:moved]).to include(from: 'Orçamento Enviado', to: 'Negociação')
+      expect(person[:stage_mix].pluck(:label)).to contain_exactly('Orçamento Enviado', 'Novos Contatos')
+      expect(person[:firsts]).to eq([{ key: 'enviado', label: 'Orçamento Enviado', n: 1 }])
+      dia = person[:days_detail].find { |d| d[:day] == '2026-11-27' }
+      expect(dia[:conversas].pluck(:name)).to eq(%w[Ana Bia])
+      expect(dia[:conversas].first[:moved]).to be(true)
+    end
   end
 end

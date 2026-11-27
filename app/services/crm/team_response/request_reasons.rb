@@ -24,7 +24,10 @@ class Crm::TeamResponse::RequestReasons
     conv = conversations[cid]
     stage = conv && stages[conv.contact_id]
     last = last_public[cid]
+    # 27/11 (3º): a cor da etapa e a resposta sugerida (gravada na conversa pela análise; depois pelo Radar)
     { display_id: conv&.display_id, name: conv&.contact&.name, etapa: stage,
+      etapa_key: Crm::TeamResponse::ConversationMap.key_for(stage),
+      sugestao: (conv&.additional_attributes || {})['cevico_sugestao_resposta'].presence,
       cliente_esperando: last.present? && last.to_s == 'incoming' }
   end
 
@@ -32,7 +35,7 @@ class Crm::TeamResponse::RequestReasons
 
   def notes
     @notes ||= Message.where(account_id: @account.id, conversation_id: @cids, message_type: :activity)
-                      .where(created_at: (@since - LOOKBACK)..@until).where('content LIKE ?', '%a tarefa #%')
+                      .where(created_at: (@since - LOOKBACK)..@until).where('content LIKE ?', '%tarefa%#%')
                       .pluck(:conversation_id, :created_at, :content)
                       .filter_map { |cid, at, content| (m = content.to_s.match(Crm::TeamResponse::TASK_NOTE)) && [cid, at, m[1].squish] }
                       .group_by(&:first).transform_values { |list| list.map { |_c, at, motivo| [at, motivo] } }

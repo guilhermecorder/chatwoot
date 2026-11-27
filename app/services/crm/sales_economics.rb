@@ -34,7 +34,7 @@ class Crm::SalesEconomics
       since: @since, until: @until,
       costs: cost, revenue: revenue_json(sales, revenue),
       roas: ratio(revenue, cost[:total]), roas_ads: ratio(revenue, cost[:by_key]['trafego']),
-      per_step: per_step(cost[:total]), pipeline: pipeline_json, times: times_json(sales),
+      per_step: per_step(cost[:total]), conversions: conversions, pipeline: pipeline_json, times: times_json(sales),
       team: Crm::TeamResponse.new(@account, since: @since, until_at: @until).call,
       entries: Crm::SalesCosts.new(@account).list
     }
@@ -111,11 +111,37 @@ class Crm::SalesEconomics
   # ── custo por etapa ───────────────────────────────────────────────────────
   # 27/11 (Guilherme): "o custo até toda etapa, inclusive depois do orçamento: forma de pagamento, CPF e crédito…"
   # → as 10 etapas da Jornada, na ordem; custo = investido no período ÷ quem chegou até ali.
+  # 27/11 (2º): cada etapa também com a conversão da anterior e desde os contatos ("ficar claro o que é cada número").
   def per_step(total)
-    journey = Crm::QuoteJourney.new(@account, since: @since, until_at: @until).call
-    journey[:steps].map do |step|
-      { key: step[:key], label: step[:label], people: step[:count].to_i, cost: ratio_money(total, step[:count]) }
+    steps = journey_steps
+    leads = steps.first&.dig(:count).to_i
+    steps.each_with_index.map do |step, i|
+      prev = i.zero? ? nil : steps[i - 1][:count].to_i
+      { key: step[:key], label: step[:label], people: step[:count].to_i, cost: ratio_money(total, step[:count]),
+        of_prev: i.zero? ? nil : pct(step[:count], prev), of_leads: pct(step[:count], leads) }
     end
+  end
+
+  # 27/11 (Guilherme): "as porcentagens de proposta de fechamento em leads, de orçamento enviado em proposta, de CPF e
+  # crédito em proposta… de proposta em contrato fechado". De → para, entre quem chegou a cada etapa (mesma coorte).
+  CONVERSIONS = [%w[leads proposta], %w[enviado proposta], %w[credito proposta], %w[proposta fechado],
+                 %w[leads fechado], %w[enviado fechado]].freeze
+
+  def conversions
+    counts = journey_steps.to_h { |st| [st[:key], st[:count].to_i] }
+    labels = journey_steps.to_h { |st| [st[:key], st[:label]] }
+    CONVERSIONS.map do |from, to|
+      { from: from, to: to, from_label: labels[from], to_label: labels[to], from_n: counts[from], to_n: counts[to],
+        pct: pct(counts[to], counts[from]) }
+    end
+  end
+
+  def journey_steps
+    @journey_steps ||= Crm::QuoteJourney.new(@account, since: @since, until_at: @until).call[:steps]
+  end
+
+  def pct(part, whole)
+    whole.to_i.positive? ? ((part.to_f * 100) / whole).round(1) : nil
   end
 
   # ── tempos ────────────────────────────────────────────────────────────────

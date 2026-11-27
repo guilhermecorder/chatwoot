@@ -9,7 +9,9 @@
 # Também conta o que sai do CELULAR (app do WhatsApp Business no mesmo número): chega como "eco" (external_echo),
 # sem usuário; aparece à parte, como "Celular (app do WhatsApp)", porque o sistema não sabe quem digitou.
 #
-# Horário comercial da LIFE: seg–sex 8h–18h, sáb 8h–12h, fora feriados nacionais (Crm::BusinessHours).
+# Horário comercial da LIFE: seg–sex 8h–18h, fora feriados nacionais (Crm::BusinessHours). 27/11 (Guilherme): "de
+# segunda a sexta, pode tirar o sábado"; também "equipe comercial" sem os donos da conta (agent_permissions
+# owner_ids, Cevico::Access) e a ENTRADA NO SISTEMA de cada dia (Crm::UserDay, gravado pelo Crm::PresenceTracker).
 # Por pessoa:
 #   · mensagens dela no período (e quantas no horário comercial)
 #   · resposta ao cliente: quando o cliente escreve e quem responde é ela, quanto tempo de horário comercial passou
@@ -43,21 +45,21 @@ class Crm::TeamResponse # rubocop:disable Metrics/ClassLength
   WAITING_LIST = 150
   TASK_NOTE = /#\d+ para [^:\n]+: (.+?)\.?\s*\[Ver tarefas\]/m
   # assunto do pedido (motivo da IA primeiro; sem assunto, a última fala do cliente). A ordem importa: o 1º que
-  # casar vence ("quer fechar no cartão" é fechamento, não pagamento).
+  # casar vence ("quer fechar no cartão" é pagamento; "objeção no fechamento: valor pesou" é preço).
   TOPICS = [
-    ['fechar', 'Quer fechar ou pediu o contrato',
-     /fechar|fechamento|contrato|assinar|quero (comprar|instalar|fazer)|vamos (fazer|fechar)|bora/],
     ['pagamento', 'Pagamento, financiamento ou crédito',
      /financ|parcel|cartao|boleto|\bpix\b|credito|\bcpf\b|negativ|entrada|a vista|juros|simulac|pagamento/],
     ['preco', 'Preço, desconto ou contraproposta',
-     /desconto|negoci|mais barato|contraproposta|contra proposta|preco|caro|concorr|outro orcamento|melhor valor|diretoria/],
+     /desconto|negoci|mais barato|contraproposta|contra proposta|preco|caro|concorr|outro orcamento|melhor valor|diretoria|pesou|objec|valor alto/],
+    ['fechar', 'Quer fechar ou pediu o contrato',
+     /fechar|contrato|assinar|quero (comprar|instalar|fazer)|vamos (fazer|fechar)|bora/],
     ['tecnico', 'Dúvida técnica (bateria, híbrido, telhado, inversor)',
-     /bateria|hibrid|off.?grid|isolad|inversor|telhad|estrutura|kwp|potencia|engenheir|marca|geracao|sombra|laje|metalic|tecnic/],
+     /bateria|hibrid|off.?grid|isolad|inversor|telhad|estrutura|kwp|potencia|engenheir|marca|geracao|sombra|laje|metalic|tecnic|usina/],
     ['visita', 'Visita técnica, vistoria ou endereço', /visita|vistoria|endereco|pessoalmente|ir ate/],
     ['ligacao', 'Pediu ligação ou falar com uma pessoa',
-     /ligar|ligac|ligue|telefon|falar com|atendente|humano|pessoa|robo|golpe|fernando|anderson/],
+     /ligar|ligac|ligue|telefon|falar com|atendente|humano|pessoa|robo|golpe|fernando|anderson|audio/],
     ['cliente', 'Já é cliente: manutenção, garantia, CPFL',
-     /ja (sou|tenho|instalei|comprei)|manutenc|limpeza|garantia|defeito|nao (esta|ta) gerando|homologa|cpfl|medidor/],
+     /ja (sou cliente|tenho (energia|placa|sistema|solar)|instalei|comprei)|manutenc|limpeza|garantia|defeito|nao (esta|ta) gerando|parou de gerar|homologa|medidor/], # rubocop:disable Layout/LineLength
     ['fora', 'Fora do perfil (fornecedor, outra cidade, emprego)',
      /fornecedor|parceria|revend|cidade|fora da area|regiao|curriculo|emprego|vaga/]
   ].freeze
@@ -70,18 +72,15 @@ class Crm::TeamResponse # rubocop:disable Metrics/ClassLength
   end
 
   def call
-    people = user_ids.filter_map { |uid| person_json(uid) }.sort_by { |p| -p[:messages] }
-    { hours: 'seg a sex 8h–18h · sáb 8h–12h', people: people, human_requests: human_requests_json }
+    people = (user_ids - account_owner_ids).filter_map { |uid| person_json(uid) }.sort_by { |p| -p[:messages] }
+    { hours: 'seg a sex, 8h às 18h', people: people, human_requests: human_requests_json }
   end
 
   # ── janela comercial de um dia: [abre, fecha] ou nil ──────────────────────
   def self.window(date)
     return nil if Crm::BusinessHours.national_holidays(date.year).include?(date)
 
-    hours = case date.wday
-            when 1..5 then [8, 18]
-            when 6 then [8, 12]
-            end
+    hours = [8, 18] if (1..5).cover?(date.wday)
     hours && [TZ.local(date.year, date.month, date.day, hours[0]), TZ.local(date.year, date.month, date.day, hours[1])]
   end
 
@@ -131,23 +130,48 @@ class Crm::TeamResponse # rubocop:disable Metrics/ClassLength
     ids
   end
 
+  # donos da conta (Guilherme): ficam fora da "equipe comercial"
+  def account_owner_ids
+    perms = CrmSetting.find_by(account_id: @account.id)&.agent_permissions || {}
+    Cevico::Access.owner_ids(perms).map(&:to_i)
+  rescue StandardError
+    []
+  end
+
+  # 1º e último acesso ao sistema por dia (só existe a partir de 27/11/2026)
+  def logins(uid)
+    return {} unless uid.is_a?(Integer)
+
+    Crm::UserDay.where(account_id: @account.id, user_id: uid, day: @since.in_time_zone(TZ).to_date..@until.in_time_zone(TZ).to_date)
+                .pluck(:day, :first_seen_at, :last_seen_at)
+                .to_h { |day, first, last| [day, [first.in_time_zone(TZ), last.in_time_zone(TZ)]] }
+  end
+
   # o responsável pelo atendimento: quem recebe as tarefas da IA (o mesmo que o Meu Painel usa)
   def owner_id
     @owner_id ||= Crm::Contact.where(pipeline_id: Crm::Pipeline.where(account: @account).select(:id))
                               .where.not(assignee_id: nil).group(:assignee_id).count.max_by(&:last)&.first
   end
 
-  def person_json(uid)
+  def person_json(uid) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     name = uid == PHONE ? PHONE_NAME : User.find_by(id: uid)&.name
     return nil unless name
 
     times = human_rows.select { |r| r[2] == uid }.pluck(1)
     in_hours = times.select { |t| business?(t) }
     gaps = day_gaps(in_hours)
+    seen = logins(uid)
+    convs = conversation_map.for(uid, TZ)
+    detail = days_detail(times, gaps[:max_by_day], seen, convs[:by_day])
     {
       id: uid, name: name, messages: times.size, in_hours: in_hours.size, owner: uid == owner_id, phone: uid == PHONE,
       reply: reply_stats(uid), gaps: gaps[:top], avg_max_gap: gaps[:avg_max], days: gaps[:days], days_absent: gaps[:absent],
-      presence: presence(in_hours), heat: heat(times), days_detail: days_detail(times, gaps[:max_by_day])
+      presence: presence(in_hours), heat: heat(times), days_detail: detail,
+      login_median: median_clock(seen.select { |day, _| self.class.window(day) }.values.map(&:first)),
+      first_reply_median: median_clock(detail.select { |d| d[:business] && d[:first] }.pluck(:first_at)),
+      avg_max_gap_24h: avg(detail.filter_map { |d| d[:max_gap_24h]&.dig(:minutes) }), login_days: seen.size,
+      stage_mix: convs[:mix], firsts: convs[:firsts], moves: convs[:moves], moved_count: convs[:moved_count],
+      conversations: convs[:conversations]
     }
   end
 
@@ -212,12 +236,20 @@ class Crm::TeamResponse # rubocop:disable Metrics/ClassLength
   end
 
   # cada dia do período (corridos), do mais antigo ao mais novo
-  def days_detail(times, max_by_day) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+  def conversation_map
+    @conversation_map ||= ConversationMap.new(@account, human_rows)
+  end
+
+  def days_detail(times, max_by_day, seen = {}, convs_by_day = {}) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
     by_day = times.map { |t| t.in_time_zone(TZ) }.group_by(&:to_date)
     (@since.in_time_zone(TZ).to_date..@until.in_time_zone(TZ).to_date).map do |day|
       list = by_day.fetch(day, []).sort
       blocks = sessions(list)
+      login = seen[day]
       {
+        entrou: login&.first&.strftime('%H:%M'), saiu: login&.last&.strftime('%H:%M'), first_at: list.first,
+        conversas: convs_by_day[day] || [],
+        max_gap_24h: gap_24h(list),
         day: day.iso8601, business: !self.class.window(day).nil?, today: day == Time.current.in_time_zone(TZ).to_date,
         msgs: list.size,
         in_hours: list.count { |t| business?(t) }, first: list.first&.strftime('%H:%M'), last: list.last&.strftime('%H:%M'),
@@ -225,6 +257,27 @@ class Crm::TeamResponse # rubocop:disable Metrics/ClassLength
         active_min: blocks.sum { |b| b[:minutes] }, max_gap: max_by_day[day]
       }
     end
+  end
+
+  # maior intervalo entre duas mensagens seguidas do dia, a qualquer hora (as 24 h, não só o comercial)
+  def gap_24h(list)
+    gap = list.each_cons(2).max_by { |a, b| b - a }
+    return nil unless gap
+
+    { from: gap[0].strftime('%H:%M'), to: gap[1].strftime('%H:%M'), minutes: ((gap[1] - gap[0]) / 60).round }
+  end
+
+  # hora típica (mediana do relógio) de uma lista de instantes: "08:42"
+  def median_clock(list)
+    mins = list.compact.map { |t| (t.in_time_zone(TZ).hour * 60) + t.in_time_zone(TZ).min }.sort
+    return nil if mins.empty?
+
+    m = mins[mins.size / 2]
+    format('%<h>02d:%<m>02d', h: m / 60, m: m % 60)
+  end
+
+  def avg(list)
+    list.any? ? (list.sum / list.size.to_f).round : nil
   end
 
   # blocos de trabalho: mensagens com até SESSION_GAP entre uma e outra

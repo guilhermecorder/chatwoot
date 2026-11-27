@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.2].define(version: 2026_11_18_120000) do
+ActiveRecord::Schema[7.2].define(version: 2026_11_27_120000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1823,6 +1823,19 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_18_120000) do
     t.index ["pipeline_id"], name: "index_crm_stages_on_pipeline_id"
   end
 
+  create_table "crm_user_days", force: :cascade do |t|
+    t.bigint "account_id", null: false
+    t.bigint "user_id", null: false
+    t.date "day", null: false
+    t.datetime "first_seen_at", null: false
+    t.datetime "last_seen_at", null: false
+    t.integer "hits", default: 1, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id", "day"], name: "index_crm_user_days_on_account_id_and_day"
+    t.index ["account_id", "user_id", "day"], name: "index_crm_user_days_on_account_id_and_user_id_and_day", unique: true
+  end
+
   create_table "crm_weekly_feedbacks", force: :cascade do |t|
     t.bigint "account_id", null: false
     t.bigint "user_id", null: false
@@ -2675,6 +2688,7 @@ ActiveRecord::Schema[7.2].define(version: 2026_11_18_120000) do
   add_foreign_key "crm_segments", "users", column: "creator_id"
   add_foreign_key "crm_settings", "accounts"
   add_foreign_key "crm_stages", "crm_pipelines", column: "pipeline_id"
+  add_foreign_key "crm_user_days", "accounts"
   add_foreign_key "crm_weekly_feedbacks", "accounts"
   add_foreign_key "crm_weekly_feedbacks", "users"
   add_foreign_key "crm_whatsapp_charges", "accounts"

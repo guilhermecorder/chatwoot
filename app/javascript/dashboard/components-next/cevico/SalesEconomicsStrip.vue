@@ -13,6 +13,16 @@ import { useRoute } from 'vue-router';
 import CrmAPI from 'dashboard/api/crm';
 import PeriodRuler from 'dashboard/components-next/cevico/PeriodRuler.vue';
 import { useAdmin } from 'dashboard/composables/useAdmin';
+import AreaChart from 'dashboard/components-next/cevico/AreaChart.vue';
+import MiniBars from 'dashboard/components-next/cevico/MiniBars.vue';
+import DonutChart from 'dashboard/components-next/cevico/DonutChart.vue';
+
+// 27/11 (3º pedido): o mesmo bloco aparece em 3 lugares do Meu Painel —
+// 'espera' (Radar: quem espera por gente, no topo), 'custos' (custos e
+// retorno) e 'equipe' (equipe comercial, embaixo de tudo)
+const props = defineProps({
+  part: { type: String, default: 'custos' },
+});
 
 const TXT = {
   title: 'Custos e retorno',
@@ -51,7 +61,39 @@ const TXT = {
   entries: 'Últimos lançamentos',
   remove: 'Apagar',
   confirmRemove: 'Apagar este lançamento?',
-  perStep: 'Custo por etapa',
+  perStep: 'Etapas da venda: quantos chegaram, conversão e custo',
+  perStepHint:
+    'Custo por pessoa = investido no período ÷ quem chegou à etapa. % = de quem estava na etapa anterior.',
+  colStep: 'Etapa',
+  colPeople: 'Pessoas',
+  colPrev: 'Da anterior',
+  colLeads: 'Dos contatos',
+  colCost: 'Custo por pessoa',
+  conversions: 'Conversões que importam',
+  chartDays: 'Mensagens por dia',
+  chartHours: 'Mensagens por hora do dia (24 h)',
+  chartStages: 'Em que etapa estava quem ele respondeu',
+  chartFirsts: 'Com quem ele fala primeiro no dia',
+  chartMoves: 'Andaram no funil até 48 h depois da resposta dele',
+  convsShort: 'conversas',
+  convsLong: 'conversas respondidas',
+  daysShort: 'dias',
+  ofConvs: 'de',
+  noMoves: 'nenhum cartão andou depois das respostas no período',
+  dayConvs: 'Com quem conversou neste dia',
+  advanced: 'andou',
+  suggestion: 'Resposta sugerida',
+  copy: 'Copiar',
+  copied: 'Copiado',
+  openConv: 'Abrir conversa',
+  conversionsHint:
+    'de quem chegou à primeira etapa, quantos chegaram à segunda',
+  login: 'Entra no sistema',
+  loginNone: 'registrando desde 27/11',
+  firstReply: '1ª resposta do dia',
+  gap24: 'Maior intervalo do dia (24 h)',
+  typical: 'horário típico',
+  entered: 'entrou',
   times: 'Quanto tempo leva',
   toBill: 'Chegada → conta',
   toQuote: 'Chegada → orçamento',
@@ -59,7 +101,7 @@ const TXT = {
   hours: 'h',
   days: 'dias',
   people: 'pessoas',
-  team: 'Equipe no horário comercial',
+  team: 'Equipe comercial',
   msgs: 'mensagens escritas',
   inHours: 'no horário',
   reply: 'Responde o cliente em',
@@ -74,7 +116,7 @@ const TXT = {
   requestsTotal: 'pedidos',
   answeredIn: 'respondidos em',
   waiting: 'ainda sem resposta',
-  owner: 'responsável',
+  owner: 'responsável pelo atendimento',
   phone: 'sem nome: saiu do app no celular',
   active: 'Tempo em atividade',
   perWorkedDay: 'por dia trabalhado',
@@ -126,7 +168,27 @@ const CATS = [
 const route = useRoute();
 const { isAdmin } = useAdmin();
 
-const PERIOD_KEY = 'cevico:economics:periodo';
+const PERIOD_KEY = `cevico:economics:periodo:${props.part}`;
+const HEADS = {
+  custos: {
+    icon: 'i-lucide-wallet',
+    title: 'Custos e retorno',
+    subtitle: 'Quanto investimos, quanto voltou e quanto custa cada etapa',
+  },
+  espera: {
+    icon: 'i-lucide-radar',
+    title: 'Radar: quem está esperando por gente',
+    subtitle:
+      'Quando a IA chama uma pessoa e o cliente fica esperando. Em qual etapa ele está e o que responder',
+  },
+  equipe: {
+    icon: 'i-lucide-users',
+    title: 'Equipe comercial',
+    subtitle:
+      'Rotina, com quem conversa, em que etapa e quem andou no funil depois da resposta',
+  },
+};
+const head = computed(() => HEADS[props.part] || HEADS.custos);
 const savedPeriod = () => {
   try {
     const saved = JSON.parse(localStorage.getItem(PERIOD_KEY) || 'null');
@@ -182,6 +244,68 @@ const pct = (part, whole) =>
 const costs = computed(() => report.value?.costs || { rows: [], total: 0 });
 const revenue = computed(() => report.value?.revenue || {});
 const perStep = computed(() => report.value?.per_step || []);
+const conversions = computed(() => report.value?.conversions || []);
+// cores fortes por etapa (27/11, "mais contraste, outras cores em relação a etapas")
+const STEP_COLORS = {
+  leads: '#cbd5e1',
+  sondagem: '#38bdf8',
+  conta: '#60a5fa',
+  enviado: '#fb923c',
+  investimento: '#facc15',
+  pagamento: '#a78bfa',
+  credito: '#22d3ee',
+  proposta: '#f472b6',
+  fechado: '#4ade80',
+  instalado: '#34d399',
+};
+const stepColor = key =>
+  ({ perdido: '#f87171', sem: '#64748b', outro: '#94a3b8' })[key] ||
+  STEP_COLORS[key] ||
+  '#94a3b8';
+const slicesOf = list =>
+  (list || []).map(r => ({
+    key: r.key,
+    label: r.label,
+    value: r.n,
+    color: stepColor(r.key),
+  }));
+// linha: mensagens por dia (só dias úteis e dias com mensagem)
+const dailySeries = p => {
+  const days = (p.days_detail || []).filter(d => d.business || d.msgs);
+  return {
+    labels: days.map(d => `${d.day.slice(8)}/${d.day.slice(5, 7)}`),
+    series: [
+      {
+        key: 'msgs',
+        label: 'Mensagens',
+        color: '#38bdf8',
+        values: days.map(d => d.msgs),
+      },
+    ],
+  };
+};
+// barras: mensagens por hora, somando a semana inteira (das 6h às 23h)
+const hourly = p => {
+  const hours = Array.from({ length: 18 }, (_, i) => i + 6);
+  return {
+    labels: hours.map(h => `${h}h`),
+    values: hours.map(h =>
+      (p.heat || []).reduce((sum, row) => sum + (row?.[h] || 0), 0)
+    ),
+  };
+};
+const copiedId = ref(null);
+const copySuggestion = async w => {
+  try {
+    await navigator.clipboard.writeText(w.sugestao);
+    copiedId.value = w.conversation_id;
+    setTimeout(() => {
+      copiedId.value = null;
+    }, 1500);
+  } catch {
+    // sem área de transferência: a pessoa copia na mão
+  }
+};
 const tm = computed(() => report.value?.times || {});
 const team = computed(() => report.value?.team || { people: [] });
 const entries = computed(() => report.value?.entries || []);
@@ -189,10 +313,14 @@ const perQuote = computed(
   () => perStep.value.find(s => s.key === 'enviado')?.cost
 );
 
+const quotesSent = computed(
+  () => perStep.value.find(s => s.key === 'enviado')?.people || 0
+);
 const cards = computed(() => [
   {
     key: 'invested',
     label: TXT.invested,
+    calc: 'anúncios lançados + IA e WhatsApp medidos pelo sistema',
     value: money(costs.value.total),
     foot: costs.value.rows
       .filter(r => r.valor)
@@ -202,6 +330,7 @@ const cards = computed(() => [
   {
     key: 'revenue',
     label: TXT.revenue,
+    calc: 'soma dos contratos assinados no período',
     value: money(revenue.value.total || 0),
     foot: revenue.value.sales
       ? `${revenue.value.sales} ${revenue.value.sales === 1 ? TXT.sale : TXT.sales}`
@@ -210,6 +339,7 @@ const cards = computed(() => [
   {
     key: 'roas',
     label: TXT.roas,
+    calc: 'retorno ÷ investido (quantas vezes voltou)',
     value: times(report.value?.roas),
     foot:
       report.value?.roas_ads !== null && report.value?.roas_ads !== undefined
@@ -219,6 +349,7 @@ const cards = computed(() => [
   {
     key: 'quote',
     label: TXT.perQuote,
+    calc: `${money(costs.value.total)} investidos ÷ ${quotesSent.value} orçamentos enviados`,
     value: money(perQuote.value),
     foot: report.value?.pipeline?.quotes
       ? `${money(report.value.pipeline.value)} ${TXT.onTable}`
@@ -227,6 +358,7 @@ const cards = computed(() => [
   {
     key: 'close',
     label: TXT.toClose,
+    calc: 'da chegada do contato até o contrato (mediana)',
     value:
       tm.value.ate_fechar?.mediana_dias !== null &&
       tm.value.ate_fechar?.mediana_dias !== undefined
@@ -406,7 +538,7 @@ const calClass = (p, d) => {
 const calStyle = (p, d) =>
   d?.msgs
     ? {
-        background: `rgba(22, 163, 74, ${0.14 + (0.6 * d.msgs) / dayMax(p)})`,
+        background: `rgba(56, 189, 248, ${0.16 + (0.62 * d.msgs) / dayMax(p)})`,
       }
     : {};
 
@@ -508,16 +640,16 @@ onMounted(load);
     <div class="ec p-4 sm:p-5">
       <div class="ec-head">
         <span class="cv-icon cv-icon-sm">
-          <span class="i-lucide-wallet text-sm" />
+          <span class="text-sm" :class="head.icon" />
         </span>
         <div class="min-w-0 flex-1">
           <h2 class="text-sm font-bold text-n-slate-12 leading-none">
-            {{ TXT.title }}
+            {{ head.title }}
           </h2>
-          <p class="text-[11px] text-n-slate-9 mt-0.5">{{ TXT.subtitle }}</p>
+          <p class="text-[11px] text-n-slate-9 mt-0.5">{{ head.subtitle }}</p>
         </div>
         <button
-          v-if="isAdmin"
+          v-if="isAdmin && part === 'custos'"
           type="button"
           class="ec-btn"
           @click="formOpen = !formOpen"
@@ -531,7 +663,11 @@ onMounted(load);
       </div>
 
       <!-- lançar custo (só administrador) -->
-      <form v-if="formOpen && isAdmin" class="ec-form" @submit.prevent="save">
+      <form
+        v-if="formOpen && isAdmin && part === 'custos'"
+        class="ec-form"
+        @submit.prevent="save"
+      >
         <label>
           <span>{{ TXT.category }}</span>
           <select v-model="form.category">
@@ -574,112 +710,177 @@ onMounted(load);
       <p v-else-if="!report && loading" class="ec-note">{{ TXT.loading }}</p>
 
       <div v-else-if="report" :class="loading ? 'ec-dim' : ''">
-        <!-- os 5 números do período -->
-        <ol class="ec-cards">
-          <li
-            v-for="card in cards"
-            :key="card.key"
-            class="ec-card"
-            :class="`ec-card-${card.key}`"
-          >
-            <span class="ec-label">{{ card.label }}</span>
-            <b class="ec-count tabular-nums">{{ card.value }}</b>
-            <span class="ec-foot">{{ card.foot }}</span>
-          </li>
-        </ol>
+        <template v-if="part === 'custos'">
+          <!-- os 5 números do período -->
+          <ol class="ec-cards">
+            <li
+              v-for="card in cards"
+              :key="card.key"
+              class="ec-card"
+              :class="`ec-card-${card.key}`"
+            >
+              <span class="ec-label">{{ card.label }}</span>
+              <b class="ec-count tabular-nums">{{ card.value }}</b>
+              <span class="ec-foot">{{ card.foot }}</span>
+              <small class="ec-calc">{{ card.calc }}</small>
+            </li>
+          </ol>
 
-        <div class="ec-grid">
-          <!-- de onde vem o custo -->
-          <section class="ec-box">
-            <p class="ec-section">{{ TXT.costs }}</p>
-            <div class="ec-table">
-              <div class="ec-row ec-row-head">
-                <span />
-                <span>{{ TXT.launched }}</span>
-                <span>{{ TXT.measured }}</span>
-                <span>{{ TXT.used }}</span>
-              </div>
-              <div v-for="row in costs.rows" :key="row.key" class="ec-row">
-                <b>{{ row.label }}</b>
-                <span
-                  class="tabular-nums"
-                  :class="row.lancado ? '' : 'ec-zero'"
-                >
-                  {{ row.lancado ? money(row.lancado) : '—' }}
-                </span>
-                <span
-                  class="tabular-nums"
-                  :class="row.medido === null ? 'ec-zero' : ''"
-                >
-                  {{
-                    row.medido === null ? TXT.notMeasured : money(row.medido)
-                  }}
-                </span>
-                <span class="tabular-nums">
-                  <b>{{ money(row.valor || 0) }}</b>
-                  <small v-if="row.fonte" class="ec-sub">
-                    {{
-                      row.fonte === 'lancado'
-                        ? TXT.fromLaunched
-                        : TXT.fromMeasured
-                    }}
-                  </small>
-                </span>
-              </div>
-            </div>
-            <div v-if="entries.length" class="ec-entries">
-              <p class="ec-section">{{ TXT.entries }}</p>
-              <ul>
-                <li v-for="e in entries.slice(0, 6)" :key="e.id">
-                  <span class="min-w-0">
-                    <b>{{ e.label }}</b>
-                    <small class="ec-sub">{{ entryLine(e) }}</small>
-                  </span>
-                  <b class="tabular-nums">{{ money(e.amount) }}</b>
-                  <button
-                    v-if="isAdmin"
-                    type="button"
-                    class="ec-x"
-                    :title="TXT.remove"
-                    @click="remove(e)"
+          <!-- conversões que importam -->
+          <p class="ec-section mt-4">
+            {{ TXT.conversions }}
+            <small class="ec-sub">· {{ TXT.conversionsHint }}</small>
+          </p>
+          <ol class="ec-conv">
+            <li
+              v-for="c in conversions"
+              :key="`${c.from}-${c.to}`"
+              class="ec-conv-card"
+              :style="{ '--from': stepColor(c.from), '--to': stepColor(c.to) }"
+            >
+              <span class="ec-conv-path">
+                <i class="ec-dot" :style="{ background: stepColor(c.from) }" />
+                {{ c.from_label }}
+                <span class="i-lucide-arrow-right text-[12px]" />
+                <i class="ec-dot" :style="{ background: stepColor(c.to) }" />
+                {{ c.to_label }}
+              </span>
+              <b class="ec-conv-pct tabular-nums">{{
+                c.pct === null || c.pct === undefined ? '—' : `${c.pct}%`
+              }}</b>
+              <small class="ec-sub tabular-nums">
+                {{ `${c.to_n} de ${c.from_n}` }}
+              </small>
+            </li>
+          </ol>
+
+          <div class="ec-grid">
+            <!-- de onde vem o custo -->
+            <section class="ec-box">
+              <p class="ec-section">{{ TXT.costs }}</p>
+              <div class="ec-table">
+                <div class="ec-row ec-row-head">
+                  <span />
+                  <span>{{ TXT.launched }}</span>
+                  <span>{{ TXT.measured }}</span>
+                  <span>{{ TXT.used }}</span>
+                </div>
+                <div v-for="row in costs.rows" :key="row.key" class="ec-row">
+                  <b>{{ row.label }}</b>
+                  <span
+                    class="tabular-nums"
+                    :class="row.lancado ? '' : 'ec-zero'"
                   >
-                    <span class="i-lucide-x text-[13px]" />
-                  </button>
+                    {{ row.lancado ? money(row.lancado) : '—' }}
+                  </span>
+                  <span
+                    class="tabular-nums"
+                    :class="row.medido === null ? 'ec-zero' : ''"
+                  >
+                    {{
+                      row.medido === null ? TXT.notMeasured : money(row.medido)
+                    }}
+                  </span>
+                  <span class="tabular-nums">
+                    <b>{{ money(row.valor || 0) }}</b>
+                    <small v-if="row.fonte" class="ec-sub">
+                      {{
+                        row.fonte === 'lancado'
+                          ? TXT.fromLaunched
+                          : TXT.fromMeasured
+                      }}
+                    </small>
+                  </span>
+                </div>
+              </div>
+              <div v-if="entries.length" class="ec-entries">
+                <p class="ec-section">{{ TXT.entries }}</p>
+                <ul>
+                  <li v-for="e in entries.slice(0, 6)" :key="e.id">
+                    <span class="min-w-0">
+                      <b>{{ e.label }}</b>
+                      <small class="ec-sub">{{ entryLine(e) }}</small>
+                    </span>
+                    <b class="tabular-nums">{{ money(e.amount) }}</b>
+                    <button
+                      v-if="isAdmin"
+                      type="button"
+                      class="ec-x"
+                      :title="TXT.remove"
+                      @click="remove(e)"
+                    >
+                      <span class="i-lucide-x text-[13px]" />
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </section>
+
+            <!-- custo por etapa e tempos -->
+            <section class="ec-box">
+              <p class="ec-section">{{ TXT.perStep }}</p>
+              <p class="ec-mini">{{ TXT.perStepHint }}</p>
+              <div class="ec-funnel">
+                <div class="ec-funnel-row ec-funnel-head">
+                  <span>{{ TXT.colStep }}</span>
+                  <span>{{ TXT.colPeople }}</span>
+                  <span>{{ TXT.colPrev }}</span>
+                  <span>{{ TXT.colLeads }}</span>
+                  <span>{{ TXT.colCost }}</span>
+                </div>
+                <div
+                  v-for="s in perStep"
+                  :key="s.key"
+                  class="ec-funnel-row"
+                  :style="{ '--step': stepColor(s.key) }"
+                >
+                  <span class="ec-funnel-name">
+                    <i
+                      class="ec-dot"
+                      :style="{ background: stepColor(s.key) }"
+                    />
+                    {{ s.label }}
+                  </span>
+                  <b class="tabular-nums">{{ s.people }}</b>
+                  <span class="tabular-nums">{{
+                    s.of_prev === null || s.of_prev === undefined
+                      ? '—'
+                      : `${s.of_prev}%`
+                  }}</span>
+                  <span class="ec-funnel-bar">
+                    <i
+                      :style="{
+                        width: `${Math.max(s.of_leads || 0, s.people ? 2 : 0)}%`,
+                      }"
+                    />
+                    <small class="tabular-nums">{{
+                      s.of_leads === null || s.of_leads === undefined
+                        ? '—'
+                        : `${s.of_leads}%`
+                    }}</small>
+                  </span>
+                  <b class="tabular-nums">{{ money(s.cost) }}</b>
+                </div>
+              </div>
+              <p class="ec-section mt-4">{{ TXT.times }}</p>
+              <ol class="ec-steps">
+                <li v-for="row in timeRows" :key="row.key">
+                  <span>{{ row.label }}</span>
+                  <small class="ec-sub tabular-nums">{{ row.foot }}</small>
+                  <b class="tabular-nums">{{ row.value }}</b>
                 </li>
-              </ul>
-            </div>
-          </section>
+              </ol>
+            </section>
+          </div>
+        </template>
 
-          <!-- custo por etapa e tempos -->
-          <section class="ec-box">
-            <p class="ec-section">{{ TXT.perStep }}</p>
-            <ol class="ec-steps">
-              <li v-for="s in perStep" :key="s.key">
-                <span>{{ s.label }}</span>
-                <small class="ec-sub tabular-nums">
-                  {{ s.people }} {{ TXT.people }}
-                </small>
-                <b class="tabular-nums">{{ money(s.cost) }}</b>
-              </li>
-            </ol>
-            <p class="ec-section mt-4">{{ TXT.times }}</p>
-            <ol class="ec-steps">
-              <li v-for="row in timeRows" :key="row.key">
-                <span>{{ row.label }}</span>
-                <small class="ec-sub tabular-nums">{{ row.foot }}</small>
-                <b class="tabular-nums">{{ row.value }}</b>
-              </li>
-            </ol>
-          </section>
-        </div>
-
-        <!-- equipe no horário comercial -->
-        <p class="ec-section mt-5">
+        <!-- equipe comercial -->
+        <p v-if="part === 'equipe'" class="ec-section">
           {{ TXT.team }} <small class="ec-sub">· {{ team.hours }}</small>
         </p>
-        <div class="ec-team">
+        <div class="ec-team ec-team-full">
           <section
-            v-for="p in team.people"
+            v-for="p in part === 'equipe' ? team.people : []"
             :key="p.id"
             class="ec-box ec-person"
             :class="p.owner ? 'ec-person-owner' : ''"
@@ -725,6 +926,22 @@ onMounted(load);
                 </small>
               </div>
               <div>
+                <span class="ec-label">{{ TXT.login }}</span>
+                <b class="tabular-nums">{{ p.login_median || '—' }}</b>
+                <small class="ec-sub">{{
+                  p.login_median ? TXT.typical : TXT.loginNone
+                }}</small>
+              </div>
+              <div>
+                <span class="ec-label">{{ TXT.firstReply }}</span>
+                <b class="tabular-nums">{{ p.first_reply_median || '—' }}</b>
+                <small class="ec-sub">{{ TXT.typical }}</small>
+              </div>
+              <div>
+                <span class="ec-label">{{ TXT.gap24 }}</span>
+                <b class="tabular-nums">{{ minutes(p.avg_max_gap_24h) }}</b>
+              </div>
+              <div>
                 <span class="ec-label">{{ TXT.startEnd }}</span>
                 <b class="tabular-nums">{{
                   summaryOf(p).start
@@ -746,6 +963,83 @@ onMounted(load);
                 }}</b>
                 <small class="ec-sub">{{ TXT.inBusiness }}</small>
               </span>
+            </div>
+
+            <!-- 27/11 (3º): micro painéis — linha, barras, pizza e o que andou -->
+            <div class="ec-micro">
+              <section class="ec-micro-box ec-micro-wide">
+                <p class="ec-micro-title">{{ TXT.chartDays }}</p>
+                <AreaChart
+                  :labels="dailySeries(p).labels"
+                  :series="dailySeries(p).series"
+                  :height="150"
+                  :legend="false"
+                  :unit="TXT.msgsShort"
+                />
+              </section>
+              <section class="ec-micro-box ec-micro-wide">
+                <p class="ec-micro-title">{{ TXT.chartHours }}</p>
+                <MiniBars
+                  :values="hourly(p).values"
+                  :labels="hourly(p).labels"
+                  color="#38bdf8"
+                  :height="120"
+                />
+                <p class="ec-mini">
+                  {{ TXT.mostHours }}:
+                  <b>{{ hoursLabel(summaryOf(p).most) }}</b> ·
+                  {{ TXT.leastHours }}:
+                  <b class="ec-hot">{{ hoursLabel(summaryOf(p).least) }}</b>
+                </p>
+              </section>
+              <section class="ec-micro-box">
+                <p class="ec-micro-title">{{ TXT.chartStages }}</p>
+                <DonutChart
+                  :slices="slicesOf(p.stage_mix)"
+                  :size="130"
+                  :thickness="18"
+                  :unit="TXT.convsShort"
+                />
+              </section>
+              <section class="ec-micro-box">
+                <p class="ec-micro-title">{{ TXT.chartFirsts }}</p>
+                <DonutChart
+                  :slices="slicesOf(p.firsts)"
+                  :size="130"
+                  :thickness="18"
+                  :unit="TXT.daysShort"
+                />
+              </section>
+              <section class="ec-micro-box ec-micro-wide">
+                <p class="ec-micro-title">{{ TXT.chartMoves }}</p>
+                <div class="ec-moves-kpi">
+                  <b class="tabular-nums">{{ p.moved_count || 0 }}</b>
+                  <small class="ec-sub">
+                    {{ TXT.ofConvs }} {{ p.conversations || 0 }}
+                    {{ TXT.convsLong }} ({{
+                      pct(p.moved_count || 0, p.conversations || 0) || '0%'
+                    }})
+                  </small>
+                </div>
+                <ul class="ec-moves">
+                  <li
+                    v-for="m in (p.moves || []).slice(0, 8)"
+                    :key="m.display_id"
+                  >
+                    <a :href="conversationUrl(m.display_id)" class="ec-link">{{
+                      m.name || `#${m.display_id}`
+                    }}</a>
+                    <span class="ec-move-path">
+                      {{ m.moved.from }}
+                      <span class="i-lucide-arrow-right text-[11px]" />
+                      <b>{{ m.moved.to }}</b>
+                    </span>
+                  </li>
+                  <li v-if="!(p.moves || []).length" class="ec-zero">
+                    {{ TXT.noMoves }}
+                  </li>
+                </ul>
+              </section>
             </div>
 
             <!-- mês · semana · dia -->
@@ -855,6 +1149,9 @@ onMounted(load);
                   <span class="i-lucide-chevron-right text-[13px]" />
                 </button>
                 <small class="ec-sub tabular-nums">
+                  <template v-if="pickedDay(p).entrou">
+                    {{ TXT.entered }} {{ pickedDay(p).entrou }} ·
+                  </template>
                   <template v-if="pickedDay(p).msgs">
                     {{ dayLine(pickedDay(p)) }}
                   </template>
@@ -863,6 +1160,28 @@ onMounted(load);
                   }}</template>
                 </small>
               </div>
+              <template v-if="pickedDay(p).conversas?.length">
+                <p class="ec-mini">{{ TXT.dayConvs }}</p>
+                <ul class="ec-dayconv">
+                  <li
+                    v-for="c in pickedDay(p).conversas"
+                    :key="c.display_id"
+                    :style="{ '--step': stepColor(c.stage?.key) }"
+                  >
+                    <small class="tabular-nums">{{ c.first }}</small>
+                    <a :href="conversationUrl(c.display_id)" class="ec-link">{{
+                      c.name || `#${c.display_id}`
+                    }}</a>
+                    <span class="ec-stage-chip">{{ c.stage?.label }}</span>
+                    <small class="tabular-nums ec-sub">{{
+                      `${c.msgs} ${TXT.msgsShort}`
+                    }}</small>
+                    <small v-if="c.moved" class="ec-tag ec-tag-good">{{
+                      TXT.advanced
+                    }}</small>
+                  </li>
+                </ul>
+              </template>
               <div class="ec-bars">
                 <span
                   v-for="h in dayHours(p)"
@@ -931,7 +1250,7 @@ onMounted(load);
           </section>
 
           <!-- IA pediu gente -->
-          <section class="ec-box">
+          <section v-if="part === 'espera'" class="ec-box ec-radar">
             <span class="ec-label">{{ TXT.requests }}</span>
             <div class="ec-kpis">
               <div>
@@ -1006,9 +1325,14 @@ onMounted(load);
                     <a :href="conversationUrl(w.display_id)" class="ec-link">
                       {{ w.name || `#${w.display_id}` }}
                     </a>
+                    <span
+                      v-if="w.etapa"
+                      class="ec-stage-chip"
+                      :style="{ '--step': stepColor(w.etapa_key) }"
+                      >{{ w.etapa }}</span
+                    >
                     <small class="ec-sub tabular-nums">
                       #{{ w.display_id }}
-                      <template v-if="w.etapa">· {{ w.etapa }}</template>
                       <template v-if="w.pedidos > 1"
                         >· {{ w.pedidos }} {{ TXT.requestsN }}</template
                       >
@@ -1030,6 +1354,27 @@ onMounted(load);
                   <p v-if="w.cliente_disse" class="ec-wait-line ec-sub">
                     <b>{{ TXT.clientSaid }}:</b> {{ `“${w.cliente_disse}”` }}
                   </p>
+                  <div v-if="w.sugestao" class="ec-suggest">
+                    <span class="ec-label">{{ TXT.suggestion }}</span>
+                    <p>{{ w.sugestao }}</p>
+                    <div class="ec-suggest-actions">
+                      <button
+                        type="button"
+                        class="ec-btn"
+                        @click="copySuggestion(w)"
+                      >
+                        <span class="i-lucide-copy text-[12px]" />
+                        {{
+                          copiedId === w.conversation_id ? TXT.copied : TXT.copy
+                        }}
+                      </button>
+                      <a
+                        :href="conversationUrl(w.display_id)"
+                        class="ec-btn ec-btn-solid"
+                        >{{ TXT.openConv }}</a
+                      >
+                    </div>
+                  </div>
                 </li>
               </ul>
               <button
@@ -1047,7 +1392,7 @@ onMounted(load);
             </template>
           </section>
         </div>
-        <p class="ec-legend">{{ TXT.legend }}</p>
+        <p v-if="part === 'custos'" class="ec-legend">{{ TXT.legend }}</p>
       </div>
     </div>
   </div>
@@ -1730,5 +2075,301 @@ onMounted(load);
 }
 :global(.dark .ec-btn-solid) {
   border-color: var(--ec-accent);
+}
+
+/* 27/11 (2º): como cada número é calculado, conversões e etapas com cor */
+.ec-calc {
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: #64748b;
+}
+.ec-conv {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@container (min-width: 760px) {
+  .ec-conv {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+.ec-conv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(100, 116, 139, 0.26);
+  background:
+    linear-gradient(90deg, var(--from), var(--to)) top / 100% 3px no-repeat,
+    rgba(255, 255, 255, 0.78);
+}
+.ec-conv-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 5px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #334155;
+}
+.ec-conv-pct {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: #0f172a;
+}
+.ec-dot {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+.ec-funnel {
+  font-size: 12px;
+}
+.ec-funnel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 0.7fr 0.8fr 1.4fr 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0 6px 8px;
+  border-top: 1px solid rgba(100, 116, 139, 0.15);
+  border-left: 3px solid var(--step, transparent);
+}
+.ec-funnel-head {
+  border-top: 0;
+  border-left-color: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.ec-funnel-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 600;
+}
+.ec-funnel-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  border-radius: 6px;
+  background: rgba(100, 116, 139, 0.12);
+  overflow: hidden;
+}
+.ec-funnel-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--step);
+  opacity: 0.55;
+}
+.ec-funnel-bar small {
+  position: relative;
+  padding-left: 6px;
+  font-weight: 700;
+}
+:global(.dark .ec-calc) {
+  color: rgba(255, 255, 255, 0.6);
+}
+:global(.dark .ec-conv-card) {
+  border-color: rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(90deg, var(--from), var(--to)) top / 100% 3px no-repeat,
+    rgba(255, 255, 255, 0.07);
+}
+:global(.dark .ec-conv-path) {
+  color: rgba(255, 255, 255, 0.85);
+}
+:global(.dark .ec-conv-pct),
+:global(.dark .ec-funnel-row) {
+  color: #fff;
+}
+:global(.dark .ec-funnel-row) {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+:global(.dark .ec-funnel-head) {
+  color: rgba(255, 255, 255, 0.62);
+}
+:global(.dark .ec-funnel-bar) {
+  background: rgba(255, 255, 255, 0.08);
+}
+/* mais contraste no escuro (27/11: "tá muito escuro, não tô entendendo") */
+:global(.dark .ec-card),
+:global(.dark .ec-box) {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+:global(.dark .ec-label),
+:global(.dark .ec-section),
+:global(.dark .ec-mini),
+:global(.dark .ec-sub) {
+  color: rgba(255, 255, 255, 0.75);
+}
+:global(.dark .ec-card-invested) {
+  border-top-color: #e2e8f0;
+}
+:global(.dark .ec-card-revenue),
+:global(.dark .ec-card-roas) {
+  border-top-color: #4ade80;
+}
+:global(.dark .ec-card-quote) {
+  border-top-color: #fb923c;
+}
+:global(.dark .ec-card-close) {
+  border-top-color: #f472b6;
+}
+:global(.dark .ec-person-owner) {
+  border-top-color: #38bdf8;
+}
+
+/* 27/11 (3º): Radar no topo, micro painéis da equipe e mais contraste */
+.ec-team-full {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.ec-micro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  margin: 12px 0;
+}
+@container (min-width: 760px) {
+  .ec-micro {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .ec-micro-wide {
+    grid-column: span 2;
+  }
+}
+.ec-micro-box {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(100, 116, 139, 0.26);
+  background: rgba(255, 255, 255, 0.6);
+}
+.ec-micro-title {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #334155;
+}
+.ec-moves-kpi {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ec-moves-kpi b {
+  font-size: 28px;
+  font-weight: 800;
+  color: #16a34a;
+}
+.ec-moves,
+.ec-dayconv {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+.ec-moves li,
+.ec-dayconv li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(100, 116, 139, 0.15);
+}
+.ec-dayconv li {
+  padding-left: 8px;
+  border-left: 3px solid var(--step, transparent);
+}
+.ec-move-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #475569;
+}
+.ec-stage-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #0f172a;
+  background: var(--step, #94a3b8);
+}
+.ec-tag-good {
+  color: #14532d;
+  background: rgba(74, 222, 128, 0.35);
+}
+.ec-suggest {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px dashed rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.08);
+}
+.ec-suggest p {
+  margin: 4px 0 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+.ec-suggest-actions {
+  display: flex;
+  gap: 8px;
+}
+:global(.dark .ec-micro-box) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+:global(.dark .ec-micro-title) {
+  color: #e2e8f0;
+}
+:global(.dark .ec-moves-kpi b) {
+  color: #4ade80;
+}
+:global(.dark .ec-move-path),
+:global(.dark .ec-suggest p),
+:global(.dark .ec-dayconv li),
+:global(.dark .ec-moves li) {
+  color: rgba(255, 255, 255, 0.88);
+}
+:global(.dark .ec-moves li),
+:global(.dark .ec-dayconv li) {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+:global(.dark .ec-tag-good) {
+  color: #bbf7d0;
+  background: rgba(74, 222, 128, 0.2);
+}
+:global(.dark .ec-radar .ec-wait li) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+:global(.dark .ec-radar .ec-link) {
+  color: #fff;
+}
+:global(.dark .ec-suggest) {
+  background: rgba(56, 189, 248, 0.1);
+  border-color: rgba(56, 189, 248, 0.5);
+}
+/* mês mais agradável: azul em degradê, número grande */
+.ec-cal-day b {
+  font-size: 15px;
 }
 </style>

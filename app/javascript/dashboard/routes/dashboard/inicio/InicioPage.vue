@@ -5461,11 +5461,14 @@ onUnmounted(() => {
         v-if="!organizeMode && !estiloClassico && tasksByHeat"
         class="cvg-arejado-jornada"
       >
-        <QuoteJourneyStrip />
-        <!-- 📊 27/11 (LIFE): custos, retorno (ROAS), tempos e equipe no horário comercial -->
-        <SalesEconomicsStrip />
-        <!-- 📬 22/11 (LIFE): o follow-up da venda logo abaixo da jornada -->
+        <!-- 📡 27/11 (LIFE, Guilherme: "o follow-up para cima, o radar de oportunidade lá em cima, lá no topo, e
+             essa gestão de equipe comercial lá embaixo"): Radar → Follow-up → Jornada → Custos → Tarefas → Equipe -->
+        <SalesEconomicsStrip part="espera" />
+        <!-- 📬 22/11 (LIFE): o follow-up da venda -->
         <FollowupStrip />
+        <QuoteJourneyStrip />
+        <!-- 📊 27/11 (LIFE): custos, retorno (ROAS), custo e conversão de cada etapa -->
+        <SalesEconomicsStrip part="custos" />
         <!-- 🌡️ 25/11 (LIFE): sem o Clássico, as tarefas por temperatura moram aqui no Novo -->
         <div v-if="myTasks.length" class="cv-block mb-6">
           <div class="p-4 sm:p-5">
@@ -5488,6 +5491,8 @@ onUnmounted(() => {
             />
           </div>
         </div>
+        <!-- 👥 27/11 (LIFE): equipe comercial embaixo de tudo -->
+        <SalesEconomicsStrip part="equipe" />
       </div>
 
       <!-- 🧭 item 337: VISÃO GERAL — as 14 perguntas (dinheiro e médicos só p/ admin).
