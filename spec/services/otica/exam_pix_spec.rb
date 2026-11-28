@@ -2,7 +2,7 @@ require 'rails_helper'
 
 # rubocop:disable Layout/LineLength
 
-# 💳 22/11: exame com a Fabi pago antecipado no PIX (R$ 29,90; na hora R$ 70)
+# 💳 22/11: exame com a Fabi pago antecipado no PIX (28/11: R$ 19,90; na hora R$ 50)
 RSpec.describe Otica::ExamPix do
   let(:account) { create(:account) }
   let(:admin) { create(:user, account: account, role: :administrator) }
@@ -42,11 +42,11 @@ RSpec.describe Otica::ExamPix do
 
     msgs = conversation.messages.outgoing.order(:id)
     expect(msgs.size).to eq(2)
-    # 🗣️ 23/11: a oferta (150 × 29,90 × 70) já foi feita pela Val antes de marcar
+    # 🗣️ 23/11: a oferta (150 × 19,90 × 50) já foi feita pela Val antes de marcar
     expect(msgs.first.content).to include('chave Pix é o CNPJ').and include('pode me enviar o comprovante?')
     expect(msgs.last.content).to eq('32.951.767/0001-92')
     expect(msgs).to all(satisfy { |m| m.cevico_send_wait.present? || m.additional_attributes['cevico_exame_pix_msg'] })
-    expect(state).to include('status' => 'aguardando', 'task_id' => exame.id, 'valor' => 29.9)
+    expect(state).to include('status' => 'aguardando', 'task_id' => exame.id, 'valor' => 19.9)
     expect(card.stage_id).to eq(pix.id)
     expect(exame.reload.comments.last['text']).to include('aguardando o comprovante')
 
@@ -55,9 +55,9 @@ RSpec.describe Otica::ExamPix do
     expect(conversation.messages.outgoing.count).to eq(2)
   end
 
-  it 'comprovante com R$ 29,90: etiqueta, coluna "Exame pago", nota no agendamento, confirmação e tarefa pra conferir', :aggregate_failures do
+  it 'comprovante com R$ 19,90: etiqueta, coluna "Exame pago", nota no agendamento, confirmação e tarefa pra conferir', :aggregate_failures do
     described_class.request!(account: account, conversation: conversation, contact: contact, task: exame)
-    msg, att = comprovante!('Pix enviado · R$ 29,90 · para SUA OTICA LTDA · CNPJ 32.951.767/0001-92')
+    msg, att = comprovante!('Pix enviado · R$ 19,90 · para SUA OTICA LTDA · CNPJ 32.951.767/0001-92')
     described_class.receipt!(msg, att)
 
     expect(state).to include('status' => 'pago', 'attachment_id' => att.id)
@@ -67,9 +67,22 @@ RSpec.describe Otica::ExamPix do
     outs = conversation.messages.outgoing.order(:id).last(2).map(&:content)
     expect(outs.first).to eq('Um instante, estou terminando o seu agendamento.')
     expect(outs.last).to start_with('Deu certo. Parabéns!').and include('Agendamento de Maria Silva')
-      .and include('sábado, 28/11, às 9h10').and include('Valor pago: R$ 29,90').and include('Brg. Vilela Júnior')
+      .and include('sábado, 28/11, às 9h10').and include('Valor pago: R$ 19,90').and include('Brg. Vilela Júnior')
     expect(account.tasks.where.not(task_type: 'consulta').last.title.to_s + account.tasks.where.not(task_type: 'consulta').last.description.to_s)
       .to include('Conferir PIX do exame')
+  end
+
+  it 'transição de 28/11: quem recebeu a oferta antiga e paga R$ 29,90 também tem o horário confirmado', :aggregate_failures do
+    described_class.request!(account: account, conversation: conversation, contact: contact, task: exame)
+    msg, att = comprovante!('Transferência Pix R$ 29.90 SUA OTICA')
+    described_class.receipt!(msg, att)
+
+    expect(state['status']).to eq('pago')
+    expect(conversation.messages.outgoing.order(:id).last.content).to include('Valor pago: R$ 29,90')
+  end
+
+  it 'R$ 119,90 ou R$ 1.290,90 não passam por 19,90/29,90' do
+    %w[119,90 1.290,90 219.90].each { |v| expect(v).not_to match(described_class::AMOUNT) }
   end
 
   it 'comprovante com outro valor: não confirma, só pede pra equipe conferir; sem PIX pedido ou fora da ótica, nada acontece', :aggregate_failures do
@@ -87,7 +100,7 @@ RSpec.describe Otica::ExamPix do
     expect(described_class.enabled?(account)).to be(false)
   end
 
-  it 'quem escolhe pagar na hora (R$ 70) não recebe Pix; o resto escolheu o Pix', :aggregate_failures do
+  it 'quem escolhe pagar na hora (R$ 50) não recebe Pix; o resto escolheu o Pix', :aggregate_failures do
     expect(described_class.pix_chosen?('Visita com exame - paga na hora')).to be(false)
     expect(described_class.pix_chosen?('Visita com exame - na loja')).to be(false)
     expect(described_class.pix_chosen?('Visita com exame - Pix')).to be(true)

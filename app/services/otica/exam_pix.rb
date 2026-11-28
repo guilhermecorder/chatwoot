@@ -1,7 +1,11 @@
 # 💳 EXAME COM A FABI PAGO NO PIX (22/11/2026, pedido do Guilherme):
 # o exame é o COMPROMISSO da conversa. Em clínica custa uns R$ 150; aqui, pagando ANTES no PIX,
-# sai por R$ 29,90 e o horário fica reservado. Sem o PIX antecipado, na hora é R$ 70 (muita gente
+# sai por R$ 19,90 e o horário fica reservado. Sem o PIX antecipado, na hora é R$ 50 (muita gente
 # marca e falta, e o horário fica perdido). Chave PIX = CNPJ da loja.
+#
+# 💸 28/11 (Guilherme): o exame NÃO é pra ganhar dinheiro, é pra pegar o compromisso da pessoa →
+# R$ 19,90 agendando agora no Pix × R$ 50 na hora (antes 29,90 × 70). Na transição, comprovante de
+# R$ 29,90 (de quem recebeu a oferta antiga) também confirma o horário.
 #
 # O fluxo é do SISTEMA (não depende do modelo lembrar):
 #   1. o Atendente marca a visita COM EXAME (sábado, Fabi) → Crm::ResponderAgentJob#book! chama request!
@@ -9,12 +13,12 @@
 #      e a conversa guarda o estado em additional_attributes['cevico_exame_pix'];
 #   2. o robô de follow-up da coluna "PIX do exame" cutuca dentro da janela de 24 h (configuração da VPS);
 #   3. chega a imagem lida como "comprovante" → Crm::MediaReadingJob chama receipt!:
-#      valor R$ 29,90 no comprovante → etiqueta "exame-pago", card na coluna "Exame pago" (a automação da
+#      valor R$ 19,90 no comprovante → etiqueta "exame-pago", card na coluna "Exame pago" (a automação da
 #      coluna manda o evento de conversão), nota "PIX recebido" no agendamento, confirmação pra cliente
 #      e tarefa pra equipe conferir no banco; valor diferente → só a tarefa pra equipe conferir.
 #
 # 🗣️ 23/11 (Guilherme, conversa curta): a OFERTA vem ANTES de marcar, na fala da Val (R$ 150 no optometrista ×
-# R$ 29,90 agendando agora no Pix × R$ 70 na hora). Ela escolhe: Pix → o agendamento vai com procedimento
+# R$ 19,90 agendando agora no Pix × R$ 50 na hora). Ela escolhe: Pix → o agendamento vai com procedimento
 # "Visita com exame - Pix" e o sistema manda só a chave e "pode me enviar o comprovante?"; na hora → procedimento
 # "Visita com exame - paga na hora" e NADA de Pix (nem chave, nem coluna, nem lembrete). Comprovante chegou →
 # "Um instante, estou terminando o seu agendamento." e, logo depois, "Deu certo. Parabéns!" com o agendamento.
@@ -26,13 +30,14 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
   PAID_LABEL = 'exame-pago'.freeze
   AGENT_KEY = 'exame_pix'.freeze
   PIX_KEY = '32.951.767/0001-92'.freeze
-  PRICE = 29.90
+  PRICE = 19.90
   PRICE_FULL = 150
-  PRICE_AT_DOOR = 70
+  PRICE_AT_DOOR = 50
   # a mensagem do PIX sai DEPOIS da fala do agente que confirmou o horário
   SEND_WAIT = 8.seconds
   WEEKDAYS = %w[domingo segunda terça quarta quinta sexta sábado].freeze
-  AMOUNT = /29[,.]90/
+  # 19,90 = preço de 28/11; 29,90 = quem recebeu a oferta antiga e paga depois da troca
+  AMOUNT = /(?<!\d)(19|29)[,.]90(?!\d)/
   AT_DOOR = /na hora|na loja|no dia/
   ADDRESS = 'Sua Ótica, R. Brg. Vilela Júnior, 100, Jardim Cachoeira'.freeze
 
@@ -57,7 +62,7 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
     save_state!(conversation, 'status' => 'aguardando', 'task_id' => task.id, 'contact_id' => contact.id,
                               'pedido_em' => state['pedido_em'] || Time.current.iso8601, 'prazo' => deadline.iso8601,
                               'horario' => task.due_at&.iso8601, 'valor' => PRICE)
-    comment!(task, '💳 PIX do exame (R$ 29,90) pedido no WhatsApp; aguardando o comprovante')
+    comment!(task, "💳 PIX do exame (#{brl(PRICE)}) pedido no WhatsApp; aguardando o comprovante")
     move!(account, contact, 'pix_exame')
     return if already_asked # remarcou antes de pagar: a chave já foi mandada
 
@@ -67,7 +72,7 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
     Rails.logger.error "[Otica::ExamPix] pedido do PIX na conversa #{conversation&.id}: #{e.class}: #{e.message}"
   end
 
-  # 🗣️ 23/11: a oferta (150 × 29,90 × 70) já foi feita pela Val antes de marcar; aqui vai só a chave e o pedido do comprovante
+  # 🗣️ 23/11: a oferta (150 × 19,90 × 50, desde 28/11) já foi feita pela Val antes de marcar; aqui vai só a chave e o pedido do comprovante
   REQUEST_TEXT = 'A chave Pix é o CNPJ da loja, vai logo abaixo. Assim que fizer, pode me enviar o comprovante?'.freeze
 
   # 🤝 os lembretes da coluna "PIX do exame" (só benefício, zero cobrança) ficam no robô de follow-up da VPS:
@@ -109,36 +114,44 @@ module Otica::ExamPix # rubocop:disable Metrics/ModuleLength
     task = account.tasks.find_by(id: state['task_id'], canceled_at: nil)
     contact = account.contacts.find_by(id: state['contact_id']) || conversation.contact
     text = [media['texto'], media['descricao']].join(' ')
-    return confirm!(account, conversation, contact, task, attachment) if text.match?(AMOUNT)
+    paid = text[AMOUNT]
+    return confirm!(account, conversation, contact, task, attachment, paid) if paid
 
     save_state!(conversation, state.merge('status' => 'conferir', 'attachment_id' => attachment.id))
     team_task!(account, conversation, contact, 'Comprovante do exame com valor diferente',
-               'Chegou um comprovante, mas não achei os R$ 29,90 nele. Confira no banco e confirme o horário do exame com a cliente.')
+               "Chegou um comprovante, mas não achei os #{brl(PRICE)} nele. Confira no banco e confirme o horário do exame com a cliente.")
   rescue StandardError => e
     Rails.logger.error "[Otica::ExamPix] comprovante na conversa #{conversation&.id}: #{e.class}: #{e.message}"
   end
 
-  def confirm!(account, conversation, contact, task, attachment)
+  def confirm!(account, conversation, contact, task, attachment, paid = nil) # rubocop:disable Metrics/ParameterLists
+    paid = "R$ #{paid.tr('.', ',')}" if paid
+    paid ||= brl(PRICE)
     save_state!(conversation, state_of(conversation).merge('status' => 'pago', 'pago_em' => Time.current.iso8601,
                                                            'attachment_id' => attachment.id))
     contact.add_labels([PAID_LABEL])
-    comment!(task, '✅ PIX do exame (R$ 29,90) recebido: comprovante na conversa. Conferir no banco.') if task
+    comment!(task, "✅ PIX do exame (#{paid}) recebido: comprovante na conversa. Conferir no banco.") if task
     move!(account, contact, 'exame_pago')
     send!(conversation, 'Um instante, estou terminando o seu agendamento.', wait: 2.seconds)
-    send!(conversation, confirmation_text(contact, task), wait: 9.seconds, space: false) # já vem uma informação por linha
-    team_task!(account, conversation, contact, 'Conferir PIX do exame (R$ 29,90)',
+    send!(conversation, confirmation_text(contact, task, paid), wait: 9.seconds, space: false) # já vem uma informação por linha
+    team_task!(account, conversation, contact, "Conferir PIX do exame (#{paid})",
                "Comprovante recebido e horário confirmado na conversa#{task&.due_at ? " (#{when_label(task.due_at)})" : ''}. Conferir no banco.")
   end
 
   # "Deu certo. Parabéns!" + o agendamento (nome, dia e hora, valor pago, local), uma informação por linha
-  def confirmation_text(contact, task)
+  def confirmation_text(contact, task, paid = brl(PRICE))
     lines = ['Deu certo. Parabéns!', '', "Agendamento de #{contact&.name.presence || 'você'}"]
     lines << "Exame com a Fabi: #{when_label(task.due_at)}" if task&.due_at
-    lines.push('Valor pago: R$ 29,90', "Local: #{ADDRESS}")
+    lines.push("Valor pago: #{paid}", "Local: #{ADDRESS}")
     lines.join("\n")
   end
 
   # ── peças ────────────────────────────────────────────────────────────────
+  # 19.9 → "R$ 19,90"
+  def brl(value)
+    "R$ #{format('%.2f', value).tr('.', ',')}"
+  end
+
   def state_of(conversation)
     (conversation.reload.additional_attributes || {})[STATE_KEY].to_h
   end
